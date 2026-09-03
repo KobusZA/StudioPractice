@@ -1,0 +1,3270 @@
+{
+  "documentKind": "Project",
+  "title": "Harbor Loft — Bid set",
+  "path": "C:\\Projects\\HarborLoft\\HarborLoft.rvt",
+  "activeView": "Level 1",
+  "viewType": "FloorPlan",
+  "extractedAt": "2026-09-01T12:00:00.0000000Z",
+  "units": "meters / square meters / cubic meters",
+  "lines": [
+    {
+      "category": "Walls",
+      "family": "Basic Wall",
+      "type": "Masonary wall 220mm (plaster)",
+      "model": "TSP_MAS009",
+      "quantity": 4,
+      "unit": "m",
+      "length": 40.4,
+      "area": 111.1,
+      "volume": 24.44,
+      "elementIds": [
+        "101",
+        "102",
+        "103",
+        "104"
+      ]
+    },
+    {
+      "category": "Walls",
+      "family": "Basic Wall",
+      "type": "Masonary wall 110mm (plaster)",
+      "model": "TSP_MAS008",
+      "quantity": 4,
+      "unit": "m",
+      "length": 11.2,
+      "area": 30.8,
+      "volume": 3.39,
+      "elementIds": [
+        "105",
+        "106",
+        "107",
+        "108"
+      ]
+    },
+    {
+      "category": "Doors",
+      "family": "Single-Flush",
+      "type": "900 × 2100mm",
+      "quantity": 3,
+      "unit": "ea",
+      "length": null,
+      "area": null,
+      "volume": null,
+      "elementIds": [
+        "201",
+        "202",
+        "203"
+      ]
+    },
+    {
+      "category": "Doors",
+      "family": "Single-Flush",
+      "type": "800 × 2100mm",
+      "quantity": 1,
+      "unit": "ea",
+      "elementIds": [
+        "204"
+      ]
+    },
+    {
+      "category": "Windows",
+      "family": "Fixed",
+      "type": "1800 × 1200mm",
+      "quantity": 4,
+      "unit": "ea",
+      "elementIds": [
+        "301",
+        "302",
+        "303",
+        "304"
+      ]
+    },
+    {
+      "category": "Rooms",
+      "family": "Rooms",
+      "type": "Living",
+      "quantity": 1,
+      "unit": "m2",
+      "area": 41.6,
+      "elementIds": [
+        "401"
+      ]
+    },
+    {
+      "category": "Rooms",
+      "family": "Rooms",
+      "type": "Kitchen",
+      "quantity": 1,
+      "unit": "m2",
+      "area": 12.4,
+      "elementIds": [
+        "402"
+      ]
+    },
+    {
+      "category": "Rooms",
+      "family": "Rooms",
+      "type": "Bedroom",
+      "quantity": 1,
+      "unit": "m2",
+      "area": 16.8,
+      "elementIds": [
+        "403"
+      ]
+    },
+    {
+      "category": "Rooms",
+      "family": "Rooms",
+      "type": "Bath",
+      "quantity": 1,
+      "unit": "m2",
+      "area": 5.2,
+      "elementIds": [
+        "404"
+      ]
+    },
+    {
+      "category": "Rooms",
+      "family": "Rooms",
+      "type": "Hall",
+      "quantity": 1,
+      "unit": "m2",
+      "area": 4.8,
+      "elementIds": [
+        "405"
+      ]
+    },
+    {
+      "category": "Floors",
+      "family": "Floor",
+      "type": "Generic 85mm",
+      "model": "TSP_RB016",
+      "quantity": 1,
+      "unit": "m2",
+      "area": 76,
+      "volume": 6.46,
+      "elementIds": [
+        "501"
+      ]
+    },
+    {
+      "category": "Floors",
+      "family": "Floor",
+      "type": "170mm Slab - Balcony",
+      "model": "TSP_RB017",
+      "quantity": 1,
+      "unit": "m2",
+      "area": 8,
+      "volume": 1.36,
+      "elementIds": [
+        "502"
+      ]
+    },
+    {
+      "category": "Roofs",
+      "family": "Basic Roof",
+      "type": "Generic - 125mm",
+      "model": "TSP_RC003",
+      "quantity": 1,
+      "unit": "m2",
+      "area": 82,
+      "elementIds": [
+        "601"
+      ]
+    }
+  ],
+  "instances": [
+    {
+      "category": "Walls",
+      "model": "TSP_MAS009",
+      "family": "Basic Wall",
+      "type": "Masonary wall 220mm (plaster)",
+      "elementId": "101",
+      "count": 1,
+      "length": 12.2,
+      "area": 33.6,
+      "volume": 7.38,
+      "level": "Level 1",
+      "phaseCreated": "Day 1"
+    },
+    {
+      "category": "Walls",
+      "model": "TSP_MAS009",
+      "family": "Basic Wall",
+      "type": "Masonary wall 220mm (plaster)",
+      "elementId": "102",
+      "count": 1,
+      "length": 8,
+      "area": 22,
+      "volume": 4.84,
+      "level": "Level 1",
+      "phaseCreated": "Day 1"
+    },
+    {
+      "category": "Walls",
+      "model": "TSP_MAS009",
+      "family": "Basic Wall",
+      "type": "Masonary wall 220mm (plaster)",
+      "elementId": "103",
+      "count": 1,
+      "length": 12.2,
+      "area": 33.6,
+      "volume": 7.38,
+      "level": "Level 1",
+      "phaseCreated": "Day 1"
+    },
+    {
+      "category": "Walls",
+      "model": "TSP_MAS009",
+      "family": "Basic Wall",
+      "type": "Masonary wall 220mm (plaster)",
+      "elementId": "104",
+      "count": 1,
+      "length": 8,
+      "area": 22,
+      "volume": 4.84,
+      "level": "Level 1",
+      "phaseCreated": "Day 1"
+    },
+    {
+      "category": "Walls",
+      "model": "TSP_MAS008",
+      "family": "Basic Wall",
+      "type": "Masonary wall 110mm (plaster)",
+      "elementId": "105",
+      "count": 1,
+      "length": 4,
+      "area": 11,
+      "volume": 1.21,
+      "level": "Level 1",
+      "phaseCreated": "Day 1"
+    },
+    {
+      "category": "Walls",
+      "model": "TSP_MAS008",
+      "family": "Basic Wall",
+      "type": "Masonary wall 110mm (plaster)",
+      "elementId": "106",
+      "count": 1,
+      "length": 3.4,
+      "area": 9.4,
+      "volume": 1.03,
+      "level": "Level 1",
+      "phaseCreated": "Day 1"
+    },
+    {
+      "category": "Walls",
+      "model": "TSP_MAS008",
+      "family": "Basic Wall",
+      "type": "Masonary wall 110mm (plaster)",
+      "elementId": "107",
+      "count": 1,
+      "length": 2.2,
+      "area": 6.1,
+      "volume": 0.67,
+      "level": "Level 1",
+      "phaseCreated": "Day 2"
+    },
+    {
+      "category": "Walls",
+      "model": "TSP_MAS008",
+      "family": "Basic Wall",
+      "type": "Masonary wall 110mm (plaster)",
+      "elementId": "108",
+      "count": 1,
+      "length": 1.6,
+      "area": 4.4,
+      "volume": 0.48,
+      "level": "Level 1",
+      "phaseCreated": "Day 2"
+    },
+    {
+      "category": "Floors",
+      "model": "TSP_RB016",
+      "family": "Floor",
+      "type": "Generic 85mm",
+      "elementId": "501",
+      "count": 1,
+      "perimeter": 40.4,
+      "area": 76,
+      "volume": 6.46,
+      "level": "01 GFL",
+      "phaseCreated": "Day 1"
+    },
+    {
+      "category": "Floors",
+      "model": "TSP_RB017",
+      "family": "Floor",
+      "type": "170mm Slab - Balcony",
+      "elementId": "502",
+      "count": 1,
+      "perimeter": 12,
+      "area": 8,
+      "volume": 1.36,
+      "level": "02 L1",
+      "phaseCreated": "Day 2"
+    },
+    {
+      "category": "Roofs",
+      "model": "TSP_RC003",
+      "family": "Basic Roof",
+      "type": "Generic - 125mm",
+      "elementId": "601",
+      "count": 1,
+      "area": 82,
+      "phaseDemolished": "None",
+      "phaseCreated": "Day 1"
+    },
+    {
+      "category": "Walls",
+      "model": "TSP_MAS008",
+      "family": "Basic Wall",
+      "type": "Masonary wall 110mm (plaster)",
+      "elementId": "111",
+      "count": 1,
+      "length": 4,
+      "area": 4.4,
+      "volume": 0.48,
+      "level": "02 L1",
+      "phaseCreated": "Day 2"
+    },
+    {
+      "category": "Walls",
+      "model": "TSP_MAS008",
+      "family": "Basic Wall",
+      "type": "Masonary wall 110mm (plaster)",
+      "elementId": "112",
+      "count": 1,
+      "length": 4,
+      "area": 4.4,
+      "volume": 0.48,
+      "level": "02 L1",
+      "phaseCreated": "Day 2"
+    },
+    {
+      "category": "Walls",
+      "model": "TSP_MAS008",
+      "family": "Basic Wall",
+      "type": "Masonary wall 110mm (plaster)",
+      "elementId": "113",
+      "count": 1,
+      "length": 4,
+      "area": 4.4,
+      "volume": 0.48,
+      "level": "02 L1",
+      "phaseCreated": "Day 2"
+    }
+  ],
+  "sketchForms": [
+    {
+      "kind": "Room",
+      "elementId": "401",
+      "name": "Living",
+      "isSolid": false,
+      "depth": 2.8,
+      "volume": null,
+      "material": null,
+      "profileLoops": [
+        {
+          "length": 26.4,
+          "curves": [
+            {
+              "kind": "Line",
+              "length": 7.2,
+              "start": [
+                0.2,
+                0.2,
+                0
+              ],
+              "end": [
+                7.4,
+                0.2,
+                0
+              ]
+            },
+            {
+              "kind": "Line",
+              "length": 7.6,
+              "start": [
+                7.4,
+                0.2,
+                0
+              ],
+              "end": [
+                7.4,
+                7.8,
+                0
+              ]
+            },
+            {
+              "kind": "Line",
+              "length": 7.2,
+              "start": [
+                7.4,
+                7.8,
+                0
+              ],
+              "end": [
+                0.2,
+                7.8,
+                0
+              ]
+            },
+            {
+              "kind": "Line",
+              "length": 7.6,
+              "start": [
+                0.2,
+                7.8,
+                0
+              ],
+              "end": [
+                0.2,
+                0.2,
+                0
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "Room",
+      "elementId": "402",
+      "name": "Kitchen",
+      "profileLoops": [
+        {
+          "length": 12,
+          "curves": [
+            {
+              "kind": "Line",
+              "length": 4.4,
+              "start": [
+                7.6,
+                6.2,
+                0
+              ],
+              "end": [
+                12,
+                6.2,
+                0
+              ]
+            },
+            {
+              "kind": "Line",
+              "length": 1.6,
+              "start": [
+                12,
+                6.2,
+                0
+              ],
+              "end": [
+                12,
+                7.8,
+                0
+              ]
+            },
+            {
+              "kind": "Line",
+              "length": 4.4,
+              "start": [
+                12,
+                7.8,
+                0
+              ],
+              "end": [
+                7.6,
+                7.8,
+                0
+              ]
+            },
+            {
+              "kind": "Line",
+              "length": 1.6,
+              "start": [
+                7.6,
+                7.8,
+                0
+              ],
+              "end": [
+                7.6,
+                6.2,
+                0
+              ]
+            }
+          ]
+        }
+      ],
+      "depth": 2.8
+    },
+    {
+      "kind": "Room",
+      "elementId": "403",
+      "name": "Bedroom",
+      "profileLoops": [
+        {
+          "length": 16.8,
+          "curves": [
+            {
+              "kind": "Line",
+              "length": 4.4,
+              "start": [
+                7.6,
+                0.2,
+                0
+              ],
+              "end": [
+                12,
+                0.2,
+                0
+              ]
+            },
+            {
+              "kind": "Line",
+              "length": 4,
+              "start": [
+                12,
+                0.2,
+                0
+              ],
+              "end": [
+                12,
+                4.2,
+                0
+              ]
+            },
+            {
+              "kind": "Line",
+              "length": 4.4,
+              "start": [
+                12,
+                4.2,
+                0
+              ],
+              "end": [
+                7.6,
+                4.2,
+                0
+              ]
+            },
+            {
+              "kind": "Line",
+              "length": 4,
+              "start": [
+                7.6,
+                4.2,
+                0
+              ],
+              "end": [
+                7.6,
+                0.2,
+                0
+              ]
+            }
+          ]
+        }
+      ],
+      "depth": 2.8
+    },
+    {
+      "kind": "Room",
+      "elementId": "404",
+      "name": "Bath",
+      "profileLoops": [
+        {
+          "length": 9.2,
+          "curves": [
+            {
+              "kind": "Line",
+              "length": 2.2,
+              "start": [
+                7.6,
+                4.4,
+                0
+              ],
+              "end": [
+                9.8,
+                4.4,
+                0
+              ]
+            },
+            {
+              "kind": "Line",
+              "length": 1.6,
+              "start": [
+                9.8,
+                4.4,
+                0
+              ],
+              "end": [
+                9.8,
+                6,
+                0
+              ]
+            },
+            {
+              "kind": "Line",
+              "length": 2.2,
+              "start": [
+                9.8,
+                6,
+                0
+              ],
+              "end": [
+                7.6,
+                6,
+                0
+              ]
+            },
+            {
+              "kind": "Line",
+              "length": 1.6,
+              "start": [
+                7.6,
+                6,
+                0
+              ],
+              "end": [
+                7.6,
+                4.4,
+                0
+              ]
+            }
+          ]
+        }
+      ],
+      "depth": 2.8
+    },
+    {
+      "kind": "Wall",
+      "elementId": "101",
+      "name": "TSP_MAS009 south",
+      "profileLoops": [
+        {
+          "length": 12.2,
+          "curves": [
+            {
+              "kind": "Line",
+              "length": 12.2,
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                12.2,
+                0,
+                0
+              ]
+            }
+          ]
+        }
+      ],
+      "depth": 2.8
+    },
+    {
+      "kind": "Wall",
+      "elementId": "102",
+      "name": "TSP_MAS009 east",
+      "profileLoops": [
+        {
+          "length": 8,
+          "curves": [
+            {
+              "kind": "Line",
+              "length": 8,
+              "start": [
+                12.2,
+                0,
+                0
+              ],
+              "end": [
+                12.2,
+                8,
+                0
+              ]
+            }
+          ]
+        }
+      ],
+      "depth": 2.8
+    },
+    {
+      "kind": "Wall",
+      "elementId": "103",
+      "name": "TSP_MAS009 north",
+      "profileLoops": [
+        {
+          "length": 12.2,
+          "curves": [
+            {
+              "kind": "Line",
+              "length": 12.2,
+              "start": [
+                12.2,
+                8,
+                0
+              ],
+              "end": [
+                0,
+                8,
+                0
+              ]
+            }
+          ]
+        }
+      ],
+      "depth": 2.8
+    },
+    {
+      "kind": "Wall",
+      "elementId": "104",
+      "name": "TSP_MAS009 west",
+      "profileLoops": [
+        {
+          "length": 8,
+          "curves": [
+            {
+              "kind": "Line",
+              "length": 8,
+              "start": [
+                0,
+                8,
+                0
+              ],
+              "end": [
+                0,
+                0,
+                0
+              ]
+            }
+          ]
+        }
+      ],
+      "depth": 2.8
+    },
+    {
+      "kind": "Wall",
+      "elementId": "105",
+      "name": "TSP_MAS008 bedroom",
+      "profileLoops": [
+        {
+          "length": 4,
+          "curves": [
+            {
+              "kind": "Line",
+              "length": 4,
+              "start": [
+                7.5,
+                0.2,
+                0
+              ],
+              "end": [
+                7.5,
+                4.2,
+                0
+              ]
+            }
+          ]
+        }
+      ],
+      "depth": 2.8
+    },
+    {
+      "kind": "Wall",
+      "elementId": "106",
+      "name": "TSP_MAS008 kitchen",
+      "profileLoops": [
+        {
+          "length": 3.4,
+          "curves": [
+            {
+              "kind": "Line",
+              "length": 3.4,
+              "start": [
+                7.5,
+                4.4,
+                0
+              ],
+              "end": [
+                7.5,
+                7.8,
+                0
+              ]
+            }
+          ]
+        }
+      ],
+      "depth": 2.8
+    },
+    {
+      "kind": "Wall",
+      "elementId": "107",
+      "name": "TSP_MAS008 bath",
+      "profileLoops": [
+        {
+          "length": 2.2,
+          "curves": [
+            {
+              "kind": "Line",
+              "length": 2.2,
+              "start": [
+                7.6,
+                4.3,
+                0
+              ],
+              "end": [
+                9.8,
+                4.3,
+                0
+              ]
+            }
+          ]
+        }
+      ],
+      "depth": 2.8
+    },
+    {
+      "kind": "Wall",
+      "elementId": "108",
+      "name": "TSP_MAS008 hall",
+      "profileLoops": [
+        {
+          "length": 1.6,
+          "curves": [
+            {
+              "kind": "Line",
+              "length": 1.6,
+              "start": [
+                9.8,
+                4.4,
+                0
+              ],
+              "end": [
+                9.8,
+                6,
+                0
+              ]
+            }
+          ]
+        }
+      ],
+      "depth": 2.8
+    },
+    {
+      "kind": "Room",
+      "elementId": "405",
+      "name": "Hall",
+      "profileLoops": [
+        {
+          "length": 9.2,
+          "curves": [
+            {
+              "kind": "Line",
+              "length": 2.2,
+              "start": [
+                9.8,
+                4.4,
+                0
+              ],
+              "end": [
+                12,
+                4.4,
+                0
+              ]
+            },
+            {
+              "kind": "Line",
+              "length": 1.6,
+              "start": [
+                12,
+                4.4,
+                0
+              ],
+              "end": [
+                12,
+                6,
+                0
+              ]
+            },
+            {
+              "kind": "Line",
+              "length": 2.2,
+              "start": [
+                12,
+                6,
+                0
+              ],
+              "end": [
+                9.8,
+                6,
+                0
+              ]
+            },
+            {
+              "kind": "Line",
+              "length": 1.6,
+              "start": [
+                9.8,
+                6,
+                0
+              ],
+              "end": [
+                9.8,
+                4.4,
+                0
+              ]
+            }
+          ]
+        }
+      ],
+      "depth": 2.8
+    },
+    {
+      "kind": "Opening",
+      "elementId": "201",
+      "name": "Entry door",
+      "profileLoops": [
+        {
+          "length": 2.4,
+          "curves": [
+            {
+              "kind": "Line",
+              "length": 0.9,
+              "start": [
+                3.1,
+                0,
+                0
+              ],
+              "end": [
+                4,
+                0,
+                0
+              ]
+            },
+            {
+              "kind": "Arc",
+              "length": 1.41,
+              "start": [
+                4,
+                0,
+                0
+              ],
+              "end": [
+                4,
+                0.9,
+                0
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "Opening",
+      "elementId": "202",
+      "name": "Bedroom door",
+      "profileLoops": [
+        {
+          "length": 2.3,
+          "curves": [
+            {
+              "kind": "Line",
+              "length": 0.9,
+              "start": [
+                7.5,
+                1.4,
+                0
+              ],
+              "end": [
+                7.5,
+                2.3,
+                0
+              ]
+            },
+            {
+              "kind": "Arc",
+              "length": 1.41,
+              "start": [
+                7.5,
+                2.3,
+                0
+              ],
+              "end": [
+                8.4,
+                2.3,
+                0
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "Opening",
+      "elementId": "203",
+      "name": "Kitchen door",
+      "profileLoops": [
+        {
+          "length": 2.3,
+          "curves": [
+            {
+              "kind": "Line",
+              "length": 0.9,
+              "start": [
+                7.5,
+                6.2,
+                0
+              ],
+              "end": [
+                7.5,
+                7.1,
+                0
+              ]
+            },
+            {
+              "kind": "Arc",
+              "length": 1.41,
+              "start": [
+                7.5,
+                7.1,
+                0
+              ],
+              "end": [
+                8.4,
+                7.1,
+                0
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "Opening",
+      "elementId": "204",
+      "name": "Bath door",
+      "profileLoops": [
+        {
+          "length": 2.05,
+          "curves": [
+            {
+              "kind": "Line",
+              "length": 0.8,
+              "start": [
+                8.6,
+                4.3,
+                0
+              ],
+              "end": [
+                9.4,
+                4.3,
+                0
+              ]
+            },
+            {
+              "kind": "Arc",
+              "length": 1.26,
+              "start": [
+                9.4,
+                4.3,
+                0
+              ],
+              "end": [
+                9.4,
+                5.1,
+                0
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "Window",
+      "elementId": "301",
+      "name": "Living south",
+      "profileLoops": [
+        {
+          "length": 1.8,
+          "curves": [
+            {
+              "kind": "Line",
+              "length": 1.8,
+              "start": [
+                8.6,
+                0,
+                0
+              ],
+              "end": [
+                10.4,
+                0,
+                0
+              ]
+            }
+          ]
+        },
+        {
+          "length": 1.8,
+          "curves": [
+            {
+              "kind": "Line",
+              "length": 1.8,
+              "start": [
+                8.6,
+                0.12,
+                0
+              ],
+              "end": [
+                10.4,
+                0.12,
+                0
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "Window",
+      "elementId": "302",
+      "name": "Living east",
+      "profileLoops": [
+        {
+          "length": 1.8,
+          "curves": [
+            {
+              "kind": "Line",
+              "length": 1.8,
+              "start": [
+                12.2,
+                2,
+                0
+              ],
+              "end": [
+                12.2,
+                3.8,
+                0
+              ]
+            }
+          ]
+        },
+        {
+          "length": 1.8,
+          "curves": [
+            {
+              "kind": "Line",
+              "length": 1.8,
+              "start": [
+                12.08,
+                2,
+                0
+              ],
+              "end": [
+                12.08,
+                3.8,
+                0
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "Window",
+      "elementId": "303",
+      "name": "Kitchen north",
+      "profileLoops": [
+        {
+          "length": 1.8,
+          "curves": [
+            {
+              "kind": "Line",
+              "length": 1.8,
+              "start": [
+                1.2,
+                8,
+                0
+              ],
+              "end": [
+                3,
+                8,
+                0
+              ]
+            }
+          ]
+        },
+        {
+          "length": 1.8,
+          "curves": [
+            {
+              "kind": "Line",
+              "length": 1.8,
+              "start": [
+                1.2,
+                7.88,
+                0
+              ],
+              "end": [
+                3,
+                7.88,
+                0
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "Window",
+      "elementId": "304",
+      "name": "Bedroom west",
+      "profileLoops": [
+        {
+          "length": 1.8,
+          "curves": [
+            {
+              "kind": "Line",
+              "length": 1.8,
+              "start": [
+                0,
+                2,
+                0
+              ],
+              "end": [
+                0,
+                3.8,
+                0
+              ]
+            }
+          ]
+        },
+        {
+          "length": 1.8,
+          "curves": [
+            {
+              "kind": "Line",
+              "length": 1.8,
+              "start": [
+                0.12,
+                2,
+                0
+              ],
+              "end": [
+                0.12,
+                3.8,
+                0
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "plans": [
+    {
+      "id": "gfl",
+      "name": "01 GFL",
+      "viewType": "FloorPlan",
+      "discipline": "Floor Plans",
+      "level": "01 GFL",
+      "elevation": 0,
+      "isActive": true,
+      "sketchForms": [
+        {
+          "kind": "Room",
+          "elementId": "401",
+          "name": "Living",
+          "isSolid": false,
+          "depth": 2.8,
+          "volume": null,
+          "material": null,
+          "profileLoops": [
+            {
+              "length": 26.4,
+              "curves": [
+                {
+                  "kind": "Line",
+                  "length": 7.2,
+                  "start": [
+                    0.2,
+                    0.2,
+                    0
+                  ],
+                  "end": [
+                    7.4,
+                    0.2,
+                    0
+                  ]
+                },
+                {
+                  "kind": "Line",
+                  "length": 7.6,
+                  "start": [
+                    7.4,
+                    0.2,
+                    0
+                  ],
+                  "end": [
+                    7.4,
+                    7.8,
+                    0
+                  ]
+                },
+                {
+                  "kind": "Line",
+                  "length": 7.2,
+                  "start": [
+                    7.4,
+                    7.8,
+                    0
+                  ],
+                  "end": [
+                    0.2,
+                    7.8,
+                    0
+                  ]
+                },
+                {
+                  "kind": "Line",
+                  "length": 7.6,
+                  "start": [
+                    0.2,
+                    7.8,
+                    0
+                  ],
+                  "end": [
+                    0.2,
+                    0.2,
+                    0
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "Room",
+          "elementId": "402",
+          "name": "Kitchen",
+          "profileLoops": [
+            {
+              "length": 12,
+              "curves": [
+                {
+                  "kind": "Line",
+                  "length": 4.4,
+                  "start": [
+                    7.6,
+                    6.2,
+                    0
+                  ],
+                  "end": [
+                    12,
+                    6.2,
+                    0
+                  ]
+                },
+                {
+                  "kind": "Line",
+                  "length": 1.6,
+                  "start": [
+                    12,
+                    6.2,
+                    0
+                  ],
+                  "end": [
+                    12,
+                    7.8,
+                    0
+                  ]
+                },
+                {
+                  "kind": "Line",
+                  "length": 4.4,
+                  "start": [
+                    12,
+                    7.8,
+                    0
+                  ],
+                  "end": [
+                    7.6,
+                    7.8,
+                    0
+                  ]
+                },
+                {
+                  "kind": "Line",
+                  "length": 1.6,
+                  "start": [
+                    7.6,
+                    7.8,
+                    0
+                  ],
+                  "end": [
+                    7.6,
+                    6.2,
+                    0
+                  ]
+                }
+              ]
+            }
+          ],
+          "depth": 2.8
+        },
+        {
+          "kind": "Room",
+          "elementId": "403",
+          "name": "Bedroom",
+          "profileLoops": [
+            {
+              "length": 16.8,
+              "curves": [
+                {
+                  "kind": "Line",
+                  "length": 4.4,
+                  "start": [
+                    7.6,
+                    0.2,
+                    0
+                  ],
+                  "end": [
+                    12,
+                    0.2,
+                    0
+                  ]
+                },
+                {
+                  "kind": "Line",
+                  "length": 4,
+                  "start": [
+                    12,
+                    0.2,
+                    0
+                  ],
+                  "end": [
+                    12,
+                    4.2,
+                    0
+                  ]
+                },
+                {
+                  "kind": "Line",
+                  "length": 4.4,
+                  "start": [
+                    12,
+                    4.2,
+                    0
+                  ],
+                  "end": [
+                    7.6,
+                    4.2,
+                    0
+                  ]
+                },
+                {
+                  "kind": "Line",
+                  "length": 4,
+                  "start": [
+                    7.6,
+                    4.2,
+                    0
+                  ],
+                  "end": [
+                    7.6,
+                    0.2,
+                    0
+                  ]
+                }
+              ]
+            }
+          ],
+          "depth": 2.8
+        },
+        {
+          "kind": "Room",
+          "elementId": "404",
+          "name": "Bath",
+          "profileLoops": [
+            {
+              "length": 9.2,
+              "curves": [
+                {
+                  "kind": "Line",
+                  "length": 2.2,
+                  "start": [
+                    7.6,
+                    4.4,
+                    0
+                  ],
+                  "end": [
+                    9.8,
+                    4.4,
+                    0
+                  ]
+                },
+                {
+                  "kind": "Line",
+                  "length": 1.6,
+                  "start": [
+                    9.8,
+                    4.4,
+                    0
+                  ],
+                  "end": [
+                    9.8,
+                    6,
+                    0
+                  ]
+                },
+                {
+                  "kind": "Line",
+                  "length": 2.2,
+                  "start": [
+                    9.8,
+                    6,
+                    0
+                  ],
+                  "end": [
+                    7.6,
+                    6,
+                    0
+                  ]
+                },
+                {
+                  "kind": "Line",
+                  "length": 1.6,
+                  "start": [
+                    7.6,
+                    6,
+                    0
+                  ],
+                  "end": [
+                    7.6,
+                    4.4,
+                    0
+                  ]
+                }
+              ]
+            }
+          ],
+          "depth": 2.8
+        },
+        {
+          "kind": "Wall",
+          "elementId": "101",
+          "name": "TSP_MAS009 south",
+          "profileLoops": [
+            {
+              "length": 12.2,
+              "curves": [
+                {
+                  "kind": "Line",
+                  "length": 12.2,
+                  "start": [
+                    0,
+                    0,
+                    0
+                  ],
+                  "end": [
+                    12.2,
+                    0,
+                    0
+                  ]
+                }
+              ]
+            }
+          ],
+          "depth": 2.8
+        },
+        {
+          "kind": "Wall",
+          "elementId": "102",
+          "name": "TSP_MAS009 east",
+          "profileLoops": [
+            {
+              "length": 8,
+              "curves": [
+                {
+                  "kind": "Line",
+                  "length": 8,
+                  "start": [
+                    12.2,
+                    0,
+                    0
+                  ],
+                  "end": [
+                    12.2,
+                    8,
+                    0
+                  ]
+                }
+              ]
+            }
+          ],
+          "depth": 2.8
+        },
+        {
+          "kind": "Wall",
+          "elementId": "103",
+          "name": "TSP_MAS009 north",
+          "profileLoops": [
+            {
+              "length": 12.2,
+              "curves": [
+                {
+                  "kind": "Line",
+                  "length": 12.2,
+                  "start": [
+                    12.2,
+                    8,
+                    0
+                  ],
+                  "end": [
+                    0,
+                    8,
+                    0
+                  ]
+                }
+              ]
+            }
+          ],
+          "depth": 2.8
+        },
+        {
+          "kind": "Wall",
+          "elementId": "104",
+          "name": "TSP_MAS009 west",
+          "profileLoops": [
+            {
+              "length": 8,
+              "curves": [
+                {
+                  "kind": "Line",
+                  "length": 8,
+                  "start": [
+                    0,
+                    8,
+                    0
+                  ],
+                  "end": [
+                    0,
+                    0,
+                    0
+                  ]
+                }
+              ]
+            }
+          ],
+          "depth": 2.8
+        },
+        {
+          "kind": "Wall",
+          "elementId": "105",
+          "name": "TSP_MAS008 bedroom",
+          "profileLoops": [
+            {
+              "length": 4,
+              "curves": [
+                {
+                  "kind": "Line",
+                  "length": 4,
+                  "start": [
+                    7.5,
+                    0.2,
+                    0
+                  ],
+                  "end": [
+                    7.5,
+                    4.2,
+                    0
+                  ]
+                }
+              ]
+            }
+          ],
+          "depth": 2.8
+        },
+        {
+          "kind": "Wall",
+          "elementId": "106",
+          "name": "TSP_MAS008 kitchen",
+          "profileLoops": [
+            {
+              "length": 3.4,
+              "curves": [
+                {
+                  "kind": "Line",
+                  "length": 3.4,
+                  "start": [
+                    7.5,
+                    4.4,
+                    0
+                  ],
+                  "end": [
+                    7.5,
+                    7.8,
+                    0
+                  ]
+                }
+              ]
+            }
+          ],
+          "depth": 2.8
+        },
+        {
+          "kind": "Wall",
+          "elementId": "107",
+          "name": "TSP_MAS008 bath",
+          "profileLoops": [
+            {
+              "length": 2.2,
+              "curves": [
+                {
+                  "kind": "Line",
+                  "length": 2.2,
+                  "start": [
+                    7.6,
+                    4.3,
+                    0
+                  ],
+                  "end": [
+                    9.8,
+                    4.3,
+                    0
+                  ]
+                }
+              ]
+            }
+          ],
+          "depth": 2.8
+        },
+        {
+          "kind": "Wall",
+          "elementId": "108",
+          "name": "TSP_MAS008 hall",
+          "profileLoops": [
+            {
+              "length": 1.6,
+              "curves": [
+                {
+                  "kind": "Line",
+                  "length": 1.6,
+                  "start": [
+                    9.8,
+                    4.4,
+                    0
+                  ],
+                  "end": [
+                    9.8,
+                    6,
+                    0
+                  ]
+                }
+              ]
+            }
+          ],
+          "depth": 2.8
+        },
+        {
+          "kind": "Room",
+          "elementId": "405",
+          "name": "Hall",
+          "profileLoops": [
+            {
+              "length": 9.2,
+              "curves": [
+                {
+                  "kind": "Line",
+                  "length": 2.2,
+                  "start": [
+                    9.8,
+                    4.4,
+                    0
+                  ],
+                  "end": [
+                    12,
+                    4.4,
+                    0
+                  ]
+                },
+                {
+                  "kind": "Line",
+                  "length": 1.6,
+                  "start": [
+                    12,
+                    4.4,
+                    0
+                  ],
+                  "end": [
+                    12,
+                    6,
+                    0
+                  ]
+                },
+                {
+                  "kind": "Line",
+                  "length": 2.2,
+                  "start": [
+                    12,
+                    6,
+                    0
+                  ],
+                  "end": [
+                    9.8,
+                    6,
+                    0
+                  ]
+                },
+                {
+                  "kind": "Line",
+                  "length": 1.6,
+                  "start": [
+                    9.8,
+                    6,
+                    0
+                  ],
+                  "end": [
+                    9.8,
+                    4.4,
+                    0
+                  ]
+                }
+              ]
+            }
+          ],
+          "depth": 2.8
+        },
+        {
+          "kind": "Opening",
+          "elementId": "201",
+          "name": "Entry door",
+          "profileLoops": [
+            {
+              "length": 2.4,
+              "curves": [
+                {
+                  "kind": "Line",
+                  "length": 0.9,
+                  "start": [
+                    3.1,
+                    0,
+                    0
+                  ],
+                  "end": [
+                    4,
+                    0,
+                    0
+                  ]
+                },
+                {
+                  "kind": "Arc",
+                  "length": 1.41,
+                  "start": [
+                    4,
+                    0,
+                    0
+                  ],
+                  "end": [
+                    4,
+                    0.9,
+                    0
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "Opening",
+          "elementId": "202",
+          "name": "Bedroom door",
+          "profileLoops": [
+            {
+              "length": 2.3,
+              "curves": [
+                {
+                  "kind": "Line",
+                  "length": 0.9,
+                  "start": [
+                    7.5,
+                    1.4,
+                    0
+                  ],
+                  "end": [
+                    7.5,
+                    2.3,
+                    0
+                  ]
+                },
+                {
+                  "kind": "Arc",
+                  "length": 1.41,
+                  "start": [
+                    7.5,
+                    2.3,
+                    0
+                  ],
+                  "end": [
+                    8.4,
+                    2.3,
+                    0
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "Opening",
+          "elementId": "203",
+          "name": "Kitchen door",
+          "profileLoops": [
+            {
+              "length": 2.3,
+              "curves": [
+                {
+                  "kind": "Line",
+                  "length": 0.9,
+                  "start": [
+                    7.5,
+                    6.2,
+                    0
+                  ],
+                  "end": [
+                    7.5,
+                    7.1,
+                    0
+                  ]
+                },
+                {
+                  "kind": "Arc",
+                  "length": 1.41,
+                  "start": [
+                    7.5,
+                    7.1,
+                    0
+                  ],
+                  "end": [
+                    8.4,
+                    7.1,
+                    0
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "Opening",
+          "elementId": "204",
+          "name": "Bath door",
+          "profileLoops": [
+            {
+              "length": 2.05,
+              "curves": [
+                {
+                  "kind": "Line",
+                  "length": 0.8,
+                  "start": [
+                    8.6,
+                    4.3,
+                    0
+                  ],
+                  "end": [
+                    9.4,
+                    4.3,
+                    0
+                  ]
+                },
+                {
+                  "kind": "Arc",
+                  "length": 1.26,
+                  "start": [
+                    9.4,
+                    4.3,
+                    0
+                  ],
+                  "end": [
+                    9.4,
+                    5.1,
+                    0
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "Window",
+          "elementId": "301",
+          "name": "Living south",
+          "profileLoops": [
+            {
+              "length": 1.8,
+              "curves": [
+                {
+                  "kind": "Line",
+                  "length": 1.8,
+                  "start": [
+                    8.6,
+                    0,
+                    0
+                  ],
+                  "end": [
+                    10.4,
+                    0,
+                    0
+                  ]
+                }
+              ]
+            },
+            {
+              "length": 1.8,
+              "curves": [
+                {
+                  "kind": "Line",
+                  "length": 1.8,
+                  "start": [
+                    8.6,
+                    0.12,
+                    0
+                  ],
+                  "end": [
+                    10.4,
+                    0.12,
+                    0
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "Window",
+          "elementId": "302",
+          "name": "Living east",
+          "profileLoops": [
+            {
+              "length": 1.8,
+              "curves": [
+                {
+                  "kind": "Line",
+                  "length": 1.8,
+                  "start": [
+                    12.2,
+                    2,
+                    0
+                  ],
+                  "end": [
+                    12.2,
+                    3.8,
+                    0
+                  ]
+                }
+              ]
+            },
+            {
+              "length": 1.8,
+              "curves": [
+                {
+                  "kind": "Line",
+                  "length": 1.8,
+                  "start": [
+                    12.08,
+                    2,
+                    0
+                  ],
+                  "end": [
+                    12.08,
+                    3.8,
+                    0
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "Window",
+          "elementId": "303",
+          "name": "Kitchen north",
+          "profileLoops": [
+            {
+              "length": 1.8,
+              "curves": [
+                {
+                  "kind": "Line",
+                  "length": 1.8,
+                  "start": [
+                    1.2,
+                    8,
+                    0
+                  ],
+                  "end": [
+                    3,
+                    8,
+                    0
+                  ]
+                }
+              ]
+            },
+            {
+              "length": 1.8,
+              "curves": [
+                {
+                  "kind": "Line",
+                  "length": 1.8,
+                  "start": [
+                    1.2,
+                    7.88,
+                    0
+                  ],
+                  "end": [
+                    3,
+                    7.88,
+                    0
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "Window",
+          "elementId": "304",
+          "name": "Bedroom west",
+          "profileLoops": [
+            {
+              "length": 1.8,
+              "curves": [
+                {
+                  "kind": "Line",
+                  "length": 1.8,
+                  "start": [
+                    0,
+                    2,
+                    0
+                  ],
+                  "end": [
+                    0,
+                    3.8,
+                    0
+                  ]
+                }
+              ]
+            },
+            {
+              "length": 1.8,
+              "curves": [
+                {
+                  "kind": "Line",
+                  "length": 1.8,
+                  "start": [
+                    0.12,
+                    2,
+                    0
+                  ],
+                  "end": [
+                    0.12,
+                    3.8,
+                    0
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "l1",
+      "name": "02 L1",
+      "viewType": "FloorPlan",
+      "discipline": "Floor Plans",
+      "level": "02 L1",
+      "elevation": 3.15,
+      "isActive": false,
+      "sketchForms": [
+        {
+          "kind": "Room",
+          "elementId": "411",
+          "name": "Terrace",
+          "depth": 0.2,
+          "profileLoops": [
+            {
+              "length": 16,
+              "curves": [
+                {
+                  "kind": "Line",
+                  "length": 4,
+                  "start": [
+                    12.4,
+                    0.2,
+                    0
+                  ],
+                  "end": [
+                    16.4,
+                    0.2,
+                    0
+                  ]
+                },
+                {
+                  "kind": "Line",
+                  "length": 4,
+                  "start": [
+                    16.4,
+                    0.2,
+                    0
+                  ],
+                  "end": [
+                    16.4,
+                    4.2,
+                    0
+                  ]
+                },
+                {
+                  "kind": "Line",
+                  "length": 4,
+                  "start": [
+                    16.4,
+                    4.2,
+                    0
+                  ],
+                  "end": [
+                    12.4,
+                    4.2,
+                    0
+                  ]
+                },
+                {
+                  "kind": "Line",
+                  "length": 4,
+                  "start": [
+                    12.4,
+                    4.2,
+                    0
+                  ],
+                  "end": [
+                    12.4,
+                    0.2,
+                    0
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "Wall",
+          "elementId": "111",
+          "name": "TSP_MAS008 terrace s",
+          "depth": 1.1,
+          "profileLoops": [
+            {
+              "length": 4,
+              "curves": [
+                {
+                  "kind": "Line",
+                  "length": 4,
+                  "start": [
+                    12.4,
+                    0.2,
+                    0
+                  ],
+                  "end": [
+                    16.4,
+                    0.2,
+                    0
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "Wall",
+          "elementId": "112",
+          "name": "TSP_MAS008 terrace e",
+          "depth": 1.1,
+          "profileLoops": [
+            {
+              "length": 4,
+              "curves": [
+                {
+                  "kind": "Line",
+                  "length": 4,
+                  "start": [
+                    16.4,
+                    0.2,
+                    0
+                  ],
+                  "end": [
+                    16.4,
+                    4.2,
+                    0
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "Wall",
+          "elementId": "113",
+          "name": "TSP_MAS008 terrace n",
+          "depth": 1.1,
+          "profileLoops": [
+            {
+              "length": 4,
+              "curves": [
+                {
+                  "kind": "Line",
+                  "length": 4,
+                  "start": [
+                    16.4,
+                    4.2,
+                    0
+                  ],
+                  "end": [
+                    12.4,
+                    4.2,
+                    0
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "meshes": [
+    {
+      "elementId": "101",
+      "category": "Walls",
+      "fill": "#c4a574",
+      "stroke": "#8d7349",
+      "positions": [
+        0,
+        -0.11,
+        0,
+        12.2,
+        -0.11,
+        0,
+        12.2,
+        0.11,
+        0,
+        0,
+        0.11,
+        0,
+        0,
+        -0.11,
+        2.8,
+        12.2,
+        -0.11,
+        2.8,
+        12.2,
+        0.11,
+        2.8,
+        0,
+        0.11,
+        2.8,
+        12.09,
+        0,
+        0,
+        12.31,
+        0,
+        0,
+        12.31,
+        8,
+        0,
+        12.09,
+        8,
+        0,
+        12.09,
+        0,
+        2.8,
+        12.31,
+        0,
+        2.8,
+        12.31,
+        8,
+        2.8,
+        12.09,
+        8,
+        2.8,
+        0,
+        7.89,
+        0,
+        12.2,
+        7.89,
+        0,
+        12.2,
+        8.11,
+        0,
+        0,
+        8.11,
+        0,
+        0,
+        7.89,
+        2.8,
+        12.2,
+        7.89,
+        2.8,
+        12.2,
+        8.11,
+        2.8,
+        0,
+        8.11,
+        2.8,
+        -0.11,
+        0,
+        0,
+        0.11,
+        0,
+        0,
+        0.11,
+        8,
+        0,
+        -0.11,
+        8,
+        0,
+        -0.11,
+        0,
+        2.8,
+        0.11,
+        0,
+        2.8,
+        0.11,
+        8,
+        2.8,
+        -0.11,
+        8,
+        2.8,
+        7.445,
+        0.2,
+        0,
+        7.555,
+        0.2,
+        0,
+        7.555,
+        4.2,
+        0,
+        7.445,
+        4.2,
+        0,
+        7.445,
+        0.2,
+        2.8,
+        7.555,
+        0.2,
+        2.8,
+        7.555,
+        4.2,
+        2.8,
+        7.445,
+        4.2,
+        2.8,
+        7.445,
+        4.4,
+        0,
+        7.555,
+        4.4,
+        0,
+        7.555,
+        7.8,
+        0,
+        7.445,
+        7.8,
+        0,
+        7.445,
+        4.4,
+        2.8,
+        7.555,
+        4.4,
+        2.8,
+        7.555,
+        7.8,
+        2.8,
+        7.445,
+        7.8,
+        2.8,
+        7.6,
+        4.245,
+        0,
+        9.8,
+        4.245,
+        0,
+        9.8,
+        4.355,
+        0,
+        7.6,
+        4.355,
+        0,
+        7.6,
+        4.245,
+        2.8,
+        9.8,
+        4.245,
+        2.8,
+        9.8,
+        4.355,
+        2.8,
+        7.6,
+        4.355,
+        2.8,
+        9.745,
+        4.4,
+        0,
+        9.855,
+        4.4,
+        0,
+        9.855,
+        6,
+        0,
+        9.745,
+        6,
+        0,
+        9.745,
+        4.4,
+        2.8,
+        9.855,
+        4.4,
+        2.8,
+        9.855,
+        6,
+        2.8,
+        9.745,
+        6,
+        2.8
+      ],
+      "indices": [
+        0,
+        1,
+        2,
+        0,
+        2,
+        3,
+        4,
+        5,
+        6,
+        4,
+        6,
+        7,
+        0,
+        1,
+        5,
+        0,
+        5,
+        4,
+        1,
+        2,
+        6,
+        1,
+        6,
+        5,
+        2,
+        3,
+        7,
+        2,
+        7,
+        6,
+        3,
+        0,
+        4,
+        3,
+        4,
+        7,
+        8,
+        9,
+        10,
+        8,
+        10,
+        11,
+        12,
+        13,
+        14,
+        12,
+        14,
+        15,
+        8,
+        9,
+        13,
+        8,
+        13,
+        12,
+        9,
+        10,
+        14,
+        9,
+        14,
+        13,
+        10,
+        11,
+        15,
+        10,
+        15,
+        14,
+        11,
+        8,
+        12,
+        11,
+        12,
+        15,
+        16,
+        17,
+        18,
+        16,
+        18,
+        19,
+        20,
+        21,
+        22,
+        20,
+        22,
+        23,
+        16,
+        17,
+        21,
+        16,
+        21,
+        20,
+        17,
+        18,
+        22,
+        17,
+        22,
+        21,
+        18,
+        19,
+        23,
+        18,
+        23,
+        22,
+        19,
+        16,
+        20,
+        19,
+        20,
+        23,
+        24,
+        25,
+        26,
+        24,
+        26,
+        27,
+        28,
+        29,
+        30,
+        28,
+        30,
+        31,
+        24,
+        25,
+        29,
+        24,
+        29,
+        28,
+        25,
+        26,
+        30,
+        25,
+        30,
+        29,
+        26,
+        27,
+        31,
+        26,
+        31,
+        30,
+        27,
+        24,
+        28,
+        27,
+        28,
+        31,
+        32,
+        33,
+        34,
+        32,
+        34,
+        35,
+        36,
+        37,
+        38,
+        36,
+        38,
+        39,
+        32,
+        33,
+        37,
+        32,
+        37,
+        36,
+        33,
+        34,
+        38,
+        33,
+        38,
+        37,
+        34,
+        35,
+        39,
+        34,
+        39,
+        38,
+        35,
+        32,
+        36,
+        35,
+        36,
+        39,
+        40,
+        41,
+        42,
+        40,
+        42,
+        43,
+        44,
+        45,
+        46,
+        44,
+        46,
+        47,
+        40,
+        41,
+        45,
+        40,
+        45,
+        44,
+        41,
+        42,
+        46,
+        41,
+        46,
+        45,
+        42,
+        43,
+        47,
+        42,
+        47,
+        46,
+        43,
+        40,
+        44,
+        43,
+        44,
+        47,
+        48,
+        49,
+        50,
+        48,
+        50,
+        51,
+        52,
+        53,
+        54,
+        52,
+        54,
+        55,
+        48,
+        49,
+        53,
+        48,
+        53,
+        52,
+        49,
+        50,
+        54,
+        49,
+        54,
+        53,
+        50,
+        51,
+        55,
+        50,
+        55,
+        54,
+        51,
+        48,
+        52,
+        51,
+        52,
+        55,
+        56,
+        57,
+        58,
+        56,
+        58,
+        59,
+        60,
+        61,
+        62,
+        60,
+        62,
+        63,
+        56,
+        57,
+        61,
+        56,
+        61,
+        60,
+        57,
+        58,
+        62,
+        57,
+        62,
+        61,
+        58,
+        59,
+        63,
+        58,
+        63,
+        62,
+        59,
+        56,
+        60,
+        59,
+        60,
+        63
+      ]
+    },
+    {
+      "elementId": "501",
+      "category": "Floors",
+      "fill": "#6a6560",
+      "stroke": "#4a4540",
+      "positions": [
+        0,
+        0,
+        0,
+        12.2,
+        0,
+        0,
+        12.2,
+        8,
+        0,
+        0,
+        8,
+        0,
+        0,
+        0,
+        0.12,
+        12.2,
+        0,
+        0.12,
+        12.2,
+        8,
+        0.12,
+        0,
+        8,
+        0.12
+      ],
+      "indices": [
+        0,
+        1,
+        2,
+        0,
+        2,
+        3,
+        4,
+        5,
+        6,
+        4,
+        6,
+        7,
+        0,
+        1,
+        5,
+        0,
+        5,
+        4,
+        1,
+        2,
+        6,
+        1,
+        6,
+        5,
+        2,
+        3,
+        7,
+        2,
+        7,
+        6,
+        3,
+        0,
+        4,
+        3,
+        4,
+        7
+      ]
+    },
+    {
+      "elementId": "601",
+      "category": "Roofs",
+      "fill": "#4a4a4a",
+      "stroke": "#2f2f2f",
+      "positions": [
+        0,
+        0,
+        2.8,
+        12.2,
+        0,
+        2.8,
+        8.783999999999999,
+        4,
+        4.15,
+        3.416,
+        4,
+        4.15,
+        12.2,
+        8,
+        2.8,
+        0,
+        8,
+        2.8
+      ],
+      "indices": [
+        0,
+        1,
+        2,
+        0,
+        2,
+        3,
+        1,
+        4,
+        2,
+        4,
+        5,
+        3,
+        4,
+        3,
+        2,
+        5,
+        0,
+        3
+      ]
+    },
+    {
+      "elementId": "201",
+      "category": "Doors",
+      "fill": "#8b5a2b",
+      "stroke": "#5c3b1a",
+      "positions": [
+        3.15,
+        -0.04,
+        0,
+        3.95,
+        -0.04,
+        0,
+        3.95,
+        0.08,
+        0,
+        3.15,
+        0.08,
+        0,
+        3.15,
+        -0.04,
+        2.1,
+        3.95,
+        -0.04,
+        2.1,
+        3.95,
+        0.08,
+        2.1,
+        3.15,
+        0.08,
+        2.1
+      ],
+      "indices": [
+        0,
+        1,
+        2,
+        0,
+        2,
+        3,
+        4,
+        5,
+        6,
+        4,
+        6,
+        7,
+        0,
+        1,
+        5,
+        0,
+        5,
+        4,
+        1,
+        2,
+        6,
+        1,
+        6,
+        5,
+        2,
+        3,
+        7,
+        2,
+        7,
+        6,
+        3,
+        0,
+        4,
+        3,
+        4,
+        7
+      ]
+    },
+    {
+      "elementId": "301",
+      "category": "Windows",
+      "fill": "#2c3d48",
+      "stroke": "#1a2830",
+      "positions": [
+        8.6,
+        -0.05,
+        0.9,
+        10.4,
+        -0.05,
+        0.9,
+        10.4,
+        0.05,
+        0.9,
+        8.6,
+        0.05,
+        0.9,
+        8.6,
+        -0.05,
+        2.1,
+        10.4,
+        -0.05,
+        2.1,
+        10.4,
+        0.05,
+        2.1,
+        8.6,
+        0.05,
+        2.1,
+        12.15,
+        2,
+        0.9,
+        12.25,
+        2,
+        0.9,
+        12.25,
+        3.8,
+        0.9,
+        12.15,
+        3.8,
+        0.9,
+        12.15,
+        2,
+        2.1,
+        12.25,
+        2,
+        2.1,
+        12.25,
+        3.8,
+        2.1,
+        12.15,
+        3.8,
+        2.1,
+        1.2,
+        7.95,
+        0.9,
+        3,
+        7.95,
+        0.9,
+        3,
+        8.05,
+        0.9,
+        1.2,
+        8.05,
+        0.9,
+        1.2,
+        7.95,
+        2.1,
+        3,
+        7.95,
+        2.1,
+        3,
+        8.05,
+        2.1,
+        1.2,
+        8.05,
+        2.1,
+        -0.05,
+        2,
+        0.9,
+        0.05,
+        2,
+        0.9,
+        0.05,
+        3.8,
+        0.9,
+        -0.05,
+        3.8,
+        0.9,
+        -0.05,
+        2,
+        2.1,
+        0.05,
+        2,
+        2.1,
+        0.05,
+        3.8,
+        2.1,
+        -0.05,
+        3.8,
+        2.1
+      ],
+      "indices": [
+        0,
+        1,
+        2,
+        0,
+        2,
+        3,
+        4,
+        5,
+        6,
+        4,
+        6,
+        7,
+        0,
+        1,
+        5,
+        0,
+        5,
+        4,
+        1,
+        2,
+        6,
+        1,
+        6,
+        5,
+        2,
+        3,
+        7,
+        2,
+        7,
+        6,
+        3,
+        0,
+        4,
+        3,
+        4,
+        7,
+        8,
+        9,
+        10,
+        8,
+        10,
+        11,
+        12,
+        13,
+        14,
+        12,
+        14,
+        15,
+        8,
+        9,
+        13,
+        8,
+        13,
+        12,
+        9,
+        10,
+        14,
+        9,
+        14,
+        13,
+        10,
+        11,
+        15,
+        10,
+        15,
+        14,
+        11,
+        8,
+        12,
+        11,
+        12,
+        15,
+        16,
+        17,
+        18,
+        16,
+        18,
+        19,
+        20,
+        21,
+        22,
+        20,
+        22,
+        23,
+        16,
+        17,
+        21,
+        16,
+        21,
+        20,
+        17,
+        18,
+        22,
+        17,
+        22,
+        21,
+        18,
+        19,
+        23,
+        18,
+        23,
+        22,
+        19,
+        16,
+        20,
+        19,
+        20,
+        23,
+        24,
+        25,
+        26,
+        24,
+        26,
+        27,
+        28,
+        29,
+        30,
+        28,
+        30,
+        31,
+        24,
+        25,
+        29,
+        24,
+        29,
+        28,
+        25,
+        26,
+        30,
+        25,
+        30,
+        29,
+        26,
+        27,
+        31,
+        26,
+        31,
+        30,
+        27,
+        24,
+        28,
+        27,
+        28,
+        31
+      ]
+    }
+  ]
+}

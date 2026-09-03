@@ -1,0 +1,356 @@
+{
+  "disclaimer": "Demo data only. Not legal advice. Fictional parties, sites, and amounts for walkthrough.",
+  "company": {
+    "name": "Clay & Harbor Construction",
+    "role": "Main contractor",
+    "city": "Cape Town",
+    "trainedBy": "StudioPractice",
+    "trainingNote": "Revit extract, TSP takeoff, and priced catalog — then job admin in this workspace."
+  },
+  "projects": [
+    {
+      "id": "sea-point",
+      "code": "CH-2418",
+      "name": "Sea Point duplex",
+      "client": "Ndlovu Family Trust",
+      "location": "High Level Road, Sea Point",
+      "phase": "Construction",
+      "status": "On site",
+      "contractValue": 4820000,
+      "linkedSample": "./samples/floor-plan.json",
+      "linkedSampleLabel": "Open Revit sample plan",
+      "nextMilestone": "First-fix inspection 12 Sep 2026",
+      "summary": "Two-storey duplex after StudioPractice Revit training. Live takeoff feeds masonry, slabs, doors, and windows into purchases."
+    },
+    {
+      "id": "observatory",
+      "code": "CH-2503",
+      "name": "Observatory warehouse fit-out",
+      "client": "Salt River Logistics (Pty) Ltd",
+      "location": "Lower Main Road, Observatory",
+      "phase": "Procurement",
+      "status": "Buying",
+      "contractValue": 3150000,
+      "linkedSample": null,
+      "linkedSampleLabel": null,
+      "nextMilestone": "Issue remaining RFQs by 8 Sep 2026",
+      "summary": "Interior fit-out. Compare extracts showed extra partition walls; variation VI-04 sits with the principal agent."
+    },
+    {
+      "id": "constantia",
+      "code": "CH-2511",
+      "name": "Constantia pavilion",
+      "client": "Steenberg Garden Estate",
+      "location": "Spaanschemat River Road, Constantia",
+      "phase": "Concept",
+      "status": "Training model",
+      "contractValue": 890000,
+      "linkedSample": null,
+      "linkedSampleLabel": null,
+      "nextMilestone": "NHBRC enrolment after concept freeze",
+      "summary": "StudioPractice training pavilion. Appointment signed; JBCC and programme still in draft."
+    }
+  ],
+  "forms": [
+    {
+      "id": "f-sp-appoint",
+      "projectId": "sea-point",
+      "type": "Letter of Appointment",
+      "parties": "Ndlovu Family Trust → Clay & Harbor Construction",
+      "issued": "2026-02-10",
+      "signed": "2026-02-18",
+      "status": "Signed",
+      "notes": "Appoints Clay & Harbor as main contractor. Principal agent: StudioPractice."
+    },
+    {
+      "id": "f-sp-jbcc",
+      "projectId": "sea-point",
+      "type": "JBCC Principal Building Agreement",
+      "parties": "Employer / Contractor / Principal agent",
+      "issued": "2026-02-20",
+      "signed": "2026-03-04",
+      "status": "Signed",
+      "notes": "PBA with sectional completion. Contract sum R4.82m excluding VAT."
+    },
+    {
+      "id": "f-sp-nhbrc",
+      "projectId": "sea-point",
+      "type": "NHBRC enrolment",
+      "parties": "Clay & Harbor Construction / NHBRC",
+      "issued": "2026-03-12",
+      "signed": "2026-03-22",
+      "status": "Signed",
+      "notes": "Enrolment 26/WC/44182. Home builder registration current."
+    },
+    {
+      "id": "f-sp-ins",
+      "projectId": "sea-point",
+      "type": "Contract works insurance",
+      "parties": "Clay & Harbor / Santam (demo)",
+      "issued": "2026-03-25",
+      "signed": "2026-03-28",
+      "status": "Signed",
+      "notes": "Works cover to practical completion plus 90 days. Demo policy number only."
+    },
+    {
+      "id": "f-sp-vi02",
+      "projectId": "sea-point",
+      "type": "Variation instruction VI-02",
+      "parties": "StudioPractice → Clay & Harbor",
+      "issued": "2026-07-14",
+      "signed": "2026-07-21",
+      "status": "Signed",
+      "notes": "Bath wall and door added — matches sample before/after compare."
+    },
+    {
+      "id": "f-ob-appoint",
+      "projectId": "observatory",
+      "type": "Letter of Appointment",
+      "parties": "Salt River Logistics → Clay & Harbor",
+      "issued": "2026-05-06",
+      "signed": "2026-05-14",
+      "status": "Signed",
+      "notes": "Fit-out only. Landlord consent attached (demo)."
+    },
+    {
+      "id": "f-ob-jbcc",
+      "projectId": "observatory",
+      "type": "JBCC Minor Works Agreement",
+      "parties": "Employer / Contractor",
+      "issued": "2026-05-16",
+      "signed": "2026-05-28",
+      "status": "Signed",
+      "notes": "MWA for warehouse internals. PC sums for joinery and HVAC."
+    },
+    {
+      "id": "f-ob-vi04",
+      "projectId": "observatory",
+      "type": "Variation instruction VI-04",
+      "parties": "StudioPractice → Clay & Harbor",
+      "issued": "2026-08-19",
+      "signed": null,
+      "status": "Issued",
+      "notes": "Extra masonry partitions from latest extract. Awaiting employer signature."
+    },
+    {
+      "id": "f-ob-warranty",
+      "projectId": "observatory",
+      "type": "Supplier warranty (joinery)",
+      "parties": "Peninsula Joinery → Employer",
+      "issued": "2026-08-02",
+      "signed": null,
+      "status": "Draft",
+      "notes": "Five-year workmanship warranty. Issue with PO-2503-08."
+    },
+    {
+      "id": "f-co-appoint",
+      "projectId": "constantia",
+      "type": "Letter of Appointment",
+      "parties": "Steenberg Garden Estate → Clay & Harbor",
+      "issued": "2026-08-04",
+      "signed": "2026-08-11",
+      "status": "Signed",
+      "notes": "Concept and training model under StudioPractice direction."
+    },
+    {
+      "id": "f-co-jbcc",
+      "projectId": "constantia",
+      "type": "JBCC Principal Building Agreement",
+      "parties": "Employer / Contractor / Principal agent",
+      "issued": null,
+      "signed": null,
+      "status": "Draft",
+      "notes": "Waiting for concept freeze and priced takeoff."
+    },
+    {
+      "id": "f-co-nhbrc",
+      "projectId": "constantia",
+      "type": "NHBRC enrolment",
+      "parties": "Clay & Harbor Construction / NHBRC",
+      "issued": null,
+      "signed": null,
+      "status": "Draft",
+      "notes": "Enrol after superstructure extent is locked in Revit."
+    }
+  ],
+  "suppliers": [
+    {
+      "id": "sup-brick",
+      "name": "Atlantic Brick & Block",
+      "trade": "Masonry",
+      "contact": "orders@atlanticbrick.example",
+      "region": "Cape Town"
+    },
+    {
+      "id": "sup-ready",
+      "name": "Peninsula Ready-Mix",
+      "trade": "Concrete / slabs",
+      "contact": "plant@peninsularm.example",
+      "region": "Paarden Eiland"
+    },
+    {
+      "id": "sup-join",
+      "name": "Harbor Joinery Works",
+      "trade": "Doors",
+      "contact": "shop@harborjoinery.example",
+      "region": "Woodstock"
+    },
+    {
+      "id": "sup-glaze",
+      "name": "Camps Bay Glass",
+      "trade": "Windows / glazing",
+      "contact": "quotes@campsbayglass.example",
+      "region": "Ndabeni"
+    },
+    {
+      "id": "sup-roof",
+      "name": "Constantia Roofing",
+      "trade": "Roofs",
+      "contact": "site@constroof.example",
+      "region": "Constantia"
+    },
+    {
+      "id": "sup-pen-join",
+      "name": "Peninsula Joinery",
+      "trade": "Fit-out joinery",
+      "contact": "contracts@penjoinery.example",
+      "region": "Observatory"
+    }
+  ],
+  "purchases": [
+    {
+      "id": "po-sp-01",
+      "projectId": "sea-point",
+      "poNumber": "PO-2418-12",
+      "supplierId": "sup-brick",
+      "supplier": "Atlantic Brick & Block",
+      "description": "Masonry 220mm plastered walls",
+      "model": "TSP_MAS009",
+      "qty": 18.4,
+      "unit": "m3",
+      "amount": 78200,
+      "status": "Delivered",
+      "issued": "2026-06-03"
+    },
+    {
+      "id": "po-sp-02",
+      "projectId": "sea-point",
+      "poNumber": "PO-2418-14",
+      "supplierId": "sup-ready",
+      "supplier": "Peninsula Ready-Mix",
+      "description": "Floor generic 85mm",
+      "model": "TSP_RB016",
+      "qty": 96,
+      "unit": "m2",
+      "amount": 85440,
+      "status": "Delivered",
+      "issued": "2026-06-18"
+    },
+    {
+      "id": "po-sp-03",
+      "projectId": "sea-point",
+      "poNumber": "PO-2418-19",
+      "supplierId": "sup-join",
+      "supplier": "Harbor Joinery Works",
+      "description": "Doors (each)",
+      "model": "",
+      "qty": 8,
+      "unit": "ea",
+      "amount": 38400,
+      "status": "Issued",
+      "issued": "2026-08-11"
+    },
+    {
+      "id": "po-sp-04",
+      "projectId": "sea-point",
+      "poNumber": "PO-2418-21",
+      "supplierId": "sup-glaze",
+      "supplier": "Camps Bay Glass",
+      "description": "Windows (each)",
+      "model": "",
+      "qty": 12,
+      "unit": "ea",
+      "amount": 74400,
+      "status": "Issued",
+      "issued": "2026-08-22"
+    },
+    {
+      "id": "po-ob-01",
+      "projectId": "observatory",
+      "poNumber": "RFQ-2503-04",
+      "supplierId": "sup-brick",
+      "supplier": "Atlantic Brick & Block",
+      "description": "Masonry wall 110mm (plaster) — VI-04 extra",
+      "model": "TSP_MAS008",
+      "qty": 6.2,
+      "unit": "m3",
+      "amount": 22630,
+      "status": "RFQ",
+      "issued": "2026-08-25"
+    },
+    {
+      "id": "po-ob-02",
+      "projectId": "observatory",
+      "poNumber": "PO-2503-08",
+      "supplierId": "sup-pen-join",
+      "supplier": "Peninsula Joinery",
+      "description": "Office joinery package",
+      "model": "",
+      "qty": 1,
+      "unit": "ea",
+      "amount": 186000,
+      "status": "Issued",
+      "issued": "2026-08-04"
+    },
+    {
+      "id": "po-ob-03",
+      "projectId": "observatory",
+      "poNumber": "RFQ-2503-09",
+      "supplierId": "sup-glaze",
+      "supplier": "Camps Bay Glass",
+      "description": "Partition glazing",
+      "model": "",
+      "qty": 22,
+      "unit": "m2",
+      "amount": 41800,
+      "status": "RFQ",
+      "issued": "2026-08-28"
+    },
+    {
+      "id": "po-co-01",
+      "projectId": "constantia",
+      "poNumber": "RFQ-2511-01",
+      "supplierId": "sup-roof",
+      "supplier": "Constantia Roofing",
+      "description": "Basic roof 125mm (budget)",
+      "model": "TSP_RC003",
+      "qty": 48,
+      "unit": "m2",
+      "amount": 46080,
+      "status": "RFQ",
+      "issued": "2026-08-20"
+    }
+  ],
+  "milestones": [
+    { "id": "m-sp-1", "projectId": "sea-point", "date": "2026-01-20", "label": "Concept freeze", "kind": "concept" },
+    { "id": "m-sp-2", "projectId": "sea-point", "date": "2026-02-18", "label": "Appointment signed", "kind": "contracts" },
+    { "id": "m-sp-3", "projectId": "sea-point", "date": "2026-03-04", "label": "JBCC signed", "kind": "contracts" },
+    { "id": "m-sp-4", "projectId": "sea-point", "date": "2026-04-02", "label": "Revit extract (StudioPractice)", "kind": "revit" },
+    { "id": "m-sp-5", "projectId": "sea-point", "date": "2026-04-08", "label": "Priced TSP takeoff", "kind": "takeoff" },
+    { "id": "m-sp-6", "projectId": "sea-point", "date": "2026-06-03", "label": "Masonry PO delivered", "kind": "orders" },
+    { "id": "m-sp-7", "projectId": "sea-point", "date": "2026-07-01", "label": "Site establishment", "kind": "site" },
+    { "id": "m-sp-8", "projectId": "sea-point", "date": "2026-09-12", "label": "First-fix inspection", "kind": "site" },
+    { "id": "m-ob-1", "projectId": "observatory", "date": "2026-04-15", "label": "Brief and measured survey", "kind": "concept" },
+    { "id": "m-ob-2", "projectId": "observatory", "date": "2026-05-14", "label": "Appointment signed", "kind": "contracts" },
+    { "id": "m-ob-3", "projectId": "observatory", "date": "2026-06-10", "label": "Revit fit-out model", "kind": "revit" },
+    { "id": "m-ob-4", "projectId": "observatory", "date": "2026-06-18", "label": "Priced takeoff", "kind": "takeoff" },
+    { "id": "m-ob-5", "projectId": "observatory", "date": "2026-08-04", "label": "Joinery PO issued", "kind": "orders" },
+    { "id": "m-ob-6", "projectId": "observatory", "date": "2026-08-19", "label": "VI-04 extra partitions", "kind": "contracts" },
+    { "id": "m-ob-7", "projectId": "observatory", "date": "2026-09-08", "label": "Close remaining RFQs", "kind": "orders" },
+    { "id": "m-co-1", "projectId": "constantia", "date": "2026-07-22", "label": "StudioPractice training kickoff", "kind": "concept" },
+    { "id": "m-co-2", "projectId": "constantia", "date": "2026-08-11", "label": "Appointment signed", "kind": "contracts" },
+    { "id": "m-co-3", "projectId": "constantia", "date": "2026-09-01", "label": "Concept model in Revit", "kind": "revit" },
+    { "id": "m-co-4", "projectId": "constantia", "date": "2026-09-15", "label": "Priced takeoff (planned)", "kind": "takeoff" },
+    { "id": "m-co-5", "projectId": "constantia", "date": "2026-10-01", "label": "NHBRC enrolment (planned)", "kind": "contracts" }
+  ]
+}

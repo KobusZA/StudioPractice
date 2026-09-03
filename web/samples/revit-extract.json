@@ -1,0 +1,508 @@
+{
+  "documentKind": "Family",
+  "title": "RME_basic_sample_family",
+  "path": "C:\\Program Files\\Autodesk\\Revit 2027\\Samples\\RME_basic_sample_family.rfa",
+  "activeView": "Ref. Level",
+  "viewType": "FloorPlan",
+  "extractedAt": "2026-08-24T08:13:35.6539067Z",
+  "units": "meters / square meters / cubic meters",
+  "lines": [
+    {
+      "category": "Cameras",
+      "family": "3D View",
+      "type": "3D View",
+      "quantity": 2,
+      "unit": "ea",
+      "length": null,
+      "area": null,
+      "volume": null,
+      "elementIds": [
+        "1806",
+        "2368"
+      ]
+    },
+    {
+      "category": "Connector Element",
+      "family": "",
+      "type": "",
+      "quantity": 1,
+      "unit": "ea",
+      "length": null,
+      "area": null,
+      "volume": null,
+      "elementIds": [
+        "8253"
+      ]
+    },
+    {
+      "category": "Dimensions",
+      "family": "Linear Dimension Style",
+      "type": "Default linear style",
+      "quantity": 17,
+      "unit": "ea",
+      "length": null,
+      "area": null,
+      "volume": null,
+      "elementIds": [
+        "2506",
+        "2507",
+        "2508",
+        "2509",
+        "2512",
+        "2513",
+        "2514",
+        "2515",
+        "2564",
+        "2567",
+        "2570",
+        "2572",
+        "2575",
+        "2576",
+        "2579",
+        "2580",
+        "2690"
+      ]
+    },
+    {
+      "category": "Reference Planes",
+      "family": "",
+      "type": "",
+      "quantity": 23,
+      "unit": "ea",
+      "length": null,
+      "area": null,
+      "volume": null,
+      "elementIds": [
+        "1734",
+        "1736",
+        "2375",
+        "2376",
+        "2377",
+        "2378",
+        "2379",
+        "2380",
+        "2381",
+        "2382",
+        "2465",
+        "2563",
+        "2566",
+        "2569",
+        "2571",
+        "2573",
+        "2574",
+        "2577",
+        "2578",
+        "6798",
+        "6812",
+        "6880",
+        "6912"
+      ]
+    },
+    {
+      "category": "Sketch curve",
+      "family": "Air Terminals",
+      "type": "Line",
+      "quantity": 32,
+      "unit": "m",
+      "length": 32.29200000000002,
+      "area": null,
+      "volume": null,
+      "elementIds": [
+        "2471",
+        "2472",
+        "2473",
+        "2474",
+        "2561",
+        "2562",
+        "2599",
+        "2600",
+        "2603",
+        "2604",
+        "2623",
+        "2624",
+        "2625",
+        "2629",
+        "3306",
+        "3391",
+        "3527",
+        "3606",
+        "3721",
+        "3814",
+        "3899",
+        "3976",
+        "4050",
+        "4126",
+        "4198",
+        "4199",
+        "4200",
+        "4201",
+        "4281",
+        "4282",
+        "4283",
+        "4284"
+      ]
+    },
+    {
+      "category": "Sketch form",
+      "family": "Extrusion",
+      "type": "Extrusion",
+      "quantity": 4,
+      "unit": "ea",
+      "length": null,
+      "area": null,
+      "volume": 1.275537190181031,
+      "elementIds": [
+        "2349",
+        "2385",
+        "2396",
+        "6945"
+      ]
+    }
+  ],
+  "sketchForms": [
+    {
+      "kind": "Extrusion",
+      "elementId": "2349",
+      "name": "Extrusion",
+      "isSolid": true,
+      "depth": 0.3048,
+      "volume": 1.2460301906881717,
+      "material": null,
+      "profileLoops": [
+        {
+          "curves": [
+            {
+              "kind": "Line",
+              "length": 1.7404000000002315,
+              "start": [
+                1.1681,
+                0.7843,
+                -0
+              ],
+              "end": [
+                1.1681,
+                -0.9562,
+                -0
+              ]
+            },
+            {
+              "kind": "Line",
+              "length": 2.348900000000011,
+              "start": [
+                1.1681,
+                -0.9562,
+                -0
+              ],
+              "end": [
+                -1.1808,
+                -0.9562,
+                -0
+              ]
+            },
+            {
+              "kind": "Line",
+              "length": 1.7404000000002315,
+              "start": [
+                -1.1808,
+                -0.9562,
+                -0
+              ],
+              "end": [
+                -1.1808,
+                0.7843,
+                -0
+              ]
+            },
+            {
+              "kind": "Line",
+              "length": 2.348900000000011,
+              "start": [
+                -1.1808,
+                0.7843,
+                -0
+              ],
+              "end": [
+                1.1681,
+                0.7843,
+                -0
+              ]
+            }
+          ],
+          "length": 8.178600000000486
+        }
+      ]
+    },
+    {
+      "kind": "Extrusion",
+      "elementId": "2385",
+      "name": "Extrusion",
+      "isSolid": true,
+      "depth": 0.27940000000000326,
+      "volume": 0.02826885379999951,
+      "material": null,
+      "profileLoops": [
+        {
+          "curves": [
+            {
+              "kind": "Line",
+              "length": 0.08299999999999765,
+              "start": [
+                0.6095,
+                0.0415,
+                -0
+              ],
+              "end": [
+                0.6095,
+                -0.0415,
+                -0
+              ]
+            },
+            {
+              "kind": "Line",
+              "length": 1.2189999999999996,
+              "start": [
+                0.6095,
+                -0.0415,
+                -0
+              ],
+              "end": [
+                -0.6095,
+                -0.0415,
+                -0
+              ]
+            },
+            {
+              "kind": "Line",
+              "length": 0.08299999999999765,
+              "start": [
+                -0.6095,
+                -0.0415,
+                -0
+              ],
+              "end": [
+                -0.6095,
+                0.0415,
+                -0
+              ]
+            },
+            {
+              "kind": "Line",
+              "length": 1.2189999999999996,
+              "start": [
+                -0.6095,
+                0.0415,
+                -0
+              ],
+              "end": [
+                0.6095,
+                0.0415,
+                -0
+              ]
+            }
+          ],
+          "length": 2.6039999999999948
+        }
+      ]
+    },
+    {
+      "kind": "Extrusion",
+      "elementId": "2396",
+      "name": "Extrusion",
+      "isSolid": true,
+      "depth": 0.0031750000000386677,
+      "volume": 0.00042656760000511773,
+      "material": null,
+      "profileLoops": [
+        {
+          "curves": [
+            {
+              "kind": "Line",
+              "length": 0.10799999999998049,
+              "start": [
+                0.622,
+                0.054,
+                -0
+              ],
+              "end": [
+                0.622,
+                -0.054,
+                -0
+              ]
+            },
+            {
+              "kind": "Line",
+              "length": 1.2439999999999993,
+              "start": [
+                0.622,
+                -0.054,
+                -0
+              ],
+              "end": [
+                -0.622,
+                -0.054,
+                -0
+              ]
+            },
+            {
+              "kind": "Line",
+              "length": 0.10799999999998049,
+              "start": [
+                -0.622,
+                -0.054,
+                -0
+              ],
+              "end": [
+                -0.622,
+                0.054,
+                -0
+              ]
+            },
+            {
+              "kind": "Line",
+              "length": 1.2439999999999993,
+              "start": [
+                -0.622,
+                0.054,
+                -0
+              ],
+              "end": [
+                0.622,
+                0.054,
+                -0
+              ]
+            }
+          ],
+          "length": 2.7039999999999598
+        }
+      ]
+    },
+    {
+      "kind": "Extrusion",
+      "elementId": "6945",
+      "name": "Extrusion",
+      "isSolid": true,
+      "depth": 0.032,
+      "volume": 0.0008115780928548919,
+      "material": null,
+      "profileLoops": [
+        {
+          "curves": [
+            {
+              "kind": "Arc",
+              "length": 0.11545353001942489,
+              "start": [
+                0.0265,
+                -0.0415,
+                -0.085
+              ],
+              "end": [
+                0.1,
+                -0.0415,
+                -0.1585
+              ]
+            },
+            {
+              "kind": "Line",
+              "length": 0.002999999999999961,
+              "start": [
+                0.1,
+                -0.0415,
+                -0.1585
+              ],
+              "end": [
+                0.1,
+                -0.0415,
+                -0.1615
+              ]
+            },
+            {
+              "kind": "Arc",
+              "length": 0.11545353001942489,
+              "start": [
+                0.1,
+                -0.0415,
+                -0.1615
+              ],
+              "end": [
+                0.0265,
+                -0.0415,
+                -0.235
+              ]
+            },
+            {
+              "kind": "Line",
+              "length": 0.053000000000000186,
+              "start": [
+                0.0265,
+                -0.0415,
+                -0.235
+              ],
+              "end": [
+                -0.0265,
+                -0.0415,
+                -0.235
+              ]
+            },
+            {
+              "kind": "Arc",
+              "length": 0.11545353001942489,
+              "start": [
+                -0.0265,
+                -0.0415,
+                -0.235
+              ],
+              "end": [
+                -0.1,
+                -0.0415,
+                -0.1615
+              ]
+            },
+            {
+              "kind": "Line",
+              "length": 0.003000000000000164,
+              "start": [
+                -0.1,
+                -0.0415,
+                -0.1615
+              ],
+              "end": [
+                -0.1,
+                -0.0415,
+                -0.1585
+              ]
+            },
+            {
+              "kind": "Arc",
+              "length": 0.11545353001942489,
+              "start": [
+                -0.1,
+                -0.0415,
+                -0.1585
+              ],
+              "end": [
+                -0.0265,
+                -0.0415,
+                -0.085
+              ]
+            },
+            {
+              "kind": "Line",
+              "length": 0.0529999999999999,
+              "start": [
+                -0.0265,
+                -0.0415,
+                -0.085
+              ],
+              "end": [
+                0.0265,
+                -0.0415,
+                -0.085
+              ]
+            }
+          ],
+          "length": 0.5738141200776998
+        }
+      ]
+    }
+  ]
+}

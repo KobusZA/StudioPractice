@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<RevitAddIns>
+  <AddIn Type="Application">
+    <Name>StudioPractice Connector</Name>
+    <Assembly>StudioPractice.RevitConnector.dll</Assembly>
+    <AddInId>8c7e1a2d-9f34-4b6e-8a11-2e5d9c0b1744</AddInId>
+    <FullClassName>StudioPractice.RevitConnector.App</FullClassName>
+    <VendorId>STPR</VendorId>
+    <VendorDescription>StudioPractice</VendorDescription>
+  </AddIn>
+</RevitAddIns>

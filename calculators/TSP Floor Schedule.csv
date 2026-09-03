@@ -1,0 +1,9 @@
+﻿Floor Schedule,,,,,
+Model,Family and Type,Perimeter,Area,Volume,Level,Phase Created
+,,,,,,
+TSP_RB016,Floor: Generic 85mm,111096,173 m²,14.75 m³,01 GFL,Day 1
+TSP_RB017,Floor: 170mm Slab - Balcony,14102,12 m²,1.97 m³,02 L1,Day 2
+TSP_RB018,Floor: Generic 255mm,34549,54 m²,13.76 m³,02 L1,Day 2
+TSP_RB020,Floor: Pool Concrete floor 170mm,19542,22 m²,3.67 m³,01 GFL,Day 3
+TSP_RB387,Floor: 170mm Slab - Roof,38194,31 m²,5.25 m³,02 L1,Day 3
+Grand total: 9,,217484,291 m²,39.39 m³,,

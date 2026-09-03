@@ -1,0 +1,297 @@
+{
+  "system": {
+    "id": "house-masonry",
+    "name": "TSP masonry pack",
+    "defaultWallSku": "TSP_MAS009",
+    "defaultFloorSku": "TSP_RB016",
+    "defaultFoundationSku": "TSP_CON052",
+    "defaultRoofSku": "TSP_RC003",
+    "defaultLevel": "01 GFL",
+    "wallHeight": 2.8,
+    "levels": [
+      { "id": "01 GFL", "name": "01 GFL", "elevation": 0 },
+      { "id": "02 L1", "name": "02 L1", "elevation": 2.8 }
+    ]
+  },
+  "skus": [
+    {
+      "id": "TSP_MAS009",
+      "name": "Masonry wall 220mm (plaster)",
+      "category": "wall",
+      "unit": "m3",
+      "thickness": 0.22,
+      "height": 2.8,
+      "draw": "wall"
+    },
+    {
+      "id": "TSP_MAS008",
+      "name": "Masonry wall 110mm (plaster)",
+      "category": "wall",
+      "unit": "m3",
+      "thickness": 0.11,
+      "height": 2.8,
+      "draw": "wall"
+    },
+    {
+      "id": "TSP_MAS007",
+      "name": "Pool masonry wall 220mm (plaster)",
+      "category": "wall",
+      "unit": "m3",
+      "thickness": 0.22,
+      "height": 2.8,
+      "draw": "wall"
+    },
+    {
+      "id": "TSP_CON052",
+      "name": "Masonry 220mm foundation perimeter (plaster)",
+      "category": "foundation",
+      "unit": "m3",
+      "thickness": 0.22,
+      "height": 0.6,
+      "width": 0.4,
+      "depth": 0.45,
+      "draw": "wall"
+    },
+    {
+      "id": "TSP_EW132",
+      "name": "Masonry 220mm foundation (no plaster)",
+      "category": "foundation",
+      "unit": "m3",
+      "thickness": 0.22,
+      "height": 0.6,
+      "width": 0.4,
+      "depth": 0.45,
+      "draw": "wall"
+    },
+    {
+      "id": "TSP_RB016",
+      "name": "Floor generic 85mm",
+      "category": "floor",
+      "unit": "m2",
+      "thickness": 0.085,
+      "defaultLevel": "01 GFL",
+      "draw": "fill"
+    },
+    {
+      "id": "TSP_RB017",
+      "name": "170mm slab — balcony",
+      "category": "floor",
+      "unit": "m2",
+      "thickness": 0.17,
+      "defaultLevel": "02 L1",
+      "draw": "fill"
+    },
+    {
+      "id": "TSP_RB018",
+      "name": "Floor generic 255mm",
+      "category": "floor",
+      "unit": "m2",
+      "thickness": 0.255,
+      "defaultLevel": "02 L1",
+      "draw": "fill"
+    },
+    {
+      "id": "TSP_RB020",
+      "name": "Pool concrete floor 170mm",
+      "category": "floor",
+      "unit": "m2",
+      "thickness": 0.17,
+      "defaultLevel": "01 GFL",
+      "draw": "fill"
+    },
+    {
+      "id": "TSP_RB387",
+      "name": "170mm slab — roof",
+      "category": "floor",
+      "unit": "m2",
+      "thickness": 0.17,
+      "defaultLevel": "02 L1",
+      "draw": "fill"
+    },
+    {
+      "id": "TSP_RC003",
+      "name": "Basic roof 125mm",
+      "category": "roof",
+      "unit": "m2",
+      "thickness": 0.125,
+      "defaultLevel": "01 GFL",
+      "draw": "roof"
+    },
+    {
+      "id": "TSP_DR813",
+      "name": "Door 813 × 2032mm",
+      "family": "Single-Flush",
+      "category": "door",
+      "host": "wall",
+      "unit": "ea",
+      "width": 0.813,
+      "height": 2.032,
+      "depth": 0.05,
+      "draw": "door"
+    },
+    {
+      "id": "TSP_DR900",
+      "name": "Door 900 × 2100mm",
+      "family": "Single-Flush",
+      "category": "door",
+      "host": "wall",
+      "unit": "ea",
+      "width": 0.9,
+      "height": 2.1,
+      "depth": 0.05,
+      "draw": "door"
+    },
+    {
+      "id": "TSP_DR1020",
+      "name": "Door 1020 × 2100mm",
+      "family": "Single-Flush",
+      "category": "door",
+      "host": "wall",
+      "unit": "ea",
+      "width": 1.02,
+      "height": 2.1,
+      "depth": 0.05,
+      "draw": "door"
+    },
+    {
+      "id": "TSP_WN0606",
+      "name": "High window 600 × 600mm",
+      "family": "Fixed",
+      "category": "window",
+      "host": "wall",
+      "unit": "ea",
+      "width": 0.6,
+      "height": 0.6,
+      "sill": 1.5,
+      "depth": 0.05,
+      "draw": "window"
+    },
+    {
+      "id": "TSP_WN0912",
+      "name": "Window 900 × 1200mm",
+      "family": "Fixed",
+      "category": "window",
+      "host": "wall",
+      "unit": "ea",
+      "width": 0.9,
+      "height": 1.2,
+      "sill": 0.9,
+      "depth": 0.05,
+      "draw": "window"
+    },
+    {
+      "id": "TSP_WN1212",
+      "name": "Window 1200 × 1200mm",
+      "family": "Fixed",
+      "category": "window",
+      "host": "wall",
+      "unit": "ea",
+      "width": 1.2,
+      "height": 1.2,
+      "sill": 0.9,
+      "depth": 0.05,
+      "draw": "window"
+    },
+    {
+      "id": "TSP_WN1812",
+      "name": "Window 1800 × 1200mm",
+      "family": "Fixed",
+      "category": "window",
+      "host": "wall",
+      "unit": "ea",
+      "width": 1.8,
+      "height": 1.2,
+      "sill": 0.9,
+      "depth": 0.05,
+      "draw": "window"
+    },
+    {
+      "id": "TSP_WN2415",
+      "name": "Window 2400 × 1500mm",
+      "family": "Fixed",
+      "category": "window",
+      "host": "wall",
+      "unit": "ea",
+      "width": 2.4,
+      "height": 1.5,
+      "sill": 0.9,
+      "depth": 0.05,
+      "draw": "window"
+    },
+    {
+      "id": "TSP_BM220",
+      "name": "Beam 220mm loadbearing",
+      "category": "beam",
+      "host": "wall",
+      "unit": "m",
+      "width": 0.11,
+      "height": 0.22,
+      "draw": "beam"
+    },
+    {
+      "id": "TSP_WC001",
+      "name": "WC",
+      "category": "plumbing",
+      "host": "floor",
+      "unit": "ea",
+      "width": 0.38,
+      "depth": 0.65,
+      "height": 0.4,
+      "draw": "box"
+    },
+    {
+      "id": "TSP_VAN06",
+      "name": "Vanity 600mm",
+      "family": "Vanity",
+      "category": "furniture",
+      "host": "floor",
+      "unit": "ea",
+      "width": 0.6,
+      "depth": 0.45,
+      "height": 0.85,
+      "draw": "box"
+    },
+    {
+      "id": "TSP_VAN01",
+      "name": "Vanity 900mm",
+      "family": "Vanity",
+      "category": "furniture",
+      "host": "floor",
+      "unit": "ea",
+      "width": 0.9,
+      "depth": 0.45,
+      "height": 0.85,
+      "draw": "box"
+    },
+    {
+      "id": "TSP_SKT01",
+      "name": "Socket outlet",
+      "category": "electrical",
+      "host": "floor",
+      "unit": "ea",
+      "width": 0.086,
+      "depth": 0.086,
+      "height": 0.086,
+      "draw": "box"
+    }
+  ],
+  "recipes": {
+    "requires": [
+      { "whenSku": "TSP_MAS009", "addSku": "TSP_CON052", "per": "wallLength" },
+      { "whenSku": "TSP_MAS008", "addSku": "TSP_CON052", "per": "wallLength" }
+    ],
+    "allowedHosts": {
+      "TSP_DR813": ["TSP_MAS009", "TSP_MAS008", "TSP_MAS007"],
+      "TSP_DR900": ["TSP_MAS009", "TSP_MAS008", "TSP_MAS007"],
+      "TSP_DR1020": ["TSP_MAS009", "TSP_MAS008", "TSP_MAS007"],
+      "TSP_WN0606": ["TSP_MAS009", "TSP_MAS008"],
+      "TSP_WN0912": ["TSP_MAS009", "TSP_MAS008"],
+      "TSP_WN1212": ["TSP_MAS009", "TSP_MAS008"],
+      "TSP_WN1812": ["TSP_MAS009", "TSP_MAS008"],
+      "TSP_WN2415": ["TSP_MAS009", "TSP_MAS008"],
+      "TSP_BM220": ["TSP_MAS009"]
+    },
+    "maxSpan": { "TSP_BM220": 4.2 },
+    "minLength": { "TSP_BM220": 1.2 }
+  }
+}
