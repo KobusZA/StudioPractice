@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>StudioPractice — ribbon mock (Simple vs Full)</title>
+  <link rel="icon" href="../logo-full.png" type="image/png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,560&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../styles.css" />
+  <link rel="stylesheet" href="./v2.css" />
+  <style>
+    html, body {
+      overflow: auto;
+      height: auto;
+      min-height: 100dvh;
+      display: block;
+    }
+    .mock-eval {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px 18px;
+      padding: 10px 22px;
+      background: var(--navy);
+      color: #f3eee4;
+      position: sticky;
+      top: 0;
+      z-index: 8;
+    }
+    .mock-eval h1 {
+      font-family: Fraunces, serif;
+      font-size: 1.05rem;
+      font-weight: 500;
+      margin: 0;
+      margin-right: 8px;
+    }
+    .mock-eval .seg {
+      display: flex;
+      gap: 0;
+      border: 1px solid rgba(243, 238, 228, 0.35);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .mock-eval .seg button {
+      border: none;
+      background: transparent;
+      color: inherit;
+      padding: 6px 12px;
+      font: inherit;
+      font-size: 0.82rem;
+    }
+    .mock-eval .seg button.active {
+      background: #f3eee4;
+      color: var(--navy);
+      font-weight: 600;
+    }
+    .mock-eval .legend {
+      display: none;
+    }
+    .mock-stats {
+      padding: 6px 22px;
+      font-size: 0.78rem;
+      color: var(--ink-soft);
+      border-bottom: 1px solid var(--line);
+      background: var(--paper);
+    }
+    .mock-pane-label {
+      font-size: 0.66rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--ink-soft);
+      padding: 8px 22px 0;
+    }
+    .mock-chrome {
+      background: rgba(243, 238, 228, 0.96);
+      border-bottom: 1px solid var(--line);
+      margin-bottom: 12px;
+    }
+    .mock-chrome .topbar {
+      display: flex;
+      padding: 10px 22px;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .mock-chrome .actions {
+      grid-column: auto;
+    }
+    .mock-chrome .brand-mark {
+      width: 40px;
+      height: 40px;
+      flex-shrink: 0;
+    }
+    .mock-chrome .brand-logo {
+      width: 40px !important;
+      height: 40px !important;
+      transform: none !important;
+    }
+    .mock-chrome .ribbon-functions {
+      flex-wrap: nowrap;
+      overflow: visible;
+      height: 104px;
+      align-items: stretch;
+    }
+    .mock-chrome .ribbon-group {
+      position: relative;
+      flex-shrink: 0;
+      min-width: 0;
+    }
+    .mock-chrome .ribbon-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 2px;
+      min-width: 52px;
+      padding: 4px 8px;
+      font-size: 0.72rem;
+      line-height: 1.1;
+    }
+    .mock-chrome button.ribbon-item:hover:not(:disabled):not(.active) {
+      background: rgba(26, 22, 18, 0.06);
+      border-color: transparent;
+    }
+    .mock-chrome button.ribbon-item.active:hover:not(:disabled) {
+      background: var(--ink);
+      border-color: var(--ink);
+      color: var(--paper);
+    }
+    .mock-chrome .ribbon-overflow-btn {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 2px;
+      width: 2.6rem;
+      min-height: 72px;
+      padding: 4px 2px;
+      border: 1px solid var(--line);
+      background: #fff;
+      font-size: 0.58rem;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      line-height: 1.1;
+      white-space: normal;
+    }
+    .mock-chrome .ribbon-item .glyph,
+    .mock-chrome .ribbon-overflow-btn .glyph {
+      width: 22px;
+      height: 22px;
+      flex-shrink: 0;
+    }
+    .mock-chrome .ribbon-item .caption,
+    .mock-chrome .ribbon-overflow-btn .caption {
+      max-width: 5.6rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .mock-chrome .ribbon-group[data-scale="collapsed"] .ribbon-overflow-btn {
+      display: flex;
+    }
+    .mock-chrome .ribbon-group[data-scale="stack"] .ribbon-group-items {
+      display: grid;
+      grid-auto-flow: column;
+      grid-template-rows: repeat(3, 1fr);
+      gap: 0 2px;
+    }
+    .mock-chrome .ribbon-group[data-scale="stack"] .ribbon-item {
+      flex-direction: row;
+      justify-content: flex-start;
+      min-width: 0;
+      padding: 1px 6px;
+      gap: 4px;
+    }
+    .mock-chrome .ribbon-group[data-scale="stack"] .glyph {
+      width: 14px;
+      height: 14px;
+    }
+    .mock-chrome .ribbon-group[data-scale="icon"] .ribbon-group-items {
+      display: grid;
+      grid-auto-flow: column;
+      grid-template-rows: repeat(3, 1fr);
+      gap: 0 2px;
+    }
+    .mock-chrome .ribbon-group[data-scale="icon"] .ribbon-item {
+      min-width: 28px;
+      padding: 2px 4px;
+    }
+    .mock-chrome .ribbon-group[data-scale="icon"] .caption {
+      display: none;
+    }
+    .mock-chrome .ribbon-group[data-scale="icon"] .glyph {
+      width: 16px;
+      height: 16px;
+    }
+    .mock-chrome .ribbon-group[data-scale="collapsed"] .ribbon-group-items {
+      display: none;
+    }
+    .mock-chrome .ribbon-group[data-scale="collapsed"] .ribbon-overflow-btn {
+      display: flex;
+    }
+    .mock-chrome .ribbon-group[data-scale="collapsed"] .ribbon-group-label {
+      display: none;
+    }
+    .mock-chrome .ribbon-group[data-scale="collapsed"].is-open .ribbon-group-items {
+      display: flex;
+      flex-direction: column;
+      position: absolute;
+      top: calc(100% - 2px);
+      left: 0;
+      z-index: 20;
+      min-width: 11rem;
+      padding: 4px;
+      background: #fff;
+      border: 1px solid var(--line);
+    }
+    .mock-chrome .ribbon-group[data-scale="collapsed"].is-open .ribbon-item {
+      flex-direction: row;
+      justify-content: flex-start;
+      width: 100%;
+      min-width: 0;
+      padding: 5px 8px;
+      gap: 8px;
+    }
+    .mock-chrome .ribbon-group[data-scale="collapsed"].is-open .caption {
+      display: inline;
+      max-width: none;
+    }
+    .mock-chrome .ribbon-group[data-scale="collapsed"].is-open .glyph {
+      width: 16px;
+      height: 16px;
+    }
+    .mock-select-hint {
+      margin: 8px 12px 8px 0;
+      font-size: 0.8rem;
+      color: var(--ink-soft);
+      align-self: center;
+      max-width: 16rem;
+    }
+    .mock-hint {
+      margin: 0;
+      padding: 8px 12px;
+      font-size: 0.82rem;
+      color: var(--ink-soft);
+      text-align: center;
+      background: var(--paper-2);
+      border-bottom: 1px solid var(--line);
+    }
+    .mock-hint strong { font-weight: 600; }
+    .mock-plan {
+      position: relative;
+      margin: 0 22px 28px;
+      border: 1px solid var(--line);
+      background: #fff;
+      min-height: 88px;
+    }
+    .mock-plan header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--line);
+      background: var(--paper-2);
+    }
+    .mock-plan header h2 {
+      margin: 0;
+      font-size: 0.95rem;
+    }
+    .mock-canvas-stub {
+      margin: 0;
+      padding: 8px 12px 12px;
+      font-size: 0.82rem;
+      color: var(--ink-soft);
+    }
+    .mock-notes {
+      max-width: 52rem;
+      margin: 0 22px 40px;
+      font-size: 0.86rem;
+      color: var(--ink-soft);
+    }
+    .mock-notes h2 {
+      font-family: Fraunces, serif;
+      font-size: 1.15rem;
+      color: var(--ink);
+      font-weight: 500;
+    }
+    .mock-notes ul { padding-left: 1.2rem; }
+    .mock-notes li { margin: 0.35em 0; }
+  </style>
+</head>
+<body>
+  <div class="mock-eval">
+    <h1>Ribbon mock</h1>
+    <div class="seg" role="group" aria-label="Density">
+      <button type="button" data-view="simple">Simple</button>
+      <button type="button" data-view="full">Full</button>
+      <button type="button" data-view="compare" class="active">Compare</button>
+    </div>
+    <div class="seg" role="group" aria-label="Scenario">
+      <button type="button" data-scenario="empty" class="active">Empty plan</button>
+      <button type="button" data-scenario="loaded">Sheet loaded</button>
+      <button type="button" data-scenario="selected">Wall selected</button>
+    </div>
+    <span class="legend">Prototype only — does not change the live planner</span>
+  </div>
+  <p class="mock-stats" id="mock-stats"></p>
+
+  <div id="mock-simple">
+    <div class="mock-pane-label">Simple — live tools, task order, unfinished work hidden</div>
+    <div class="mock-chrome">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-mark"><img class="brand-logo" src="../logo.png" width="40" height="40" alt="" /></div>
+          <div>
+            <h1>StudioPractice</h1>
+            <p>Simple ribbon</p>
+          </div>
+        </div>
+        <div class="actions">
+          <button type="button">Demo house</button>
+          <button type="button" class="primary">Compile</button>
+        </div>
+      </header>
+      <nav class="ribbon" aria-label="Simple toolbars">
+        <div class="tabs ribbon-tabs" id="mock-simple-tabs"></div>
+        <div class="ribbon-functions" id="mock-simple-functions"></div>
+      </nav>
+    </div>
+  </div>
+
+  <div id="mock-full">
+    <div class="mock-pane-label">Full — current four toolbars plus Check, including grey roadmap items</div>
+    <div class="mock-chrome">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-mark"><img class="brand-logo" src="../logo.png" width="40" height="40" alt="" /></div>
+          <div>
+            <h1>StudioPractice</h1>
+            <p>Full ribbon (today)</p>
+          </div>
+        </div>
+        <div class="actions">
+          <button type="button">Demo house</button>
+          <button type="button" class="primary">Compile</button>
+        </div>
+      </header>
+      <nav class="ribbon" aria-label="Full toolbars">
+        <div class="tabs ribbon-tabs" id="mock-full-tabs"></div>
+        <div class="ribbon-functions" id="mock-full-functions"></div>
+      </nav>
+    </div>
+  </div>
+
+  <section class="mock-plan" aria-label="Plan chrome">
+    <header>
+      <h2>Plan</h2>
+      <div class="planner-tools" role="toolbar">
+        <button type="button" class="active">Select</button>
+        <button type="button">Undo</button>
+        <span id="mock-header-modify" hidden>
+          <button type="button">Rotate</button>
+          <button type="button">Copy</button>
+          <button type="button">Delete</button>
+        </span>
+      </div>
+    </header>
+    <p class="mock-hint"><strong>Next step</strong> — <span id="mock-hint">Click a function to see the next-step hint.</span></p>
+    <p class="mock-canvas-stub">Canvas is a stub. Use the scenario toggles to see sheet collapse and selection-aware Modify.</p>
+  </section>
+
+  <section class="mock-notes">
+    <h2>What to look for</h2>
+    <ul>
+      <li><strong>Empty plan.</strong> Simple should show PDF / image, then the drawing types. Full still shows Hide, DWG, Ramp, and the rest of the roadmap.</li>
+      <li><strong>Sheet loaded.</strong> Simple replaces PDF / image with Set scale / Move / Hide. Full keeps the whole Add drawing group.</li>
+      <li><strong>Wall selected.</strong> Simple unlocks Modify and adds Rotate / Copy / Delete on the plan header. Full does not change.</li>
+      <li>Resize the window. Groups on the right shrink first (large → stacked → icon → a dropdown), so the ribbon stays one row instead of growing a scrollbar.</li>
+    </ul>
+  </section>
+
+  <script type="module" src="./ribbon-mock.js"></script>
+</body>
+</html>

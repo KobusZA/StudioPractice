@@ -76,9 +76,7 @@ public sealed class LocalConnectorHost : IExternalEventHandler, IDisposable
 
         try
         {
-            BomPayload payload = BomExtractor.Extract(app);
-            BomJson.Write(payload);
-            pending.TrySetResult(BomJson.Serialize(payload));
+            pending.TrySetResult(ConnectorHotSwap.ExtractJson(app));
         }
         catch (Exception ex)
         {
@@ -130,10 +128,14 @@ public sealed class LocalConnectorHost : IExternalEventHandler, IDisposable
 
             if (context.Request.HttpMethod == "GET" && path == "/last")
             {
-                string? last = BomJson.LastJson;
-                if (string.IsNullOrEmpty(last) && File.Exists(BomJson.OutputPath))
+                string? last = null;
+                if (File.Exists(BomJson.OutputPath))
                 {
                     last = File.ReadAllText(BomJson.OutputPath);
+                }
+                else
+                {
+                    last = BomJson.LastJson;
                 }
 
                 if (string.IsNullOrEmpty(last))

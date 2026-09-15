@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>StudioPractice — Office</title>
+  <link rel="icon" href="logo.png" type="image/png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,560&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet" />
@@ -13,7 +14,9 @@
   <div class="chrome">
     <header class="topbar">
       <div class="brand">
-        <div class="mark" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+        <div class="brand-mark">
+          <img class="brand-logo" src="logo.png" alt="The Studio Practice" />
+        </div>
         <div>
           <h1>StudioPractice</h1>
           <p>Revit + job office</p>
@@ -87,13 +90,13 @@
         <dl class="meta" id="meta">
           <div><dt>Document</dt><dd>—</dd></div>
           <div><dt>View</dt><dd>—</dd></div>
-          <div><dt>Kind</dt><dd>—</dd></div>
+          <div><dt>Plans</dt><dd>—</dd></div>
           <div><dt>Extracted</dt><dd>—</dd></div>
         </dl>
         <div class="banner" id="banner"></div>
         <p class="hint">
-          Import reads every floor, structural, and ceiling plan in the model — switch them in the list above the drawing.
-          Takeoff is the whole building (TSP type marks, instance quantities, subtotals).
+          Import reads the family library (Families tab, including unused types) and whole-building takeoff (All).
+          The drawing is one floor plan at a time. Restart Revit after a rebuild so the add-in can copy in.
         </p>
       </section>
 
@@ -103,12 +106,49 @@
           <span id="takeoff-count">No quantities</span>
         </header>
         <div class="tabs" role="tablist" aria-label="Takeoff">
-          <button type="button" class="tab active" data-tab="walls" aria-selected="true">Walls</button>
+          <button type="button" class="tab active" data-tab="families" aria-selected="true">Families</button>
+          <button type="button" class="tab" data-tab="all" aria-selected="false">All</button>
+          <button type="button" class="tab" data-tab="walls" aria-selected="false">Walls</button>
           <button type="button" class="tab" data-tab="floors" aria-selected="false">Floors</button>
           <button type="button" class="tab" data-tab="roofs" aria-selected="false">Roofs</button>
           <button type="button" class="tab" data-tab="bom" aria-selected="false">BOM</button>
+          <button type="button" class="tab" data-tab="views" aria-selected="false">Views</button>
+          <button type="button" class="tab" data-tab="sheets" aria-selected="false">Sheets</button>
         </div>
-        <div class="table-wrap takeoff-table" data-panel="walls">
+        <div class="table-wrap takeoff-table" data-panel="families">
+          <table>
+            <thead>
+              <tr>
+                <th>Category</th>
+                <th>Family</th>
+                <th>Type</th>
+                <th>Kind</th>
+                <th class="num">Placed</th>
+              </tr>
+            </thead>
+            <tbody id="families-body">
+              <tr class="muted"><td colspan="5">No family catalog yet. Import from Revit after restarting the add-in.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="table-wrap takeoff-table" data-panel="all" hidden>
+          <table>
+            <thead>
+              <tr>
+                <th>Category</th>
+                <th>Family</th>
+                <th>Type</th>
+                <th class="num">Qty</th>
+                <th>Unit</th>
+                <th>Level</th>
+              </tr>
+            </thead>
+            <tbody id="all-body">
+              <tr class="muted"><td colspan="6">Nothing imported yet.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="table-wrap takeoff-table" data-panel="walls" hidden>
           <table>
             <thead>
               <tr>
@@ -177,6 +217,38 @@
             </tbody>
           </table>
         </div>
+        <div class="table-wrap takeoff-table" data-panel="views" hidden>
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Type</th>
+                <th>Family</th>
+                <th>Level</th>
+                <th>Scale</th>
+                <th>Sheet</th>
+              </tr>
+            </thead>
+            <tbody id="views-body">
+              <tr class="muted"><td colspan="6">No views extracted.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="table-wrap takeoff-table" data-panel="sheets" hidden>
+          <table>
+            <thead>
+              <tr>
+                <th>Number</th>
+                <th>Name</th>
+                <th>Title block</th>
+                <th>Placed views</th>
+              </tr>
+            </thead>
+            <tbody id="sheets-body">
+              <tr class="muted"><td colspan="4">No sheets extracted.</td></tr>
+            </tbody>
+          </table>
+        </div>
       </section>
     </aside>
   </main>
@@ -184,12 +256,12 @@
   <main class="layout layout-planner view-page" id="view-planner" hidden>
     <aside class="planner-palette panel">
       <header>
-        <h2>Catalog</h2>
+        <h2>Types</h2>
         <span id="planner-pack-name">Pack</span>
       </header>
       <div class="planner-search">
-        <label class="visually-hidden" for="planner-search">Search catalog</label>
-        <input id="planner-search" type="search" placeholder="Search SKUs" />
+        <label class="visually-hidden" for="planner-search">Search types</label>
+        <input id="planner-search" type="search" placeholder="Search types" />
       </div>
       <div class="planner-sku-list" id="planner-sku-list"></div>
     </aside>

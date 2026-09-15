@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Level slider mock — house section</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,560&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --paper: #f3eee4;
+      --paper-2: #e8e0d2;
+      --ink: #1a1612;
+      --ink-soft: #5c5348;
+      --line: #cfc4b3;
+      --copper: #b2451e;
+      --shadow: 0 18px 40px rgba(26, 22, 18, 0.08);
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      background:
+        radial-gradient(1200px 500px at 10% -10%, #fff8ee 0%, transparent 55%),
+        var(--paper);
+      color: var(--ink);
+      font-family: "Source Sans 3", "Segoe UI", sans-serif;
+    }
+    body { padding: 28px 32px 48px; }
+    h1 {
+      font-family: Fraunces, Georgia, serif;
+      font-weight: 500;
+      font-size: 1.55rem;
+      margin: 0 0 6px;
+    }
+    .lede {
+      color: var(--ink-soft);
+      max-width: 64ch;
+      margin: 0 0 28px;
+      line-height: 1.45;
+    }
+    .stage {
+      display: grid;
+      grid-template-columns: 268px 1fr;
+      gap: 28px;
+      align-items: start;
+      max-width: 980px;
+    }
+    .canvas-fake {
+      position: relative;
+      min-height: 520px;
+      background:
+        linear-gradient(transparent 23px, rgba(26, 22, 18, 0.04) 24px),
+        linear-gradient(90deg, transparent 23px, rgba(26, 22, 18, 0.04) 24px),
+        #f7f2e8;
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow);
+    }
+    .plan-chip {
+      position: absolute;
+      top: 14px;
+      left: 14px;
+      font-family: Fraunces, Georgia, serif;
+      font-size: 1.15rem;
+    }
+    .widget {
+      background: #f6f1e8;
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow);
+      padding: 14px 12px 12px;
+    }
+    .widget h2,
+    .panel h2 {
+      margin: 0 0 4px;
+      font-size: 0.75rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--ink-soft);
+      font-weight: 600;
+    }
+    .cut-name {
+      font-family: Fraunces, Georgia, serif;
+      font-size: 1.12rem;
+      font-weight: 500;
+      margin: 0 0 2px;
+    }
+    .cut-meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.76rem;
+      color: var(--ink-soft);
+      margin: 0 0 8px;
+      font-variant-numeric: tabular-nums;
+    }
+    .kind-chip {
+      font-size: 0.68rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      border: 1px solid var(--line);
+      background: var(--paper-2);
+      padding: 1px 6px;
+    }
+    .house {
+      display: block;
+      width: 100%;
+      height: auto;
+      cursor: pointer;
+      touch-action: none;
+      user-select: none;
+    }
+    .house:focus { outline: none; }
+    .house:focus-visible { outline: 1px solid var(--ink); outline-offset: 3px; }
+    .hint {
+      font-size: 0.74rem;
+      color: var(--ink-soft);
+      margin: 8px 0 0;
+      line-height: 1.4;
+    }
+    .panel {
+      position: absolute;
+      right: 18px;
+      top: 18px;
+      width: 248px;
+      background: rgba(246, 241, 232, 0.96);
+      border: 1px solid var(--line);
+      padding: 10px 12px 4px;
+    }
+    .stations { list-style: none; margin: 0; padding: 0; }
+    .stations button {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      width: 100%;
+      gap: 12px;
+      border: 0;
+      border-bottom: 1px solid var(--line);
+      border-left: 2px solid transparent;
+      background: transparent;
+      padding: 7px 2px 7px 8px;
+      font: inherit;
+      font-size: 0.86rem;
+      color: inherit;
+      cursor: pointer;
+      text-align: left;
+    }
+    .stations li:first-child button { border-top: 1px solid var(--line); }
+    .stations button:hover { background: rgba(26, 22, 18, 0.035); }
+    .stations button:focus-visible { outline: 1px solid var(--copper); outline-offset: -2px; }
+    /* Copper alone would carry the active row; the gutter bar and weight keep it
+       legible in greyscale and for colour-blind readers. */
+    .stations button[aria-current="true"] {
+      color: var(--copper);
+      border-left-color: var(--copper);
+      font-weight: 600;
+    }
+    .elev {
+      font-size: 0.75rem;
+      letter-spacing: 0.04em;
+      color: var(--ink-soft);
+      font-variant-numeric: tabular-nums;
+    }
+    .stations button[aria-current="true"] .elev { color: var(--copper); }
+    kbd {
+      font-size: 0.75rem;
+      border: 1px solid var(--line);
+      padding: 0 5px;
+      background: #fff;
+    }
+    .storeys {
+      display: inline-flex;
+      gap: 0;
+      margin: 0 0 22px;
+      border: 1px solid var(--line);
+    }
+    .storeys button {
+      font: inherit;
+      font-size: 0.82rem;
+      padding: 6px 12px;
+      border: 0;
+      background: transparent;
+      color: var(--ink-soft);
+      cursor: pointer;
+    }
+    .storeys button:focus-visible { outline: 1px solid var(--copper); outline-offset: -2px; }
+    .storeys button[aria-pressed="true"] {
+      background: var(--ink);
+      color: #f6f1e8;
+    }
+  </style>
+</head>
+<body>
+  <h1>Graphical level slider — mock</h1>
+  <p class="lede">
+    A section fragment through one bay — not a complete house, and not cut on
+    the centreline. Drag the rail or use <kbd>↑</kbd> <kbd>↓</kbd>. The rule snaps to
+    construction planes: floor, then ceiling, then the slab above.
+  </p>
+  <div class="storeys" role="group" aria-label="Mock storeys">
+    <button type="button" data-storeys="1" aria-pressed="true">1 floor</button>
+    <button type="button" data-storeys="3" aria-pressed="false">3 floors</button>
+  </div>
+
+  <div class="stage">
+    <aside class="widget">
+      <h2>Active cut</h2>
+      <p class="cut-name" id="cut-name">01 GFL · floor</p>
+      <p class="cut-meta">
+        <span id="cut-elev">0.00 m</span>
+        <span class="kind-chip" id="cut-kind">floor plan</span>
+      </p>
+      <svg class="house" id="house" viewBox="0 0 248 318" role="slider"
+           aria-label="Building cut" aria-orientation="vertical"
+           aria-valuemin="0" aria-valuemax="8" tabindex="0"></svg>
+      <p class="hint">Dashed rule = the plan plane. Drag the rail on the right, or click
+        anywhere in the section to jump. <kbd>PgUp</kbd> <kbd>PgDn</kbd> skip a whole storey.</p>
+    </aside>
+
+    <section class="canvas-fake">
+      <div class="plan-chip">Plan</div>
+      <div class="panel">
+        <h2>Stations</h2>
+        <ul class="stations" id="stations"></ul>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const PRESETS = {
+      1: [
+        { id: "00 FOUNDATION", name: "00 FOUNDATION", elevation: -0.6, floorToFloor: 0.6, floorToCeiling: null, kind: "foundation" },
+        { id: "01 GFL", name: "01 GFL", elevation: 0, floorToFloor: 3, floorToCeiling: 2.7 },
+      ],
+      3: [
+        { id: "00 FOUNDATION", name: "00 FOUNDATION", elevation: -0.6, floorToFloor: 0.6, floorToCeiling: null, kind: "foundation" },
+        { id: "01 GFL", name: "01 GFL", elevation: 0, floorToFloor: 3, floorToCeiling: 2.7 },
+        { id: "02 L1", name: "02 L1", elevation: 3, floorToFloor: 3, floorToCeiling: 2.7 },
+        { id: "03 L2", name: "03 L2", elevation: 6, floorToFloor: 2.8, floorToCeiling: 2.55 },
+      ],
+    };
+    const ROOF_RISE = 1.65;
+    const SLAB = 0.2;
+    const CEIL = 0.09;
+    const VB = { w: 248, h: 318, padTop: 16, padBot: 22 };
+    const wallT = 6.5;
+    const x0 = 28;
+    const x1 = x0 + wallT;
+    const breakX = 132;
+    const railX = 214;
+    const RAIL_GRAB = 12;
+    const NS = "http://www.w3.org/2000/svg";
+
+    const svg = document.getElementById("house");
+    const list = document.getElementById("stations");
+
+    let stations = [];
+    let index = 0;
+    let zToY = () => 0;
+    let yToZ = () => 0;
+    let cutGroup = null;
+    let ghostGroup = null;
+    let ghostLabel = null;
+
+    function buildStations(levels) {
+      const out = [];
+      for (const level of levels) {
+        out.push({
+          id: `${level.id}::floor`,
+          kind: level.kind === "foundation" ? "foundation" : "floor",
+          elevation: level.elevation,
+          label: level.kind === "foundation" ? level.name : `${level.name} · floor`,
+        });
+        if (Number.isFinite(level.floorToCeiling)) {
+          out.push({
+            id: `${level.id}::ceiling`,
+            kind: "ceiling",
+            elevation: level.elevation + level.floorToCeiling,
+            label: `${level.name} · ceiling`,
+          });
+        }
+      }
+      const top = levels[levels.length - 1];
+      out.push({
+        id: "roof",
+        kind: "roof",
+        elevation: top.elevation + top.floorToFloor + 0.12,
+        label: "Roof · eaves",
+      });
+      return out;
+    }
+
+    function svgEl(name, attrs) {
+      const node = document.createElementNS(NS, name);
+      for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+      return node;
+    }
+
+    function kindPhrase(kind) {
+      if (kind === "ceiling") return "ceiling plan";
+      if (kind === "roof") return "roof plan";
+      if (kind === "foundation") return "foundation plan";
+      return "floor plan";
+    }
+
+    function nearestIndex(z) {
+      let best = 0;
+      let dist = Infinity;
+      stations.forEach((s, i) => {
+        const d = Math.abs(s.elevation - z);
+        if (d < dist) { dist = d; best = i; }
+      });
+      return best;
+    }
+
+    // Stations are spaced by true elevation, which reads well up to three or four
+    // storeys and then collapses: past that the ticks fall inside a few pixels of
+    // each other and the drag stops being aimable. The agreed fix is a minimum
+    // pixel spacing with the rail scrolling past the viewBox, which changes the
+    // zToY/yToZ mapping below. Not built yet.
+    function mount(levels) {
+      stations = buildStations(levels);
+      index = Math.max(0, stations.findIndex((s) => s.id === "01 GFL::floor"));
+
+      const topLevel = levels[levels.length - 1];
+      const eavesZ = topLevel.elevation + topLevel.floorToFloor;
+      const ridgeZ = eavesZ + ROOF_RISE;
+      const zMin = levels[0].elevation - 0.55;
+      const zMax = ridgeZ + 0.45;
+
+      zToY = (z) => {
+        const t = (z - zMin) / (zMax - zMin);
+        return VB.padTop + (1 - t) * (VB.h - VB.padTop - VB.padBot);
+      };
+      yToZ = (y) => {
+        const t = 1 - (y - VB.padTop) / (VB.h - VB.padTop - VB.padBot);
+        return zMin + t * (zMax - zMin);
+      };
+
+      const groundY = zToY(0);
+      const foundY = zToY(levels[0].elevation);
+      const eavesY = zToY(eavesZ);
+      const ridgeY = zToY(ridgeZ);
+      const footY = zToY(levels[0].elevation - 0.2);
+
+      function breakLine(x, y0, y1) {
+        const mid = (y0 + y1) / 2;
+        return `<path class="break" d="
+          M ${x} ${y0}
+          L ${x} ${mid - 10}
+          L ${x + 5} ${mid - 6}
+          L ${x - 5} ${mid + 6}
+          L ${x} ${mid + 10}
+          L ${x} ${y1}" />`;
+      }
+
+      const occupied = levels.filter((l) => l.kind !== "foundation");
+      const openings = occupied.map((l) => {
+        const sill = zToY(l.elevation + 0.95);
+        const head = zToY(l.elevation + 2.2);
+        const oh = head - sill;
+        if (oh <= 1) return "";
+        return `<rect class="void" x="${x0 - 0.3}" y="${sill}" width="${wallT + 0.6}" height="${oh}" />`;
+      }).join("");
+
+      const floors = occupied.map((l) => {
+        const y = zToY(l.elevation);
+        const h = Math.max(1.8, zToY(l.elevation - SLAB) - y);
+        return `<rect class="poche" x="${x1}" y="${y}" width="${breakX - x1}" height="${h}" />`;
+      }).join("");
+
+      const ceilings = occupied.filter((l) => Number.isFinite(l.floorToCeiling)).map((l) => {
+        const y = zToY(l.elevation + l.floorToCeiling);
+        const h = Math.max(1, zToY(l.elevation + l.floorToCeiling - CEIL) - y);
+        return `<rect class="ceiling" x="${x1}" y="${y}" width="${breakX - x1}" height="${h}" />`;
+      }).join("");
+
+      const eaveX = x0 - 11;
+      const eaveY = eavesY + 2;
+      const roofEndX = breakX + 2;
+      const t = (roofEndX - eaveX) / 130;
+      const roofEndY = eaveY - (eaveY - ridgeY) * t;
+
+      const ticks = stations.map((s) => {
+        const y = zToY(s.elevation);
+        return `<line class="tick" x1="${railX - 3.5}" y1="${y}" x2="${railX + 3.5}" y2="${y}" />`;
+      }).join("");
+
+      svg.innerHTML = `
+        <defs>
+          <pattern id="earth" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(32)">
+            <line x1="0" y1="0" x2="0" y2="5" stroke="#d2c6b4" stroke-width="0.55" />
+          </pattern>
+        </defs>
+        <style>
+          .earth { fill: url(#earth); }
+          .grade { stroke: #1a1612; stroke-width: 0.9; fill: none; }
+          .poche { fill: #2c2824; stroke: #1a1612; stroke-width: 0.55; }
+          .void { fill: #f6f1e8; stroke: #1a1612; stroke-width: 0.55; }
+          .ceiling { fill: #cfc6b8; stroke: #1a1612; stroke-width: 0.4; }
+          .stroke { fill: none; stroke: #1a1612; stroke-width: 0.9; }
+          .break { fill: none; stroke: #1a1612; stroke-width: 0.7; }
+          .rail { stroke: #c0b4a2; stroke-width: 1; }
+          .tick { stroke: #8a7d6c; stroke-width: 1; }
+          .cut { stroke: #b2451e; stroke-width: 1.1; stroke-dasharray: 3.2 2.4; fill: none; }
+          .cut-cap { fill: #b2451e; }
+          .thumb { fill: #f6f1e8; stroke: #b2451e; stroke-width: 1.2; }
+          /* Invisible grab area: the drawn thumb stays small, the target does not. */
+          .rail-band, .thumb-hit { fill: transparent; cursor: ns-resize; }
+          .ghost { opacity: 0; pointer-events: none; }
+          .ghost.on { opacity: 0.4; }
+          .ghost line { stroke: #b2451e; stroke-width: 1.1; stroke-dasharray: 3.2 2.4; }
+          .ghost text { fill: #b2451e; font-size: 8.5px; font-family: "Source Sans 3", sans-serif; }
+          @media (prefers-reduced-motion: no-preference) {
+            .cut-group { transition: transform 120ms ease-out; }
+            .ghost { transition: transform 120ms ease-out, opacity 120ms ease-out; }
+          }
+        </style>
+        <rect class="earth" x="${x0 - 16}" y="${groundY}" width="${breakX - x0 + 22}" height="${VB.h - groundY - 10}" />
+        <line class="grade" x1="${x0 - 16}" y1="${groundY}" x2="${breakX + 6}" y2="${groundY}" />
+        <rect class="poche" x="${x0 - 6}" y="${groundY}" width="${wallT + 12}" height="${footY - groundY}" />
+        <rect class="poche" x="${x1}" y="${foundY}" width="${breakX - x1}" height="${Math.max(1.6, zToY(levels[0].elevation - 0.16) - foundY)}" />
+        <rect class="poche" x="${x0}" y="${eavesY}" width="${wallT}" height="${groundY - eavesY}" />
+        ${openings}
+        ${floors}
+        ${ceilings}
+        <path class="poche" d="
+          M ${eaveX} ${eaveY}
+          L ${roofEndX} ${roofEndY}
+          L ${roofEndX} ${roofEndY + 5.5}
+          L ${eaveX + 2.5} ${eaveY + 5.5}
+          Z" />
+        <path class="stroke" d="M ${eaveX} ${eaveY} L ${roofEndX} ${roofEndY}" />
+        ${breakLine(breakX, ridgeY + 4, footY)}
+        <line class="rail" x1="${railX}" y1="${zToY(ridgeZ)}" x2="${railX}" y2="${zToY(levels[0].elevation)}" />
+        ${ticks}
+        <rect class="rail-band" x="${railX - RAIL_GRAB}" y="${zToY(ridgeZ) - 12}"
+              width="${RAIL_GRAB * 2}" height="${zToY(levels[0].elevation) - zToY(ridgeZ) + 24}" />
+        <g id="cut-layer"></g>
+      `;
+
+      const cutLayer = svg.querySelector("#cut-layer");
+      const xLeft = x0 - 8;
+
+      ghostLabel = svgEl("text", { x: breakX + 6, y: -3 });
+      ghostGroup = svgEl("g", { class: "ghost" });
+      ghostGroup.append(
+        svgEl("line", { x1: xLeft, y1: 0, x2: railX - 7, y2: 0 }),
+        ghostLabel,
+      );
+
+      // Built once and moved with a transform, so the cut can ease between
+      // stations instead of teleporting.
+      cutGroup = svgEl("g", { class: "cut-group" });
+      cutGroup.append(
+        svgEl("line", { class: "cut", x1: xLeft, y1: 0, x2: breakX, y2: 0 }),
+        svgEl("polygon", { class: "cut-cap", points: `${xLeft},0 ${xLeft - 4.5},-2.8 ${xLeft - 4.5},2.8` }),
+        svgEl("line", { class: "cut", x1: breakX, y1: 0, x2: railX - 7, y2: 0 }),
+        svgEl("rect", { class: "thumb", x: railX - 5, y: -5, width: 10, height: 10 }),
+        svgEl("rect", { class: "thumb-hit", x: railX - RAIL_GRAB, y: -12, width: RAIL_GRAB * 2, height: 24 }),
+      );
+      // Placed before the first paint so mounting doesn't animate from the top.
+      cutGroup.setAttribute("transform", `translate(0 ${zToY(stations[index].elevation)})`);
+      cutLayer.append(ghostGroup, cutGroup);
+
+      list.innerHTML = [...stations].reverse().map((s) => `
+        <li>
+          <button type="button" data-id="${s.id}">
+            <span>${s.label}</span>
+            <span class="elev">${s.elevation.toFixed(2)}</span>
+          </button>
+        </li>
+      `).join("");
+      svg.setAttribute("aria-valuemax", String(stations.length - 1));
+      render();
+    }
+
+    function render() {
+      const s = stations[index];
+      cutGroup.setAttribute("transform", `translate(0 ${zToY(s.elevation)})`);
+      svg.setAttribute("aria-valuenow", String(index));
+      svg.setAttribute("aria-valuetext", s.label);
+      document.getElementById("cut-name").textContent = s.label;
+      document.getElementById("cut-elev").textContent = `${s.elevation.toFixed(2)} m`;
+      document.getElementById("cut-kind").textContent = kindPhrase(s.kind);
+      for (const btn of document.querySelectorAll(".stations button")) {
+        if (btn.dataset.id === s.id) btn.setAttribute("aria-current", "true");
+        else btn.removeAttribute("aria-current");
+      }
+    }
+
+    list.addEventListener("click", (e) => {
+      const btn = e.target.closest("button");
+      if (!btn) return;
+      index = stations.findIndex((s) => s.id === btn.dataset.id);
+      render();
+    });
+
+    function localPoint(clientX, clientY) {
+      const pt = svg.createSVGPoint();
+      pt.x = clientX;
+      pt.y = clientY;
+      const ctm = svg.getScreenCTM();
+      return ctm ? pt.matrixTransform(ctm.inverse()) : null;
+    }
+
+    function showGhost(idx) {
+      if (idx === index) { hideGhost(); return; }
+      ghostGroup.setAttribute("transform", `translate(0 ${zToY(stations[idx].elevation)})`);
+      ghostLabel.textContent = stations[idx].label;
+      ghostGroup.classList.add("on");
+    }
+
+    function hideGhost() {
+      if (ghostGroup) ghostGroup.classList.remove("on");
+    }
+
+    function commitAt(loc) {
+      index = nearestIndex(yToZ(loc.y));
+      hideGhost();
+      render();
+    }
+
+    let dragging = false;
+    svg.addEventListener("pointerdown", (e) => {
+      const loc = localPoint(e.clientX, e.clientY);
+      if (!loc) return;
+      // Only the rail is a handle. The section is a drawing first, so clicking it
+      // picks a station without turning the whole widget into a scrub surface.
+      if (loc.x >= railX - RAIL_GRAB) {
+        dragging = true;
+        svg.setPointerCapture(e.pointerId);
+      }
+      commitAt(loc);
+    });
+    svg.addEventListener("pointermove", (e) => {
+      const loc = localPoint(e.clientX, e.clientY);
+      if (!loc) return;
+      if (dragging) commitAt(loc);
+      else showGhost(nearestIndex(yToZ(loc.y)));
+    });
+    svg.addEventListener("pointerup", () => { dragging = false; });
+    svg.addEventListener("pointercancel", () => { dragging = false; });
+    svg.addEventListener("pointerleave", hideGhost);
+
+    /** Next station in `dir` that starts a storey, so paging skips ceilings. */
+    function storeyStep(dir) {
+      for (let i = index + dir; i >= 0 && i < stations.length; i += dir) {
+        if (stations[i].kind === "floor" || stations[i].kind === "foundation") return i;
+      }
+      return dir > 0 ? stations.length - 1 : 0;
+    }
+
+    svg.addEventListener("keydown", (e) => {
+      hideGhost();
+      if (e.key === "ArrowUp" || e.key === "ArrowRight") {
+        e.preventDefault();
+        index = Math.min(stations.length - 1, index + 1);
+        render();
+      } else if (e.key === "ArrowDown" || e.key === "ArrowLeft") {
+        e.preventDefault();
+        index = Math.max(0, index - 1);
+        render();
+      } else if (e.key === "PageUp") {
+        e.preventDefault();
+        index = storeyStep(1);
+        render();
+      } else if (e.key === "PageDown") {
+        e.preventDefault();
+        index = storeyStep(-1);
+        render();
+      } else if (e.key === "Home") {
+        e.preventDefault();
+        index = 0;
+        render();
+      } else if (e.key === "End") {
+        e.preventDefault();
+        index = stations.length - 1;
+        render();
+      }
+    });
+
+    document.querySelector(".storeys").addEventListener("click", (e) => {
+      const btn = e.target.closest("button");
+      if (!btn) return;
+      const n = Number(btn.dataset.storeys);
+      for (const b of document.querySelectorAll(".storeys button")) {
+        b.setAttribute("aria-pressed", b === btn ? "true" : "false");
+      }
+      mount(PRESETS[n]);
+    });
+
+    mount(PRESETS[1]);
+  </script>
+</body>
+</html>

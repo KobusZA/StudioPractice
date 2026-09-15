@@ -1,0 +1,4279 @@
+{
+  "schema": "sp.pack/3",
+  "id": "tsp-template",
+  "name": "TSP template (family report)",
+  "version": "2.1.0",
+  "revision": "2026-09-15",
+  "builtFrom": {
+    "schema": "sp.catalog/1",
+    "title": "TSP template (family report)",
+    "extractedAt": "2026-09-15T20:07:48.850Z"
+  },
+  "locale": {
+    "country": "ZA",
+    "municipality": null,
+    "energyZone": null
+  },
+  "system": {
+    "wallHeight": 2800,
+    "defaultWallSku": "TSP_WAL_MASONARY_WALL_220MM_PLASTER",
+    "defaultFloorSku": "TSP_FLR_GENERIC_85MM",
+    "defaultFoundationSku": "TSP_FND_BEARING_FOOTING_600X200_MM",
+    "defaultRoofSku": "TSP_ROF_GENERIC_125MM",
+    "defaultCeilingSku": "TSP_CLG_9MM_PLASTERED_CEILINGS",
+    "defaultLevel": "Ground floor (inferred)"
+  },
+  "levels": [
+    {
+      "id": "Ground floor (inferred)",
+      "name": "Ground floor (inferred)",
+      "elevation": 0,
+      "floorToFloor": 2.8,
+      "floorToCeiling": null
+    },
+    {
+      "id": "First floor (inferred)",
+      "name": "First floor (inferred)",
+      "elevation": 2.8,
+      "floorToFloor": 2.8,
+      "floorToCeiling": null
+    }
+  ],
+  "skus": [
+    {
+      "id": "TSP_CLG_9MM_PLASTERED_CEILINGS",
+      "name": "9mm Plastered Ceilings",
+      "family": "Compound Ceiling",
+      "category": "ceiling",
+      "unit": "m2",
+      "draw": "fill",
+      "revit": {
+        "category": "Ceilings",
+        "family": "Compound Ceiling",
+        "type": "9mm Plastered Ceilings",
+        "placedCount": 4
+      },
+      "geometry": {
+        "thickness": 9
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "rValue": null
+      },
+      "drawing": {
+        "colourClass": "masonry",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "area",
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_DOR_1800_X_2100MM",
+      "name": "TSP_Door-Double-Sliding — 1800 x 2100mm",
+      "family": "TSP_Door-Double-Sliding",
+      "category": "door",
+      "unit": "ea",
+      "draw": "door",
+      "revit": {
+        "category": "Doors",
+        "family": "TSP_Door-Double-Sliding",
+        "type": "1800 x 2100mm",
+        "placedCount": 4
+      },
+      "geometry": {
+        "width": 1800,
+        "height": 2100
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "uValue": null,
+        "external": null,
+        "sealed": null,
+        "providesVentilation": true,
+        "openableAreaFraction": 0.5
+      },
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_DOR_4800_X_2100MM",
+      "name": "TSP_Door-Garage-Embossed_Panel — 4800 x 2100mm",
+      "family": "TSP_Door-Garage-Embossed_Panel",
+      "category": "door",
+      "unit": "ea",
+      "draw": "door",
+      "revit": {
+        "category": "Doors",
+        "family": "TSP_Door-Garage-Embossed_Panel",
+        "type": "4800 x 2100mm",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 4800,
+        "height": 2100
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "uValue": null,
+        "external": null,
+        "sealed": null,
+        "providesVentilation": true,
+        "openableAreaFraction": 1
+      },
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_DOR_850_X_2100MM",
+      "name": "TSP_Door-Interior-Single-4_Panel-Wood — 850 x 2100mm",
+      "family": "TSP_Door-Interior-Single-4_Panel-Wood",
+      "category": "door",
+      "unit": "ea",
+      "draw": "door",
+      "revit": {
+        "category": "Doors",
+        "family": "TSP_Door-Interior-Single-4_Panel-Wood",
+        "type": "850 x 2100mm",
+        "placedCount": 6
+      },
+      "geometry": {
+        "width": 850,
+        "height": 2100
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "uValue": null,
+        "external": null,
+        "sealed": null,
+        "providesVentilation": true,
+        "openableAreaFraction": 1
+      },
+      "drawing": {
+        "colourClass": "timber",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_DOR_900_X_2000MM",
+      "name": "TSP_Door-Interior-Single-4_Panel-Wood — 900 x 2000mm",
+      "family": "TSP_Door-Interior-Single-4_Panel-Wood",
+      "category": "door",
+      "unit": "ea",
+      "draw": "door",
+      "revit": {
+        "category": "Doors",
+        "family": "TSP_Door-Interior-Single-4_Panel-Wood",
+        "type": "900 x 2000mm",
+        "placedCount": 2
+      },
+      "geometry": {
+        "width": 900,
+        "height": 2000
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "uValue": null,
+        "external": null,
+        "sealed": null,
+        "providesVentilation": true,
+        "openableAreaFraction": 1
+      },
+      "drawing": {
+        "colourClass": "timber",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_DOR_900_X_2100MM",
+      "name": "TSP_Door-Interior-Single-4_Panel-Wood — 900 x 2100mm",
+      "family": "TSP_Door-Interior-Single-4_Panel-Wood",
+      "category": "door",
+      "unit": "ea",
+      "draw": "door",
+      "revit": {
+        "category": "Doors",
+        "family": "TSP_Door-Interior-Single-4_Panel-Wood",
+        "type": "900 x 2100mm",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 900,
+        "height": 2100
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "uValue": null,
+        "external": null,
+        "sealed": null,
+        "providesVentilation": true,
+        "openableAreaFraction": 1
+      },
+      "drawing": {
+        "colourClass": "timber",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_DOR_850_X_2100MM_2",
+      "name": "TSP_Door-Interior-Single-Pocket-2_Panel-Wood — 850 x 2100mm",
+      "family": "TSP_Door-Interior-Single-Pocket-2_Panel-Wood",
+      "category": "door",
+      "unit": "ea",
+      "draw": "door",
+      "revit": {
+        "category": "Doors",
+        "family": "TSP_Door-Interior-Single-Pocket-2_Panel-Wood",
+        "type": "850 x 2100mm",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 850,
+        "height": 2100
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "uValue": null,
+        "external": null,
+        "sealed": null,
+        "providesVentilation": true,
+        "openableAreaFraction": 0.5
+      },
+      "drawing": {
+        "colourClass": "timber",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_DOR_900_X_2400MM",
+      "name": "TSP_Door-Passage-Single-Two_Lite_Narrow — 900 x 2400mm",
+      "family": "TSP_Door-Passage-Single-Two_Lite_Narrow",
+      "category": "door",
+      "unit": "ea",
+      "draw": "door",
+      "revit": {
+        "category": "Doors",
+        "family": "TSP_Door-Passage-Single-Two_Lite_Narrow",
+        "type": "900 x 2400mm",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 900,
+        "height": 2400
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "uValue": null,
+        "external": null,
+        "sealed": null,
+        "providesVentilation": true,
+        "openableAreaFraction": 1
+      },
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_16X3_SWA_ELECT_FEEDER_CA",
+      "name": "TSP 16x3 SWA Elect Feeder Cable",
+      "family": "TSP 16x3 SWA Elect Feeder Cable",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP 16x3 SWA Elect Feeder Cable",
+        "type": "TSP 16x3 SWA Elect Feeder Cable",
+        "placedCount": 3
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_16X4_SWA_ELECT_FEEDER_CA",
+      "name": "TSP 16x4 SWA Elect Feeder Cable",
+      "family": "TSP 16x4 SWA Elect Feeder Cable",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP 16x4 SWA Elect Feeder Cable",
+        "type": "TSP 16x4 SWA Elect Feeder Cable",
+        "placedCount": 4
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_220V_LIGHT_POINTS_IN_CEI",
+      "name": "TSP 220V Light points in ceiling",
+      "family": "TSP 220V Light points in ceiling",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP 220V Light points in ceiling",
+        "type": "TSP 220V Light points in ceiling",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_220V_LIGHT_POINTS_IN_SLA",
+      "name": "TSP 220V Light points in slab_flat roof",
+      "family": "TSP 220V Light points in slab_flat roof",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP 220V Light points in slab_flat roof",
+        "type": "TSP 220V Light points in slab_flat roof",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_AC_POINT_24_000_30_000_B",
+      "name": "TSP AC Point 24,000-30,000 BTU",
+      "family": "TSP AC Point 24,000-30,000 BTU",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP AC Point 24,000-30,000 BTU",
+        "type": "TSP AC Point 24,000-30,000 BTU",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_AC_POINT_36_000_48_000_B",
+      "name": "TSP AC Point 36,000-48,000 BTU",
+      "family": "TSP AC Point 36,000-48,000 BTU",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP AC Point 36,000-48,000 BTU",
+        "type": "TSP AC Point 36,000-48,000 BTU",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_AC_POINT_60_000_BTU",
+      "name": "TSP AC Point 60,000 BTU",
+      "family": "TSP AC Point 60,000 BTU",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP AC Point 60,000 BTU",
+        "type": "TSP AC Point 60,000 BTU",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_AC_POINT_9_000_18_000_BT",
+      "name": "TSP AC Point 9,000-18,000 BTU",
+      "family": "TSP AC Point 9,000-18,000 BTU",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP AC Point 9,000-18,000 BTU",
+        "type": "TSP AC Point 9,000-18,000 BTU",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_ALARM_POINTS_BEAMS_OUTSI",
+      "name": "TSP Alarm points-Beams outside",
+      "family": "TSP Alarm points-Beams outside",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Alarm points-Beams outside",
+        "type": "TSP Alarm points-Beams outside",
+        "placedCount": 2
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_BATHROOM_EXTRACTOR_POINT",
+      "name": "TSP Bathroom Extractor Point-Ceiling",
+      "family": "TSP Bathroom Extractor Point-Ceiling",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Bathroom Extractor Point-Ceiling",
+        "type": "TSP Bathroom Extractor Point-Ceiling",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_BATHROOM_EXTRACTOR_POINT_2",
+      "name": "TSP Bathroom Extractor Point-Wall",
+      "family": "TSP Bathroom Extractor Point-Wall",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Bathroom Extractor Point-Wall",
+        "type": "TSP Bathroom Extractor Point-Wall",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_BONDING_EARTHING",
+      "name": "TSP Bonding & Earthing",
+      "family": "TSP Bonding & Earthing",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Bonding & Earthing",
+        "type": "TSP Bonding & Earthing",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_BRAAI_LIGHTPOINT",
+      "name": "TSP Braai LightPoint",
+      "family": "TSP Braai LightPoint",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Braai LightPoint",
+        "type": "TSP Braai LightPoint",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_CEILING_OR_WALL_FAN",
+      "name": "TSP Ceiling or Wall fan",
+      "family": "TSP Ceiling or Wall fan",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Ceiling or Wall fan",
+        "type": "TSP Ceiling or Wall fan",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_DATA_POINTS",
+      "name": "TSP Data Points",
+      "family": "TSP Data Points",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Data Points",
+        "type": "TSP Data Points",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_DB_BOARD_1PH",
+      "name": "TSP DB Board 1Ph",
+      "family": "TSP DB Board 1Ph",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP DB Board 1Ph",
+        "type": "TSP DB Board 1Ph",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_DB_BOARD_3PH",
+      "name": "TSP DB Board 3Ph",
+      "family": "TSP DB Board 3Ph",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP DB Board 3Ph",
+        "type": "TSP DB Board 3Ph",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_DIMMERS",
+      "name": "TSP Dimmers",
+      "family": "TSP Dimmers",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Dimmers",
+        "type": "TSP Dimmers",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_DOUBLE_PLUG",
+      "name": "TSP Double Plug",
+      "family": "TSP Double Plug",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Double Plug",
+        "type": "TSP Double Plug",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_DOUBLE_PLUG_WATER_RESIST",
+      "name": "TSP Double Plug Water resistant",
+      "family": "TSP Double Plug Water resistant",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Double Plug Water resistant",
+        "type": "TSP Double Plug Water resistant",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_DOUBLE_PLUG_0001",
+      "name": "TSP Double Plug.0001",
+      "family": "TSP Double Plug.0001",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Double Plug.0001",
+        "type": "TSP Double Plug.0001",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_DOWNLIGHTER_FOR_GARAGE_D",
+      "name": "TSP Downlighter For Garage Door",
+      "family": "TSP Downlighter For Garage Door",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Downlighter For Garage Door",
+        "type": "TSP Downlighter For Garage Door",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_DOWNLIGHTER_IN_CEILING",
+      "name": "TSP Downlighter in Ceiling",
+      "family": "TSP Downlighter in Ceiling",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Downlighter in Ceiling",
+        "type": "TSP Downlighter in Ceiling",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_DOWNLIGHTER_IN_SLAB",
+      "name": "TSP Downlighter in Slab",
+      "family": "TSP Downlighter in Slab",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Downlighter in Slab",
+        "type": "TSP Downlighter in Slab",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_ELEC_COC",
+      "name": "TSP Elec COC",
+      "family": "TSP Elec COC",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Elec COC",
+        "type": "TSP Elec COC",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_EXTRACTOR_FAN_POINT_STOV",
+      "name": "TSP Extractor Fan Point Stove",
+      "family": "TSP Extractor Fan Point Stove",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Extractor Fan Point Stove",
+        "type": "TSP Extractor Fan Point Stove",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_FIBER_CONNECTION_POINT_E",
+      "name": "TSP Fiber-connection point external",
+      "family": "TSP Fiber-connection point external",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Fiber-connection point external",
+        "type": "TSP Fiber-connection point external",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_FLOOR_LIGHT_POINTS",
+      "name": "TSP Floor light points",
+      "family": "TSP Floor light points",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Floor light points",
+        "type": "TSP Floor light points",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_FOOTLIGHT_POINTS",
+      "name": "TSP Footlight points",
+      "family": "TSP Footlight points",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Footlight points",
+        "type": "TSP Footlight points",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_FOUR_WAY_SWITCHING",
+      "name": "TSP Four-way switching",
+      "family": "TSP Four-way switching",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Four-way switching",
+        "type": "TSP Four-way switching",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_GARDEN_LIGHTS_OR_POOL_LI",
+      "name": "TSP Garden Lights or Pool Light switch",
+      "family": "TSP Garden Lights or Pool Light switch",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Garden Lights or Pool Light switch",
+        "type": "TSP Garden Lights or Pool Light switch",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_GATE_MOTOR_POINT",
+      "name": "TSP Gate Motor Point",
+      "family": "TSP Gate Motor Point",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Gate Motor Point",
+        "type": "TSP Gate Motor Point",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_GEY_TSP_GEYSER_ELECTRCICAL_150L",
+      "name": "TSP Geyser Electrcical 150L",
+      "family": "TSP Geyser Electrcical 150L",
+      "category": "waterheater",
+      "unit": "ea",
+      "draw": "box",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Geyser Electrcical 150L",
+        "type": "TSP Geyser Electrcical 150L",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 600,
+        "depth": 600,
+        "height": 1500
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "capacityLitres": 150,
+        "heatSource": "resistance",
+        "nonResistanceFraction": null
+      },
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_GEY_TSP_GEYSER_ELECTRCICAL_200L",
+      "name": "TSP Geyser Electrcical 200L",
+      "family": "TSP Geyser Electrcical 200L",
+      "category": "waterheater",
+      "unit": "ea",
+      "draw": "box",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Geyser Electrcical 200L",
+        "type": "TSP Geyser Electrcical 200L",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 600,
+        "depth": 600,
+        "height": 1500
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "capacityLitres": 200,
+        "heatSource": "resistance",
+        "nonResistanceFraction": null
+      },
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_GEY_TSP_GEYSER_ELECTRCICAL_250L",
+      "name": "TSP Geyser Electrcical 250L",
+      "family": "TSP Geyser Electrcical 250L",
+      "category": "waterheater",
+      "unit": "ea",
+      "draw": "box",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Geyser Electrcical 250L",
+        "type": "TSP Geyser Electrcical 250L",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 600,
+        "depth": 600,
+        "height": 1500
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "capacityLitres": 250,
+        "heatSource": "resistance",
+        "nonResistanceFraction": null
+      },
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_GEY_TSP_GEYSER_ELECTRCICAL_300L",
+      "name": "TSP Geyser Electrcical 300L",
+      "family": "TSP Geyser Electrcical 300L",
+      "category": "waterheater",
+      "unit": "ea",
+      "draw": "box",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Geyser Electrcical 300L",
+        "type": "TSP Geyser Electrcical 300L",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 600,
+        "depth": 600,
+        "height": 1500
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "capacityLitres": 300,
+        "heatSource": "resistance",
+        "nonResistanceFraction": null
+      },
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_GEY_TSP_GEYSER_SOLAR_150L",
+      "name": "TSP Geyser Solar 150L",
+      "family": "TSP Geyser Solar 150L",
+      "category": "waterheater",
+      "unit": "ea",
+      "draw": "box",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Geyser Solar 150L",
+        "type": "TSP Geyser Solar 150L",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 600,
+        "depth": 600,
+        "height": 1500
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "capacityLitres": 150,
+        "heatSource": "solar",
+        "nonResistanceFraction": null
+      },
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_GEY_TSP_GEYSER_SOLAR_200L",
+      "name": "TSP Geyser Solar 200L",
+      "family": "TSP Geyser Solar 200L",
+      "category": "waterheater",
+      "unit": "ea",
+      "draw": "box",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Geyser Solar 200L",
+        "type": "TSP Geyser Solar 200L",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 600,
+        "depth": 600,
+        "height": 1500
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "capacityLitres": 200,
+        "heatSource": "solar",
+        "nonResistanceFraction": null
+      },
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_GEY_TSP_GEYSER_SOLAR_250L",
+      "name": "TSP Geyser Solar 250L",
+      "family": "TSP Geyser Solar 250L",
+      "category": "waterheater",
+      "unit": "ea",
+      "draw": "box",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Geyser Solar 250L",
+        "type": "TSP Geyser Solar 250L",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 600,
+        "depth": 600,
+        "height": 1500
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "capacityLitres": 250,
+        "heatSource": "solar",
+        "nonResistanceFraction": null
+      },
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_GEY_TSP_GEYSER_SOLAR_300L",
+      "name": "TSP Geyser Solar 300L",
+      "family": "TSP Geyser Solar 300L",
+      "category": "waterheater",
+      "unit": "ea",
+      "draw": "box",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Geyser Solar 300L",
+        "type": "TSP Geyser Solar 300L",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 600,
+        "depth": 600,
+        "height": 1500
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "capacityLitres": 300,
+        "heatSource": "solar",
+        "nonResistanceFraction": null
+      },
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_HEATED_POOL_AND_JACUZZI_",
+      "name": "TSP Heated Pool and Jacuzzi Supply only",
+      "family": "TSP Heated Pool and Jacuzzi Supply only",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Heated Pool and Jacuzzi Supply only",
+        "type": "TSP Heated Pool and Jacuzzi Supply only",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_HEATED_TOWEL_RAIL_POINT",
+      "name": "TSP Heated Towel Rail Point",
+      "family": "TSP Heated Towel Rail Point",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Heated Towel Rail Point",
+        "type": "TSP Heated Towel Rail Point",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_INTERCOM_POINT",
+      "name": "TSP Intercom Point",
+      "family": "TSP Intercom Point",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Intercom Point",
+        "type": "TSP Intercom Point",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_LED_STIP_LIGHT",
+      "name": "TSP LED Stip Light",
+      "family": "TSP LED Stip Light",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP LED Stip Light",
+        "type": "TSP LED Stip Light",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_LIGHTPOINT_DOUBLE_VOLUME",
+      "name": "TSP LightPoint-Double Volume",
+      "family": "TSP LightPoint-Double Volume",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP LightPoint-Double Volume",
+        "type": "TSP LightPoint-Double Volume",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_LIGHTPOINT_PENDANT_CHAND",
+      "name": "TSP LightPoint-Pendant_Chandelier DV",
+      "family": "TSP LightPoint-Pendant_Chandelier DV",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP LightPoint-Pendant_Chandelier DV",
+        "type": "TSP LightPoint-Pendant_Chandelier DV",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_POOL_SUPPLY_NOT_HEATED",
+      "name": "TSP Pool supply-not heated",
+      "family": "TSP Pool supply-not heated",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Pool supply-not heated",
+        "type": "TSP Pool supply-not heated",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_RECESSED_FLOOR_LIGHT_POI",
+      "name": "TSP Recessed Floor Light Point",
+      "family": "TSP Recessed Floor Light Point",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Recessed Floor Light Point",
+        "type": "TSP Recessed Floor Light Point",
+        "placedCount": 2
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_SAUNA_SUPPLY_ONLY",
+      "name": "TSP Sauna Supply only",
+      "family": "TSP Sauna Supply only",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Sauna Supply only",
+        "type": "TSP Sauna Supply only",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_SHAVER_PLUG",
+      "name": "TSP Shaver Plug",
+      "family": "TSP Shaver Plug",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Shaver Plug",
+        "type": "TSP Shaver Plug",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_SINGLE_PLUG",
+      "name": "TSP Single Plug",
+      "family": "TSP Single Plug",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Single Plug",
+        "type": "TSP Single Plug",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_SINGLE_PLUG_CEILING",
+      "name": "TSP Single Plug Ceiling",
+      "family": "TSP Single Plug Ceiling",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Single Plug Ceiling",
+        "type": "TSP Single Plug Ceiling",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_SINGLE_PLUG_SLAB",
+      "name": "TSP Single Plug Slab",
+      "family": "TSP Single Plug Slab",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Single Plug Slab",
+        "type": "TSP Single Plug Slab",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_SMART_LIVING_COMMS_BOX",
+      "name": "TSP Smart Living Comms Box",
+      "family": "TSP Smart Living Comms Box",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Smart Living Comms Box",
+        "type": "TSP Smart Living Comms Box",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_SOLAR_TUBING_TO_ROOF_AND",
+      "name": "TSP Solar tubing to roof and Solar system",
+      "family": "TSP Solar tubing to roof and Solar system",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Solar tubing to roof and Solar system",
+        "type": "TSP Solar tubing to roof and Solar system",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_SPEAKER_POINTS_CEILING",
+      "name": "TSP Speaker points-Ceiling",
+      "family": "TSP Speaker points-Ceiling",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Speaker points-Ceiling",
+        "type": "TSP Speaker points-Ceiling",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_SPEAKER_POINTS_WALL",
+      "name": "TSP Speaker points-Wall",
+      "family": "TSP Speaker points-Wall",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Speaker points-Wall",
+        "type": "TSP Speaker points-Wall",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_STEAM_SHOWER_POINT",
+      "name": "TSP Steam Shower Point",
+      "family": "TSP Steam Shower Point",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Steam Shower Point",
+        "type": "TSP Steam Shower Point",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_STOVE_OVEN_AND_EXTRACTOR",
+      "name": "TSP Stove, oven and extractor fan point",
+      "family": "TSP Stove, oven and extractor fan point",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Stove, oven and extractor fan point",
+        "type": "TSP Stove, oven and extractor fan point",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_STRIP_LIGHT_OR_CABLE_SYS",
+      "name": "TSP Strip light or Cable system Light Point",
+      "family": "TSP Strip light or Cable system Light Point",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Strip light or Cable system Light Point",
+        "type": "TSP Strip light or Cable system Light Point",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_SUB_DB_BOARD_1PH",
+      "name": "TSP SUB DB Board 1Ph",
+      "family": "TSP SUB DB Board 1Ph",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP SUB DB Board 1Ph",
+        "type": "TSP SUB DB Board 1Ph",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_SUB_DB_BOARD_3PH",
+      "name": "TSP SUB DB Board 3Ph",
+      "family": "TSP SUB DB Board 3Ph",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP SUB DB Board 3Ph",
+        "type": "TSP SUB DB Board 3Ph",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_SUBMERSIBLE_LIGHT_POINT",
+      "name": "TSP Submersible Light Point",
+      "family": "TSP Submersible Light Point",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Submersible Light Point",
+        "type": "TSP Submersible Light Point",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_TELEPHONE_POINTS",
+      "name": "TSP Telephone points",
+      "family": "TSP Telephone points",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Telephone points",
+        "type": "TSP Telephone points",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_TELKOM_CONNECTION_POINT_",
+      "name": "TSP Telkom-connection point external",
+      "family": "TSP Telkom-connection point external",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Telkom-connection point external",
+        "type": "TSP Telkom-connection point external",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_THREE_WAY_SWITCHING",
+      "name": "TSP Three-way switching",
+      "family": "TSP Three-way switching",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Three-way switching",
+        "type": "TSP Three-way switching",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_TV_POINTS",
+      "name": "TSP TV points",
+      "family": "TSP TV points",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP TV points",
+        "type": "TSP TV points",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_TV_CONNECTION_POINT_EXTE",
+      "name": "TSP TV-connection point external",
+      "family": "TSP TV-connection point external",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP TV-connection point external",
+        "type": "TSP TV-connection point external",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_TWO_WAY_SWITCHING",
+      "name": "TSP Two-way switching",
+      "family": "TSP Two-way switching",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Two-way switching",
+        "type": "TSP Two-way switching",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_UNDERFLOOR_HEATING_POINT",
+      "name": "TSP Underfloor heating points",
+      "family": "TSP Underfloor heating points",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Underfloor heating points",
+        "type": "TSP Underfloor heating points",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSP_WALL_LIGHT_POINTS",
+      "name": "TSP Wall light points",
+      "family": "TSP Wall light points",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSP Wall light points",
+        "type": "TSP Wall light points",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ELE_TSPDAY_AND_NIGHT_SWITCHES",
+      "name": "TSPDay and Night Switches",
+      "family": "TSPDay and Night Switches",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "point",
+      "revit": {
+        "category": "Electrical Fixtures",
+        "family": "TSPDay and Night Switches",
+        "type": "TSPDay and Night Switches",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 86,
+        "depth": 86,
+        "height": 86
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_FLR_170MM_SLAB_BALCONY",
+      "name": "170mm Slab - Balcony",
+      "family": "Floor",
+      "category": "floor",
+      "unit": "m2",
+      "draw": "fill",
+      "revit": {
+        "category": "Floors",
+        "family": "Floor",
+        "type": "170mm Slab - Balcony",
+        "placedCount": 1
+      },
+      "geometry": {
+        "thickness": 170
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "rValue": null,
+        "suspended": null,
+        "exposed": null
+      },
+      "drawing": {
+        "colourClass": "concrete",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "area",
+          "volume",
+          "perimeter",
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_FLR_170MM_SLAB_ROOF",
+      "name": "170mm Slab - Roof",
+      "family": "Floor",
+      "category": "floor",
+      "unit": "m2",
+      "draw": "fill",
+      "revit": {
+        "category": "Floors",
+        "family": "Floor",
+        "type": "170mm Slab - Roof",
+        "placedCount": 1
+      },
+      "geometry": {
+        "thickness": 170
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "rValue": null,
+        "suspended": null,
+        "exposed": null
+      },
+      "drawing": {
+        "colourClass": "concrete",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "area",
+          "volume",
+          "perimeter",
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_FLR_GENERIC_255MM",
+      "name": "Generic 255mm",
+      "family": "Floor",
+      "category": "floor",
+      "unit": "m2",
+      "draw": "fill",
+      "revit": {
+        "category": "Floors",
+        "family": "Floor",
+        "type": "Generic 255mm",
+        "placedCount": 1
+      },
+      "geometry": {
+        "thickness": 255
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "rValue": null,
+        "suspended": null,
+        "exposed": null
+      },
+      "drawing": {
+        "colourClass": "concrete",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "area",
+          "volume",
+          "perimeter",
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_FLR_GENERIC_85MM",
+      "name": "Generic 85mm",
+      "family": "Floor",
+      "category": "floor",
+      "unit": "m2",
+      "draw": "fill",
+      "revit": {
+        "category": "Floors",
+        "family": "Floor",
+        "type": "Generic 85mm",
+        "placedCount": 5
+      },
+      "geometry": {
+        "thickness": 85
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "rValue": null,
+        "suspended": null,
+        "exposed": null
+      },
+      "drawing": {
+        "colourClass": "concrete",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "area",
+          "volume",
+          "perimeter",
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_FLR_POOL_CONCRETE_FLOOR_170MM",
+      "name": "Pool Concrete floor 170mm",
+      "family": "Floor",
+      "category": "floor",
+      "unit": "m2",
+      "draw": "fill",
+      "revit": {
+        "category": "Floors",
+        "family": "Floor",
+        "type": "Pool Concrete floor 170mm",
+        "placedCount": 1
+      },
+      "geometry": {
+        "thickness": 170
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "rValue": null,
+        "suspended": null,
+        "exposed": null
+      },
+      "drawing": {
+        "colourClass": "concrete",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "area",
+          "volume",
+          "perimeter",
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_DRN_110_DIA",
+      "name": "TSP 110mm Sewer Pipe — 110 dia",
+      "family": "TSP 110mm Sewer Pipe",
+      "category": "drainage",
+      "unit": "m",
+      "draw": "pipe",
+      "revit": {
+        "category": "Plumbing Fixtures",
+        "family": "TSP 110mm Sewer Pipe",
+        "type": "110 dia",
+        "placedCount": 7
+      },
+      "geometry": {
+        "diameter": 110
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "minGradient": null,
+        "ventDiameter": null
+      },
+      "drawing": {
+        "colourClass": "drain",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "length",
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_SAN_CLOSED_COUPLE",
+      "name": "TSP Closed Couple WC — Closed Couple",
+      "family": "TSP Closed Couple WC",
+      "category": "sanitary",
+      "unit": "ea",
+      "draw": "box",
+      "revit": {
+        "category": "Plumbing Fixtures",
+        "family": "TSP Closed Couple WC",
+        "type": "Closed Couple",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 600,
+        "depth": 400,
+        "height": 400
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "dischargeType": "soil",
+        "trapDiameter": null,
+        "fixtureUnits": null,
+        "requiresGully": false,
+        "requiresVent": null
+      },
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_DRN_HDPE_FRESH_WATER_SUPPLY",
+      "name": "TSP Main Water Supply Line HDPE — HDPE Fresh Water Supply",
+      "family": "TSP Main Water Supply Line HDPE",
+      "category": "drainage",
+      "unit": "m",
+      "draw": "pipe",
+      "revit": {
+        "category": "Plumbing Fixtures",
+        "family": "TSP Main Water Supply Line HDPE",
+        "type": "HDPE Fresh Water Supply",
+        "placedCount": 8
+      },
+      "geometry": {
+        "diameter": 110
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "minGradient": null,
+        "ventDiameter": null
+      },
+      "drawing": {
+        "colourClass": "drain",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "length",
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_SAN_CLOSED_COUPLE_2",
+      "name": "TSP Toilet 3D Wall Based — Closed Couple",
+      "family": "TSP Toilet 3D Wall Based",
+      "category": "sanitary",
+      "unit": "ea",
+      "draw": "box",
+      "revit": {
+        "category": "Plumbing Fixtures",
+        "family": "TSP Toilet 3D Wall Based",
+        "type": "Closed Couple",
+        "placedCount": 4
+      },
+      "geometry": {
+        "width": 600,
+        "depth": 400,
+        "height": 400
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "dischargeType": "soil",
+        "trapDiameter": null,
+        "fixtureUnits": null,
+        "requiresGully": false,
+        "requiresVent": null
+      },
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_SAN_WASHING_MACHINE",
+      "name": "TSP Washing Machine — Washing Machine",
+      "family": "TSP Washing Machine",
+      "category": "sanitary",
+      "unit": "ea",
+      "draw": "box",
+      "revit": {
+        "category": "Plumbing Fixtures",
+        "family": "TSP Washing Machine",
+        "type": "Washing Machine",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 600,
+        "depth": 400,
+        "height": 400
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "dischargeType": "waste",
+        "trapDiameter": null,
+        "fixtureUnits": null,
+        "requiresGully": true,
+        "requiresVent": null
+      },
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_SAN_1675_MMX915_MM_BUILT_IN",
+      "name": "TSP_Bath Tub - Maestro — 1675 mmx915 mm - Built in",
+      "family": "TSP_Bath Tub - Maestro",
+      "category": "sanitary",
+      "unit": "ea",
+      "draw": "box",
+      "revit": {
+        "category": "Plumbing Fixtures",
+        "family": "TSP_Bath Tub - Maestro",
+        "type": "1675 mmx915 mm - Built in",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 1675,
+        "depth": 915,
+        "height": 400
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "dischargeType": "waste",
+        "trapDiameter": null,
+        "fixtureUnits": null,
+        "requiresGully": true,
+        "requiresVent": null
+      },
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_SAN_WHB",
+      "name": "TSP_Minimal_Hand_Wash_Basin_16201 — WHB",
+      "family": "TSP_Minimal_Hand_Wash_Basin_16201",
+      "category": "sanitary",
+      "unit": "ea",
+      "draw": "box",
+      "revit": {
+        "category": "Plumbing Fixtures",
+        "family": "TSP_Minimal_Hand_Wash_Basin_16201",
+        "type": "WHB",
+        "placedCount": 4
+      },
+      "geometry": {
+        "width": 600,
+        "depth": 400,
+        "height": 400
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "dischargeType": "waste",
+        "trapDiameter": null,
+        "fixtureUnits": null,
+        "requiresGully": true,
+        "requiresVent": null
+      },
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_SAN_915_MMX915_MM_PRIVATE",
+      "name": "TSP_Shower Stall - Rectangular — 915 mmx915 mm - Private",
+      "family": "TSP_Shower Stall - Rectangular",
+      "category": "sanitary",
+      "unit": "ea",
+      "draw": "box",
+      "revit": {
+        "category": "Plumbing Fixtures",
+        "family": "TSP_Shower Stall - Rectangular",
+        "type": "915 mmx915 mm - Private",
+        "placedCount": 4
+      },
+      "geometry": {
+        "width": 915,
+        "depth": 915,
+        "height": 400
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "dischargeType": "waste",
+        "trapDiameter": null,
+        "fixtureUnits": null,
+        "requiresGully": true,
+        "requiresVent": null
+      },
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_SAN_1065_MMX535_MM_PRIVATE",
+      "name": "TSP_Sink - Kitchen - Double — 1065 mmx535 mm - Private",
+      "family": "TSP_Sink - Kitchen - Double",
+      "category": "sanitary",
+      "unit": "ea",
+      "draw": "box",
+      "revit": {
+        "category": "Plumbing Fixtures",
+        "family": "TSP_Sink - Kitchen - Double",
+        "type": "1065 mmx535 mm - Private",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 1065,
+        "depth": 535,
+        "height": 400
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "dischargeType": "waste",
+        "trapDiameter": null,
+        "fixtureUnits": null,
+        "requiresGully": true,
+        "requiresVent": null
+      },
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_SAN_482_X_482MM",
+      "name": "TSP_Sink Vanity-Round — 482 x 482mm",
+      "family": "TSP_Sink Vanity-Round",
+      "category": "sanitary",
+      "unit": "ea",
+      "draw": "box",
+      "revit": {
+        "category": "Plumbing Fixtures",
+        "family": "TSP_Sink Vanity-Round",
+        "type": "482 x 482mm",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 482,
+        "depth": 482,
+        "height": 400
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "dischargeType": "waste",
+        "trapDiameter": null,
+        "fixtureUnits": null,
+        "requiresGully": true,
+        "requiresVent": null
+      },
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_SAN_760_X_1525MM",
+      "name": "TSP_Tub-Free Standing-3D — 760 x 1525mm",
+      "family": "TSP_Tub-Free Standing-3D",
+      "category": "sanitary",
+      "unit": "ea",
+      "draw": "box",
+      "revit": {
+        "category": "Plumbing Fixtures",
+        "family": "TSP_Tub-Free Standing-3D",
+        "type": "760 x 1525mm",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 760,
+        "depth": 1525,
+        "height": 400
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "dischargeType": null,
+        "trapDiameter": null,
+        "fixtureUnits": null,
+        "requiresGully": null,
+        "requiresVent": null
+      },
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ROF_GENERIC_125MM",
+      "name": "Generic - 125mm",
+      "family": "Basic Roof",
+      "category": "roof",
+      "unit": "m2",
+      "draw": "roof",
+      "revit": {
+        "category": "Roofs",
+        "family": "Basic Roof",
+        "type": "Generic - 125mm",
+        "placedCount": 4
+      },
+      "geometry": {
+        "thickness": 125
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "rValue": null,
+        "insulationRValue": null,
+        "underlay": null,
+        "radiantBarrier": null,
+        "compressible": null
+      },
+      "drawing": {
+        "colourClass": "concrete",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "area",
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_ROF_GENERIC_225MM",
+      "name": "Generic - 225mm",
+      "family": "Basic Roof",
+      "category": "roof",
+      "unit": "m2",
+      "draw": "roof",
+      "revit": {
+        "category": "Roofs",
+        "family": "Basic Roof",
+        "type": "Generic - 225mm",
+        "placedCount": 1
+      },
+      "geometry": {
+        "thickness": 225
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "rValue": null,
+        "insulationRValue": null,
+        "underlay": null,
+        "radiantBarrier": null,
+        "compressible": null
+      },
+      "drawing": {
+        "colourClass": "concrete",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "area",
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_CAS_600MM",
+      "name": "TSP_Dishwasher — 600mm",
+      "family": "TSP_Dishwasher",
+      "category": "casework",
+      "unit": "ea",
+      "draw": "box",
+      "revit": {
+        "category": "Specialty Equipment",
+        "family": "TSP_Dishwasher",
+        "type": "600mm",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 600,
+        "depth": 600,
+        "height": 900
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "timber",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_STR_TSP_MONOLITHIC_STAIR",
+      "name": "TSP_Monolithic Stair",
+      "family": "Cast-In-Place Stair",
+      "category": "stair",
+      "unit": "ea",
+      "draw": "stair",
+      "revit": {
+        "category": "Stairs",
+        "family": "Cast-In-Place Stair",
+        "type": "TSP_Monolithic Stair",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 900,
+        "riser": 175,
+        "going": 250
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "solidRisers": null,
+        "treadOverlap": null,
+        "landingLength": null,
+        "maxFlightRise": null,
+        "winders": null
+      },
+      "drawing": {
+        "colourClass": "concrete",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_COL_450_X_450MM",
+      "name": "Concrete-Rectangular-Column — 450 x 450mm",
+      "family": "Concrete-Rectangular-Column",
+      "category": "column",
+      "unit": "m",
+      "draw": "beam",
+      "revit": {
+        "category": "Structural Columns",
+        "family": "Concrete-Rectangular-Column",
+        "type": "450 x 450mm",
+        "placedCount": 3
+      },
+      "geometry": {
+        "width": 450,
+        "depth": 450
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "loadBearing": null
+      },
+      "drawing": {
+        "colourClass": "concrete",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "length",
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_COL_450_X_600MM",
+      "name": "Concrete-Rectangular-Column — 450 x 600mm",
+      "family": "Concrete-Rectangular-Column",
+      "category": "column",
+      "unit": "m",
+      "draw": "beam",
+      "revit": {
+        "category": "Structural Columns",
+        "family": "Concrete-Rectangular-Column",
+        "type": "450 x 600mm",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 450,
+        "depth": 600
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "loadBearing": null
+      },
+      "drawing": {
+        "colourClass": "concrete",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "length",
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_FND_BEARING_FOOTING_600X200_MM",
+      "name": "Bearing Footing - 600X200 mm",
+      "family": "Wall Foundation",
+      "category": "foundation",
+      "unit": "m3",
+      "draw": "wall",
+      "revit": {
+        "category": "Structural Foundations",
+        "family": "Wall Foundation",
+        "type": "Bearing Footing - 600X200 mm",
+        "placedCount": 29
+      },
+      "geometry": {
+        "thickness": 200,
+        "width": 600,
+        "depth": 200
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "loadBearing": true
+      },
+      "drawing": {
+        "colourClass": "concrete",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "length",
+          "volume",
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_WAL_MASONARY_WALL_110MM_PLASTER",
+      "name": "Masonary wall 110mm (plaster)",
+      "family": "Basic Wall",
+      "category": "wall",
+      "unit": "m3",
+      "draw": "wall",
+      "revit": {
+        "category": "Walls",
+        "family": "Basic Wall",
+        "type": "Masonary wall 110mm (plaster)",
+        "placedCount": 27
+      },
+      "geometry": {
+        "thickness": 110,
+        "height": 2800
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "rValue": null,
+        "surfaceDensity": null,
+        "plastered": true,
+        "rendered": null,
+        "cavity": null,
+        "loadBearing": null,
+        "thermalBreakRValue": null
+      },
+      "drawing": {
+        "colourClass": "masonry",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "length",
+          "area",
+          "volume",
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_WAL_MASONARY_WALL_220MM_PLASTER",
+      "name": "Masonary wall 220mm (plaster)",
+      "family": "Basic Wall",
+      "category": "wall",
+      "unit": "m3",
+      "draw": "wall",
+      "revit": {
+        "category": "Walls",
+        "family": "Basic Wall",
+        "type": "Masonary wall 220mm (plaster)",
+        "placedCount": 33
+      },
+      "geometry": {
+        "thickness": 220,
+        "height": 2800
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "rValue": null,
+        "surfaceDensity": null,
+        "plastered": true,
+        "rendered": null,
+        "cavity": null,
+        "loadBearing": null,
+        "thermalBreakRValue": null
+      },
+      "drawing": {
+        "colourClass": "masonry",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "length",
+          "area",
+          "volume",
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_FND_MASONARY_WALL_220MM_FOUNDATI",
+      "name": "Masonary wall 220mm Foundation (No-plaster)",
+      "family": "Basic Wall",
+      "category": "foundation",
+      "unit": "m3",
+      "draw": "wall",
+      "revit": {
+        "category": "Walls",
+        "family": "Basic Wall",
+        "type": "Masonary wall 220mm Foundation (No-plaster)",
+        "placedCount": 10
+      },
+      "geometry": {
+        "thickness": 220,
+        "width": 600,
+        "depth": 200
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "loadBearing": true
+      },
+      "drawing": {
+        "colourClass": "masonry",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "length",
+          "volume",
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_FND_MASONARY_WALL_220MM_FOUNDATI_2",
+      "name": "Masonary wall 220mm Foundation Perimeter (plaster)",
+      "family": "Basic Wall",
+      "category": "foundation",
+      "unit": "m3",
+      "draw": "wall",
+      "revit": {
+        "category": "Walls",
+        "family": "Basic Wall",
+        "type": "Masonary wall 220mm Foundation Perimeter (plaster)",
+        "placedCount": 15
+      },
+      "geometry": {
+        "thickness": 220,
+        "width": 600,
+        "depth": 200
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "loadBearing": true
+      },
+      "drawing": {
+        "colourClass": "masonry",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "length",
+          "volume",
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_WAL_POOL_MASONRY_WALL_220MM_PLAS",
+      "name": "Pool Masonry wall 220mm (plaster)",
+      "family": "Basic Wall",
+      "category": "wall",
+      "unit": "m3",
+      "draw": "wall",
+      "revit": {
+        "category": "Walls",
+        "family": "Basic Wall",
+        "type": "Pool Masonry wall 220mm (plaster)",
+        "placedCount": 4
+      },
+      "geometry": {
+        "thickness": 220,
+        "height": 2800
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "rValue": null,
+        "surfaceDensity": null,
+        "plastered": true,
+        "rendered": null,
+        "cavity": null,
+        "loadBearing": null,
+        "thermalBreakRValue": null
+      },
+      "drawing": {
+        "colourClass": "masonry",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "length",
+          "area",
+          "volume",
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_WIN_2150_X_1500MM",
+      "name": "TSP_Window-Casement-Triple-Side-Transom — 2150 x 1500mm",
+      "family": "TSP_Window-Casement-Triple-Side-Transom",
+      "category": "window",
+      "unit": "ea",
+      "draw": "window",
+      "revit": {
+        "category": "Windows",
+        "family": "TSP_Window-Casement-Triple-Side-Transom",
+        "type": "2150 x 1500mm",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 2150,
+        "height": 1500,
+        "sill": 900
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "uValue": null,
+        "shgc": null,
+        "glazingLayers": null,
+        "sealed": null,
+        "providesLight": true,
+        "providesVentilation": true,
+        "openableAreaFraction": null,
+        "safetyGlazed": null
+      },
+      "drawing": {
+        "colourClass": "glass",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_WIN_1650X_1650MM",
+      "name": "TSP_Window-Fixed — 1650x 1650mm",
+      "family": "TSP_Window-Fixed",
+      "category": "window",
+      "unit": "ea",
+      "draw": "window",
+      "revit": {
+        "category": "Windows",
+        "family": "TSP_Window-Fixed",
+        "type": "1650x 1650mm",
+        "placedCount": 1
+      },
+      "geometry": {
+        "width": 1650,
+        "height": 1650,
+        "sill": 900
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "uValue": null,
+        "shgc": null,
+        "glazingLayers": null,
+        "sealed": null,
+        "providesLight": true,
+        "providesVentilation": false,
+        "openableAreaFraction": 0,
+        "safetyGlazed": null
+      },
+      "drawing": {
+        "colourClass": "glass",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_WIN_600_X_900MM",
+      "name": "TSP_Window-Fixed — 600 x 900mm",
+      "family": "TSP_Window-Fixed",
+      "category": "window",
+      "unit": "ea",
+      "draw": "window",
+      "revit": {
+        "category": "Windows",
+        "family": "TSP_Window-Fixed",
+        "type": "600 x 900mm",
+        "placedCount": 8
+      },
+      "geometry": {
+        "width": 600,
+        "height": 900,
+        "sill": 900
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "uValue": null,
+        "shgc": null,
+        "glazingLayers": null,
+        "sealed": null,
+        "providesLight": true,
+        "providesVentilation": false,
+        "openableAreaFraction": 0,
+        "safetyGlazed": null
+      },
+      "drawing": {
+        "colourClass": "glass",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_WIN_900_X_1650MM",
+      "name": "TSP_Window-Fixed — 900 x 1650mm",
+      "family": "TSP_Window-Fixed",
+      "category": "window",
+      "unit": "ea",
+      "draw": "window",
+      "revit": {
+        "category": "Windows",
+        "family": "TSP_Window-Fixed",
+        "type": "900 x 1650mm",
+        "placedCount": 9
+      },
+      "geometry": {
+        "width": 900,
+        "height": 1650,
+        "sill": 900
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "uValue": null,
+        "shgc": null,
+        "glazingLayers": null,
+        "sealed": null,
+        "providesLight": true,
+        "providesVentilation": false,
+        "openableAreaFraction": 0,
+        "safetyGlazed": null
+      },
+      "drawing": {
+        "colourClass": "glass",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_WIN_900_X_900MM",
+      "name": "TSP_Window-Fixed — 900 x 900mm",
+      "family": "TSP_Window-Fixed",
+      "category": "window",
+      "unit": "ea",
+      "draw": "window",
+      "revit": {
+        "category": "Windows",
+        "family": "TSP_Window-Fixed",
+        "type": "900 x 900mm",
+        "placedCount": 2
+      },
+      "geometry": {
+        "width": 900,
+        "height": 900,
+        "sill": 900
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "uValue": null,
+        "shgc": null,
+        "glazingLayers": null,
+        "sealed": null,
+        "providesLight": true,
+        "providesVentilation": false,
+        "openableAreaFraction": 0,
+        "safetyGlazed": null
+      },
+      "drawing": {
+        "colourClass": "glass",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    }
+  ],
+  "recipes": {
+    "requires": [
+      {
+        "whenSku": "TSP_WAL_MASONARY_WALL_110MM_PLASTER",
+        "addSku": "TSP_FND_BEARING_FOOTING_600X200_MM",
+        "per": "wallLength"
+      },
+      {
+        "whenSku": "TSP_WAL_MASONARY_WALL_220MM_PLASTER",
+        "addSku": "TSP_FND_BEARING_FOOTING_600X200_MM",
+        "per": "wallLength"
+      },
+      {
+        "whenSku": "TSP_WAL_POOL_MASONRY_WALL_220MM_PLAS",
+        "addSku": "TSP_FND_BEARING_FOOTING_600X200_MM",
+        "per": "wallLength"
+      }
+    ],
+    "allowedHosts": {},
+    "maxSpan": {},
+    "minLength": {}
+  }
+}

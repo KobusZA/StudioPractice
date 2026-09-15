@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 
 namespace StudioPractice.RevitConnector.Ui;
 
@@ -18,12 +19,29 @@ public sealed class AboutWindow : Window
         var root = new DockPanel { Margin = new Thickness(20) };
 
         var heading = new StackPanel { Margin = new Thickness(0, 0, 0, 16) };
-        heading.Children.Add(new TextBlock
+        BitmapImage? logo = App.LoadIcon("logo FULL.png");
+        if (logo is not null)
         {
-            Text = "Studio Practice",
-            FontSize = 22,
-            FontWeight = FontWeights.SemiBold
-        });
+            heading.Children.Add(new Image
+            {
+                Source = logo,
+                Width = 96,
+                Height = 96,
+                Stretch = Stretch.Uniform,
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Clip = new EllipseGeometry(new Rect(0, 0, 96, 96)),
+                Margin = new Thickness(0, 0, 0, 12)
+            });
+        }
+        else
+        {
+            heading.Children.Add(new TextBlock
+            {
+                Text = "Studio Practice",
+                FontSize = 22,
+                FontWeight = FontWeights.SemiBold
+            });
+        }
         heading.Children.Add(new TextBlock
         {
             Text = "Revit Connector",

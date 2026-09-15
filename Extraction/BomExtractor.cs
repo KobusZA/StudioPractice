@@ -7,31 +7,30 @@ namespace StudioPractice.RevitConnector.Extraction;
 
 public static class BomExtractor
 {
-    private static readonly BuiltInCategory[] ProjectCategories =
+    private static readonly HashSet<BuiltInCategory> SkipTakeoffCategories =
     [
-        BuiltInCategory.OST_Walls,
-        BuiltInCategory.OST_Doors,
-        BuiltInCategory.OST_Windows,
-        BuiltInCategory.OST_Floors,
-        BuiltInCategory.OST_Rooms,
-        BuiltInCategory.OST_Furniture,
-        BuiltInCategory.OST_Casework,
-        BuiltInCategory.OST_PlumbingFixtures,
-        BuiltInCategory.OST_LightingFixtures,
-        BuiltInCategory.OST_ElectricalFixtures,
-        BuiltInCategory.OST_MechanicalEquipment,
-        BuiltInCategory.OST_SpecialityEquipment,
-        BuiltInCategory.OST_GenericModel,
-        BuiltInCategory.OST_Stairs,
-        BuiltInCategory.OST_Railings,
-        BuiltInCategory.OST_Columns,
-        BuiltInCategory.OST_StructuralColumns,
-        BuiltInCategory.OST_StructuralFraming,
-        BuiltInCategory.OST_Ceilings,
-        BuiltInCategory.OST_Roofs,
-        BuiltInCategory.OST_CurtainWallPanels,
-        BuiltInCategory.OST_DuctCurves,
-        BuiltInCategory.OST_PipeCurves
+        BuiltInCategory.INVALID,
+        BuiltInCategory.OST_Cameras,
+        BuiltInCategory.OST_CLines,
+        BuiltInCategory.OST_Constraints,
+        BuiltInCategory.OST_Dimensions,
+        BuiltInCategory.OST_Grids,
+        BuiltInCategory.OST_Levels,
+        BuiltInCategory.OST_Lines,
+        BuiltInCategory.OST_Matchline,
+        BuiltInCategory.OST_ReferenceLines,
+        BuiltInCategory.OST_ReferencePoints,
+        BuiltInCategory.OST_RoomSeparationLines,
+        BuiltInCategory.OST_SketchLines,
+        BuiltInCategory.OST_SectionBox,
+        BuiltInCategory.OST_Sheets,
+        BuiltInCategory.OST_TitleBlocks,
+        BuiltInCategory.OST_Viewports,
+        BuiltInCategory.OST_VolumeOfInterest,
+        BuiltInCategory.OST_IOSModelGroups,
+        BuiltInCategory.OST_IOSDetailGroups,
+        BuiltInCategory.OST_IOSAttachedDetailGroups,
+        BuiltInCategory.OST_ImportObjectStyles
     ];
 
     public static BomPayload Extract(UIApplication uiApp)
@@ -49,13 +48,22 @@ public static class BomExtractor
             Path = string.IsNullOrWhiteSpace(doc.PathName) ? "(unsaved)" : doc.PathName,
             ActiveView = view?.Name ?? "(none)",
             ViewType = view?.ViewType.ToString() ?? "",
-            ExtractedAt = DateTime.UtcNow.ToString("o")
+            ExtractedAt = DateTime.UtcNow.ToString("o"),
+            ExtractorVersion = "4"
         };
 
         IList<Element> elements = CollectProjectElements(doc);
 
         payload.Lines = BuildLines(doc, elements);
         payload.Instances = BuildInstances(doc, elements);
+        try
+        {
+            payload.Families = BuildFamilies(doc, elements);
+        }
+        catch (Exception)
+        {
+            payload.Families = [];
+        }
         payload.SketchForms = BuildSketchForms(doc, elements);
 
         if (payload.SketchForms.Count == 0 && doc.IsFamilyDocument)
@@ -68,6 +76,24 @@ public static class BomExtractor
         if (!doc.IsFamilyDocument)
         {
             payload.Plans = BuildPlanSketches(doc, view);
+            try
+            {
+                payload.Views = BuildViews(doc, view);
+            }
+            catch (Exception)
+            {
+                payload.Views = [];
+            }
+
+            try
+            {
+                payload.Sheets = BuildSheets(doc);
+            }
+            catch (Exception)
+            {
+                payload.Sheets = [];
+            }
+
             PlanSketch? shown = payload.Plans.FirstOrDefault(p => p.IsActive)
                                 ?? payload.Plans.FirstOrDefault();
             if (shown is not null)
@@ -90,6 +116,90 @@ public static class BomExtractor
         return new FilteredElementCollector(doc)
             .WhereElementIsNotElementType()
             .ToElements();
+    }
+
+    private static List<LoadedFamilyType> BuildFamilies(Document doc, IEnumerable<Element> instances)
+    {
+        var placed = new Dictionary<ElementId, int>();
+        foreach (Element element in instances)
+        {
+            ElementId typeId = element.GetTypeId();
+            if (typeId == ElementId.InvalidElementId)
+            {
+                continue;
+            }
+
+            placed[typeId] = placed.GetValueOrDefault(typeId) + 1;
+        }
+
+        var families = new List<LoadedFamilyType>();
+        foreach (ElementType type in new FilteredElementCollector(doc)
+                     .WhereElementIsElementType()
+                     .OfClass(typeof(ElementType))
+                     .Cast<ElementType>())
+        {
+            try
+            {
+                if (type is ViewFamilyType)
+                {
+                    continue;
+                }
+
+                Category? cat = type.Category;
+                if (cat is null)
+                {
+                    continue;
+                }
+
+                if (cat.CategoryType is not (CategoryType.Model or CategoryType.Annotation))
+                {
+                    continue;
+                }
+
+                families.Add(new LoadedFamilyType
+                {
+                    Id = type.Id.Value.ToString(),
+                    Category = cat.Name,
+                    Family = type.FamilyName,
+                    Type = type.Name,
+                    Kind = FamilyKind(type),
+                    PlacedCount = placed.GetValueOrDefault(type.Id)
+                });
+            }
+            catch (Autodesk.Revit.Exceptions.InvalidOperationException)
+            {
+            }
+            catch (ArgumentException)
+            {
+            }
+        }
+
+        return families
+            .OrderBy(f => f.Category, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(f => f.Family, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(f => f.Type, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static string FamilyKind(ElementType type)
+    {
+        if (type is FamilySymbol symbol)
+        {
+            try
+            {
+                if (symbol.Family?.IsInPlace == true)
+                {
+                    return "In-place";
+                }
+            }
+            catch (Autodesk.Revit.Exceptions.InvalidOperationException)
+            {
+            }
+
+            return "Component";
+        }
+
+        return type.Category?.CategoryType == CategoryType.Annotation ? "Annotation" : "System";
     }
 
     private static List<PlanSketch> BuildPlanSketches(Document doc, View? activeView)
@@ -133,6 +243,151 @@ public static class BomExtractor
     private static bool IsExtractablePlan(ViewType viewType) =>
         viewType is ViewType.FloorPlan or ViewType.EngineeringPlan or ViewType.CeilingPlan;
 
+    private static List<DocumentViewInfo> BuildViews(Document doc, View? activeView)
+    {
+        Dictionary<ElementId, string> sheetByView = SheetNumbersByView(doc);
+        ElementId? activeId = activeView?.Id;
+        var views = new List<DocumentViewInfo>();
+
+        foreach (View view in new FilteredElementCollector(doc).OfClass(typeof(View)).Cast<View>())
+        {
+            try
+            {
+                if (!IsBrowsableView(view))
+                {
+                    continue;
+                }
+
+                views.Add(new DocumentViewInfo
+                {
+                    Id = view.Id.Value.ToString(),
+                    Name = view.Name,
+                    ViewType = view.ViewType.ToString(),
+                    ViewFamily = ViewFamilyName(doc, view),
+                    Level = AssociatedLevelName(view),
+                    Scale = ViewScale(view),
+                    SheetNumber = sheetByView.TryGetValue(view.Id, out string? number) ? number : "",
+                    IsActive = activeId is not null && view.Id == activeId
+                });
+            }
+            catch (Autodesk.Revit.Exceptions.InvalidOperationException)
+            {
+            }
+            catch (ArgumentException)
+            {
+            }
+        }
+
+        return views
+            .OrderBy(v => v.ViewType, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(v => v.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static List<DocumentSheetInfo> BuildSheets(Document doc)
+    {
+        var sheets = new List<DocumentSheetInfo>();
+        foreach (ViewSheet sheet in CollectSheets(doc))
+        {
+            try
+            {
+                (string family, string type) = TitleBlock(doc, sheet);
+                sheets.Add(new DocumentSheetInfo
+                {
+                    Id = sheet.Id.Value.ToString(),
+                    Number = sheet.SheetNumber,
+                    Name = sheet.Name,
+                    TitleBlockFamily = family,
+                    TitleBlockType = type,
+                    Views = sheet.GetAllPlacedViews()
+                        .Select(id => doc.GetElement(id))
+                        .OfType<View>()
+                        .Select(v => v.Name)
+                        .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+                        .ToList()
+                });
+            }
+            catch (Autodesk.Revit.Exceptions.InvalidOperationException)
+            {
+            }
+            catch (ArgumentException)
+            {
+            }
+        }
+
+        return sheets;
+    }
+
+    private static IEnumerable<ViewSheet> CollectSheets(Document doc)
+    {
+        return new FilteredElementCollector(doc)
+            .OfClass(typeof(ViewSheet))
+            .Cast<ViewSheet>()
+            .Where(s => !s.IsTemplate)
+            .OrderBy(s => s.SheetNumber, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(s => s.Name, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static Dictionary<ElementId, string> SheetNumbersByView(Document doc)
+    {
+        var map = new Dictionary<ElementId, string>();
+        foreach (ViewSheet sheet in CollectSheets(doc))
+        {
+            foreach (ElementId viewId in sheet.GetAllPlacedViews())
+            {
+                map[viewId] = sheet.SheetNumber;
+            }
+        }
+
+        return map;
+    }
+
+    private static (string Family, string Type) TitleBlock(Document doc, ViewSheet sheet)
+    {
+        FamilyInstance? title = new FilteredElementCollector(doc, sheet.Id)
+            .OfCategory(BuiltInCategory.OST_TitleBlocks)
+            .WhereElementIsNotElementType()
+            .OfType<FamilyInstance>()
+            .FirstOrDefault();
+
+        if (title?.Symbol is null)
+        {
+            return ("", "");
+        }
+
+        return (title.Symbol.FamilyName, title.Symbol.Name);
+    }
+
+    private static bool IsBrowsableView(View view) =>
+        !view.IsTemplate
+        && view is not ViewSheet
+        && view.ViewType is not ViewType.Internal
+            and not ViewType.ProjectBrowser
+            and not ViewType.SystemBrowser
+            and not ViewType.Undefined;
+
+    private static string ViewFamilyName(Document doc, View view)
+    {
+        return doc.GetElement(view.GetTypeId()) is ViewFamilyType familyType
+            ? familyType.ViewFamily.ToString()
+            : view.ViewType.ToString();
+    }
+
+    private static string AssociatedLevelName(View view) =>
+        view is ViewPlan plan ? plan.GenLevel?.Name ?? "" : "";
+
+    private static string ViewScale(View view)
+    {
+        try
+        {
+            return view.Scale > 0 ? $"1:{view.Scale}" : "";
+        }
+        catch (Autodesk.Revit.Exceptions.InvalidOperationException)
+        {
+            return "";
+        }
+    }
+
     private static string DisciplineName(ViewType viewType) =>
         viewType switch
         {
@@ -157,6 +412,11 @@ public static class BomExtractor
 
         foreach (Element element in elements)
         {
+            if (element is CurveElement or GenericForm or View)
+            {
+                continue;
+            }
+
             if (!TryDescribe(doc, element, out string category, out string family, out string type, out string unit))
             {
                 continue;
@@ -210,14 +470,13 @@ public static class BomExtractor
 
         foreach (Element element in elements)
         {
-            Category? cat = element.Category;
-            if (cat is null)
+            if (element is CurveElement or GenericForm or View)
             {
                 continue;
             }
 
-            BuiltInCategory bic = (BuiltInCategory)cat.Id.Value;
-            if (bic is not (BuiltInCategory.OST_Walls or BuiltInCategory.OST_Floors or BuiltInCategory.OST_Roofs))
+            Category? cat = element.Category;
+            if (cat is null)
             {
                 continue;
             }
@@ -248,7 +507,7 @@ public static class BomExtractor
 
             if (TryLength(element, out double length))
             {
-                item.Length = Math.Round(length, 4);
+                item.Length = Math.Round(length, 1);
             }
 
             if (TryArea(element, out double area))
@@ -263,7 +522,7 @@ public static class BomExtractor
 
             if (TryPerimeter(element, out double perimeter))
             {
-                item.Perimeter = Math.Round(perimeter, 4);
+                item.Perimeter = Math.Round(perimeter, 1);
             }
 
             instances.Add(item);
@@ -363,11 +622,48 @@ public static class BomExtractor
                        ?? element.get_Parameter(BuiltInParameter.ROOM_PERIMETER);
         if (p is { HasValue: true } && p.StorageType == StorageType.Double)
         {
-            perimeter = ToMeters(p.AsDouble());
+            perimeter = Math.Round(ToMillimeters(p.AsDouble()), 1);
             return perimeter > 0;
         }
 
         return false;
+    }
+
+    private static bool IsTakeoffElement(Document doc, Element element, BuiltInCategory bic, Category cat)
+    {
+        if (doc.IsFamilyDocument)
+        {
+            return true;
+        }
+
+        if (element is Room or Area)
+        {
+            return true;
+        }
+
+        if (SkipTakeoffCategories.Contains(bic))
+        {
+            return false;
+        }
+
+        string name = bic.ToString();
+        if (name.StartsWith("OST_IOS", StringComparison.Ordinal)
+            || name.StartsWith("OST_Sketch", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (cat.CategoryType != CategoryType.Model)
+        {
+            return false;
+        }
+
+        return element is FamilyInstance
+            or HostObject
+            or MEPCurve
+            or Opening
+            or InsulationLiningBase
+            or SpatialElement;
     }
 
     private static bool TryDescribe(
@@ -397,7 +693,7 @@ public static class BomExtractor
             category = "Sketch curve";
             family = curve.LineStyle?.Name ?? curve.GetType().Name;
             type = curve.GeometryCurve?.GetType().Name ?? "Curve";
-            unit = "m";
+            unit = "mm";
             return true;
         }
 
@@ -408,14 +704,7 @@ public static class BomExtractor
         }
 
         BuiltInCategory bic = (BuiltInCategory)cat.Id.Value;
-        bool isFamilyDoc = doc.IsFamilyDocument;
-        if (!isFamilyDoc && !ProjectCategories.Contains(bic) && element is not Room)
-        {
-            return false;
-        }
-
-        if (!isFamilyDoc && element is not FamilyInstance && element is not HostObject && element is not Room
-            && element is not MEPCurve)
+        if (!IsTakeoffElement(doc, element, bic, cat))
         {
             return false;
         }
@@ -435,10 +724,12 @@ public static class BomExtractor
         return category switch
         {
             BuiltInCategory.OST_Walls or BuiltInCategory.OST_DuctCurves or BuiltInCategory.OST_PipeCurves
-                => "m",
+                or BuiltInCategory.OST_Conduit or BuiltInCategory.OST_CableTray
+                or BuiltInCategory.OST_FlexDuctCurves or BuiltInCategory.OST_FlexPipeCurves
+                => "mm",
             BuiltInCategory.OST_Floors or BuiltInCategory.OST_Rooms or BuiltInCategory.OST_Ceilings
                 or BuiltInCategory.OST_Roofs => "m2",
-            _ => element is CurveElement ? "m" : "ea"
+            _ => element is CurveElement ? "mm" : "ea"
         };
     }
 
@@ -449,13 +740,13 @@ public static class BomExtractor
                        ?? element.get_Parameter(BuiltInParameter.INSTANCE_LENGTH_PARAM);
         if (p is { HasValue: true } && p.StorageType == StorageType.Double)
         {
-            length = ToMeters(p.AsDouble());
+            length = Math.Round(ToMillimeters(p.AsDouble()), 1);
             return length > 0;
         }
 
         if (element is CurveElement curve && curve.GeometryCurve is not null)
         {
-            length = ToMeters(curve.GeometryCurve.Length);
+            length = Math.Round(ToMillimeters(curve.GeometryCurve.Length), 1);
             return length > 0;
         }
 
@@ -537,7 +828,7 @@ public static class BomExtractor
             ElementId = extrusion.Id.Value.ToString(),
             Name = extrusion.Name,
             IsSolid = extrusion.IsSolid,
-            Depth = ToMeters(Math.Abs(extrusion.EndOffset - extrusion.StartOffset)),
+            Depth = Math.Round(ToMillimeters(Math.Abs(extrusion.EndOffset - extrusion.StartOffset)), 0),
             Volume = SolidVolume(extrusion),
             Material = MaterialName(doc, extrusion)
         };
@@ -696,31 +987,31 @@ public static class BomExtractor
         Parameter? p = wall.get_Parameter(BuiltInParameter.WALL_USER_HEIGHT_PARAM);
         if (p is { HasValue: true } && p.StorageType == StorageType.Double)
         {
-            double height = ToMeters(p.AsDouble());
+            double height = ToMillimeters(p.AsDouble());
             if (height > 0)
             {
-                return Math.Round(height, 3);
+                return Math.Round(height, 0);
             }
         }
 
-        return 2.8;
+        return 2800;
     }
 
     private static double RoomHeight(Room room)
     {
         try
         {
-            double unbounded = ToMeters(room.UnboundedHeight);
-            if (unbounded > 0.1)
+            double unbounded = ToMillimeters(room.UnboundedHeight);
+            if (unbounded > 100)
             {
-                return Math.Round(unbounded, 3);
+                return Math.Round(unbounded, 0);
             }
         }
         catch (Autodesk.Revit.Exceptions.InvalidOperationException)
         {
         }
 
-        return 2.8;
+        return 2800;
     }
 
     private static SketchForm? FromDoor(FamilyInstance door)
@@ -750,7 +1041,7 @@ public static class BomExtractor
         var arc = new SketchCurve
         {
             Kind = "Arc",
-            Length = ToMeters(width * Math.PI * 0.5),
+            Length = Math.Round(ToMillimeters(width * Math.PI * 0.5), 1),
             Start = Point(hinge),
             End = Point(swing)
         };
@@ -760,7 +1051,7 @@ public static class BomExtractor
             Kind = "Opening",
             ElementId = door.Id.Value.ToString(),
             Name = door.Name,
-            Depth = OpeningHeightMeters(door, BuiltInParameter.DOOR_HEIGHT, 2.1),
+            Depth = OpeningHeightMillimeters(door, BuiltInParameter.DOOR_HEIGHT, 2100),
             Sill = 0,
             ProfileLoops =
             [
@@ -805,8 +1096,8 @@ public static class BomExtractor
             Kind = "Window",
             ElementId = window.Id.Value.ToString(),
             Name = window.Name,
-            Depth = OpeningHeightMeters(window, BuiltInParameter.WINDOW_HEIGHT, 1.2),
-            Sill = WindowSillMeters(window),
+            Depth = OpeningHeightMillimeters(window, BuiltInParameter.WINDOW_HEIGHT, 1200),
+            Sill = WindowSillMillimeters(window),
             ProfileLoops =
             [
                 new SketchLoop
@@ -823,37 +1114,37 @@ public static class BomExtractor
         };
     }
 
-    private static double OpeningHeightMeters(FamilyInstance instance, BuiltInParameter heightParam, double fallbackMeters)
+    private static double OpeningHeightMillimeters(FamilyInstance instance, BuiltInParameter heightParam, double fallbackMm)
     {
         Parameter? parameter = instance.Symbol.get_Parameter(heightParam)
                                ?? instance.get_Parameter(heightParam)
                                ?? instance.Symbol.LookupParameter("Height");
         if (parameter is { HasValue: true } && parameter.StorageType == StorageType.Double)
         {
-            double value = ToMeters(parameter.AsDouble());
+            double value = ToMillimeters(parameter.AsDouble());
             if (value > 0)
             {
-                return Math.Round(value, 3);
+                return Math.Round(value, 0);
             }
         }
 
-        return fallbackMeters;
+        return fallbackMm;
     }
 
-    private static double WindowSillMeters(FamilyInstance window)
+    private static double WindowSillMillimeters(FamilyInstance window)
     {
         Parameter? parameter = window.get_Parameter(BuiltInParameter.INSTANCE_SILL_HEIGHT_PARAM)
                                ?? window.LookupParameter("Sill Height");
         if (parameter is { HasValue: true } && parameter.StorageType == StorageType.Double)
         {
-            double value = ToMeters(parameter.AsDouble());
+            double value = ToMillimeters(parameter.AsDouble());
             if (value >= 0)
             {
-                return Math.Round(value, 3);
+                return Math.Round(value, 0);
             }
         }
 
-        return 0.9;
+        return 900;
     }
 
     private static double OpeningWidth(FamilyInstance instance, BuiltInParameter widthParam, double fallbackMeters)
@@ -878,7 +1169,7 @@ public static class BomExtractor
         var sc = new SketchCurve
         {
             Kind = curve is Line ? "Line" : curve is Arc ? "Arc" : curve.GetType().Name,
-            Length = ToMeters(curve.Length)
+            Length = Math.Round(ToMillimeters(curve.Length), 1)
         };
 
         if (curve.IsBound)
@@ -943,6 +1234,9 @@ public static class BomExtractor
 
     private static double ToMeters(double internalValue) =>
         UnitUtils.ConvertFromInternalUnits(internalValue, UnitTypeId.Meters);
+
+    private static double ToMillimeters(double internalValue) =>
+        UnitUtils.ConvertFromInternalUnits(internalValue, UnitTypeId.Millimeters);
 
     private static double ToSquareMeters(double internalValue) =>
         UnitUtils.ConvertFromInternalUnits(internalValue, UnitTypeId.SquareMeters);

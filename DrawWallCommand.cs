@@ -122,7 +122,7 @@ public class DrawWallCommand : IExternalCommand
             }
         }
 
-        return UnitUtils.ConvertToInternalUnits(3.0, UnitTypeId.Meters);
+        return UnitUtils.ConvertToInternalUnits(3000.0, UnitTypeId.Millimeters);
     }
 
     private static Level? NextLevel(Level level)

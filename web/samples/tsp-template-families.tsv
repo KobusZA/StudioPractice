@@ -1,0 +1,121 @@
+# Transcribed from the customer's Revit family report for APP DEVELOPMENT TRAIL PROJECT.
+# Model categories with at least one placed instance only; annotation, detail and
+# unused system types are omitted because they cannot become SKUs.
+#
+# This file is a stand-in. Running Export Catalog in Revit produces the real
+# sp.catalog/1 with parameters and materials, which supersedes it.
+#
+# Category	Family	Type	Kind	Placed
+Ceilings	Compound Ceiling	9mm Plastered Ceilings	System	4
+Doors	TSP_Door-Double-Sliding	1800 x 2100mm	Component	4
+Doors	TSP_Door-Garage-Embossed_Panel	4800 x 2100mm	Component	1
+Doors	TSP_Door-Interior-Single-4_Panel-Wood	850 x 2100mm	Component	6
+Doors	TSP_Door-Interior-Single-4_Panel-Wood	900 x 2000mm	Component	2
+Doors	TSP_Door-Interior-Single-4_Panel-Wood	900 x 2100mm	Component	1
+Doors	TSP_Door-Interior-Single-Pocket-2_Panel-Wood	850 x 2100mm	Component	1
+Doors	TSP_Door-Passage-Single-Two_Lite_Narrow	900 x 2400mm	Component	1
+Electrical Fixtures	TSP 16x3 SWA Elect Feeder Cable	TSP 16x3 SWA Elect Feeder Cable	Component	3
+Electrical Fixtures	TSP 16x4 SWA Elect Feeder Cable	TSP 16x4 SWA Elect Feeder Cable	Component	4
+Electrical Fixtures	TSP 220V Light points in ceiling	TSP 220V Light points in ceiling	Component	1
+Electrical Fixtures	TSP 220V Light points in slab_flat roof	TSP 220V Light points in slab_flat roof	Component	1
+Electrical Fixtures	TSP AC Point 24,000-30,000 BTU	TSP AC Point 24,000-30,000 BTU	Component	1
+Electrical Fixtures	TSP AC Point 36,000-48,000 BTU	TSP AC Point 36,000-48,000 BTU	Component	1
+Electrical Fixtures	TSP AC Point 60,000 BTU	TSP AC Point 60,000 BTU	Component	1
+Electrical Fixtures	TSP AC Point 9,000-18,000 BTU	TSP AC Point 9,000-18,000 BTU	Component	1
+Electrical Fixtures	TSP Alarm points-Beams outside	TSP Alarm points-Beams outside	Component	2
+Electrical Fixtures	TSP Bathroom Extractor Point-Ceiling	TSP Bathroom Extractor Point-Ceiling	Component	1
+Electrical Fixtures	TSP Bathroom Extractor Point-Wall	TSP Bathroom Extractor Point-Wall	Component	1
+Electrical Fixtures	TSP Bonding & Earthing	TSP Bonding & Earthing	Component	1
+Electrical Fixtures	TSP Braai LightPoint	TSP Braai LightPoint	Component	1
+Electrical Fixtures	TSP Ceiling or Wall fan	TSP Ceiling or Wall fan	Component	1
+Electrical Fixtures	TSP Data Points	TSP Data Points	Component	1
+Electrical Fixtures	TSP DB Board 1Ph	TSP DB Board 1Ph	Component	1
+Electrical Fixtures	TSP DB Board 3Ph	TSP DB Board 3Ph	Component	1
+Electrical Fixtures	TSP Dimmers	TSP Dimmers	Component	1
+Electrical Fixtures	TSP Double Plug	TSP Double Plug	Component	1
+Electrical Fixtures	TSP Double Plug Water resistant	TSP Double Plug Water resistant	Component	1
+Electrical Fixtures	TSP Double Plug.0001	TSP Double Plug.0001	Component	1
+Electrical Fixtures	TSP Downlighter For Garage Door	TSP Downlighter For Garage Door	Component	1
+Electrical Fixtures	TSP Downlighter in Ceiling	TSP Downlighter in Ceiling	Component	1
+Electrical Fixtures	TSP Downlighter in Slab	TSP Downlighter in Slab	Component	1
+Electrical Fixtures	TSP Elec COC	TSP Elec COC	Component	1
+Electrical Fixtures	TSP Extractor Fan Point Stove	TSP Extractor Fan Point Stove	Component	1
+Electrical Fixtures	TSP Fiber-connection point external	TSP Fiber-connection point external	Component	1
+Electrical Fixtures	TSP Floor light points	TSP Floor light points	Component	1
+Electrical Fixtures	TSP Footlight points	TSP Footlight points	Component	1
+Electrical Fixtures	TSP Four-way switching	TSP Four-way switching	Component	1
+Electrical Fixtures	TSP Garden Lights or Pool Light switch	TSP Garden Lights or Pool Light switch	Component	1
+Electrical Fixtures	TSP Gate Motor Point	TSP Gate Motor Point	Component	1
+Electrical Fixtures	TSP Geyser Electrcical 150L	TSP Geyser Electrcical 150L	Component	1
+Electrical Fixtures	TSP Geyser Electrcical 200L	TSP Geyser Electrcical 200L	Component	1
+Electrical Fixtures	TSP Geyser Electrcical 250L	TSP Geyser Electrcical 250L	Component	1
+Electrical Fixtures	TSP Geyser Electrcical 300L	TSP Geyser Electrcical 300L	Component	1
+Electrical Fixtures	TSP Geyser Solar 150L	TSP Geyser Solar 150L	Component	1
+Electrical Fixtures	TSP Geyser Solar 200L	TSP Geyser Solar 200L	Component	1
+Electrical Fixtures	TSP Geyser Solar 250L	TSP Geyser Solar 250L	Component	1
+Electrical Fixtures	TSP Geyser Solar 300L	TSP Geyser Solar 300L	Component	1
+Electrical Fixtures	TSP Heated Pool and Jacuzzi Supply only	TSP Heated Pool and Jacuzzi Supply only	Component	1
+Electrical Fixtures	TSP Heated Towel Rail Point	TSP Heated Towel Rail Point	Component	1
+Electrical Fixtures	TSP Intercom Point	TSP Intercom Point	Component	1
+Electrical Fixtures	TSP LED Stip Light	TSP LED Stip Light	Component	1
+Electrical Fixtures	TSP LightPoint-Double Volume	TSP LightPoint-Double Volume	Component	1
+Electrical Fixtures	TSP LightPoint-Pendant_Chandelier DV	TSP LightPoint-Pendant_Chandelier DV	Component	1
+Electrical Fixtures	TSP Pool supply-not heated	TSP Pool supply-not heated	Component	1
+Electrical Fixtures	TSP Recessed Floor Light Point	TSP Recessed Floor Light Point	Component	2
+Electrical Fixtures	TSP Sauna Supply only	TSP Sauna Supply only	Component	1
+Electrical Fixtures	TSP Shaver Plug	TSP Shaver Plug	Component	1
+Electrical Fixtures	TSP Single Plug	TSP Single Plug	Component	1
+Electrical Fixtures	TSP Single Plug Ceiling	TSP Single Plug Ceiling	Component	1
+Electrical Fixtures	TSP Single Plug Slab	TSP Single Plug Slab	Component	1
+Electrical Fixtures	TSP Smart Living Comms Box	TSP Smart Living Comms Box	Component	1
+Electrical Fixtures	TSP Solar tubing to roof and Solar system	TSP Solar tubing to roof and Solar system	Component	1
+Electrical Fixtures	TSP Speaker points-Ceiling	TSP Speaker points-Ceiling	Component	1
+Electrical Fixtures	TSP Speaker points-Wall	TSP Speaker points-Wall	Component	1
+Electrical Fixtures	TSP Steam Shower Point	TSP Steam Shower Point	Component	1
+Electrical Fixtures	TSP Stove, oven and extractor fan point	TSP Stove, oven and extractor fan point	Component	1
+Electrical Fixtures	TSP Strip light or Cable system Light Point	TSP Strip light or Cable system Light Point	Component	1
+Electrical Fixtures	TSP SUB DB Board 1Ph	TSP SUB DB Board 1Ph	Component	1
+Electrical Fixtures	TSP SUB DB Board 3Ph	TSP SUB DB Board 3Ph	Component	1
+Electrical Fixtures	TSP Submersible Light Point	TSP Submersible Light Point	Component	1
+Electrical Fixtures	TSP Telephone points	TSP Telephone points	Component	1
+Electrical Fixtures	TSP Telkom-connection point external	TSP Telkom-connection point external	Component	1
+Electrical Fixtures	TSP Three-way switching	TSP Three-way switching	Component	1
+Electrical Fixtures	TSP TV points	TSP TV points	Component	1
+Electrical Fixtures	TSP TV-connection point external	TSP TV-connection point external	Component	1
+Electrical Fixtures	TSP Two-way switching	TSP Two-way switching	Component	1
+Electrical Fixtures	TSP Underfloor heating points	TSP Underfloor heating points	Component	1
+Electrical Fixtures	TSP Wall light points	TSP Wall light points	Component	1
+Electrical Fixtures	TSPDay and Night Switches	TSPDay and Night Switches	Component	1
+Floors	Floor	170mm Slab - Balcony	System	1
+Floors	Floor	170mm Slab - Roof	System	1
+Floors	Floor	Generic 255mm	System	1
+Floors	Floor	Generic 85mm	System	5
+Floors	Floor	Pool Concrete floor 170mm	System	1
+Plumbing Fixtures	TSP 110mm Sewer Pipe	110 dia	Component	7
+Plumbing Fixtures	TSP Closed Couple WC	Closed Couple	Component	1
+Plumbing Fixtures	TSP Main Water Supply Line HDPE	HDPE Fresh Water Supply	Component	8
+Plumbing Fixtures	TSP Toilet 3D Wall Based	Closed Couple	Component	4
+Plumbing Fixtures	TSP Washing Machine	Washing Machine	Component	1
+Plumbing Fixtures	TSP_Bath Tub - Maestro	1675 mmx915 mm - Built in	Component	1
+Plumbing Fixtures	TSP_Minimal_Hand_Wash_Basin_16201	WHB	Component	4
+Plumbing Fixtures	TSP_Shower Stall - Rectangular	915 mmx915 mm - Private	Component	4
+Plumbing Fixtures	TSP_Sink - Kitchen - Double	1065 mmx535 mm - Private	Component	1
+Plumbing Fixtures	TSP_Sink Vanity-Round	482 x 482mm	Component	1
+Plumbing Fixtures	TSP_Tub-Free Standing-3D	760 x 1525mm	Component	1
+Roofs	Basic Roof	Generic - 125mm	System	4
+Roofs	Basic Roof	Generic - 225mm	System	1
+Specialty Equipment	TSP_Dishwasher	600mm	Component	1
+Stairs	Cast-In-Place Stair	TSP_Monolithic Stair	System	1
+Structural Columns	Concrete-Rectangular-Column	450 x 450mm	Component	3
+Structural Columns	Concrete-Rectangular-Column	450 x 600mm	Component	1
+Structural Foundations	Wall Foundation	Bearing Footing - 600X200 mm	System	29
+Walls	Basic Wall	Masonary wall 110mm (plaster)	System	27
+Walls	Basic Wall	Masonary wall 220mm (plaster)	System	33
+Walls	Basic Wall	Masonary wall 220mm Foundation (No-plaster)	System	10
+Walls	Basic Wall	Masonary wall 220mm Foundation Perimeter (plaster)	System	15
+Walls	Basic Wall	Pool Masonry wall 220mm (plaster)	System	4
+Windows	TSP_Window-Casement-Triple-Side-Transom	2150 x 1500mm	Component	1
+Windows	TSP_Window-Fixed	1650x 1650mm	Component	1
+Windows	TSP_Window-Fixed	600 x 900mm	Component	8
+Windows	TSP_Window-Fixed	900 x 1650mm	Component	9
+Windows	TSP_Window-Fixed	900 x 900mm	Component	2

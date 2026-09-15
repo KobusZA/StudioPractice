@@ -1,6 +1,7 @@
 using System.IO;
 using System.Windows.Media.Imaging;
 using Autodesk.Revit.UI;
+using Autodesk.Revit.UI.Events;
 
 namespace StudioPractice.RevitConnector;
 
@@ -10,6 +11,7 @@ public class App : IExternalApplication
     public const string PanelName = "Connector";
 
     private LocalConnectorHost? _host;
+    private UIControlledApplication? _ui;
 
     public Result OnStartup(UIControlledApplication application)
     {
@@ -66,6 +68,14 @@ public class App : IExternalApplication
         bom.ToolTip = "Extract BOM and floor-plan sketch, save JSON, and serve it to the web app on port 17300.";
         AssignIcons(bom, "SendToApp32.png", "SendToApp16.png");
 
+        var catalog = new PushButtonData(
+            "StudioPractice.ExportCatalog",
+            "Export\nCatalog",
+            assemblyPath,
+            "StudioPractice.RevitConnector.ExportCatalogCommand");
+        catalog.ToolTip = "Dump every wall, floor, roof, door, window and fixture type in this template to type-catalog.json, so the web app's SKU pack can be regenerated from the firm's own file.";
+        AssignIcons(catalog, "SendToApp32.png", "SendToApp16.png");
+
         var info = new PushButtonData(
             "StudioPractice.DocumentInfo",
             "Document\nInfo",
@@ -73,6 +83,13 @@ public class App : IExternalApplication
             "StudioPractice.RevitConnector.DocumentInfoCommand");
         info.ToolTip = "Reads the open model's title, path, and active view.";
         AssignIcons(info, "DocumentInfo32.png", "DocumentInfo16.png");
+
+        var reload = new PushButtonData(
+            "StudioPractice.ReloadConnector",
+            "Reload\nAdd-in",
+            assemblyPath,
+            "StudioPractice.RevitConnector.ReloadConnectorCommand");
+        reload.ToolTip = "Load a newer connector DLL without closing Revit. Use this after a rebuild while Revit is still open.";
 
         var about = new PushButtonData(
             "StudioPractice.About",
@@ -144,7 +161,9 @@ public class App : IExternalApplication
         panel.AddItem(drawWall);
         panel.AddItem(placeRoom);
         panel.AddItem(bom);
+        panel.AddItem(catalog);
         panel.AddItem(info);
+        panel.AddItem(reload);
         panel.AddItem(about);
 
         try
@@ -157,7 +176,27 @@ public class App : IExternalApplication
             _host = null;
         }
 
+        _ui = application;
+        application.Idling += OnFirstIdle;
+
         return Result.Succeeded;
+    }
+
+    private void OnFirstIdle(object? sender, IdlingEventArgs e)
+    {
+        if (_ui is not null)
+        {
+            _ui.Idling -= OnFirstIdle;
+            _ui = null;
+        }
+
+        try
+        {
+            ConnectorHotSwap.OfferIfNewer();
+        }
+        catch (Exception)
+        {
+        }
     }
 
     public Result OnShutdown(UIControlledApplication application)
@@ -194,7 +233,7 @@ public class App : IExternalApplication
             button.Image = small;
     }
 
-    private static BitmapImage? LoadIcon(string fileName)
+    internal static BitmapImage? LoadIcon(string fileName)
     {
         var assembly = typeof(App).Assembly;
         using Stream? stream = assembly.GetManifestResourceStream(

@@ -1,8 +1,7 @@
+using System.IO;
 using Autodesk.Revit.Attributes;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
-using StudioPractice.RevitConnector.Extraction;
-using StudioPractice.RevitConnector.Models;
 
 namespace StudioPractice.RevitConnector;
 
@@ -14,17 +13,19 @@ public class ExtractBomCommand : IExternalCommand
     {
         try
         {
-            BomPayload payload = BomExtractor.Extract(commandData.Application);
-            string path = BomJson.Write(payload);
+            string json = ConnectorHotSwap.ExtractJson(commandData.Application);
+            string path = BomJson.OutputPath;
+            if (!File.Exists(path) && !string.IsNullOrEmpty(json))
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                File.WriteAllText(path, json);
+            }
 
             var dialog = new TaskDialog("StudioPractice Connector")
             {
                 MainInstruction = "Sent to the connector",
                 MainContent =
-                    $"{payload.DocumentKind}: {payload.Title}\n" +
-                    $"View: {payload.ActiveView} ({payload.ViewType})\n" +
-                    $"BOM lines: {payload.Lines.Count}\n" +
-                    $"Sketch forms: {payload.SketchForms.Count}\n\n" +
+                    ConnectorHotSwap.Summarize(json) + "\n\n" +
                     $"Saved to:\n{path}\n\n" +
                     "In the web app, click Import from Revit (connector port 17300).",
                 CommonButtons = TaskDialogCommonButtons.Ok

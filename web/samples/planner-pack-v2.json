@@ -1,0 +1,934 @@
+{
+  "schema": "sp.pack/3",
+  "id": "house-masonry",
+  "name": "TSP masonry pack",
+  "version": "2.0.0",
+  "revision": "2026-09-15",
+  "migratedFrom": "sp.pack/1",
+  "locale": {
+    "country": "ZA",
+    "municipality": null,
+    "energyZone": null
+  },
+  "system": {
+    "wallHeight": 2800,
+    "defaultWallSku": "TSP_MAS009",
+    "defaultFloorSku": "TSP_RB016",
+    "defaultFoundationSku": "TSP_CON052",
+    "defaultRoofSku": "TSP_RC003",
+    "defaultCeilingSku": null,
+    "defaultLevel": "01 GFL"
+  },
+  "levels": [
+    {
+      "id": "01 GFL",
+      "name": "01 GFL",
+      "elevation": 0,
+      "floorToFloor": 2.8,
+      "floorToCeiling": null
+    },
+    {
+      "id": "02 L1",
+      "name": "02 L1",
+      "elevation": 2.8,
+      "floorToFloor": 2.8,
+      "floorToCeiling": null
+    }
+  ],
+  "skus": [
+    {
+      "id": "TSP_MAS009",
+      "name": "Masonry wall 220mm (plaster)",
+      "category": "wall",
+      "unit": "m3",
+      "draw": "wall",
+      "geometry": {
+        "thickness": 220,
+        "height": 2800
+      },
+      "cost": {
+        "rateRef": "TSP_MAS009",
+        "wasteFactor": null
+      },
+      "compliance": {
+        "rValue": null,
+        "surfaceDensity": null,
+        "plastered": true,
+        "rendered": null,
+        "cavity": null,
+        "loadBearing": null,
+        "thermalBreakRValue": null
+      },
+      "drawing": {
+        "colourClass": "masonry",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "length",
+          "area",
+          "volume",
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_MAS008",
+      "name": "Masonry wall 110mm (plaster)",
+      "category": "wall",
+      "unit": "m3",
+      "draw": "wall",
+      "geometry": {
+        "thickness": 110,
+        "height": 2800
+      },
+      "cost": {
+        "rateRef": "TSP_MAS008",
+        "wasteFactor": null
+      },
+      "compliance": {
+        "rValue": null,
+        "surfaceDensity": null,
+        "plastered": true,
+        "rendered": null,
+        "cavity": null,
+        "loadBearing": null,
+        "thermalBreakRValue": null
+      },
+      "drawing": {
+        "colourClass": "masonry",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "length",
+          "area",
+          "volume",
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_MAS007",
+      "name": "Pool masonry wall 220mm (plaster)",
+      "category": "wall",
+      "unit": "m3",
+      "draw": "wall",
+      "geometry": {
+        "thickness": 220,
+        "height": 2800
+      },
+      "cost": {
+        "rateRef": "TSP_MAS007",
+        "wasteFactor": null
+      },
+      "compliance": {
+        "rValue": null,
+        "surfaceDensity": null,
+        "plastered": true,
+        "rendered": null,
+        "cavity": null,
+        "loadBearing": null,
+        "thermalBreakRValue": null
+      },
+      "drawing": {
+        "colourClass": "masonry",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "length",
+          "area",
+          "volume",
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_CON052",
+      "name": "Masonry 220mm foundation perimeter (plaster)",
+      "category": "foundation",
+      "unit": "m3",
+      "draw": "wall",
+      "geometry": {
+        "thickness": 220,
+        "width": 400,
+        "height": 600,
+        "depth": 450
+      },
+      "cost": {
+        "rateRef": "TSP_CON052",
+        "wasteFactor": null
+      },
+      "compliance": {
+        "loadBearing": true
+      },
+      "drawing": {
+        "colourClass": "masonry",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "length",
+          "volume",
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_EW132",
+      "name": "Masonry 220mm foundation (no plaster)",
+      "category": "foundation",
+      "unit": "m3",
+      "draw": "wall",
+      "geometry": {
+        "thickness": 220,
+        "width": 400,
+        "height": 600,
+        "depth": 450
+      },
+      "cost": {
+        "rateRef": "TSP_EW132",
+        "wasteFactor": null
+      },
+      "compliance": {
+        "loadBearing": true
+      },
+      "drawing": {
+        "colourClass": "masonry",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "length",
+          "volume",
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_RB016",
+      "name": "Floor generic 85mm",
+      "category": "floor",
+      "unit": "m2",
+      "draw": "fill",
+      "geometry": {
+        "thickness": 85
+      },
+      "cost": {
+        "rateRef": "TSP_RB016",
+        "wasteFactor": null
+      },
+      "compliance": {
+        "rValue": null,
+        "suspended": null,
+        "exposed": null
+      },
+      "drawing": {
+        "colourClass": "concrete",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "area",
+          "volume",
+          "perimeter",
+          "count"
+        ],
+        "scheduleName": null
+      },
+      "defaultLevel": "01 GFL"
+    },
+    {
+      "id": "TSP_RB017",
+      "name": "170mm slab — balcony",
+      "category": "floor",
+      "unit": "m2",
+      "draw": "fill",
+      "geometry": {
+        "thickness": 170
+      },
+      "cost": {
+        "rateRef": "TSP_RB017",
+        "wasteFactor": null
+      },
+      "compliance": {
+        "rValue": null,
+        "suspended": null,
+        "exposed": null
+      },
+      "drawing": {
+        "colourClass": "concrete",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "area",
+          "volume",
+          "perimeter",
+          "count"
+        ],
+        "scheduleName": null
+      },
+      "defaultLevel": "02 L1"
+    },
+    {
+      "id": "TSP_RB018",
+      "name": "Floor generic 255mm",
+      "category": "floor",
+      "unit": "m2",
+      "draw": "fill",
+      "geometry": {
+        "thickness": 255
+      },
+      "cost": {
+        "rateRef": "TSP_RB018",
+        "wasteFactor": null
+      },
+      "compliance": {
+        "rValue": null,
+        "suspended": null,
+        "exposed": null
+      },
+      "drawing": {
+        "colourClass": "concrete",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "area",
+          "volume",
+          "perimeter",
+          "count"
+        ],
+        "scheduleName": null
+      },
+      "defaultLevel": "02 L1"
+    },
+    {
+      "id": "TSP_RB020",
+      "name": "Pool concrete floor 170mm",
+      "category": "floor",
+      "unit": "m2",
+      "draw": "fill",
+      "geometry": {
+        "thickness": 170
+      },
+      "cost": {
+        "rateRef": "TSP_RB020",
+        "wasteFactor": null
+      },
+      "compliance": {
+        "rValue": null,
+        "suspended": null,
+        "exposed": null
+      },
+      "drawing": {
+        "colourClass": "concrete",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "area",
+          "volume",
+          "perimeter",
+          "count"
+        ],
+        "scheduleName": null
+      },
+      "defaultLevel": "01 GFL"
+    },
+    {
+      "id": "TSP_RB387",
+      "name": "170mm slab — roof",
+      "category": "floor",
+      "unit": "m2",
+      "draw": "fill",
+      "geometry": {
+        "thickness": 170
+      },
+      "cost": {
+        "rateRef": "TSP_RB387",
+        "wasteFactor": null
+      },
+      "compliance": {
+        "rValue": null,
+        "suspended": null,
+        "exposed": null
+      },
+      "drawing": {
+        "colourClass": "concrete",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "area",
+          "volume",
+          "perimeter",
+          "count"
+        ],
+        "scheduleName": null
+      },
+      "defaultLevel": "02 L1"
+    },
+    {
+      "id": "TSP_RC003",
+      "name": "Basic roof 125mm",
+      "category": "roof",
+      "unit": "m2",
+      "draw": "roof",
+      "geometry": {
+        "thickness": 125
+      },
+      "cost": {
+        "rateRef": "TSP_RC003",
+        "wasteFactor": null
+      },
+      "compliance": {
+        "rValue": null,
+        "insulationRValue": null,
+        "underlay": null,
+        "radiantBarrier": null,
+        "compressible": null
+      },
+      "drawing": {
+        "colourClass": "concrete",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "area",
+          "count"
+        ],
+        "scheduleName": null
+      },
+      "defaultLevel": "01 GFL"
+    },
+    {
+      "id": "TSP_DR813",
+      "name": "Door 813 × 2032mm",
+      "category": "door",
+      "unit": "ea",
+      "draw": "door",
+      "geometry": {
+        "width": 813,
+        "height": 2032,
+        "depth": 50
+      },
+      "cost": {
+        "rateRef": "TSP_DR813",
+        "wasteFactor": null
+      },
+      "compliance": {
+        "uValue": null,
+        "external": null,
+        "sealed": null,
+        "providesVentilation": true,
+        "openableAreaFraction": 1
+      },
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      },
+      "family": "Single-Flush"
+    },
+    {
+      "id": "TSP_DR900",
+      "name": "Door 900 × 2100mm",
+      "category": "door",
+      "unit": "ea",
+      "draw": "door",
+      "geometry": {
+        "width": 900,
+        "height": 2100,
+        "depth": 50
+      },
+      "cost": {
+        "rateRef": "TSP_DR900",
+        "wasteFactor": null
+      },
+      "compliance": {
+        "uValue": null,
+        "external": null,
+        "sealed": null,
+        "providesVentilation": true,
+        "openableAreaFraction": 1
+      },
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      },
+      "family": "Single-Flush"
+    },
+    {
+      "id": "TSP_DR1020",
+      "name": "Door 1020 × 2100mm",
+      "category": "door",
+      "unit": "ea",
+      "draw": "door",
+      "geometry": {
+        "width": 1020,
+        "height": 2100,
+        "depth": 50
+      },
+      "cost": {
+        "rateRef": "TSP_DR1020",
+        "wasteFactor": null
+      },
+      "compliance": {
+        "uValue": null,
+        "external": null,
+        "sealed": null,
+        "providesVentilation": true,
+        "openableAreaFraction": 1
+      },
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      },
+      "family": "Single-Flush"
+    },
+    {
+      "id": "TSP_WN0606",
+      "name": "High window 600 × 600mm",
+      "category": "window",
+      "unit": "ea",
+      "draw": "window",
+      "geometry": {
+        "width": 600,
+        "height": 600,
+        "depth": 50,
+        "sill": 1500
+      },
+      "cost": {
+        "rateRef": "TSP_WN0606",
+        "wasteFactor": null
+      },
+      "compliance": {
+        "uValue": null,
+        "shgc": null,
+        "glazingLayers": null,
+        "sealed": null,
+        "providesLight": true,
+        "providesVentilation": false,
+        "openableAreaFraction": 0,
+        "safetyGlazed": null
+      },
+      "drawing": {
+        "colourClass": "glass",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      },
+      "family": "Fixed"
+    },
+    {
+      "id": "TSP_WN0912",
+      "name": "Window 900 × 1200mm",
+      "category": "window",
+      "unit": "ea",
+      "draw": "window",
+      "geometry": {
+        "width": 900,
+        "height": 1200,
+        "depth": 50,
+        "sill": 900
+      },
+      "cost": {
+        "rateRef": "TSP_WN0912",
+        "wasteFactor": null
+      },
+      "compliance": {
+        "uValue": null,
+        "shgc": null,
+        "glazingLayers": null,
+        "sealed": null,
+        "providesLight": true,
+        "providesVentilation": false,
+        "openableAreaFraction": 0,
+        "safetyGlazed": null
+      },
+      "drawing": {
+        "colourClass": "glass",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      },
+      "family": "Fixed"
+    },
+    {
+      "id": "TSP_WN1212",
+      "name": "Window 1200 × 1200mm",
+      "category": "window",
+      "unit": "ea",
+      "draw": "window",
+      "geometry": {
+        "width": 1200,
+        "height": 1200,
+        "depth": 50,
+        "sill": 900
+      },
+      "cost": {
+        "rateRef": "TSP_WN1212",
+        "wasteFactor": null
+      },
+      "compliance": {
+        "uValue": null,
+        "shgc": null,
+        "glazingLayers": null,
+        "sealed": null,
+        "providesLight": true,
+        "providesVentilation": false,
+        "openableAreaFraction": 0,
+        "safetyGlazed": null
+      },
+      "drawing": {
+        "colourClass": "glass",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      },
+      "family": "Fixed"
+    },
+    {
+      "id": "TSP_WN1812",
+      "name": "Window 1800 × 1200mm",
+      "category": "window",
+      "unit": "ea",
+      "draw": "window",
+      "geometry": {
+        "width": 1800,
+        "height": 1200,
+        "depth": 50,
+        "sill": 900
+      },
+      "cost": {
+        "rateRef": "TSP_WN1812",
+        "wasteFactor": null
+      },
+      "compliance": {
+        "uValue": null,
+        "shgc": null,
+        "glazingLayers": null,
+        "sealed": null,
+        "providesLight": true,
+        "providesVentilation": false,
+        "openableAreaFraction": 0,
+        "safetyGlazed": null
+      },
+      "drawing": {
+        "colourClass": "glass",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      },
+      "family": "Fixed"
+    },
+    {
+      "id": "TSP_WN2415",
+      "name": "Window 2400 × 1500mm",
+      "category": "window",
+      "unit": "ea",
+      "draw": "window",
+      "geometry": {
+        "width": 2400,
+        "height": 1500,
+        "depth": 50,
+        "sill": 900
+      },
+      "cost": {
+        "rateRef": "TSP_WN2415",
+        "wasteFactor": null
+      },
+      "compliance": {
+        "uValue": null,
+        "shgc": null,
+        "glazingLayers": null,
+        "sealed": null,
+        "providesLight": true,
+        "providesVentilation": false,
+        "openableAreaFraction": 0,
+        "safetyGlazed": null
+      },
+      "drawing": {
+        "colourClass": "glass",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      },
+      "family": "Fixed"
+    },
+    {
+      "id": "TSP_BM220",
+      "name": "Beam 220mm loadbearing",
+      "category": "beam",
+      "unit": "m",
+      "draw": "beam",
+      "geometry": {
+        "width": 110,
+        "height": 220
+      },
+      "cost": {
+        "rateRef": "TSP_BM220",
+        "wasteFactor": null
+      },
+      "compliance": {
+        "loadBearing": true
+      },
+      "drawing": {
+        "colourClass": "concrete",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "length",
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_WC001",
+      "name": "WC",
+      "category": "sanitary",
+      "unit": "ea",
+      "draw": "box",
+      "geometry": {
+        "width": 380,
+        "height": 400,
+        "depth": 650
+      },
+      "cost": {
+        "rateRef": "TSP_WC001",
+        "wasteFactor": null
+      },
+      "compliance": {
+        "dischargeType": "soil",
+        "trapDiameter": null,
+        "fixtureUnits": null,
+        "requiresGully": false,
+        "requiresVent": null
+      },
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_VAN06",
+      "name": "Vanity 600mm",
+      "category": "furniture",
+      "unit": "ea",
+      "draw": "box",
+      "geometry": {
+        "width": 600,
+        "height": 850,
+        "depth": 450
+      },
+      "cost": {
+        "rateRef": "TSP_VAN06",
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      },
+      "family": "Vanity"
+    },
+    {
+      "id": "TSP_VAN01",
+      "name": "Vanity 900mm",
+      "category": "furniture",
+      "unit": "ea",
+      "draw": "box",
+      "geometry": {
+        "width": 900,
+        "height": 850,
+        "depth": 450
+      },
+      "cost": {
+        "rateRef": "TSP_VAN01",
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      },
+      "family": "Vanity"
+    },
+    {
+      "id": "TSP_SKT01",
+      "name": "Socket outlet",
+      "category": "electrical",
+      "unit": "ea",
+      "draw": "box",
+      "geometry": {
+        "width": 86,
+        "height": 86,
+        "depth": 86
+      },
+      "cost": {
+        "rateRef": "TSP_SKT01",
+        "wasteFactor": null
+      },
+      "compliance": {},
+      "drawing": {
+        "colourClass": "other",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "count"
+        ],
+        "scheduleName": null
+      }
+    }
+  ],
+  "recipes": {
+    "requires": [
+      {
+        "whenSku": "TSP_MAS009",
+        "addSku": "TSP_CON052",
+        "per": "wallLength"
+      },
+      {
+        "whenSku": "TSP_MAS008",
+        "addSku": "TSP_CON052",
+        "per": "wallLength"
+      }
+    ],
+    "allowedHosts": {
+      "TSP_DR813": [
+        "TSP_MAS009",
+        "TSP_MAS008",
+        "TSP_MAS007"
+      ],
+      "TSP_DR900": [
+        "TSP_MAS009",
+        "TSP_MAS008",
+        "TSP_MAS007"
+      ],
+      "TSP_DR1020": [
+        "TSP_MAS009",
+        "TSP_MAS008",
+        "TSP_MAS007"
+      ],
+      "TSP_WN0606": [
+        "TSP_MAS009",
+        "TSP_MAS008"
+      ],
+      "TSP_WN0912": [
+        "TSP_MAS009",
+        "TSP_MAS008"
+      ],
+      "TSP_WN1212": [
+        "TSP_MAS009",
+        "TSP_MAS008"
+      ],
+      "TSP_WN1812": [
+        "TSP_MAS009",
+        "TSP_MAS008"
+      ],
+      "TSP_WN2415": [
+        "TSP_MAS009",
+        "TSP_MAS008"
+      ],
+      "TSP_BM220": [
+        "TSP_MAS009"
+      ]
+    },
+    "maxSpan": {
+      "TSP_BM220": 4.2
+    },
+    "minLength": {
+      "TSP_BM220": 1.2
+    }
+  }
+}

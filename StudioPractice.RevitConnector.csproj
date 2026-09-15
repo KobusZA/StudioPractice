@@ -30,8 +30,10 @@
   </ItemGroup>
 
   <Target Name="DeployAddin" AfterTargets="Build">
-    <MakeDir Directories="$(RevitAddinDir)" />
+    <MakeDir Directories="$(RevitAddinDir);$(LocalAppData)\StudioPractice.RevitConnector" />
     <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(RevitAddinDir)" SkipUnchangedFiles="true" Retries="8" RetryDelayMilliseconds="500" ContinueOnError="true" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFiles="$(RevitAddinDir)StudioPractice.RevitConnector.pending.dll" SkipUnchangedFiles="false" ContinueOnError="true" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(LocalAppData)\StudioPractice.RevitConnector" SkipUnchangedFiles="false" ContinueOnError="true" />
     <Copy SourceFiles="$(MSBuildProjectDirectory)\StudioPractice.RevitConnector.addin" DestinationFolder="$(RevitAddinDir)" SkipUnchangedFiles="true" ContinueOnError="true" />
   </Target>
 

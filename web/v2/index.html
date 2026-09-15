@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>StudioPractice — Part 3 core preview</title>
+  <link rel="icon" href="../logo.png" type="image/png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,560&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../styles.css" />
+  <link rel="stylesheet" href="./v2.css" />
+</head>
+<body>
+  <div class="chrome">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark">
+          <img class="brand-logo" src="../logo.png" alt="The Studio Practice" />
+        </div>
+        <div>
+          <h1>StudioPractice</h1>
+          <p>Part 3 — v2 core preview</p>
+        </div>
+      </div>
+      <div class="status">
+        <span class="dot" id="v2-health-dot"></span>
+        <span id="v2-health-label">Loading pack…</span>
+      </div>
+      <div class="actions">
+        <div class="seg" role="group" aria-label="Ribbon density">
+          <button type="button" data-density="simple" class="active">Simple</button>
+          <button type="button" data-density="full">Full</button>
+        </div>
+        <button type="button" id="v2-demo">Demo house</button>
+        <button type="button" id="v2-clear">Clear</button>
+        <button type="button" class="primary" id="v2-compile">Compile</button>
+      </div>
+    </header>
+    <nav class="ribbon" aria-label="Toolbars">
+      <div class="tabs ribbon-tabs" id="v2-ribbon-tabs"></div>
+      <div class="ribbon-functions" id="v2-ribbon-functions"></div>
+    </nav>
+  </div>
+
+  <main class="layout layout-planner view-page" id="v2-app">
+    <aside class="planner-palette panel">
+      <header>
+        <h2 id="v2-palette-title">Types</h2>
+        <span id="v2-pack-name">Pack</span>
+      </header>
+      <div class="planner-search">
+        <label class="visually-hidden" for="v2-search">Search types</label>
+        <input id="v2-search" type="search" placeholder="Search types" />
+      </div>
+      <div class="planner-sku-list" id="v2-sku-list"></div>
+    </aside>
+
+    <section class="panel planner-stage">
+      <header class="plan-header planner-header">
+        <h2>Plan</h2>
+        <div class="planner-tools" role="toolbar" aria-label="Tools">
+          <button type="button" data-tool="select" class="active">Select</button>
+          <button type="button" id="v2-undo">Undo</button>
+          <div class="seg" role="group" aria-label="Place as">
+            <button type="button" data-status="existing">Existing</button>
+            <button type="button" data-status="planned" class="active">Planned</button>
+          </div>
+          <span class="header-modify" id="v2-header-modify" hidden>
+            <button type="button" id="v2-hm-rotate">Rotate</button>
+            <button type="button" id="v2-hm-copy">Copy</button>
+            <button type="button" id="v2-hm-delete">Delete</button>
+          </span>
+        </div>
+      </header>
+      <div class="stage-row" id="v2-stage-row">
+        <aside class="level-widget panel" id="v2-level-widget" hidden>
+          <h2>Active cut</h2>
+          <p class="level-cut-name" id="v2-cut-name">—</p>
+          <p class="level-cut-meta">
+            <span id="v2-cut-elev">—</span>
+            <span class="level-kind-chip" id="v2-cut-kind">—</span>
+          </p>
+          <svg class="level-house" id="v2-level-house" viewBox="0 0 248 318" role="slider"
+               aria-label="Building cut" aria-orientation="vertical"
+               aria-valuemin="0" tabindex="0"></svg>
+          <p class="hint">Drag the rail, or click the section to jump. <kbd>↑</kbd> <kbd>↓</kbd> step;
+            <kbd>PgUp</kbd> <kbd>PgDn</kbd> skip a storey.</p>
+          <ul class="level-stations" id="v2-level-stations"></ul>
+        </aside>
+        <div class="canvas-wrap planner-canvas-wrap" id="v2-canvas-wrap">
+        <canvas id="v2-canvas"></canvas>
+        <div class="canvas-status">
+          <p class="ribbon-hint" id="v2-ribbon-hint" hidden></p>
+          <div class="plan-options" id="v2-plan-options" hidden>
+            <label id="v2-ctx-len-wrap">Length
+              <span class="plan-context-field">
+                <input id="v2-ctx-len" type="text" inputmode="decimal" autocomplete="off" />
+                <span>m</span>
+              </span>
+            </label>
+            <label id="v2-ctx-ang-wrap">Angle
+              <span class="plan-context-field">
+                <input id="v2-ctx-ang" type="text" inputmode="decimal" autocomplete="off" />
+                <span>°</span>
+              </span>
+            </label>
+            <label id="v2-ctx-w-wrap" hidden>Width
+              <span class="plan-context-field">
+                <input id="v2-ctx-w" type="text" inputmode="decimal" autocomplete="off" />
+                <span>m</span>
+              </span>
+            </label>
+            <label id="v2-ctx-h-wrap" hidden>Height
+              <span class="plan-context-field">
+                <input id="v2-ctx-h" type="text" inputmode="decimal" autocomplete="off" />
+                <span>m</span>
+              </span>
+            </label>
+          </div>
+        </div>
+        <div class="empty" id="v2-empty">
+          <h3>Nothing drawn</h3>
+          <p>Pick Walls, Doors or another tool on the ribbon, then a type from the list, or click Demo house to see a shared wall, an L-shaped room, a door, a window and a slab in one go.</p>
+        </div>
+        <div class="legend" id="v2-legend" hidden>
+          <span class="existing"><i></i>Existing</span>
+          <span class="planned"><i></i>Planned</span>
+        </div>
+        <div class="planner-size-hud" id="v2-size-hud" hidden>
+          <label id="v2-hud-w-label"><span id="v2-hud-w-name">Width</span>
+            <input id="v2-hud-w" type="text" inputmode="decimal" autocomplete="off" />
+          </label>
+          <span class="planner-size-times" id="v2-hud-times" aria-hidden="true">×</span>
+          <label id="v2-hud-h-label">Height
+            <input id="v2-hud-h" type="text" inputmode="decimal" autocomplete="off" />
+          </label>
+          <span class="planner-size-unit">m</span>
+          <p class="hint" id="v2-hud-hint">Drag to size, or type metres. Tab switches width / height.</p>
+        </div>
+        <div class="planner-underlay-panel" id="v2-underlay-panel" hidden>
+          <strong>Underlay</strong>
+          <label>Opacity
+            <input id="v2-underlay-opacity" type="range" min="0" max="100" step="1" />
+          </label>
+          <label>Rotation
+            <span class="plan-context-field">
+              <input id="v2-underlay-rotation" type="text" inputmode="decimal" autocomplete="off" />
+              <span>°</span>
+            </span>
+          </label>
+          <button type="button" id="v2-underlay-rotate-ccw" title="Rotate 90° left">⟲ 90°</button>
+          <button type="button" id="v2-underlay-rotate-cw" title="Rotate 90° right">⟳ 90°</button>
+          <p class="hint">Drag a corner to resize, the top handle to rotate (Shift snaps to 15°), or the sheet to move it. Hide, show and set scale live on the Build ribbon.</p>
+        </div>
+        <div class="planner-underlay-panel" id="v2-calibrate-panel" hidden>
+          <strong>Set scale</strong>
+          <p class="hint" id="v2-calibrate-hint">Click a point, then a second point a known distance away.</p>
+          <label id="v2-calibrate-distance-wrap" hidden>Real distance
+            <span class="plan-context-field">
+              <input id="v2-calibrate-distance" type="text" inputmode="decimal" autocomplete="off" />
+              <span>m</span>
+            </span>
+          </label>
+          <button type="button" id="v2-calibrate-confirm" hidden>Set scale</button>
+          <button type="button" id="v2-calibrate-cancel">Cancel</button>
+        </div>
+        <div class="planner-underlay-panel" id="v2-sg-panel" hidden>
+          <strong>SG diagram coordinates</strong>
+          <p class="hint" id="v2-sg-hint">Click the point on your drawing that matches a known SG diagram coordinate.</p>
+          <div id="v2-sg-fields-wrap" hidden>
+            <label>Erf number
+              <input id="v2-sg-erf" type="text" autocomplete="off" />
+            </label>
+            <label>Real X (m)
+              <input id="v2-sg-x" type="text" inputmode="decimal" autocomplete="off" />
+            </label>
+            <label>Real Y (m)
+              <input id="v2-sg-y" type="text" inputmode="decimal" autocomplete="off" />
+            </label>
+            <button type="button" id="v2-sg-confirm">Set reference</button>
+          </div>
+          <button type="button" id="v2-sg-cancel">Cancel</button>
+        </div>
+      </div>
+      </div>
+    </section>
+
+    <aside class="side planner-side planner-inspector">
+      <section class="panel">
+        <header>
+          <h2>Inspector</h2>
+          <span id="v2-inspect-kicker">—</span>
+        </header>
+        <p class="hint" id="v2-inspect-empty">Select a wall, room, roof or opening to edit its type and identity.</p>
+        <div class="planner-fields" id="v2-inspect-fields" hidden>
+          <label id="v2-ctx-name-wrap" hidden>Name
+            <input id="v2-ctx-name" type="text" autocomplete="off" />
+          </label>
+          <label id="v2-ctx-use-wrap" hidden>Use
+            <select id="v2-ctx-use"></select>
+          </label>
+          <label id="v2-ctx-type-wrap" hidden>Type
+            <select id="v2-ctx-type"></select>
+          </label>
+          <label id="v2-ctx-form-wrap" hidden>Form
+            <select id="v2-ctx-form">
+              <option value="flat">flat</option>
+              <option value="gable">gable</option>
+              <option value="shed">shed</option>
+              <option value="hip">hip</option>
+            </select>
+          </label>
+          <label id="v2-ctx-pitch-wrap" hidden>Pitch
+            <span class="plan-context-field">
+              <input id="v2-ctx-pitch" type="text" inputmode="decimal" autocomplete="off" />
+              <span>°</span>
+            </span>
+          </label>
+          <label id="v2-ctx-olevel-wrap" hidden>On level
+            <select id="v2-ctx-olevel"></select>
+          </label>
+          <button type="button" id="v2-ctx-flip" hidden>Flip swing</button>
+        </div>
+      </section>
+    </aside>
+  </main>
+
+  <div class="check-overlay" id="v2-check-overlay" hidden>
+    <div class="panel check-panel">
+      <header>
+        <h2>Check</h2>
+        <button type="button" id="v2-check-close">Close</button>
+      </header>
+      <div class="check-split">
+        <section class="panel">
+          <header>
+            <h2>Compliance</h2>
+            <span id="v2-rules-count">—</span>
+          </header>
+          <div class="planner-fields" id="v2-rules">
+            <p class="hint">Loading pack…</p>
+          </div>
+        </section>
+        <section class="panel">
+          <header>
+            <h2>Data quality</h2>
+            <span id="v2-gap-count">—</span>
+          </header>
+          <div class="planner-fields" id="v2-gaps">
+            <p class="hint">Loading pack…</p>
+          </div>
+        </section>
+        <section class="panel" id="v2-compile-panel" hidden>
+          <header>
+            <h2>Compile result</h2>
+            <span id="v2-compile-kicker">—</span>
+          </header>
+          <div class="planner-fields" id="v2-compile-out"></div>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <div class="mass-overlay" id="v2-mass-overlay" hidden>
+    <div class="panel mass-panel">
+      <header>
+        <h2>3D massing</h2>
+        <div class="seg" role="group" aria-label="Show in 3D">
+          <button type="button" data-mass-status="both" class="active">Both</button>
+          <button type="button" data-mass-status="existing">Existing</button>
+          <button type="button" data-mass-status="planned">Planned</button>
+        </div>
+        <span id="v2-mass-caption">Drag to orbit · scroll to zoom</span>
+        <button type="button" id="v2-mass-close">Close</button>
+      </header>
+      <div class="canvas-wrap mass-wrap" id="v2-mass-wrap">
+        <canvas id="v2-mass-canvas"></canvas>
+        <div class="empty" id="v2-mass-empty">
+          <h3>Nothing to show</h3>
+          <p>Draw a room, wall, roof, floor, door or window, then open 3D again.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sheet-overlay" id="v2-sheet-overlay" hidden>
+    <div class="panel sheet-panel">
+      <header>
+        <h2>Sheets</h2>
+        <button type="button" id="v2-sheet-add">Add sheet</button>
+        <button type="button" id="v2-sheet-close">Close</button>
+      </header>
+      <div class="sheet-split">
+        <aside class="sheet-list" id="v2-sheet-list"></aside>
+        <section class="sheet-main">
+          <div class="sheet-fields" id="v2-sheet-fields" hidden>
+            <label>Size
+              <select id="v2-sheet-size"></select>
+            </label>
+            <label>Drawing title
+              <input id="v2-sheet-title" type="text" autocomplete="off" />
+            </label>
+            <label>Scale
+              <select id="v2-sheet-scale"></select>
+            </label>
+            <label>Date
+              <input id="v2-sheet-date" type="date" />
+            </label>
+            <label>Drawn by
+              <input id="v2-sheet-drawn" type="text" autocomplete="off" />
+            </label>
+            <label>Checked by
+              <input id="v2-sheet-checked" type="text" autocomplete="off" />
+            </label>
+            <button type="button" id="v2-sheet-delete">Delete sheet</button>
+          </div>
+          <p class="hint" id="v2-sheet-empty-fields">Add a sheet to lay the current plan out on an A0–A4 title block.</p>
+          <div class="canvas-wrap sheet-canvas-wrap">
+            <canvas id="v2-sheet-canvas"></canvas>
+            <div class="empty" id="v2-sheet-empty">
+              <h3>No sheet selected</h3>
+              <p>Add a sheet, or pick one from the list.</p>
+            </div>
+          </div>
+          <div class="sheet-revisions">
+            <h3>Revisions</h3>
+            <div id="v2-sheet-rev-list"></div>
+            <div class="sheet-rev-add">
+              <input id="v2-sheet-rev-desc" type="text" placeholder="Revision description" autocomplete="off" />
+              <button type="button" id="v2-sheet-rev-add">Add revision</button>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="./ui.js?v=20260915-level-isolate"></script>
+</body>
+</html>

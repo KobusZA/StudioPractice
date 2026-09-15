@@ -10,10 +10,14 @@ const els = {
   meta: document.getElementById("meta"),
   banner: document.getElementById("banner"),
   body: document.getElementById("bom-body"),
+  all: document.getElementById("all-body"),
+  families: document.getElementById("families-body"),
   walls: document.getElementById("walls-body"),
   floors: document.getElementById("floors-body"),
   roofs: document.getElementById("roofs-body"),
   takeoffCount: document.getElementById("takeoff-count"),
+  views: document.getElementById("views-body"),
+  sheets: document.getElementById("sheets-body"),
   healthDot: document.getElementById("health-dot"),
   healthLabel: document.getElementById("health-label"),
 };
@@ -71,12 +75,16 @@ async function importRevit() {
       throw new Error(await res.text());
     }
     applyPayload(await res.json(), "Live from Revit");
-    const count = plansOf(payload).length;
+    const plans = plansOf(payload).length;
+    const views = viewsOf(payload).length;
+    const sheets = (payload.sheets || []).length;
+    const families = (payload.families || []).length;
+    const stale = !payload.extractorVersion || Number(payload.extractorVersion) < 4;
     showBanner(
-      count > 1
-        ? `Imported ${count} plans from the open model. Use the plan list to switch.`
-        : "Imported the open model through the local connector.",
-      "ok"
+      stale
+        ? `All is placed-model takeoff, not the family library. Close Revit completely, reopen, then Import to load the Families catalog. (${plans} plans in this snapshot.)`
+        : `Imported ${families} family types, ${plans} plans, ${views} views, ${sheets} sheets. Families is the full library (including unused). All is placed takeoff.`,
+      stale ? "" : "ok"
     );
   } catch (err) {
     try {
@@ -100,6 +108,36 @@ async function loadJson(url, source) {
     throw new Error(`Could not load ${url}`);
   }
   applyPayload(await res.json(), source);
+}
+
+function viewsOf(data) {
+  if (data?.views?.length) {
+    return data.views;
+  }
+  return (data?.plans || []).map((plan) => ({
+    id: plan.id,
+    name: plan.name,
+    viewType: plan.viewType,
+    viewFamily: plan.discipline || plan.viewType,
+    level: plan.level || "",
+    scale: "",
+    sheetNumber: "",
+    isActive: plan.isActive,
+  }));
+}
+
+function modelLines(data) {
+  return (data?.lines || []).filter((line) => {
+    const cat = (line.category || "").toLowerCase();
+    return cat && !cat.includes("sketch");
+  });
+}
+
+function modelInstances(data) {
+  return (data?.instances || []).filter((row) => {
+    const cat = (row.category || "").toLowerCase();
+    return cat && !cat.includes("sketch");
+  });
 }
 
 function plansOf(data) {
@@ -206,10 +244,14 @@ function renderMeta(data) {
     : "—";
   const plan = selectedPlan(data);
   const planCount = plansOf(data).length;
+  const viewCount = viewsOf(data).length;
+  const sheetCount = (data.sheets || []).length;
+  const familyCount = (data.families || []).length;
   els.meta.innerHTML = `
     <div><dt>Document</dt><dd>${escapeHtml(data.title || "—")}</dd></div>
     <div><dt>View</dt><dd>${escapeHtml(planLabel(plan))} (${escapeHtml(plan?.viewType || data.viewType || "")})</dd></div>
-    <div><dt>Plans</dt><dd>${planCount}</dd></div>
+    <div><dt>Drawings</dt><dd>${planCount} plans · ${viewCount} views · ${sheetCount} sheets</dd></div>
+    <div><dt>Families</dt><dd>${familyCount ? `${familyCount} types in project` : "Restart Revit, then Import"}</dd></div>
     <div><dt>Extracted</dt><dd>${escapeHtml(extracted)}</dd></div>
   `;
 }
@@ -218,8 +260,11 @@ function formatQty(line) {
   if (line.area != null && line.unit === "m2") {
     return line.area.toFixed(1);
   }
-  if (line.length != null && line.unit === "m") {
-    return line.length.toFixed(1);
+  // Units migration (see UNITS-MIGRATION-PLAN.md): BomLine.Length is now
+  // millimetres and BomLine.Unit reports "mm" for the categories that carry a
+  // length, not "m" - see BomExtractor.cs's UnitFor().
+  if (line.length != null && line.unit === "mm") {
+    return Math.round(line.length).toLocaleString();
   }
   return Number(line.quantity ?? 0).toLocaleString();
 }
@@ -229,20 +274,18 @@ function instancesOf(data, category) {
   return (data.instances || []).filter((row) => (row.category || "").toLowerCase().includes(wanted));
 }
 
-function mmFromMeters(meters) {
-  if (meters == null || Number.isNaN(Number(meters))) {
-    return null;
+// Units migration (see UNITS-MIGRATION-PLAN.md): every row this formats
+// (TakeoffInstance.Length/.Perimeter from the live BOM extractor, and the
+// TSP CSV loader's parsed columns below) is already millimetres, so this is
+// now a display formatter, not a unit conversion. It used to guess ("> 80 is
+// probably already mm") because the BOM payload was metres and a caller
+// might pass either; that ambiguity is gone now that every source of these
+// fields agrees on millimetres.
+function fmtMm(mm) {
+  if (mm == null || Number.isNaN(Number(mm))) {
+    return "—";
   }
-  const value = Number(meters);
-  if (value > 80) {
-    return Math.round(value);
-  }
-  return Math.round(value * 1000);
-}
-
-function fmtMm(meters) {
-  const mm = mmFromMeters(meters);
-  return mm == null ? "—" : mm.toLocaleString();
+  return Math.round(Number(mm)).toLocaleString();
 }
 
 function fmtArea(value) {
@@ -300,10 +343,151 @@ function renderSchedules(data) {
   const walls = instancesOf(data, "wall");
   const floors = instancesOf(data, "floor");
   const roofs = instancesOf(data, "roof");
-  els.takeoffCount.textContent = `${walls.length} walls · ${floors.length} floors · ${roofs.length} roofs`;
+  const lines = modelLines(data);
+  const instances = modelInstances(data);
+  const byCat = new Map();
+  for (const line of lines) {
+    const cat = line.category || "Other";
+    byCat.set(cat, (byCat.get(cat) || 0) + Number(line.quantity || 0));
+  }
+  const summary = [...byCat.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([cat, qty]) => `${Math.round(qty)} ${cat.toLowerCase()}`);
+  const familyRows = data.families || [];
+  const unused = familyRows.filter((row) => !row.placedCount).length;
+  els.takeoffCount.textContent = familyRows.length
+    ? `${familyRows.length} family types (${unused} unused) · ${summary.join(" · ") || "no placed takeoff"}`
+    : summary.length
+      ? `Whole model · ${summary.join(" · ")}`
+      : `${walls.length} walls · ${floors.length} floors · ${roofs.length} roofs`;
+  renderFamilySchedule(familyRows);
+  renderAllSchedule(instances, lines);
   renderWallSchedule(walls);
   renderFloorSchedule(floors);
   renderRoofSchedule(roofs);
+  renderViewSchedule(viewsOf(data));
+  renderSheetSchedule(data.sheets || []);
+}
+
+function renderFamilySchedule(rows) {
+  if (!els.families) {
+    return;
+  }
+  if (!rows.length) {
+    els.families.innerHTML = `<tr class="muted"><td colspan="5">No family catalog in this extract. Close Revit, reopen, then Import.</td></tr>`;
+    return;
+  }
+  const html = [];
+  let lastCat = "";
+  for (const row of rows) {
+    if (row.category !== lastCat) {
+      lastCat = row.category;
+      const n = rows.filter((r) => r.category === lastCat).length;
+      html.push(`<tr class="group"><td colspan="5">${escapeHtml(lastCat)} (${n})</td></tr>`);
+    }
+    html.push(`<tr>
+      <td>${escapeHtml(row.category || "")}</td>
+      <td>${escapeHtml(row.family || "")}</td>
+      <td>${escapeHtml(row.type || "")}</td>
+      <td>${escapeHtml(row.kind || "")}</td>
+      <td class="num">${row.placedCount ?? 0}</td>
+    </tr>`);
+  }
+  els.families.innerHTML = html.join("");
+}
+
+function renderAllSchedule(instances, lines) {
+  if (!els.all) {
+    return;
+  }
+  if (instances.length > 3 && new Set(instances.map((row) => row.category)).size > 3) {
+    const html = [];
+    const groups = new Map();
+    for (const row of instances) {
+      const key = row.category || "Other";
+      if (!groups.has(key)) {
+        groups.set(key, []);
+      }
+      groups.get(key).push(row);
+    }
+    for (const [category, group] of groups) {
+      html.push(`<tr class="group"><td colspan="6">${escapeHtml(category)} (${group.length})</td></tr>`);
+      for (const row of group) {
+        html.push(`<tr data-ids="${escapeHtml(row.elementId || "")}">
+          <td>${escapeHtml(row.category || "")}</td>
+          <td>${escapeHtml(row.family || "")}</td>
+          <td>${escapeHtml(row.type || "")}</td>
+          <td class="num">${row.count ?? 1}</td>
+          <td>ea</td>
+          <td>${escapeHtml(row.level || "")}</td>
+        </tr>`);
+      }
+    }
+    els.all.innerHTML = html.join("");
+    markSelectedRows(els.all);
+    return;
+  }
+  if (!lines.length) {
+    els.all.innerHTML = `<tr class="muted"><td colspan="6">No model quantities.</td></tr>`;
+    return;
+  }
+  const html = [];
+  let lastCat = "";
+  for (const line of lines) {
+    if (line.category !== lastCat) {
+      lastCat = line.category;
+      html.push(`<tr class="group"><td colspan="6">${escapeHtml(lastCat)}</td></tr>`);
+    }
+    const ids = (line.elementIds || []).join(",");
+    html.push(`<tr data-ids="${escapeHtml(ids)}">
+      <td>${escapeHtml(line.category || "")}</td>
+      <td>${escapeHtml(line.family || "")}</td>
+      <td>${escapeHtml(line.type || "")}</td>
+      <td class="num">${formatQty(line)}</td>
+      <td>${escapeHtml(line.unit || "")}</td>
+      <td></td>
+    </tr>`);
+  }
+  els.all.innerHTML = html.join("");
+  markSelectedRows(els.all);
+}
+
+function renderViewSchedule(rows) {
+  if (!els.views) {
+    return;
+  }
+  if (!rows.length) {
+    els.views.innerHTML = `<tr class="muted"><td colspan="6">No views extracted.</td></tr>`;
+    return;
+  }
+  els.views.innerHTML = rows.map((row) => `<tr>
+      <td>${escapeHtml(row.name || "")}</td>
+      <td>${escapeHtml(row.viewType || "")}</td>
+      <td>${escapeHtml(row.viewFamily || "")}</td>
+      <td>${escapeHtml(row.level || "")}</td>
+      <td>${escapeHtml(row.scale || "—")}</td>
+      <td>${escapeHtml(row.sheetNumber || "—")}</td>
+    </tr>`).join("");
+}
+
+function renderSheetSchedule(rows) {
+  if (!els.sheets) {
+    return;
+  }
+  if (!rows.length) {
+    els.sheets.innerHTML = `<tr class="muted"><td colspan="4">No sheets extracted.</td></tr>`;
+    return;
+  }
+  els.sheets.innerHTML = rows.map((row) => {
+    const title = [row.titleBlockFamily, row.titleBlockType].filter(Boolean).join(" · ");
+    const views = (row.views || []).join(", ");
+    return `<tr>
+      <td>${escapeHtml(row.number || "")}</td>
+      <td>${escapeHtml(row.name || "")}</td>
+      <td>${escapeHtml(title || "—")}</td>
+      <td>${escapeHtml(views || "—")}</td>
+    </tr>`;
+  }).join("");
 }
 
 function renderWallSchedule(rows) {
@@ -414,7 +598,7 @@ function renderRoofSchedule(rows) {
 }
 
 function renderBom(data) {
-  const lines = data.lines || [];
+  const lines = modelLines(data);
   if (!lines.length) {
     els.body.innerHTML = `<tr><td colspan="5">No BOM lines in this payload.</td></tr>`;
     return;
@@ -706,7 +890,10 @@ function parseWallCsv(rows) {
       type,
       elementId: `W${id}`,
       count: parseNumber(cols[6]) ?? 1,
-      length: lengthMm == null ? null : lengthMm / 1000,
+      // Millimetres, same convention as TakeoffInstance.Length from the live
+      // BOM extractor (see UNITS-MIGRATION-PLAN.md) - the CSV column already
+      // states mm, so no conversion here now.
+      length: lengthMm,
       area: parseNumber(cols[4]),
       volume: parseNumber(cols[5]),
     });
@@ -738,7 +925,9 @@ function parseFloorCsv(rows) {
       type,
       elementId: `F${id}`,
       count: 1,
-      perimeter: periMm == null ? null : periMm / 1000,
+      // Millimetres, same convention as TakeoffInstance.Perimeter - see the
+      // note on parseWallCsv's `length` above.
+      perimeter: periMm,
       area: parseNumber(cols[3]),
       volume: parseNumber(cols[4]),
       level: cols[5] || "",
@@ -794,7 +983,9 @@ function linesFromInstances(instances) {
         family: row.family,
         type: row.type,
         quantity: 0,
-        unit: row.category === "Walls" ? "m" : "m2",
+        // "mm" for Walls to match formatQty()'s check and BomExtractor.cs's
+        // UnitFor() - see the units migration note on parseWallCsv above.
+        unit: row.category === "Walls" ? "mm" : "m2",
         length: 0,
         area: 0,
         volume: 0,
@@ -836,7 +1027,7 @@ async function loadTspSchedules() {
       activeView: "Exported schedules",
       viewType: "Schedule",
       extractedAt: new Date().toISOString(),
-      units: "meters / square meters / cubic meters",
+      units: "millimeters (lengths, perimeters) / square meters / cubic meters",
       lines: linesFromInstances(instances),
       instances,
       sketchForms: [],
@@ -852,7 +1043,7 @@ function selectFromRow(row) {
   }
   const ids = (row.dataset.ids || "").split(",").filter(Boolean);
   selectedIds = ids;
-  for (const tbody of [els.walls, els.floors, els.roofs, els.body]) {
+  for (const tbody of [els.all, els.walls, els.floors, els.roofs, els.body].filter(Boolean)) {
     markSelectedRows(tbody);
   }
   drawPlan();
@@ -920,7 +1111,7 @@ document.getElementById("file-json").addEventListener("change", async (event) =>
   }
 });
 
-for (const tbody of [els.walls, els.floors, els.roofs, els.body]) {
+for (const tbody of [els.all, els.walls, els.floors, els.roofs, els.body].filter(Boolean)) {
   tbody.addEventListener("click", (event) => {
     selectFromRow(event.target.closest("tr"));
   });
