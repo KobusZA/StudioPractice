@@ -298,6 +298,64 @@ export function allRefs(doc) {
     .map((row) => ({ kind, id: row.id })));
 }
 
+// --- base attach ----------------------------------------------------------
+
+/**
+ * Kinds that can attach, and be attached to. Drawn linear objects only: a
+ * person placed them directly and they have one top surface to sit on. Rooms'
+ * derived shared walls are not doc entities at all, and the shaped kinds have
+ * no equivalent of the x1/y1/x2/y2 shape the resolution arithmetic assumes.
+ */
+export const ATTACHABLE_KINDS = new Set(["segment", "beam"]);
+
+/**
+ * Resolve `obj.baseAttach` to the object whose top it sits on.
+ *
+ * `reason` says why there is no live target, and each caller words it for
+ * itself rather than sharing one generic message:
+ *   "none"    - not attached; the level datum is the answer, exactly as before
+ *   "missing" - the target was deleted, or was never an attachable kind
+ *   "cycle"   - the chain leads back to `obj`
+ *   "chained" - the target is itself attached; one hop only, for now
+ */
+export function resolveBaseAttach(doc, obj) {
+  const ref = obj?.baseAttach;
+  if (!ref?.kind || ref.id == null) return { ok: false, reason: "none", ref: null, target: null };
+  if (!ATTACHABLE_KINDS.has(ref.kind)) return { ok: false, reason: "missing", ref, target: null };
+  const target = objectByRef(doc, ref);
+  if (!target) return { ok: false, reason: "missing", ref, target: null };
+  if (target.id === obj.id) return { ok: false, reason: "cycle", ref, target };
+  if (target.baseAttach) {
+    return { ok: false, reason: attachChainReaches(doc, target, obj) ? "cycle" : "chained", ref, target };
+  }
+  return { ok: true, reason: null, ref, target };
+}
+
+/**
+ * Does the attach chain starting at `from` arrive at `obj`? Walks with a seen
+ * set, so a chain that loops among other objects terminates as well - the
+ * one-hop cap is a rule about what may be written, not something the resolver
+ * is allowed to assume it will find.
+ *
+ * Matched on `id`, not object identity: compile.js resolves attach against
+ * *derived* wall rows, which carry the drawn segment's id but are not the same
+ * object as the segment in the document.
+ */
+export function attachChainReaches(doc, from, obj) {
+  const seen = new Set();
+  let cur = from;
+  while (cur) {
+    if (cur.id === obj?.id) return true;
+    const ref = cur.baseAttach;
+    if (!ref?.kind || ref.id == null) return false;
+    const key = selKey(ref);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    cur = objectByRef(doc, ref);
+  }
+  return false;
+}
+
 // --- store ----------------------------------------------------------------
 
 function clone(value) {
@@ -544,6 +602,7 @@ export function normalizeDoc(raw) {
     x2: seg.x2,
     y2: seg.y2,
     status: seg.status === "existing" ? "existing" : "planned",
+    ...baseAttachFields(seg),
   }));
 
   const mapShaped = (rows, prefix) => (rows || []).map((row) => ({
@@ -565,13 +624,34 @@ export function normalizeDoc(raw) {
 
   doc.openings = (raw.openings || []).map((o) => migrateOpening(o));
   doc.items = (raw.items || []).map((i) => ({ ...i, id: i.id || nid("i") }));
-  doc.beams = (raw.beams || []).map((b) => ({ ...b, id: b.id || nid("b") }));
+  doc.beams = (raw.beams || []).map((b) => ({ ...b, id: b.id || nid("b"), ...baseAttachFields(b) }));
   doc.stairs = (raw.stairs || []).map((s) => ({ ...s, id: s.id || nid("st") }));
   doc.groups = Array.isArray(raw.groups) ? raw.groups : [];
   doc.sheets = Array.isArray(raw.sheets) ? raw.sheets : [];
 
   if (isV1) doc.migratedFrom = raw.schema || "sp.doc/1";
   return doc;
+}
+
+/**
+ * The three attach-related keys every drawn wall and beam carries, made
+ * explicit rather than absent so a document written before attach existed
+ * states "not attached" instead of leaving the reader to infer it.
+ *
+ * `baseOffset` is how far above its level datum an unattached object sits, and
+ * `height` is a per-object override of the SKU's height. Both exist for
+ * Detach: Revit's Detach leaves a wall exactly where it is and only stops the
+ * live link, so detach writes the currently resolved elevation and height into
+ * these two rather than snapping the object back to the flat level datum.
+ * `height: null` means "use the SKU's height", which is every object that has
+ * never been attached.
+ */
+function baseAttachFields(row) {
+  return {
+    baseAttach: row?.baseAttach ?? null,
+    baseOffset: Number.isFinite(row?.baseOffset) ? row.baseOffset : 0,
+    height: Number.isFinite(row?.height) ? row.height : null,
+  };
 }
 
 /**

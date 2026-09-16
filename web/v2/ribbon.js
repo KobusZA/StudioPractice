@@ -170,6 +170,8 @@ export const RIBBON = [
           { id: "split", label: "Split", command: "split" },
           { id: "cut", label: "Cut", command: "cut" },
           { id: "join", label: "Join", command: "join" },
+          { id: "attach", label: "Attach base", command: "attach" },
+          { id: "detach", label: "Detach base", command: "detach" },
         ],
       },
       {
@@ -279,6 +281,8 @@ export const HINTS = {
   rooms: "Click inside enclosed walls to tag a room.",
   dimensions: "Click two points to measure.",
   rotate: "Select something first, then rotate.",
+  attach: "Click a wall or beam on this storey or the one below to sit the selection on top of it. Esc to cancel.",
+  detach: "Stop following what the selection sits on, leaving it at the elevation it already has.",
   "view-3d": "Open a massing view of the current plan.",
   compile: "Build the bill of quantities from what you have drawn.",
   gaps: "List facts the template still needs before compliance can run.",
@@ -321,6 +325,7 @@ const SIMPLE_TABS = [
     needsSelection: true,
     groups: [
       { label: "Edit", items: ["rotate", "mirror", "copy", "align", "split", "join"] },
+      { label: "Elevation", items: ["attach", "detach"] },
       { label: "Arrange", items: ["group", "ungroup", "delete"] },
     ],
   },

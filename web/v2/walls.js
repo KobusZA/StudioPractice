@@ -131,6 +131,11 @@ export function deriveRoomWalls(doc, pack) {
         thickness: sku?.geometry?.thickness ?? 0.22,
         height: sku?.geometry?.height ?? pack.system.wallHeight,
         level: g.level,
+        // Room-derived walls are level-datum-only: attach belongs to linear
+        // objects a person placed directly, and a shared wall has no single
+        // owner to have attached it. See LEVEL-ATTACH-PLAN.md's Phase 2.
+        baseAttach: null,
+        baseOffset: 0,
         roomIds: rooms.map((r) => r.id),
         shared: rooms.length > 1,
         edges: hits.map((h) => ({ roomId: h.room.id, edgeIndex: h.edgeIndex })),
@@ -160,8 +165,15 @@ export function deriveDrawnWalls(doc, pack, minLength = 0.3) {
       sku: sku.id,
       category: sku.category,
       thickness: sku.geometry?.thickness ?? sku.geometry?.width ?? 0.22,
-      height: sku.geometry?.height ?? pack.system.wallHeight,
+      // `seg.height` is the per-object override Detach writes when it freezes a
+      // wall at the height its attach had resolved to; everything else falls
+      // through to the SKU and the document default as before.
+      height: seg.height ?? sku.geometry?.height ?? pack.system.wallHeight,
       level: effectiveLevel(seg, pack),
+      // Passed through untouched - compile.js resolves it, because that is
+      // where the level datums and the target's height already are.
+      baseAttach: seg.baseAttach ?? null,
+      baseOffset: seg.baseOffset || 0,
       roomIds: [],
       shared: false,
       edges: [],

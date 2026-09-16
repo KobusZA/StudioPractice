@@ -23,8 +23,10 @@ import { closeOverflowMenus, decorateRibbon, fitRibbon } from "./ribbon-fit.js?v
 import { lookDownLevelId, lookUpLevelId } from "./level-view.js";
 import {
   alignSelection,
+  attachSelection,
   copySelection,
   cutSelection,
+  detachSelection,
   joinSelection,
   mergeSelection,
   mirrorSelection,
@@ -49,6 +51,7 @@ import { planDimensionLines } from "./dimensions.js";
 import { area as polyArea, bbox, clipSegToRect, distToSeg, headingDeg, pointInPoly, roundGrid } from "./geom.js?v=20260915-offset";
 import { SNAP_PIXEL_TOL, bestEndpointSnap, collectSnapTargets, snapPoint } from "./snap.js";
 import {
+  ATTACHABLE_KINDS,
   PlanStore,
   ROOM_USES,
   collectionFor,
@@ -70,7 +73,15 @@ import {
   wallForOpening,
   wallT,
 } from "./openings.js";
-import { compile } from "./compile.js";
+import {
+  attachPreview,
+  attachReport,
+  attachTargetLevels,
+  compile,
+  drawnObjectHeight,
+  objectLabel,
+  resolvedBase,
+} from "./compile.js";
 import { createMassingView } from "./massing.js";
 import {
   SHEET_SIZES,
@@ -132,6 +143,13 @@ const el = {
   sgY: document.getElementById("v2-sg-y"),
   sgConfirm: document.getElementById("v2-sg-confirm"),
   sgCancel: document.getElementById("v2-sg-cancel"),
+  attachPanel: document.getElementById("v2-attach-panel"),
+  attachHint: document.getElementById("v2-attach-hint"),
+  attachList: document.getElementById("v2-attach-list"),
+  attachConfirm: document.getElementById("v2-attach-confirm"),
+  attachCancel: document.getElementById("v2-attach-cancel"),
+  attachReport: document.getElementById("v2-attach-report"),
+  attachCount: document.getElementById("v2-attach-count"),
   ribbonTabs: document.getElementById("v2-ribbon-tabs"),
   ribbonFunctions: document.getElementById("v2-ribbon-functions"),
   ribbonHint: document.getElementById("v2-ribbon-hint"),
@@ -172,6 +190,8 @@ const el = {
   ctxTypeWrap: document.getElementById("v2-ctx-type-wrap"),
   ctxOLevel: document.getElementById("v2-ctx-olevel"),
   ctxOLevelWrap: document.getElementById("v2-ctx-olevel-wrap"),
+  ctxAttach: document.getElementById("v2-ctx-attach"),
+  ctxAttachWrap: document.getElementById("v2-ctx-attach-wrap"),
   ctxFlip: document.getElementById("v2-ctx-flip"),
   massOverlay: document.getElementById("v2-mass-overlay"),
   massCanvas: document.getElementById("v2-mass-canvas"),
@@ -216,6 +236,10 @@ let siteDraft = null;
 // Site > SG diagram coordinates: the plan point clicked, while tool === "sg-ref",
 // waiting on the erf number and real coordinate fields in the SG panel.
 let sgPick = null;
+// Modify > Attach base: the refs waiting for a target while tool === "attach",
+// plus the candidate under the pointer so the hint can preview what the click
+// will do before it commits anything.
+let attachPick = null;
 let sizeDraft = null;
 let hover = null;
 let hoverPoint = null;
@@ -930,11 +954,18 @@ function draw() {
   const walls = currentWalls();
   const levelWalls = walls.filter(onActiveLevel);
 
+  ctx.save();
+  // While picking an attach target, everything that cannot be picked fades and
+  // the candidates are re-drawn on top: the wrong thing is never clickable
+  // rather than clickable-and-then-refused.
+  if (attachPick) ctx.globalAlpha = 0.3;
   if (!isolateCurrentLevel) {
     const below = lookDownLevelId(pack.levels, activeLevel);
     if (below) drawPlanLevel(below, walls, { ghost: true });
   }
   drawPlanLevel(activeLevel, walls);
+  ctx.restore();
+  if (attachPick) drawAttachCandidates();
   if (showDimensions) drawDimensions();
 
   drawSelectionHighlights(levelWalls);
@@ -1040,6 +1071,7 @@ function render() {
   syncUnderlayPanel();
   syncCalibratePanel();
   syncSgPanel();
+  syncAttachPanel();
   syncHeaderModify();
   // Simple's Modify tab gates its whole content on selection; refresh it
   // only when that flips (not on every render(), which pointer drags call
@@ -1428,6 +1460,28 @@ function drawSelectionHighlights(walls) {
   }
 }
 
+/** The pickable attach targets, at full strength over the faded plan, with the
+ * one under the pointer heavier still. */
+function drawAttachCandidates() {
+  const hoverKey = attachPick.hover ? attachRefKey(attachPick.hover) : null;
+  ctx.save();
+  ctx.lineCap = "round";
+  for (const ref of attachPick.candidates) {
+    const obj = objByRef(ref);
+    if (!obj) continue;
+    const [ax, ay] = worldToScreen(obj.x1, obj.y1);
+    const [bx, by] = worldToScreen(obj.x2, obj.y2);
+    const active = attachRefKey(ref) === hoverKey;
+    ctx.strokeStyle = active ? COLOUR.hover : COLOUR.selection;
+    ctx.lineWidth = active ? 6 : 3;
+    ctx.beginPath();
+    ctx.moveTo(ax, ay);
+    ctx.lineTo(bx, by);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function drawHover(ref) {
   const obj = objByRef(ref);
   if (!obj) return;
@@ -1523,7 +1577,7 @@ function soleLinearSelection() {
 
 function drawEndpointHandles() {
   const sel = soleLinearSelection();
-  if (!sel || drag) return;
+  if (!sel || drag || attachPick) return;
   const { obj } = sel;
   for (const [x, y] of [[obj.x1, obj.y1], [obj.x2, obj.y2]]) {
     const [hx, hy] = worldToScreen(x, y);
@@ -1881,6 +1935,33 @@ function hitTest(wx, wy) {
   return null;
 }
 
+/**
+ * Nearest wall or beam under the pointer while the attach pick is armed, valid
+ * target or not - hovering an invalid one is how its reason gets explained.
+ *
+ * Its own hit test rather than hitTest(): a target may sit on the storey below,
+ * which the normal active-level-only hit test deliberately ignores.
+ */
+function attachObjectAt(wx, wy) {
+  const mine = new Set((attachPick?.refs || []).map(attachRefKey));
+  let best = null;
+  let bestD = Infinity;
+  for (const kind of ATTACHABLE_KINDS) {
+    for (const obj of collectionFor(store.doc, kind) || []) {
+      const ref = { kind, id: obj.id };
+      if (mine.has(attachRefKey(ref))) continue;
+      const sku = skuById(obj.sku);
+      const tol = Math.max(0.18, (sku?.geometry?.thickness || sku?.geometry?.width || 0.22) / 2 + 0.08);
+      const d = distToSeg(obj.x1, obj.y1, obj.x2, obj.y2, wx, wy);
+      if (d < tol && d < bestD) {
+        best = ref;
+        bestD = d;
+      }
+    }
+  }
+  return best;
+}
+
 // --- palette ---------------------------------------------------------------
 
 const CATEGORY_LABEL = {
@@ -2088,6 +2169,15 @@ function drawRibbon() {
  * level switcher itself - the user stays in control of the cut. */
 function updateRibbonHint() {
   if (!el.ribbonHint) return;
+  // While the attach target pick is armed the hint is the live preview of what
+  // the hovered candidate would do, or why it cannot be picked.
+  if (attachPick) {
+    const hoverText = attachPick.hover ? attachHoverText(attachPick.hover) : null;
+    el.ribbonHint.hidden = false;
+    el.ribbonHint.classList.toggle("ribbon-hint-warn", Boolean(hoverText?.warn));
+    el.ribbonHint.textContent = hoverText ? hoverText.text : HINTS.attach;
+    return;
+  }
   if (foundationLevelMismatch()) {
     const level = (pack.levels || []).find((l) => l.id === activeLevel);
     el.ribbonHint.hidden = false;
@@ -2120,6 +2210,18 @@ function ribbonCommandState(item) {
         : below
           ? "Ghosting the floor below. Click to show this storey only."
           : "Nothing below this cut to ghost. Click to keep this storey only.",
+    };
+  }
+  // Attach/detach act on a wall or beam, so say which is missing rather than
+  // letting the click fail with the same information a tooltip could have given.
+  if (item.id === "attach" || item.id === "detach") {
+    const refs = store.selected.filter((ref) => ATTACHABLE_KINDS.has(ref.kind));
+    if (!refs.length) return { disabled: true, title: "Select a wall or beam first." };
+    if (item.id === "attach") return { active: Boolean(attachPick), title: HINTS.attach };
+    const attached = refs.filter((ref) => objByRef(ref)?.baseAttach);
+    return {
+      disabled: !attached.length,
+      title: attached.length ? HINTS.detach : "Nothing selected is attached to anything.",
     };
   }
   const ids = new Set(["underlay-adjust", "calibrate", "underlay-toggle", "underlay-off"]);
@@ -2201,6 +2303,8 @@ function runCommand(name) {
       activeFunction = showDimensions ? "dimensions" : null;
       drawRibbon();
       break;
+    case "attach": startAttachPick(); return;
+    case "detach": runDetach(); return;
     case "rotate": case "mirror": case "copy": case "align":
     case "merge": case "split": case "cut": case "join":
       modifySelection(name);
@@ -2534,6 +2638,7 @@ function wireSheets() {
 function openCheck() {
   if (el.checkOverlay) el.checkOverlay.hidden = false;
   renderRulesReport();
+  renderAttachReport();
 }
 
 function closeCheck() {
@@ -2771,6 +2876,232 @@ function toggleUnderlayVisibility() {
   render();
 }
 
+// --- attach base ---------------------------------------------------------
+//
+// Modify > Attach base: sit the selected walls/beams on top of one other wall
+// or beam, so their base elevation follows it. Everything about what may attach
+// to what, and what a given attach would do, comes from compile.js's
+// attachPreview - this layer only arms the pick, shows the consequence before
+// the click, and hands the target to modify.js.
+
+/** Why a hovered candidate cannot take this selection - one message per cause. */
+const ATTACH_HOVER_REASON = {
+  "target-attached": "That is already attached to something else, and attach chains are one level deep.",
+  cycle: "That would create an attach cycle.",
+  "level-too-far": "That is more than one level below.",
+  "no-height": "That top is already at or above the selection's own top - pick something lower.",
+  "target-height-unknown": "The template states no height for that type, so where its top is is unknown.",
+  self: "That is part of the selection.",
+  "not-attachable": "Only a wall or beam has a top to attach to.",
+  "missing-target": "That no longer exists.",
+};
+
+function attachRefKey(ref) {
+  return `${ref.kind}:${ref.id}`;
+}
+
+/**
+ * Arm the target pick. Candidates are resolved once, here, rather than per
+ * frame: nothing can edit the document while the pick is armed.
+ */
+function startAttachPick() {
+  const refs = store.selected.filter((ref) => ATTACHABLE_KINDS.has(ref.kind));
+  if (!refs.length) {
+    setStatusMessage("Select the walls or beams to attach first, then pick what they sit on.", "warn");
+    return;
+  }
+  const objs = refs.map(objByRef).filter(Boolean);
+  const taken = new Set(refs.map(attachRefKey));
+  const candidates = [];
+  for (const kind of ATTACHABLE_KINDS) {
+    for (const row of collectionFor(store.doc, kind) || []) {
+      const ref = { kind, id: row.id };
+      if (taken.has(attachRefKey(ref))) continue;
+      if (objs.some((obj) => attachPreview(store.doc, pack, obj, ref).ok)) candidates.push(ref);
+    }
+  }
+  if (!candidates.length) {
+    const levels = attachTargetLevels(pack, objs[0]).map((id) => (pack.levels || []).find((l) => l.id === id)?.name || id);
+    setStatusMessage(`Nothing on ${levels.join(" or ")} can take this selection's base.`, "warn");
+    return;
+  }
+  attachPick = { refs, candidates, hover: null };
+  tool = "attach";
+  activeFunction = "attach";
+  underlaySelected = false;
+  beamStart = null;
+  fillAttachList();
+  syncToolButtons();
+  drawRibbon();
+  render();
+}
+
+function cancelAttachPick() {
+  attachPick = null;
+  if (tool === "attach") tool = "select";
+  if (activeFunction === "attach") activeFunction = null;
+  syncToolButtons();
+  drawRibbon();
+  render();
+}
+
+function isAttachCandidate(ref) {
+  return Boolean(ref && attachPick?.candidates.some((c) => c.kind === ref.kind && c.id === ref.id));
+}
+
+/**
+ * What picking `targetRef` would do, worded for the armed-tool hint. Shown
+ * while hovering, before the click: seeing the consequence first is the whole
+ * point, rather than explaining an unexpected change afterwards.
+ */
+function attachHoverText(targetRef) {
+  const objs = attachPick.refs.map(objByRef).filter(Boolean);
+  const previews = objs.map((obj) => attachPreview(store.doc, pack, obj, targetRef));
+  const ok = previews.filter((p) => p.ok);
+  const label = objectLabel(pack, objByRef(targetRef));
+  if (!ok.length) {
+    return { warn: true, text: ATTACH_HOVER_REASON[previews[0]?.reason] || "That cannot take this selection's base." };
+  }
+  if (objs.length === 1) {
+    const [only] = ok;
+    return {
+      warn: false,
+      text: `On "${label}": base rises ${only.rise.toFixed(2)} m to ${only.elevation.toFixed(2)} m; height reduces to ${only.height.toFixed(2)} m.`,
+    };
+  }
+  const skipped = previews.length - ok.length;
+  return {
+    warn: skipped > 0,
+    text: `On "${label}": ${ok.length} of ${previews.length} will attach${skipped ? `, ${skipped} would be invalid and will be skipped` : ""}.`,
+  };
+}
+
+/**
+ * The named-list alternative to clicking: the same candidate set, chosen by
+ * name, so a thin foundation strip at low zoom does not have to be hit
+ * pixel-perfectly.
+ */
+function fillAttachList() {
+  if (!el.attachList || !attachPick) return;
+  el.attachList.innerHTML = attachPick.candidates.map((ref) => {
+    const obj = objByRef(ref);
+    const level = (pack.levels || []).find((l) => l.id === effectiveLevel(obj, pack))?.name || effectiveLevel(obj, pack);
+    return `<option value="${escapeHtml(attachRefKey(ref))}">${escapeHtml(`${objectLabel(pack, obj)} — ${level}`)}</option>`;
+  }).join("");
+}
+
+function syncAttachPanel() {
+  if (!el.attachPanel) return;
+  el.attachPanel.hidden = !attachPick;
+  if (!attachPick) return;
+  const count = attachPick.refs.length;
+  if (el.attachHint) {
+    el.attachHint.textContent = attachPick.pending
+      ? attachPick.pending.message
+      : `${count} object${count === 1 ? "" : "s"} selected. Click a highlighted wall or beam, or pick one by name.`;
+  }
+  if (el.attachConfirm) el.attachConfirm.textContent = attachPick.pending ? "Confirm attach" : "Attach";
+}
+
+/**
+ * First half of an attach: run the validity pass, show what it would do, and
+ * change nothing. A partly-valid batch is then a decision taken here rather
+ * than something discovered later in the Check panel. Follows the same
+ * "summarise in a panel, don't block on a dialog" shape as calibration.
+ */
+function proposeAttach(targetRef) {
+  const preview = attachSelection(store.doc, attachPick.refs, { pack, targetRef });
+  if (!preview.ok) {
+    setStatusMessage(preview.message, "warn");
+    return;
+  }
+  attachPick.pending = { targetRef, message: preview.message };
+  setStatusMessage(preview.message, "ok");
+  render();
+}
+
+/** Second half: apply exactly what the summary above described. */
+function commitAttach(targetRef) {
+  store.pushUndo();
+  const result = attachSelection(store.doc, attachPick.refs, { pack, targetRef, commit: true });
+  if (!result.ok) {
+    store.undoStack.pop();
+    setStatusMessage(result.message, "warn");
+    return;
+  }
+  store.persist();
+  cancelAttachPick();
+  setStatusMessage(result.message, "ok");
+}
+
+function runDetach() {
+  store.pushUndo();
+  const result = detachSelection(store.doc, store.selected, { pack });
+  if (!result.ok) {
+    store.undoStack.pop();
+    setStatusMessage(result.message, "warn");
+    return;
+  }
+  store.persist();
+  setStatusMessage(result.message, "ok");
+  render();
+}
+
+/** One line per selected wall/beam, for the Inspector's read-only Base row. */
+function attachStateText(obj) {
+  const base = resolvedBase(store.doc, pack, obj, drawnObjectHeight(pack, obj));
+  const level = (pack.levels || []).find((l) => l.id === effectiveLevel(obj, pack));
+  const levelLabel = level?.name || effectiveLevel(obj, pack) || "level";
+  if (base.warning) return `Attached, but unresolved — falls back to ${levelLabel}. See Check.`;
+  if (base.attachedTo) {
+    return `On "${base.attachedTo.label}" at ${base.elevation.toFixed(2)} m, ${base.height.toFixed(2)} m high`;
+  }
+  return `Not attached — ${levelLabel} + ${(obj.baseOffset || 0).toFixed(2)} m`;
+}
+
+/** Attach state in the Check panel as well as on the object, so a broken
+ * attach is findable without knowing which object to select first. */
+function renderAttachReport() {
+  if (!el.attachReport) return;
+  const rows = attachReport(store.doc, pack);
+  const broken = rows.filter((r) => r.warning).length;
+  el.attachCount.textContent = rows.length
+    ? `${rows.length} attached${broken ? ` · ${broken} unresolved` : ""}`
+    : "None";
+  if (!rows.length) {
+    el.attachReport.innerHTML = '<p class="hint">No object\'s base follows another one. Every elevation here is its level\'s datum.</p>';
+    return;
+  }
+  el.attachReport.innerHTML = rows.map((row) => `
+    <div class="attach-row${row.warning ? " attach-broken" : ""}">
+      <span>${escapeHtml(row.label)}</span>
+      <span>${escapeHtml(row.warning
+        ? row.warning
+        : `on "${row.attachedTo.label}" — base ${row.elevation.toFixed(2)} m, ${row.height.toFixed(2)} m high`)}</span>
+    </div>
+  `).join("");
+}
+
+el.attachCancel?.addEventListener("click", () => {
+  cancelAttachPick();
+  setStatusMessage("Attach cancelled; nothing changed.", "warn");
+});
+
+el.attachConfirm?.addEventListener("click", () => {
+  if (!attachPick) return;
+  if (attachPick.pending) {
+    commitAttach(attachPick.pending.targetRef);
+    return;
+  }
+  const [kind, id] = String(el.attachList?.value || "").split(":");
+  const ref = attachPick.candidates.find((c) => c.kind === kind && c.id === id);
+  if (!ref) {
+    setStatusMessage("Pick a target from the list first.", "warn");
+    return;
+  }
+  proposeAttach(ref);
+});
+
 let statusTimer = null;
 
 function setStatusMessage(text, tone) {
@@ -2805,6 +3136,7 @@ function wireToolbar() {
       beamStart = null;
       siteDraft = null;
       sgPick = null;
+      attachPick = null;
       syncToolButtons();
       render();
     });
@@ -2887,7 +3219,9 @@ function onPointerDown(ev) {
   }
   const [wx, wy] = pointerWorld(ev);
 
-  const handle = endpointHandleHit(wx, wy);
+  // Endpoint handles are the selection's own; while a target pick is armed the
+  // click belongs to the pick, not to dragging what is already selected.
+  const handle = attachPick ? null : endpointHandleHit(wx, wy);
   if (handle && !ev.shiftKey) {
     const obj = objByRef({ kind: handle.target, id: handle.id });
     if (obj) {
@@ -2972,6 +3306,21 @@ function onPointerDown(ev) {
   if (tool === "sg-ref") {
     sgPick = applySnap(wx, wy);
     render();
+    return;
+  }
+  if (tool === "attach") {
+    const target = attachObjectAt(wx, wy);
+    if (!target) {
+      setStatusMessage("Click one of the highlighted walls or beams, or pick one by name.", "warn");
+      return;
+    }
+    // A dimmed object was still clicked: answer with the reason it cannot take
+    // this base, not with a restatement of what is pickable.
+    if (!isAttachCandidate(target)) {
+      setStatusMessage(attachHoverText(target).text, "warn");
+      return;
+    }
+    proposeAttach(target);
     return;
   }
   if (tool === "room" || tool === "slab" || tool === "roof") {
@@ -3087,6 +3436,16 @@ function onPointerMove(ev) {
     return;
   }
   if (tool === "property" || tool === "sg-ref") {
+    render();
+    return;
+  }
+  if (tool === "attach" && attachPick) {
+    const next = attachObjectAt(wx, wy);
+    const changed = attachRefKey(next || { kind: "", id: "" }) !== attachRefKey(attachPick.hover || { kind: "", id: "" });
+    attachPick.hover = next;
+    el.canvas.style.cursor = isAttachCandidate(next) ? "pointer" : "default";
+    // The hint is the pre-commit preview, so it has to follow the pointer.
+    if (changed) updateRibbonHint();
     render();
     return;
   }
@@ -3250,6 +3609,12 @@ function wireKeyboard() {
       if (tool === "sg-ref") {
         sgPick = null;
         tool = "select";
+        syncToolButtons();
+      }
+      if (attachPick) {
+        attachPick = null;
+        tool = "select";
+        activeFunction = null;
         syncToolButtons();
       }
       drawRibbon();
@@ -3597,6 +3962,9 @@ function syncPlanContext() {
   setHidden(el.ctxPitchWrap, !roof);
   setHidden(el.ctxTypeWrap, !showType);
   setHidden(el.ctxFlip, !(opening && skuById(obj.sku)?.category === "door"));
+  const attachable = Boolean(obj && ATTACHABLE_KINDS.has(ref.kind));
+  setHidden(el.ctxAttachWrap, !attachable);
+  if (attachable && el.ctxAttach) el.ctxAttach.textContent = attachStateText(obj);
   syncObjectLevel(obj && ref.kind !== "opening" ? obj : null);
 
   const skuId = draft ? placeSkuId : obj?.sku;

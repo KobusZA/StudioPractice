@@ -11,11 +11,20 @@
 // { ok, message }, so ui.js owns undo, persistence and redraw, and the tests
 // never touch a DOM.
 
+import {
+  attachPreview,
+  drawnObjectHeight,
+  levelElevation,
+  objectLabel,
+  resolvedBase,
+} from "./compile.js";
 import { bbox, roundGrid } from "./geom.js";
 import {
   collectionFor,
+  effectiveLevel,
   nid,
   objectByRef,
+  sameRef,
   shapePolygon,
   shapeRects,
   uniqueRefs,
@@ -357,4 +366,132 @@ export function joinSelection(doc, refs) {
   if (idx >= 0) list.splice(idx, 1);
 
   return done("Joined into one.", [first.ref]);
+}
+
+// --- attach base -----------------------------------------------------------
+//
+// Revit's Attach Base, scoped to the numeric relationship: an object's base is
+// resolved from another object's top instead of its level's flat datum. The
+// arithmetic and every rule about what may attach to what live in compile.js
+// (`attachPreview`), so the hover preview, this validity pass and the compiled
+// schedule are one implementation, not three.
+
+/** One message per cause, never a single "cannot attach" for all of them. */
+const ATTACH_SKIP_MESSAGE = {
+  "missing-target": "the target no longer exists",
+  "not-attachable": "only a wall or beam has a top to attach to",
+  self: "it is the target",
+  "target-attached": "the target is itself attached to something",
+  cycle: "it would create an attach cycle",
+  "level-too-far": "the target is more than one level below",
+  "no-height": "it would have no height left above the target",
+  "target-height-unknown": "the template states no height for the target, so its top is unknown",
+};
+
+function labelOf(pack, ref, obj) {
+  return `${objectLabel(pack, obj)} (${ref.id})`;
+}
+
+function skipClause(pack, skipped) {
+  return skipped
+    .map((row) => `${labelOf(pack, row.ref, row.obj)} will be skipped - ${ATTACH_SKIP_MESSAGE[row.reason] || "it cannot attach"}`)
+    .join("; ");
+}
+
+/**
+ * Attach every selected wall/beam's base to one target's top.
+ *
+ * Batch by design, the same anchor-plus-refs shape `alignSelection` uses: one
+ * call attaches a whole run of walls to one foundation.
+ *
+ * Reports before it commits. Called without `commit` it mutates nothing and
+ * returns the summary of what would happen, including which objects would be
+ * skipped and why; the caller shows that, then calls again with `commit: true`.
+ * Discovering a skipped wall later in the Check panel is the failure mode this
+ * exists to avoid.
+ */
+export function attachSelection(doc, refs, { targetRef = null, pack = null, commit = false } = {}) {
+  if (!pack) return fail("Attach needs the pack's level elevations; none is loaded.");
+  const target = targetRef ? objectByRef(doc, targetRef) : null;
+  const selected = resolve(doc, refs);
+  const rows = selected.filter((row) => !sameRef(row.ref, targetRef));
+  if (!targetRef || (!rows.length && !selected.length)) {
+    return fail("Select at least one object and exactly one target.");
+  }
+  if (!rows.length) return fail("Pick a target that is not part of the selection.");
+  if (rows.some((row) => !ENDPOINTED.has(row.ref.kind))) return fail("Attach applies to walls and beams.");
+  if (!target || !ENDPOINTED.has(targetRef.kind)) return fail("Target has no resolvable elevation.");
+
+  const attach = [];
+  const skipped = [];
+  for (const row of rows) {
+    const preview = attachPreview(doc, pack, row.obj, targetRef);
+    if (preview.ok) attach.push({ ...row, preview });
+    else skipped.push({ ...row, reason: preview.reason });
+  }
+
+  // Nothing can attach: say which single thing is wrong rather than listing the
+  // same cause once per selected object.
+  if (!attach.length) {
+    const causes = new Set(skipped.map((row) => row.reason));
+    if (causes.size === 1) {
+      const [only] = causes;
+      if (only === "cycle") return fail("That would create an attach cycle.");
+      if (only === "target-attached") return fail("Target is itself attached to something; attach chains are one level deep.");
+      if (only === "level-too-far") return fail("Target is more than one level below.");
+      if (only === "target-height-unknown") return fail(`The template states no height for ${labelOf(pack, targetRef, target)}, so there is nothing to sit on top of. Add a height to that type first.`);
+      if (only === "no-height") return fail(`Target's top is already at or above ${rows.length === 1 ? "this object's" : "every selected object's"} own top.`);
+    }
+    return fail(`Nothing can attach to ${labelOf(pack, targetRef, target)}: ${skipClause(pack, skipped)}.`);
+  }
+
+  const plural = attach.length === 1 ? "" : "s";
+  const skipText = skipped.length ? `; ${skipClause(pack, skipped)}` : "";
+  if (!commit) {
+    return {
+      ok: true,
+      pending: true,
+      message: `${attach.length} object${plural} will attach to ${labelOf(pack, targetRef, target)}${skipText}.`,
+      attach: attach.map((row) => row.ref),
+      skipped: skipped.map((row) => ({ ref: row.ref, reason: row.reason })),
+    };
+  }
+
+  for (const row of attach) {
+    row.obj.baseAttach = { kind: targetRef.kind, id: targetRef.id };
+  }
+  return done(
+    `Attached ${attach.length} object${plural} to ${labelOf(pack, targetRef, target)}${skipText}.`,
+    attach.map((row) => row.ref),
+  );
+}
+
+/**
+ * Clear the attach, leaving the object exactly where it was.
+ *
+ * Detach freezes the position it resolved to - into `baseOffset` and `height` -
+ * rather than resetting it. Revit's own Detach does the same: it stops the live
+ * link and leaves the wall where it sits. Writing `baseAttach = null` on its own
+ * would drop the object back to its flat level datum and grow it back to full
+ * height, which is a visible, unasked-for change to a drawing and a schedule.
+ */
+export function detachSelection(doc, refs, { pack = null } = {}) {
+  if (!pack) return fail("Detach needs the pack's level elevations; none is loaded.");
+  const rows = resolve(doc, refs).filter((row) => ENDPOINTED.has(row.ref.kind));
+  if (!rows.length) return fail("Detach applies to walls and beams.");
+  const attached = rows.filter((row) => row.obj.baseAttach);
+  if (!attached.length) return fail("Nothing selected is attached to anything.");
+
+  for (const { obj } of attached) {
+    const base = resolvedBase(doc, pack, obj, drawnObjectHeight(pack, obj));
+    obj.baseOffset = round4(base.elevation - levelElevation(pack, effectiveLevel(obj, pack)));
+    obj.height = round4(base.height);
+    obj.baseAttach = null;
+  }
+  return done(`Detached ${attached.length} object${attached.length === 1 ? "" : "s"}, each at the elevation and height it already had.`);
+}
+
+/** Elevations are metres, so trim the float noise an attach chain accumulates. */
+function round4(n) {
+  return Number(n.toFixed(4));
 }

@@ -182,6 +182,18 @@
           </div>
           <button type="button" id="v2-sg-cancel">Cancel</button>
         </div>
+        <!-- Attach base: the named-list alternative to clicking the target on
+             the plan, so a thin foundation strip at low zoom does not have to
+             be hit pixel-perfectly. Same candidate set as the canvas pick. -->
+        <div class="planner-underlay-panel" id="v2-attach-panel" hidden>
+          <strong>Attach base</strong>
+          <p class="hint" id="v2-attach-hint">Click what the selection should sit on.</p>
+          <label>Or pick by name
+            <select id="v2-attach-list"></select>
+          </label>
+          <button type="button" id="v2-attach-confirm">Attach</button>
+          <button type="button" id="v2-attach-cancel">Cancel</button>
+        </div>
       </div>
       </div>
     </section>
@@ -220,6 +232,13 @@
           <label id="v2-ctx-olevel-wrap" hidden>On level
             <select id="v2-ctx-olevel"></select>
           </label>
+          <!-- Attach state on the object itself, not only in the Check panel:
+               a wall whose base follows something else should say so the
+               instant it is selected. -->
+          <div class="planner-read-field" id="v2-ctx-attach-wrap" hidden>
+            <span>Base</span>
+            <strong id="v2-ctx-attach">Not attached</strong>
+          </div>
           <button type="button" id="v2-ctx-flip" hidden>Flip swing</button>
         </div>
       </section>
@@ -250,6 +269,13 @@
           <div class="planner-fields" id="v2-gaps">
             <p class="hint">Loading pack…</p>
           </div>
+        </section>
+        <section class="panel" id="v2-attach-report-panel">
+          <header>
+            <h2>Attached bases</h2>
+            <span id="v2-attach-count">—</span>
+          </header>
+          <div class="planner-fields" id="v2-attach-report"></div>
         </section>
         <section class="panel" id="v2-compile-panel" hidden>
           <header>

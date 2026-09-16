@@ -324,6 +324,18 @@ belong to one printed drawing, not to the SKU catalog or the rule pack.
    a habitable room, 2.1 m in a passage) cannot be checked until the ceiling
    build-up is known. `compile()` currently falls back to `system.wallHeight`,
    which is floor-to-floor and therefore optimistic.
+
+   **Bounded, not closed** (required before base attach landed, see
+   [../../LEVEL-ATTACH-PLAN.md](../../LEVEL-ATTACH-PLAN.md) rollout step 6): an
+   attach chain resolves **one hop only**, so a wall's elevation absorbs that
+   optimistic fallback at most once - exactly as it did before attach existed -
+   rather than once per hop up a chain. A second hop is warned about and falls
+   back to the level datum. Deeper chains stay out of scope until this gap is
+   actually closed with real floor-to-ceiling values from the template.
+   Relatedly, `resolvedBase` will **not** substitute `system.wallHeight` for a
+   *target's* missing height: a target whose type states no height is reported
+   as an unresolved attach, because an invented elevation underneath a real wall
+   is the same category of mistake as a guessed R-value.
 2. **Concave `roomMinDimension` is an upper bound.** Exact for anything built
    from rectangles, which is everything the week-1 UI can draw; the value is
    flagged per room as `minDimensionExact` so the rule engine can downgrade a
@@ -346,7 +358,7 @@ belong to one printed drawing, not to the SKU catalog or the rule pack.
 | [model.js](model.js) | Document model, shapes, room measures, store, v1 migration |
 | [walls.js](walls.js) | Wall derivation from polygons |
 | [openings.js](openings.js) | Host validation, opening placement, Part O areas |
-| [compile.js](compile.js) | Extract payload, recipes, quantities |
+| [compile.js](compile.js) | Extract payload, recipes, quantities, base-attach resolution |
 | [migrate-pack.js](migrate-pack.js) | v1 to v2 pack migration plus gap report |
 | [build-pack.js](build-pack.js) | Revit type catalog to v2 pack, plus assumption report |
 | [catalog-from-tsv.js](catalog-from-tsv.js) | The family report as a stand-in catalog |
@@ -354,6 +366,6 @@ belong to one printed drawing, not to the SKU catalog or the rule pack.
 | [rules.js](rules.js) | Week 2: the SANS rule pack and `evaluateCompliance()` |
 | [site.js](site.js) | Week 2: property line, SG reference, building line |
 | [sheets.js](sheets.js) | Week 3: A0-A4 title blocks, scale, revisions |
-| [modify.js](modify.js) | Rotate, mirror, copy, align, merge, split, cut, join |
+| [modify.js](modify.js) | Rotate, mirror, copy, align, merge, split, cut, join, attach/detach base |
 | [underlay.js](underlay.js) | PDF and image underlay with two-point calibration |
-| [tests/](tests/) | 154 tests over all of the above |
+| [tests/](tests/) | 207 tests over all of the above |

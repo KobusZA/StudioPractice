@@ -693,6 +693,42 @@
   width: 5.5rem;
 }
 
+/* Attach base: a read-only Inspector row, so a selected wall states what its
+   base follows without that being mistaken for an editable field. */
+.planner-read-field {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 0.82rem;
+}
+
+.planner-read-field[hidden] {
+  display: none !important;
+}
+
+.planner-read-field > span {
+  color: var(--ink-soft);
+}
+
+.planner-read-field > strong {
+  font-weight: 600;
+  text-align: right;
+}
+
+#v2-attach-report .attach-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 4px 0;
+  font-size: 0.82rem;
+  border-bottom: 1px solid var(--line);
+}
+
+#v2-attach-report .attach-row.attach-broken {
+  color: #7a5310;
+}
+
 /* Document-structure nudges from compile() - e.g. a ceiling drawn on a level
    with no rooms yet, almost always the level switcher left on the wrong
    storey. Distinct from #v2-gaps (which is compliance facts, not what was

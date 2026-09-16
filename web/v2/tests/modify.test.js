@@ -1,11 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import { emptyDoc, nid, rectShape, roomMinDimension, roomArea, shapeRects } from "../model.js";
 import {
   alignSelection,
+  attachSelection,
   copySelection,
   cutSelection,
+  detachSelection,
   joinSelection,
   mergeSelection,
   mirrorSelection,
@@ -13,6 +16,15 @@ import {
   selectionBounds,
   splitSelection,
 } from "../modify.js";
+import { normalizePackUnits } from "../schema.js";
+
+// Attach resolves against real level datums and SKU heights, so it needs the
+// pack the same way ui.js has it: mm on disk, metres in memory.
+const pack = normalizePackUnits(
+  JSON.parse(readFileSync(new URL("../../samples/planner-pack-v2.json", import.meta.url))),
+);
+const WALL_SKU = "TSP_MAS009"; // 2.8 m high
+const FOUNDATION_SKU = "TSP_CON052"; // 0.6 m high
 
 function docWith(overrides = {}) {
   return { ...emptyDoc(), ...overrides };
@@ -196,4 +208,143 @@ test("every operation refuses an empty selection without throwing", () => {
     assert.equal(result.ok, false, `${op.name} should refuse`);
     assert.ok(result.message.length > 0);
   }
+  for (const op of [attachSelection, detachSelection]) {
+    const result = op(doc, [], { pack, targetRef: ref("segment", "nope") });
+    assert.equal(result.ok, false, `${op.name} should refuse`);
+    assert.ok(result.message.length > 0);
+  }
+});
+
+// --- attach base -----------------------------------------------------------
+
+/** A foundation and two walls on it, all on the ground level. */
+function attachDoc() {
+  return docWith({
+    segments: [
+      { id: "f1", sku: FOUNDATION_SKU, x1: 0, y1: 0, x2: 6, y2: 0, level: "01 GFL", status: "planned", baseAttach: null, baseOffset: 0, height: null },
+      { id: "w1", sku: WALL_SKU, x1: 0, y1: 0, x2: 3, y2: 0, level: "01 GFL", status: "planned", baseAttach: null, baseOffset: 0, height: null },
+      { id: "w2", sku: WALL_SKU, x1: 3, y1: 0, x2: 6, y2: 0, level: "01 GFL", status: "planned", baseAttach: null, baseOffset: 0, height: null },
+    ],
+  });
+}
+
+test("attach reports what it will do and changes nothing until it is committed", () => {
+  const doc = attachDoc();
+  const dry = attachSelection(doc, [ref("segment", "w1"), ref("segment", "w2")], {
+    pack,
+    targetRef: ref("segment", "f1"),
+  });
+  assert.equal(dry.ok, true);
+  assert.equal(dry.pending, true);
+  assert.match(dry.message, /2 objects will attach/);
+  assert.equal(doc.segments[1].baseAttach, null, "the dry run must not mutate");
+
+  const done = attachSelection(doc, [ref("segment", "w1"), ref("segment", "w2")], {
+    pack,
+    targetRef: ref("segment", "f1"),
+    commit: true,
+  });
+  assert.equal(done.ok, true);
+  assert.deepEqual(doc.segments[1].baseAttach, { kind: "segment", id: "f1" });
+  assert.deepEqual(doc.segments[2].baseAttach, { kind: "segment", id: "f1" });
+});
+
+// The whole reason the validity pass runs before the commit: a partly-valid
+// batch has to say which object it is dropping, not quietly attach the rest.
+test("a batch names the object it will skip, and still attaches the others", () => {
+  const doc = attachDoc();
+  // A 0.6 m foundation cannot sit on another 0.6 m foundation's top: there is
+  // no height left above it.
+  doc.segments.push({ id: "f2", sku: FOUNDATION_SKU, x1: 0, y1: 2, x2: 6, y2: 2, level: "01 GFL", status: "planned", baseAttach: null, baseOffset: 0, height: null });
+  const result = attachSelection(doc, [ref("segment", "w1"), ref("segment", "f2")], {
+    pack,
+    targetRef: ref("segment", "f1"),
+  });
+  assert.equal(result.ok, true);
+  assert.match(result.message, /1 object will attach/);
+  assert.match(result.message, /f2\) will be skipped - it would have no height left above the target/);
+  assert.deepEqual(result.attach, [ref("segment", "w1")]);
+});
+
+test("attach refuses each cause with its own message", () => {
+  const doc = attachDoc();
+  assert.match(
+    attachSelection(doc, [], { pack, targetRef: ref("segment", "f1") }).message,
+    /at least one object and exactly one target/,
+  );
+  assert.match(
+    attachSelection(doc, [ref("segment", "f1")], { pack, targetRef: ref("segment", "f1") }).message,
+    /not part of the selection/,
+  );
+  assert.match(
+    attachSelection(doc, [ref("segment", "w1")], { pack, targetRef: ref("room", "a") }).message,
+    /Target has no resolvable elevation/,
+  );
+  doc.rooms.push(room("a", 0, 0, 4, 3));
+  assert.match(
+    attachSelection(doc, [ref("room", "a")], { pack, targetRef: ref("segment", "f1") }).message,
+    /Attach applies to walls and beams/,
+  );
+  assert.match(
+    attachSelection(doc, [ref("segment", "w2")], { pack, targetRef: ref("segment", "w1") }).message,
+    /already at or above/,
+  );
+});
+
+test("attach refuses a cycle rather than writing one into the document", () => {
+  const doc = attachDoc();
+  attachSelection(doc, [ref("segment", "w1")], { pack, targetRef: ref("segment", "f1"), commit: true });
+  const result = attachSelection(doc, [ref("segment", "f1")], {
+    pack,
+    targetRef: ref("segment", "w1"),
+    commit: true,
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.message, /attach cycle/);
+  assert.equal(doc.segments[0].baseAttach, null);
+});
+
+test("attach refuses a second hop while chains are one level deep", () => {
+  const doc = attachDoc();
+  attachSelection(doc, [ref("segment", "w1")], { pack, targetRef: ref("segment", "f1"), commit: true });
+  const result = attachSelection(doc, [ref("segment", "w2")], {
+    pack,
+    targetRef: ref("segment", "w1"),
+    commit: true,
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.message, /one level deep/);
+  assert.equal(doc.segments[2].baseAttach, null);
+});
+
+test("attach refuses a target more than one level below", () => {
+  const doc = attachDoc();
+  doc.segments.push({ id: "w3", sku: WALL_SKU, x1: 0, y1: 4, x2: 3, y2: 4, level: "02 L1", status: "planned", baseAttach: null, baseOffset: 0, height: null });
+  // 01 GFL is the level immediately below 02 L1, so this one is allowed...
+  assert.equal(attachSelection(doc, [ref("segment", "w3")], { pack, targetRef: ref("segment", "f1") }).ok, true);
+  // ...but with the ground level removed from the pack it is two storeys away.
+  const gapPack = { ...pack, levels: [pack.levels[0], { id: "01 MEZZ", name: "01 MEZZ", elevation: 1.4 }, pack.levels[1]] };
+  const result = attachSelection(doc, [ref("segment", "w3")], { pack: gapPack, targetRef: ref("segment", "f1") });
+  assert.equal(result.ok, false);
+  assert.match(result.message, /more than one level below/);
+});
+
+// Revit's Detach leaves the wall where it is; so does this. Anything else is a
+// wall that silently jumps and grows the moment the link is cut.
+test("detach freezes the elevation and height the attach had resolved to", () => {
+  const doc = attachDoc();
+  attachSelection(doc, [ref("segment", "w1")], { pack, targetRef: ref("segment", "f1"), commit: true });
+  const result = detachSelection(doc, [ref("segment", "w1")], { pack });
+  assert.equal(result.ok, true);
+  const wall = doc.segments[1];
+  assert.equal(wall.baseAttach, null);
+  assert.equal(wall.baseOffset, 0.6, "it stays on top of the 0.6 m foundation it was attached to");
+  assert.equal(wall.height, 2.2, "and keeps the height the attach had left it");
+});
+
+test("detach says so when nothing selected is attached", () => {
+  const doc = attachDoc();
+  const result = detachSelection(doc, [ref("segment", "w1")], { pack });
+  assert.equal(result.ok, false);
+  assert.match(result.message, /not attached|Nothing selected is attached/);
 });

@@ -7,8 +7,14 @@
 // come off these rows unchanged.
 
 import { area as polyArea, perimeter as polyPerimeter } from "./geom.js";
+import { lookDownLevelId } from "./level-view.js";
 import {
+  ATTACHABLE_KINDS,
+  attachChainReaches,
+  collectionFor,
   effectiveLevel,
+  objectByRef,
+  resolveBaseAttach,
   roomArea,
   roomCentroid,
   roomMinDimension,
@@ -66,9 +72,199 @@ function objectStatus(obj) {
   return obj?.status === "existing" ? "existing" : "planned";
 }
 
-function levelElevation(pack, levelId) {
+export function levelElevation(pack, levelId) {
   const hit = (pack.levels || []).find((l) => l.id === levelId || l.name === levelId);
   return hit?.elevation ?? 0;
+}
+
+function levelName(pack, levelId) {
+  return (pack?.levels || []).find((l) => l.id === levelId)?.name || levelId;
+}
+
+// --- base attach: elevation and height resolution -------------------------
+//
+// Without attach, every level-bound object's base is exactly its level's flat
+// datum. With it, a wall that sits on a foundation resolves its base from that
+// foundation's top instead, so the wall keeps a correct base elevation when the
+// thing under it changes height. This is the numeric relationship only - it
+// says nothing about how anything is drawn or how solids join.
+
+// A degenerate attach (the target's top already at or above this object's own
+// top) is a gap, not a number to emit anyway, so anything at or under this is
+// warned about rather than scheduled.
+const MIN_ATTACH_HEIGHT = 1e-6;
+
+const BEAM_CATEGORIES = new Set(["beam", "column"]);
+const BEAM_DEPTH = 0.22;
+
+/** The label the Check panel, the inspector and the attach picker all print. */
+export function objectLabel(pack, obj) {
+  return skuById(pack, obj?.sku)?.name || obj?.id || "object";
+}
+
+/**
+ * The height the document actually states for an object: the per-object
+ * override Detach writes, else the SKU's. `null` where neither exists - which
+ * is the real case for a template whose foundation types carry a thickness and
+ * a depth but no height.
+ */
+export function statedHeight(pack, obj) {
+  if (Number.isFinite(obj?.height)) return obj.height;
+  const height = skuById(pack, obj?.sku)?.geometry?.height;
+  return Number.isFinite(height) ? height : null;
+}
+
+/**
+ * A drawn object's own height, before any attach eats into it. Falls back to
+ * the document default the way `walls.js` and the beam extrusion already do, so
+ * attach computes an object's height exactly as the rest of the app does.
+ */
+export function drawnObjectHeight(pack, obj) {
+  const stated = statedHeight(pack, obj);
+  if (stated !== null) return stated;
+  if (BEAM_CATEGORIES.has(skuById(pack, obj?.sku)?.category)) return BEAM_DEPTH;
+  return pack?.system?.wallHeight ?? 0;
+}
+
+/**
+ * The top surface something attaches to, or `null` when the pack does not state
+ * the target's height.
+ *
+ * Deliberately stricter than `drawnObjectHeight`: falling back to
+ * `system.wallHeight` here would put an invented elevation under a real wall,
+ * which is the "unknown is null, never a plausible default" rule the pack
+ * schema already applies to a missing compliance fact. Reads the target's own
+ * datum and offset rather than its attach, since Phase 1 refuses a target that
+ * is itself attached.
+ */
+function topElevation(pack, obj) {
+  const height = statedHeight(pack, obj);
+  if (height === null) return null;
+  return levelElevation(pack, effectiveLevel(obj, pack)) + (obj.baseOffset || 0) + height;
+}
+
+/**
+ * Levels a Phase-1 attach target may sit on: the object's own, or the storey
+ * immediately below it. You attach to what is under you or beside you, never
+ * to something two storeys down and never upwards - there is no Top attach to
+ * make "upwards" mean anything yet.
+ */
+export function attachTargetLevels(pack, obj) {
+  const own = effectiveLevel(obj, pack);
+  const below = lookDownLevelId(pack?.levels, own);
+  return below ? [own, below] : [own];
+}
+
+/**
+ * What attaching `obj` to `targetRef` would do, changing nothing. The picker's
+ * hover preview, `attachSelection`'s validity pass and the Check panel's
+ * warning text all read this one function, so what the UI promises before a
+ * click and what compile() reports after it cannot disagree.
+ *
+ * `reason` on a refusal is the cause, one per distinct thing that can be
+ * wrong, so every caller can say which it was instead of "cannot attach".
+ */
+export function attachPreview(doc, pack, obj, targetRef) {
+  if (!obj || !targetRef?.kind || targetRef.id == null) {
+    return { ok: false, reason: "missing-target", target: null };
+  }
+  if (!ATTACHABLE_KINDS.has(targetRef.kind)) return { ok: false, reason: "not-attachable", target: null };
+  const target = objectByRef(doc, targetRef);
+  if (!target) return { ok: false, reason: "missing-target", target: null };
+  if (target.id === obj.id) return { ok: false, reason: "self", target };
+  if (target.baseAttach) {
+    return { ok: false, reason: attachChainReaches(doc, target, obj) ? "cycle" : "target-attached", target };
+  }
+  if (!attachTargetLevels(pack, obj).includes(effectiveLevel(target, pack))) {
+    return { ok: false, reason: "level-too-far", target };
+  }
+  const base = levelElevation(pack, effectiveLevel(obj, pack)) + (obj.baseOffset || 0);
+  const elevation = topElevation(pack, target);
+  if (elevation === null) return { ok: false, reason: "target-height-unknown", target };
+  const height = (base + drawnObjectHeight(pack, obj)) - elevation;
+  if (height <= MIN_ATTACH_HEIGHT) return { ok: false, reason: "no-height", target, elevation };
+  return { ok: true, reason: null, target, elevation, height, rise: elevation - base };
+}
+
+/**
+ * Where a drawn wall's or beam's base sits, and how tall it is once its attach
+ * is resolved. `height` in is the object's pre-attach height, which is what
+ * keeps its **top** elevation fixed: attach raises the base and eats into the
+ * height from the bottom, so the takeoff row shrinks with the wall instead of
+ * the wall silently growing taller than it was drawn.
+ *
+ * A gap - dead target, cycle, second hop, or a chain with no height left in it
+ * - falls back to the level datum and returns a warning. It never guesses a
+ * number, the same rule the pack schema follows for a missing compliance fact.
+ */
+export function resolvedBase(doc, pack, obj, height) {
+  const datum = levelElevation(pack, effectiveLevel(obj, pack));
+  const flat = { elevation: datum + (obj?.baseOffset || 0), height, attachedTo: null, warning: null };
+  const link = resolveBaseAttach(doc, obj);
+  if (link.reason === "none") return flat;
+
+  const preview = attachPreview(doc, pack, obj, obj.baseAttach);
+  if (!preview.ok) return { ...flat, warning: attachWarning(pack, obj, preview) };
+
+  // Re-checked against the caller's height rather than trusting the preview's:
+  // the derived wall row is what the schedule is built from, so it is the
+  // number that has to come out positive.
+  const resolvedHeight = (flat.elevation + height) - preview.elevation;
+  if (resolvedHeight <= MIN_ATTACH_HEIGHT) {
+    return { ...flat, warning: attachWarning(pack, obj, { ...preview, ok: false, reason: "no-height" }) };
+  }
+  return {
+    elevation: preview.elevation,
+    height: resolvedHeight,
+    attachedTo: { ref: obj.baseAttach, label: objectLabel(pack, preview.target) },
+    warning: null,
+  };
+}
+
+function attachWarning(pack, obj, preview) {
+  const name = objectLabel(pack, obj);
+  const where = levelName(pack, effectiveLevel(obj, pack));
+  const target = preview.target ? `"${objectLabel(pack, preview.target)}"` : null;
+  switch (preview.reason) {
+    case "cycle":
+      return `"${name}" and ${target || "its target"} are attached to each other, so neither base can be resolved. "${name}" falls back to ${where}.`;
+    case "target-attached":
+      return `"${name}" is attached to ${target}, which is itself attached to something else. Attach chains are one level deep for now, so "${name}" falls back to ${where}.`;
+    case "level-too-far":
+      return `"${name}" is attached to ${target}, which is more than one level below it, so "${name}" falls back to ${where}.`;
+    case "no-height":
+      return `"${name}" is attached to ${target}, whose top is already at or above "${name}"'s own top, so the attach would leave no height. "${name}" falls back to ${where}.`;
+    case "target-height-unknown":
+      return `"${name}" is attached to ${target}, and the template does not state a height for it, so where its top is is unknown. "${name}" falls back to ${where} rather than a guessed elevation.`;
+    default:
+      return `"${name}" is attached to an object that no longer exists, so its base falls back to ${where}. Re-attach it or detach it.`;
+  }
+}
+
+/**
+ * Every base attach in the document, resolved. The Check panel and the
+ * selection inspector read this so attach state is visible without running a
+ * compile - attach that is only discoverable by opening a schedule is the
+ * thing Revit users complain about most after the failure messages.
+ */
+export function attachReport(doc, pack) {
+  const rows = [];
+  for (const kind of ATTACHABLE_KINDS) {
+    for (const obj of collectionFor(doc, kind) || []) {
+      if (!obj.baseAttach) continue;
+      const base = resolvedBase(doc, pack, obj, drawnObjectHeight(pack, obj));
+      rows.push({
+        ref: { kind, id: obj.id },
+        label: objectLabel(pack, obj),
+        level: effectiveLevel(obj, pack),
+        attachedTo: base.attachedTo,
+        elevation: base.elevation,
+        height: base.height,
+        warning: base.warning,
+      });
+    }
+  }
+  return rows;
 }
 
 function defaultLevelFor(pack, sku) {
@@ -289,10 +485,21 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
   }
 
   // --- walls ---------------------------------------------------------------
+  // Resolved base per wall id, so an opening in an attached wall reads the
+  // same elevation the wall itself got rather than resolving it a second time
+  // (and warning about the same broken attach twice).
+  const wallBases = new Map();
   for (const wall of walls) {
     const sku = skuById(pack, wall.sku);
     if (!sku) continue;
-    const height = wall.height || sku.geometry?.height || wallHeight;
+    // A base attach raises this wall's base and takes the difference out of its
+    // height, so `area`/`volume` below are the attached wall's, not the
+    // as-drawn wall's. Room-derived walls carry no attach and resolve to the
+    // level datum exactly as they always did.
+    const base = resolvedBase(doc, pack, wall, wall.height || sku.geometry?.height || wallHeight);
+    if (base.warning) warnings.push(base.warning);
+    wallBases.set(wall.id, base);
+    const height = base.height;
     const a = wall.length * height;
 
     const row = baseRow(pack, sku, wall.id, wall.status || "planned");
@@ -311,7 +518,7 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
       name: sku.name,
       thickness: wall.thickness,
       depth: height,
-      elevation: levelElevation(pack, wall.level),
+      elevation: base.elevation,
       status: wall.status || "planned",
       profileLoops: [{
         length: wall.length,
@@ -346,7 +553,9 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
       name: sku.name,
       depth: g.height || (sku.category === "window" ? 1.2 : 2.1),
       sill: sku.category === "window" ? (g.sill ?? 0.9) : 0,
-      elevation: levelElevation(pack, wall.level),
+      // Follows its host wall's base, so a door in a wall attached to a
+      // foundation is not left sitting at the level datum below it.
+      elevation: wallBases.get(wall.id)?.elevation ?? levelElevation(pack, wall.level),
       status: objectStatus(opening),
       profileLoops: [{
         length: placed.width,
@@ -410,12 +619,15 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
     applyMeasures(row, sku, { length: len, count: 1 });
     instances.push(row);
 
+    const base = resolvedBase(doc, pack, beam, drawnObjectHeight(pack, beam));
+    if (base.warning) warnings.push(base.warning);
+
     sketchForms.push({
       kind: "Extrusion",
       elementId: beam.id,
       name: sku.name,
-      depth: sku.geometry?.height || 0.22,
-      elevation: levelElevation(pack, effectiveLevel(beam, pack)),
+      depth: base.height,
+      elevation: base.elevation,
       profileLoops: [segLoop(beam.x1, beam.y1, beam.x2, beam.y2, sku.geometry?.width || 0.11)],
       status: objectStatus(beam),
     });
@@ -451,7 +663,11 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
       sku: w.sku,
       length: w.length,
       thickness: w.thickness,
-      height: w.height,
+      // The attached height and base, not the as-drawn ones, so a consumer of
+      // this row and the schedule row above never disagree about a wall.
+      height: wallBases.get(w.id)?.height ?? w.height,
+      baseElevation: wallBases.get(w.id)?.elevation ?? levelElevation(pack, w.level),
+      attachedTo: wallBases.get(w.id)?.attachedTo?.label ?? null,
       external: isExternalWall(w),
       roomIds: w.roomIds,
       status: w.status,
