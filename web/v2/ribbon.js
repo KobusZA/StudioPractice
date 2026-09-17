@@ -21,7 +21,7 @@ export const RIBBON = [
         label: "Add drawing",
         items: [
           { id: "underlay", label: "PDF / image", command: "underlay" },
-          { id: "underlay-adjust", label: "Move / rotate", command: "underlay-adjust" },
+          { id: "underlay-adjust", label: "Adjust", command: "underlay-adjust" },
           { id: "calibrate", label: "Set scale", command: "calibrate" },
           { id: "underlay-toggle", label: "Hide", command: "underlay-toggle" },
           { id: "underlay-off", label: "Remove", command: "underlay-off" },
@@ -32,8 +32,12 @@ export const RIBBON = [
       {
         label: "Levels",
         items: [
-          { id: "level-isolate", label: "This storey only", command: "level-isolate" },
-          { id: "levels", label: "Insert level", todo: "Levels come from the template; adding new ones is week 3 with sections." },
+          { id: "level-isolate", label: "This level only", command: "level-isolate" },
+          // Two different jobs: "+ Add floor" reveals a storey the template
+          // already defines, "Insert level" adds one it does not. The template
+          // is the default stack, not the limit (PHILOSOPHY.md).
+          { id: "add-floor", label: "+ Add floor", command: "add-floor" },
+          { id: "levels", label: "Insert level", command: "insert-level" },
         ],
       },
       {
@@ -125,7 +129,7 @@ export const RIBBON = [
       {
         label: "Views",
         items: [
-          { id: "section", label: "Section", todo: "Week 3: one section extruded from the plan." },
+          { id: "section", label: "Section", command: "section" },
           { id: "elevation", label: "Elevation", todo: "Week 3: one elevation extruded from the plan." },
           { id: "grids", label: "Grids", todo: "Week 3, with the TSP grid head." },
         ],
@@ -193,6 +197,7 @@ export const RIBBON = [
         label: "Views",
         items: [
           { id: "view-3d", label: "3D", command: "view-3d" },
+          { id: "view-camera", label: "Camera", command: "view-camera" },
           { id: "callout", label: "Call out", todo: "Week 3, with the TSP callout head." },
           { id: "view-section", label: "Section", todo: "Week 3: placing a section view on a sheet, once sheets exist." },
         ],
@@ -202,6 +207,13 @@ export const RIBBON = [
         items: [
           { id: "boq", label: "BOQ", command: "compile" },
           { id: "bom", label: "BOM", command: "compile" },
+        ],
+      },
+      {
+        label: "Exchange",
+        items: [
+          { id: "export-dxf", label: "Export CAD", command: "export-dxf" },
+          { id: "export-ifc", label: "Export IFC", command: "export-ifc" },
         ],
       },
       {
@@ -258,11 +270,11 @@ const ITEM_INDEX = ribbonItems();
  */
 export const HINTS = {
   underlay: "Load a PDF or image to trace.",
-  calibrate: "Click two points on the sheet, then type the real distance.",
+  calibrate: "Click two points on the sheet, then type the real distance or drag a corner to resize.",
   "underlay-adjust": "Drag the sheet to move, a corner to resize, the top handle to rotate.",
   "underlay-toggle": "Hide the sheet without removing it.",
   "underlay-off": "Remove the sheet from the plan.",
-  "level-isolate": "Show this storey only. Off ghosts the floor below, so upper walls can align to the footprint they sit on.",
+  "level-isolate": "Show only this level. Off ghosts the neighbouring level: the floor below, or the walls above when you are on a foundation.",
   walls: "Click to start a wall, click again to end. Esc to stop.",
   boundary: "Click to start a boundary wall, click again to end. Esc to stop.",
   foundations: "Click to start a foundation, click again to end. Esc to stop.",
@@ -279,14 +291,18 @@ export const HINTS = {
   furniture: "Click to place a piece of furniture.",
   casework: "Click to place casework.",
   rooms: "Click inside enclosed walls to tag a room.",
-  dimensions: "Click two points to measure.",
+  dimensions: "Click two points to measure. Esc to stop.",
   rotate: "Select something first, then rotate.",
   attach: "Click a wall or beam on this storey or the one below to sit the selection on top of it. Esc to cancel.",
   detach: "Stop following what the selection sits on, leaving it at the elevation it already has.",
   "view-3d": "Open a massing view of the current plan.",
+  "view-camera": "Click where you stand, then click what you look at.",
+  section: "Click two points to cut. Look is to the left of the line; draw the other way to flip.",
   compile: "Build the bill of quantities from what you have drawn.",
   gaps: "List facts the template still needs before compliance can run.",
   sheets: "Manage print sheets (A0–A4) and their title blocks.",
+  "export-dxf": "Download a DXF. In Revit: open the template, then Insert → Link CAD (not File → Open).",
+  "export-ifc": "Download an IFC. File → Open will ignore it unless you pick Open → IFC, then Save As a project.",
 };
 
 /**
@@ -333,7 +349,7 @@ const SIMPLE_TABS = [
     id: "issue",
     label: "Issue",
     groups: [
-      { label: "Views", items: ["view-3d"] },
+      { label: "Views", items: ["view-3d", "view-camera", "section"] },
       { label: "Quantities", items: ["boq"] },
       { label: "Print", items: ["sheets"] },
       { label: "Check", items: ["gaps"] },

@@ -8,6 +8,7 @@
 import {
   EPS,
   paramOnSeg,
+  pointInPoly,
   polyEdges,
   segNormal,
 } from "./geom.js";
@@ -147,6 +148,39 @@ export function swingToward(wall, x, y) {
   const p = pointOnWall(wall, t);
   const n = wallNormal(wall, 1);
   return (x - p.x) * n.x + (y - p.y) * n.y >= 0 ? 1 : -1;
+}
+
+/**
+ * The opening a click at (x, y) would commit: same host, t and swing the
+ * canvas preview uses. Drawn walls store a wallId; room-derived walls store
+ * the room edge under the pointer (or the first edge if the pointer is
+ * outside every room).
+ */
+export function openingDraftAt(doc, pack, walls, skuId, x, y) {
+  const sku = skuById(pack, skuId);
+  if (!sku) return null;
+  const wall = nearestPlaceWall(walls, pack, x, y, skuId);
+  if (!wall) return null;
+  const swing = swingToward(wall, x, y);
+  if (wall.drawn) {
+    return { sku: skuId, wallId: wall.id, t: wallT(wall, x, y), swing };
+  }
+  const roomHit = (doc.rooms || []).find((r) => {
+    const poly = roomPolygon(r);
+    return poly.length >= 3 && pointInPoly(x, y, poly);
+  });
+  const edge = (wall.edges || []).find((e) => e.roomId === roomHit?.id) || wall.edges?.[0];
+  const room = edge ? (doc.rooms || []).find((r) => r.id === edge.roomId) : null;
+  if (!room) return null;
+  const edgeSeg = roomEdgeSegment(room, edge.edgeIndex);
+  if (!edgeSeg) return null;
+  return {
+    sku: skuId,
+    roomId: edge.roomId,
+    edgeIndex: edge.edgeIndex,
+    t: wallT(edgeSeg, x, y),
+    swing,
+  };
 }
 
 export function beamHostsOk(walls, pack, beam, skuId) {

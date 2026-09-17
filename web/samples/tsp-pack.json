@@ -1,13 +1,13 @@
 {
   "schema": "sp.pack/3",
   "id": "tsp-template",
-  "name": "TSP template (family report)",
+  "name": "APP DEVELOPMENT TRAIL PROJECT(1)",
   "version": "2.1.0",
-  "revision": "2026-09-15",
+  "revision": "2026-09-16",
   "builtFrom": {
     "schema": "sp.catalog/1",
-    "title": "TSP template (family report)",
-    "extractedAt": "2026-09-15T20:07:48.850Z"
+    "title": "APP DEVELOPMENT TRAIL PROJECT(1)",
+    "extractedAt": "2026-09-16T14:19:48.2775861Z"
   },
   "locale": {
     "country": "ZA",
@@ -15,28 +15,42 @@
     "energyZone": null
   },
   "system": {
-    "wallHeight": 2800,
+    "wallHeight": 3000,
     "defaultWallSku": "TSP_WAL_MASONARY_WALL_220MM_PLASTER",
     "defaultFloorSku": "TSP_FLR_GENERIC_85MM",
     "defaultFoundationSku": "TSP_FND_BEARING_FOOTING_600X200_MM",
     "defaultRoofSku": "TSP_ROF_GENERIC_125MM",
     "defaultCeilingSku": "TSP_CLG_9MM_PLASTERED_CEILINGS",
-    "defaultLevel": "Ground floor (inferred)"
+    "defaultLevel": "01 GFL"
   },
   "levels": [
     {
-      "id": "Ground floor (inferred)",
-      "name": "Ground floor (inferred)",
-      "elevation": 0,
-      "floorToFloor": 2.8,
-      "floorToCeiling": null
+      "id": "00 FOUNDATION",
+      "name": "00 FOUNDATION",
+      "elevation": -0.6,
+      "floorToFloor": 0.6,
+      "floorToCeiling": 2.902
     },
     {
-      "id": "First floor (inferred)",
-      "name": "First floor (inferred)",
-      "elevation": 2.8,
+      "id": "01 GFL",
+      "name": "01 GFL",
+      "elevation": 0,
+      "floorToFloor": 3,
+      "floorToCeiling": 2.902
+    },
+    {
+      "id": "02 L1",
+      "name": "02 L1",
+      "elevation": 3,
+      "floorToFloor": 3,
+      "floorToCeiling": 2.902
+    },
+    {
+      "id": "03 L2",
+      "name": "03 L2",
+      "elevation": 6,
       "floorToFloor": 2.8,
-      "floorToCeiling": null
+      "floorToCeiling": 2.902
     }
   ],
   "skus": [
@@ -54,7 +68,7 @@
         "placedCount": 4
       },
       "geometry": {
-        "thickness": 9
+        "thickness": 57
       },
       "cost": {
         "rateRef": null,
@@ -813,14 +827,14 @@
     },
     {
       "id": "TSP_ELE_TSP_CEILING_OR_WALL_FAN",
-      "name": "TSP Ceiling or Wall fan",
-      "family": "TSP Ceiling or Wall fan",
+      "name": "TSP Ceiling or Wall fan  — TSP Ceiling or Wall fan",
+      "family": "TSP Ceiling or Wall fan ",
       "category": "electrical",
       "unit": "ea",
       "draw": "point",
       "revit": {
         "category": "Electrical Fixtures",
-        "family": "TSP Ceiling or Wall fan",
+        "family": "TSP Ceiling or Wall fan ",
         "type": "TSP Ceiling or Wall fan",
         "placedCount": 1
       },
@@ -3526,7 +3540,7 @@
       "geometry": {
         "width": 760,
         "depth": 1525,
-        "height": 400
+        "height": 460
       },
       "cost": {
         "rateRef": null,
@@ -3647,7 +3661,7 @@
       "geometry": {
         "width": 600,
         "depth": 600,
-        "height": 900
+        "height": 850
       },
       "cost": {
         "rateRef": null,
@@ -3681,8 +3695,8 @@
       },
       "geometry": {
         "width": 900,
-        "riser": 175,
-        "going": 250
+        "riser": 176,
+        "going": 280
       },
       "cost": {
         "rateRef": null,
@@ -3709,7 +3723,7 @@
     },
     {
       "id": "TSP_COL_450_X_450MM",
-      "name": "Concrete-Rectangular-Column — 450 x 450mm",
+      "name": "Concrete-Rectangular-Column — 450  x 450mm",
       "family": "Concrete-Rectangular-Column",
       "category": "column",
       "unit": "m",
@@ -3717,7 +3731,7 @@
       "revit": {
         "category": "Structural Columns",
         "family": "Concrete-Rectangular-Column",
-        "type": "450 x 450mm",
+        "type": "450  x 450mm",
         "placedCount": 3
       },
       "geometry": {
@@ -3834,8 +3848,8 @@
         "placedCount": 27
       },
       "geometry": {
-        "thickness": 110,
-        "height": 2800
+        "thickness": 130,
+        "height": 3000
       },
       "cost": {
         "rateRef": null,
@@ -3879,8 +3893,8 @@
         "placedCount": 33
       },
       "geometry": {
-        "thickness": 220,
-        "height": 2800
+        "thickness": 240,
+        "height": 3000
       },
       "cost": {
         "rateRef": null,
@@ -3924,8 +3938,8 @@
         "placedCount": 10
       },
       "geometry": {
-        "thickness": 220,
-        "width": 600,
+        "thickness": 240,
+        "width": 240,
         "depth": 200
       },
       "cost": {
@@ -3963,8 +3977,8 @@
         "placedCount": 15
       },
       "geometry": {
-        "thickness": 220,
-        "width": 600,
+        "thickness": 240,
+        "width": 240,
         "depth": 200
       },
       "cost": {
@@ -4002,8 +4016,8 @@
         "placedCount": 4
       },
       "geometry": {
-        "thickness": 220,
-        "height": 2800
+        "thickness": 240,
+        "height": 1970
       },
       "cost": {
         "rateRef": null,
@@ -4091,7 +4105,7 @@
         "placedCount": 1
       },
       "geometry": {
-        "width": 1650,
+        "width": 1635,
         "height": 1650,
         "sill": 900
       },
@@ -4225,7 +4239,7 @@
       "geometry": {
         "width": 900,
         "height": 900,
-        "sill": 900
+        "sill": 1200
       },
       "cost": {
         "rateRef": null,

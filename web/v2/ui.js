@@ -18,9 +18,23 @@
 import { complianceGaps, normalizePackUnits } from "./schema.js";
 import { RULE_PACK, evaluateCompliance, groupFindingsByPart, summarizeFindings } from "./rules.js";
 import { deriveBuildingLine, setBuildingLine, setPropertyLine, setSgReference } from "./site.js?v=20260915-offset";
-import { HINTS, firstTabId, renderRibbon } from "./ribbon.js?v=20260915-level-isolate";
-import { closeOverflowMenus, decorateRibbon, fitRibbon } from "./ribbon-fit.js?v=20260915-level-isolate";
-import { lookDownLevelId, lookUpLevelId } from "./level-view.js";
+import { HINTS, firstTabId, renderRibbon } from "./ribbon.js?v=20260917-measure";
+import { closeOverflowMenus, decorateRibbon, fitRibbon } from "./ribbon-fit.js?v=20260917-section";
+import {
+  lookUpLevelId,
+  ghostContext,
+  MAX_FLOORS_TO_ADD,
+  floorsAvailableToAdd as floorsAvailableToAddFor,
+  canAddFloor as canAddFloorFor,
+  visibleLevels as visibleLevelsFor,
+  mergedLevels,
+  validateLevelInsert,
+  insertLevel as insertLevelInto,
+  buildHouseStations,
+  inspectorStations,
+  selectedInspectorStationId,
+} from "./level-view.js";
+import { isFoundationLevel as levelIsFoundation, placementHintOverride } from "./placement-warn.js";
 import {
   alignSelection,
   attachSelection,
@@ -46,10 +60,13 @@ import {
   toggleUnderlayHidden,
   underlayBitmap,
   underlayCorners,
-} from "./underlay.js";
-import { planDimensionLines } from "./dimensions.js";
+  underlayPixelFromWorld,
+  underlayWorldFromPixel,
+} from "./underlay.js?v=20260917-calibrate";
+import { pickedDimension, planDimensionLines } from "./dimensions.js?v=20260917-measure";
 import { area as polyArea, bbox, clipSegToRect, distToSeg, headingDeg, pointInPoly, roundGrid } from "./geom.js?v=20260915-offset";
-import { SNAP_PIXEL_TOL, bestEndpointSnap, collectSnapTargets, snapPoint } from "./snap.js";
+import { SNAP_PIXEL_TOL, GAP_MAX_M, NICE_MIN_STEP_M, PROBE_VECTORS, applyNicePoint, bestEndpointSnap, collectSnapEdges, collectSnapTargets, nearestAlignments, resolveProbes, snapLengthFrom, snapPoint } from "./snap.js";
+import { DEFAULT_ROOF_PITCH, roofGuideLines } from "./roof.js";
 import {
   ATTACHABLE_KINDS,
   PlanStore,
@@ -65,12 +82,13 @@ import {
   roomPolygon,
   shapePolygon,
 } from "./model.js";
-import { deriveWalls } from "./walls.js";
+import { deriveWalls, drawnWallThickness, isStripFooting, statusVisible } from "./walls.js";
 import {
-  nearestPlaceWall,
+  openingDraftAt,
+  openingOnWall,
   roomEdgeSegment,
-  swingToward,
   wallForOpening,
+  wallNormal,
   wallT,
 } from "./openings.js";
 import {
@@ -82,7 +100,11 @@ import {
   objectLabel,
   resolvedBase,
 } from "./compile.js";
-import { createMassingView } from "./massing.js";
+import { exportDxf } from "./dxf.js";
+import { exportIfc } from "./ifc.js";
+import { createMassingView, lookFromClicks, EYE_HEIGHT_M } from "./massing.js";
+import { drawLookPlan, lookPlanCaption } from "./look-plan.js";
+import { sectionFromClicks } from "./section.js";
 import {
   SHEET_SIZES,
   STANDARD_SCALES,
@@ -143,6 +165,12 @@ const el = {
   sgY: document.getElementById("v2-sg-y"),
   sgConfirm: document.getElementById("v2-sg-confirm"),
   sgCancel: document.getElementById("v2-sg-cancel"),
+  levelPanel: document.getElementById("v2-level-panel"),
+  levelHint: document.getElementById("v2-level-hint"),
+  levelName: document.getElementById("v2-level-name"),
+  levelElevation: document.getElementById("v2-level-elevation"),
+  levelConfirm: document.getElementById("v2-level-confirm"),
+  levelCancel: document.getElementById("v2-level-cancel"),
   attachPanel: document.getElementById("v2-attach-panel"),
   attachHint: document.getElementById("v2-attach-hint"),
   attachList: document.getElementById("v2-attach-list"),
@@ -164,12 +192,17 @@ const el = {
   cutName: document.getElementById("v2-cut-name"),
   cutElev: document.getElementById("v2-cut-elev"),
   cutKind: document.getElementById("v2-cut-kind"),
+  levelIsolate: document.getElementById("v2-level-isolate"),
   planOptions: document.getElementById("v2-plan-options"),
   inspectKicker: document.getElementById("v2-inspect-kicker"),
   inspectEmpty: document.getElementById("v2-inspect-empty"),
   inspectFields: document.getElementById("v2-inspect-fields"),
   checkOverlay: document.getElementById("v2-check-overlay"),
   checkClose: document.getElementById("v2-check-close"),
+  aboutOverlay: document.getElementById("v2-about-overlay"),
+  aboutOpen: document.getElementById("v2-about-open"),
+  aboutClose: document.getElementById("v2-about-close"),
+  aboutOk: document.getElementById("v2-about-ok"),
   ctxName: document.getElementById("v2-ctx-name"),
   ctxNameWrap: document.getElementById("v2-ctx-name-wrap"),
   ctxUse: document.getElementById("v2-ctx-use"),
@@ -186,18 +219,26 @@ const el = {
   ctxFormWrap: document.getElementById("v2-ctx-form-wrap"),
   ctxPitch: document.getElementById("v2-ctx-pitch"),
   ctxPitchWrap: document.getElementById("v2-ctx-pitch-wrap"),
+  ctxRidge: document.getElementById("v2-ctx-ridge"),
+  ctxRidgeWrap: document.getElementById("v2-ctx-ridge-wrap"),
   ctxType: document.getElementById("v2-ctx-type"),
   ctxTypeWrap: document.getElementById("v2-ctx-type-wrap"),
+  ctxStatusWrap: document.getElementById("v2-ctx-status-wrap"),
   ctxOLevel: document.getElementById("v2-ctx-olevel"),
   ctxOLevelWrap: document.getElementById("v2-ctx-olevel-wrap"),
   ctxAttach: document.getElementById("v2-ctx-attach"),
   ctxAttachWrap: document.getElementById("v2-ctx-attach-wrap"),
   ctxFlip: document.getElementById("v2-ctx-flip"),
   massOverlay: document.getElementById("v2-mass-overlay"),
+  massTitle: document.getElementById("v2-mass-title"),
   massCanvas: document.getElementById("v2-mass-canvas"),
   massEmpty: document.getElementById("v2-mass-empty"),
   massCaption: document.getElementById("v2-mass-caption"),
   massClose: document.getElementById("v2-mass-close"),
+  massPanel: document.querySelector("#v2-mass-overlay .mass-panel"),
+  massPlanWrap: document.getElementById("v2-mass-plan-wrap"),
+  massPlanCanvas: document.getElementById("v2-mass-plan-canvas"),
+  massViewLabel: document.getElementById("v2-mass-view-label"),
   sheetOverlay: document.getElementById("v2-sheet-overlay"),
   sheetClose: document.getElementById("v2-sheet-close"),
   sheetAdd: document.getElementById("v2-sheet-add"),
@@ -220,12 +261,20 @@ const el = {
 
 const ctx = el.canvas.getContext("2d");
 
+// `templatePack` is the pack exactly as build-pack.js produced it from the
+// template. `pack` is what everything downstream reads: the same object with
+// the document's own inserted levels folded into `levels`, so every existing
+// consumer (compile.js, walls.js, the level switcher) sees one level stack
+// without knowing where each storey came from. The document stays the only
+// place a user level is stored - see syncPackLevels().
+let templatePack = null;
 let pack = null;
 const store = new PlanStore(emptyDoc(), { storage: window.localStorage });
 
 let tool = "select";
 let placeSkuId = null;
 let placeStatus = "planned";
+let planStatusFilter = "both";
 let placeRotation = 0;
 let cam = { scale: 48, ox: 80, oy: 60 };
 let drag = null;
@@ -236,6 +285,17 @@ let siteDraft = null;
 // Site > SG diagram coordinates: the plan point clicked, while tool === "sg-ref",
 // waiting on the erf number and real coordinate fields in the SG panel.
 let sgPick = null;
+// Output > Views > Camera: the stand point while tool === "camera", waiting
+// on the look-at click. Same two-click shape as Set scale.
+let cameraDraft = null;
+// Document > Views > Section: the first end of the cut while tool === "section".
+let sectionDraft = null;
+// Document > Annotate > Dimensions: the first click while tool === "measure".
+let measureDraft = null;
+// Completed two-point strings kept while the measure tool stays armed, so a
+// second pair can sit next to the first until Escape (or the button again)
+// leaves the tool.
+let userDimensions = [];
 // Modify > Attach base: the refs waiting for a target while tool === "attach",
 // plus the candidate under the pointer so the hint can preview what the click
 // will do before it commits anything.
@@ -245,10 +305,29 @@ let hover = null;
 let hoverPoint = null;
 let wallsCache = [];
 
-// While drawing/moving a wall or beam, the nearest join/alignment point found
-// by applySnap() - drawn as a crosshair guide, cleared once the drag ends or
-// nothing is close enough. See snap.js.
+// While a wall, beam, room, slab or roof tool is armed, the nearest
+// join/alignment (and, when not latched, how far the pointer is from it).
+// Drawn as tracking lines; cleared when the tool is not snap-aware.
 let snapGuide = null;
+
+// Which side each axis' live measurement is pinned to, set by the arrow keys
+// (same key again unpins). Null keeps the nearest-object measurement, which
+// is right most of the time but can only ever report one side of an axis: a
+// point with a wall above and a wall below only ever shows the closer of the
+// two. Pinning asks for the other one explicitly, and reports an empty side
+// as a faded string rather than nothing at all.
+const probeSide = { h: null, v: null };
+
+const PROBE_KEYS = {
+  ArrowLeft: "left",
+  ArrowRight: "right",
+  ArrowUp: "up",
+  ArrowDown: "down",
+};
+
+function probeAxis(side) {
+  return side === "left" || side === "right" ? "h" : "v";
+}
 
 // The level the plan is currently showing/editing. A two-storey house drawn
 // on one canvas with no level concept would draw its ground and first floor
@@ -257,13 +336,16 @@ let snapGuide = null;
 // data existed to test it against.
 let activeLevel = null;
 
-// Off (default): ghost the storey immediately below, like Revit's look-down
-// underlay. On: draw only the active cut. Hit-testing always stays on the
-// active level either way.
+// Off (default): ghost the neighbouring level, like Revit's look-down
+// underlay — or look-up when nothing sits below, so a foundation plan can
+// still see the walls it carries. On: draw only the active level. Hit-testing
+// always stays on the active level either way. The widget checkbox and the
+// ribbon command share this flag.
 let isolateCurrentLevel = window.localStorage.getItem("v2-level-isolate") === "1";
 
-// Document -> Annotate -> Dimensions: a persistent on/off toggle, not a
-// one-shot command, so it keeps its own state alongside `activeFunction`.
+// Document -> Annotate -> Dimensions: automatic room/overall strings, shown
+// while the two-point measure tool is armed so the pick has the existing
+// layout sizes next to it.
 let showDimensions = false;
 
 // The underlay is not a doc entity with a ref (it's a singleton on the doc,
@@ -294,7 +376,21 @@ const massView = createMassingView({
   canvas: el.massCanvas,
   emptyEl: el.massEmpty,
   captionEl: el.massCaption,
+  titleEl: el.massTitle,
+  onDraw: syncLookPlan,
 });
+
+function syncLookPlan(cam, payload) {
+  const isLook = cam?.mode === "look";
+  if (el.massPanel) el.massPanel.classList.toggle("mass-panel--look", isLook);
+  if (el.massPlanWrap) el.massPlanWrap.hidden = !isLook;
+  if (el.massViewLabel) el.massViewLabel.textContent = isLook ? "What you will see" : cam?.mode === "section" ? "Section" : "3D";
+  if (!isLook || !el.massPlanCanvas) return;
+  drawLookPlan(el.massPlanCanvas, payload, cam);
+  if (el.massCaption) {
+    el.massCaption.textContent = `${lookPlanCaption(payload, cam)} · drag to look around · scroll to zoom`;
+  }
+}
 
 // Output > Print > Sheets. The id of the sheet currently shown/edited in the
 // Sheets panel; null once the last sheet is deleted or before any exists.
@@ -309,7 +405,8 @@ async function boot() {
     // The pack on disk states geometry in millimetres (sp.pack/3); everything
     // downstream of here (walls.js, compile.js, openings.js, ...) still works in
     // metres, so this is the one place that boundary gets crossed.
-    pack = normalizePackUnits(await res.json());
+    templatePack = normalizePackUnits(await res.json());
+    pack = templatePack;
   } catch (err) {
     el.healthDot.classList.remove("ok");
     el.healthLabel.textContent = `Pack failed to load: ${err.message}`;
@@ -322,6 +419,7 @@ async function boot() {
   if (!store.load()) {
     store.doc.packId = pack.id;
   }
+  syncPackLevels();
 
   activeLevel = pack.system.defaultLevel;
   if (el.ctxUse) {
@@ -339,6 +437,7 @@ async function boot() {
   wireKeyboard();
   wireMassing();
   wireCheck();
+  wireAbout();
   wireSheets();
   wireRibbonFit();
   resizeCanvas();
@@ -361,6 +460,9 @@ window.__debug = {
   get doc() { return store.doc; },
   get store() { return store; },
   get tool() { return tool; },
+  get cam() { return cam; },
+  get placeSkuId() { return placeSkuId; },
+  get hoverPoint() { return hoverPoint; },
 };
 
 // --- geometry helpers ----------------------------------------------------
@@ -383,10 +485,9 @@ function pointerWorld(ev) {
 }
 
 /**
- * The grid step new points round to, tied to zoom. Zoomed out, a coarse 0.1 m
- * step keeps drags predictable; zoomed in, cam.scale is large enough that a
- * screen pixel covers a much smaller distance, so the step shrinks to match -
- * fine placement is only useful once you can actually see it.
+ * The grid step used when moving a selection. Draw tools prefer the
+ * millimetre magnets in snap.js instead: those round a length from the
+ * start of the run, which a world grid cannot do once the start is off-grid.
  */
 function activeGrid() {
   if (cam.scale >= 800) return 0.001;
@@ -398,22 +499,88 @@ function activeGrid() {
 }
 
 /**
+ * The point a live length should round from: the wall/beam start, the
+ * anchored end of a stretch, or the first corner of a room/slab/roof drag.
+ */
+function snapFrom() {
+  if (drag?.kind === "wall-new") return { x: drag.x1, y: drag.y1 };
+  if (drag?.kind === "segment-end") return { x: drag.fx, y: drag.fy };
+  if (drag?.kind?.endsWith("-new") && drag.x0 != null) return { x: drag.x0, y: drag.y0 };
+  if (beamStart) return beamStart;
+  if (measureDraft?.a) return measureDraft.a;
+  return null;
+}
+
+/**
  * Resolve a candidate world point to where it should actually land: an exact
  * join with another wall/beam endpoint or room corner, an alignment guide
- * (same X or Y as one of those points), or - failing both - the current
- * zoom-scaled grid. Updates `snapGuide` as a side effect so the caller just
- * has to re-render.
+ * (same X or Y as one of those points), or - failing both - a round millimetre
+ * offset from the run's start / a nearby object. Round lengths (3500 mm) are
+ * magnetic; 1 mm values stay reachable once the zoom tightens the magnet.
+ * Always writes `snapGuide` so tracking lines and offset labels can follow
+ * the pointer before the first click, not only mid-drag.
  */
 function applySnap(wx, wy, exclude) {
-  const targets = collectSnapTargets(store.doc, exclude);
+  const targets = collectSnapTargets(store.doc, snapOpts(exclude));
+  const edges = collectSnapEdges(store.doc, snapOpts(exclude));
   const tol = SNAP_PIXEL_TOL / cam.scale;
   const result = snapPoint(wx, wy, targets, tol);
-  if (result.snapped) {
-    snapGuide = result;
-    return { x: result.x, y: result.y };
+  const align = nearestAlignments(wx, wy, targets, edges);
+  const from = snapFrom();
+  const originsX = [];
+  const originsY = [];
+  if (from) {
+    originsX.push(from.x);
+    originsY.push(from.y);
   }
-  snapGuide = null;
-  return { x: roundGrid(wx, activeGrid()), y: roundGrid(wy, activeGrid()) };
+  const near = align.nearest && align.dist <= GAP_MAX_M;
+  if (near) {
+    originsX.push(align.nearest.x);
+    originsY.push(align.nearest.y);
+  }
+  originsX.push(0);
+  originsY.push(0);
+  const point = applyNicePoint(wx, wy, {
+    join: result,
+    from,
+    originsX,
+    originsY,
+    tolWorld: tol,
+    minStep: NICE_MIN_STEP_M,
+  });
+  const origin = near ? align.nearest : null;
+  snapGuide = {
+    x: point.x,
+    y: point.y,
+    // Infinite tracking lines only when actually latched. Unsnapped gaps
+    // use the origin mark + dimension string instead, so a leftover X from
+    // one corner and a leftover Y from another cannot meet in empty space.
+    guideX: result.guideX ?? null,
+    guideY: result.guideY ?? null,
+    // The point that put the guide there, so drawSnapGuide can show how far
+    // along the line it actually sits instead of just tracking off-screen.
+    guideXPoint: result.guideXPoint ?? null,
+    guideYPoint: result.guideYPoint ?? null,
+    snapped: result.snapped,
+    snapX: result.guideX != null,
+    snapY: result.guideY != null,
+    origin,
+    dx: origin ? point.x - origin.x : null,
+    dy: origin ? point.y - origin.y : null,
+    probes: buildProbes(point, edges),
+    tol,
+  };
+  return point;
+}
+
+function buildProbes(point, edges) {
+  return resolveProbes(point.x, point.y, [probeSide.h, probeSide.v].filter(Boolean), edges);
+}
+
+function snapPreviewTool() {
+  return tool === "wall" || tool === "beam" || tool === "room" || tool === "slab"
+    || tool === "roof" || tool === "property" || tool === "sg-ref" || tool === "camera" || tool === "section"
+    || tool === "measure";
 }
 
 function itemRect(item, sku) {
@@ -426,6 +593,41 @@ function itemRect(item, sku) {
 
 function objectStatus(obj) {
   return obj?.status === "existing" ? "existing" : "planned";
+}
+
+function placementStatus() {
+  return placeStatus === "existing" ? "existing" : "planned";
+}
+
+function planObjectVisible(obj) {
+  return statusVisible(obj?.status, planStatusFilter);
+}
+
+function planRefVisible(ref) {
+  if (!ref) return false;
+  const obj = objByRef(ref);
+  if (!obj || !planObjectVisible(obj)) return false;
+  if (ref.kind === "opening") {
+    const wall = wallForOpening(store.doc, pack, wallsCache, obj);
+    if (!wall || !planObjectVisible(wall)) return false;
+  }
+  return true;
+}
+
+function pruneInvisibleSelection() {
+  if (!store.selected.length) return;
+  const kept = store.selected.filter(planRefVisible);
+  if (kept.length === store.selected.length) return;
+  if (!kept.length) {
+    store.clearSelection();
+    return;
+  }
+  const primaryKept = store.primary && kept.some((r) => r.kind === store.primary.kind && r.id === store.primary.id);
+  store.setSelection(kept, primaryKept ? store.primary : kept[0]);
+}
+
+function snapOpts(extra = {}) {
+  return { ...extra, include: planObjectVisible };
 }
 
 function currentWalls() {
@@ -459,21 +661,103 @@ function orderedLevels() {
   return [...levels].sort((a, b) => a.elevation - b.elevation);
 }
 
-/** True if `levelId` is a below-datum (foundation-kind) level. Same test as
- * `buildHouseStations`'s `isFoundation`, kept in one place so the level
- * switcher and the ribbon's foundation warning never disagree on what
- * counts as a foundation storey. */
-function isFoundationLevel(levelId) {
-  const level = (pack.levels || []).find((l) => l.id === levelId);
-  return Number.isFinite(level?.elevation) && level.elevation < 0;
+/** Thin wrappers over level-view.js's pure floor-reveal logic, binding it to
+ * this document's pack and `doc.floorsRevealed`. Kept pure and testable in
+ * level-view.js; only the wiring to `pack`/`store` lives here.
+ * `drawLevelSwitcher()` is the only place `visibleLevels()` should feed the
+ * widget from; everything downstream (station build, house geometry,
+ * keyboard paging, the inspector cut list) reads its result via
+ * `widgetLevels` / `houseStations`. */
+function floorsAvailableToAdd() {
+  return floorsAvailableToAddFor(pack.levels);
+}
+function canAddFloor() {
+  return canAddFloorFor(pack.levels, store.doc?.floorsRevealed);
+}
+function visibleLevels() {
+  return visibleLevelsFor(pack.levels, store.doc?.floorsRevealed);
 }
 
-/** Categories that belong on a foundation storey: the foundation itself and
- * a boundary wall (a property-line fact, not tied to a storey). Everything
- * else - rooms, floors, ceilings, roofs, openings, services - is the
- * "ordinary walls, rooms and ceilings underground" mistake `defaultLevelId`
- * in build-pack.js already exists to steer new documents away from. */
-const FOUNDATION_OK_CATEGORIES = new Set(["foundation", "boundarywall"]);
+/** Reveals the next template storey, capped at MAX_FLOORS_TO_ADD. No-ops
+ * past the cap or once the template has no more storeys to offer. */
+function addFloor() {
+  if (!canAddFloor()) return;
+  store.doc.floorsRevealed = (store.doc.floorsRevealed || 0) + 1;
+  store.persist();
+  drawLevelSwitcher();
+  drawRibbon();
+  render();
+}
+
+// --- Insert level -------------------------------------------------------
+//
+// The template's four storeys are the default stack, not the limit
+// (PHILOSOPHY.md): a third storey, a mezzanine or a different floor-to-floor
+// is a storey the user supplies. Open while the panel is showing.
+let levelInsertOpen = false;
+
+/** Fold `doc.levels` into the pack every consumer reads. Called after boot and
+ * after any change to the document's own levels; `templatePack` is never
+ * mutated, so a re-export of the template cannot be polluted by a job. */
+function syncPackLevels() {
+  const own = store.doc?.levels || [];
+  pack = own.length
+    ? { ...templatePack, levels: mergedLevels(templatePack.levels, own) }
+    : templatePack;
+}
+
+function openLevelInsert() {
+  levelInsertOpen = true;
+  if (el.levelName) el.levelName.value = "";
+  if (el.levelElevation) el.levelElevation.value = "";
+  render();
+  el.levelName?.focus();
+}
+
+function closeLevelInsert() {
+  levelInsertOpen = false;
+  render();
+}
+
+function syncLevelPanel() {
+  if (!el.levelPanel) return;
+  el.levelPanel.hidden = !levelInsertOpen;
+}
+
+/** Commit the panel's two fields, or report the one reason they were refused. */
+function commitLevelInsert() {
+  const spec = { name: el.levelName?.value, elevation: el.levelElevation?.value };
+  const check = validateLevelInsert(pack.levels || [], spec);
+  if (!check.ok) {
+    if (el.levelHint) el.levelHint.textContent = check.message;
+    setStatusMessage(check.message, "warn");
+    return;
+  }
+  store.pushUndo();
+  store.doc.levels = insertLevelInto(store.doc.levels, spec);
+  syncPackLevels();
+  store.persist();
+  levelInsertOpen = false;
+  if (el.levelHint) el.levelHint.textContent = "Name the storey and its elevation above the ground floor.";
+  drawLevelSwitcher();
+  drawRibbon();
+  render();
+  // Floor-to-ceiling is null on an inserted level, so say so once here rather
+  // than letting the Part C check be the first place the user learns it.
+  setStatusMessage(
+    `${String(spec.name).trim()} inserted. Its floor-to-ceiling height is unknown, so Part C reports "cannot check" on this storey until the firm supplies one.`,
+    "warn"
+  );
+}
+
+/** True if `levelId` is a below-datum (foundation-kind) level. Same test as
+ * `buildHouseStations`'s `isFoundation`, so the level switcher and the
+ * ribbon's placement warning never disagree on what counts as a foundation
+ * storey. */
+function isFoundationLevel(levelId) {
+  const level = (pack.levels || []).find((l) => l.id === levelId);
+  return levelIsFoundation(level);
+}
 
 /** The category (or categories) the currently armed tool would place, from
  * whichever source is live: a ribbon function's declared categories, or a
@@ -484,12 +768,17 @@ function armedCategories() {
   return sku ? [sku.category] : null;
 }
 
-/** True if the armed tool would place something a foundation storey should
- * not carry, while the plan is currently cut at a foundation level. */
-function foundationLevelMismatch() {
-  if (tool === "select" || !isFoundationLevel(activeLevel)) return false;
-  const categories = armedCategories();
-  return Boolean(categories && categories.some((c) => !FOUNDATION_OK_CATEGORIES.has(c)));
+/** Warning copy when the armed tool does not belong on the current cut
+ * (a roof on "00 FOUNDATION", a foundation on a ceiling plan). Null when
+ * the pair is not something the app can rule out. */
+function placementCutWarning() {
+  const level = (pack.levels || []).find((l) => l.id === activeLevel);
+  return placementHintOverride({
+    tool,
+    stationKind: houseStations[activeStationIndex()]?.kind,
+    level,
+    categories: armedCategories(),
+  });
 }
 
 // --- level widget: house cutaway + elevation-accurate rail ---------------
@@ -512,10 +801,17 @@ const HOUSE_RAIL_X = 214;
 const HOUSE_RAIL_GRAB = 12;
 
 let houseStations = [];
+// The filtered `visibleLevels()` result the current `houseStations` was
+// built from - `selectStationIndex()` must resolve a station's `levelIndex`
+// against this, not the full `orderedLevels()`, or an index built from a
+// floors-revealed-filtered list would resolve against the wrong level once
+// any storey is hidden.
+let widgetLevels = [];
 let houseZToY = () => 0;
 let houseYToZ = () => 0;
 let houseCutGroup = null;
 let houseGhostGroup = null;
+let houseGhostBg = null;
 let houseGhostLabel = null;
 let houseDragging = false;
 /** Which station (may be a level's ceiling or the roof, not just its floor)
@@ -534,45 +830,6 @@ function houseKindPhrase(kind) {
   if (kind === "roof") return "roof plan";
   if (kind === "foundation") return "foundation plan";
   return "floor plan";
-}
-
-/**
- * One "floor" station per level (foundation-kind below datum), plus a
- * "ceiling" station where the level states one, plus a synthetic roof
- * station above the top level. Each carries the index of the real level it
- * belongs to: editing is still per-level, the ceiling/roof cuts are purely
- * a richer read of where that level's rail position falls physically.
- */
-function buildHouseStations(levels) {
-  const out = [];
-  levels.forEach((level, i) => {
-    const isFoundation = level.elevation < 0;
-    out.push({
-      id: `${level.id}::floor`,
-      levelIndex: i,
-      kind: isFoundation ? "foundation" : "floor",
-      elevation: level.elevation,
-      label: isFoundation ? level.name : `${level.name} · floor`,
-    });
-    if (Number.isFinite(level.floorToCeiling)) {
-      out.push({
-        id: `${level.id}::ceiling`,
-        levelIndex: i,
-        kind: "ceiling",
-        elevation: level.elevation + level.floorToCeiling,
-        label: `${level.name} · ceiling`,
-      });
-    }
-  });
-  const top = levels[levels.length - 1];
-  out.push({
-    id: "roof",
-    levelIndex: levels.length - 1,
-    kind: "roof",
-    elevation: top.elevation + top.floorToFloor + 0.12,
-    label: "Roof · eaves",
-  });
-  return out;
 }
 
 function nearestStationIndex(z) {
@@ -601,7 +858,8 @@ function activeStationIndex() {
  * levels, matching how the mock's own mount() works.
  */
 function drawLevelSwitcher() {
-  const levels = orderedLevels();
+  const levels = visibleLevels();
+  widgetLevels = levels;
   const hasWidget = el.levelWidget && el.levelHouse;
   if (el.levelWidget) el.levelWidget.hidden = levels.length < 2;
   if (!levels.length || !hasWidget) return;
@@ -698,9 +956,10 @@ function drawLevelSwitcher() {
       .house-thumb { fill: #f6f1e8; stroke: #b2451e; stroke-width: 1.2; }
       .house-rail-band, .house-thumb-hit { fill: transparent; cursor: ns-resize; }
       .house-ghost { opacity: 0; pointer-events: none; }
-      .house-ghost.on { opacity: 0.4; }
-      .house-ghost line { stroke: #b2451e; stroke-width: 1.1; stroke-dasharray: 3.2 2.4; }
-      .house-ghost text { fill: #b2451e; font-size: 8.5px; font-family: "Source Sans 3", sans-serif; }
+      .house-ghost.on { opacity: 1; }
+      .house-ghost line { stroke: #b2451e; stroke-width: 1.1; stroke-dasharray: 3.2 2.4; opacity: 0.55; }
+      .house-ghost-chip { fill: #f6f1e8; stroke: #c0b4a2; stroke-width: 0.8; }
+      .house-ghost text { fill: #1a1612; font-size: 14px; font-weight: 600; font-family: "Source Sans 3", sans-serif; }
       @media (prefers-reduced-motion: no-preference) {
         .house-cut-group { transition: transform 120ms ease-out; }
         .house-ghost { transition: transform 120ms ease-out, opacity 120ms ease-out; }
@@ -732,10 +991,12 @@ function drawLevelSwitcher() {
   const cutLayer = el.levelHouse.querySelector("#v2-house-cut-layer");
   const xLeft = HOUSE_X0 - 8;
 
-  houseGhostLabel = svgEl("text", { x: HOUSE_BREAK_X + 6, y: -3 });
+  houseGhostLabel = svgEl("text", { x: String(xLeft + 8), y: "-5" });
+  houseGhostBg = svgEl("rect", { class: "house-ghost-chip", rx: "2.5", ry: "2.5" });
   houseGhostGroup = svgEl("g", { class: "house-ghost" });
   houseGhostGroup.append(
     svgEl("line", { x1: xLeft, y1: 0, x2: HOUSE_RAIL_X - 7, y2: 0 }),
+    houseGhostBg,
     houseGhostLabel,
   );
 
@@ -793,11 +1054,10 @@ function renderLevelCut() {
  * different one from the one currently shown (a ceiling/roof cut still
  * edits the level that owns it). No-ops if neither the station nor the
  * level actually changes. */
-function selectStationIndex(idx) {
+function selectStationIndex(idx, { keepSelection = false } = {}) {
   const s = houseStations[idx];
   if (!s) return;
-  const levels = orderedLevels();
-  const level = levels[s.levelIndex];
+  const level = widgetLevels[s.levelIndex];
   const levelChanged = level && level.id !== activeLevel;
   if (s.id === activeStationId && !levelChanged) return;
   activeStationId = s.id;
@@ -805,9 +1065,13 @@ function selectStationIndex(idx) {
     activeLevel = level.id;
     beamStart = null;
     drag = null;
-    store.clearSelection();
-    updateRibbonHint();
+    if (!keepSelection) store.clearSelection();
     drawRibbon();
+  } else {
+    // Same storey, different cut (floor → ceiling). The armed tool may now
+    // be the wrong kind of work for this plan — refresh the hint without
+    // rebuilding the whole ribbon.
+    updateRibbonHint();
   }
   renderLevelCut();
   render();
@@ -825,9 +1089,40 @@ function showHouseGhost(idx) {
   if (!houseGhostGroup || !houseStations[idx]) return;
   if (idx === activeStationIndex()) { hideHouseGhost(); return; }
   const s = houseStations[idx];
-  houseGhostGroup.setAttribute("transform", `translate(0 ${houseZToY(s.elevation)})`);
-  houseGhostLabel.textContent = s.label;
+  const cutY = houseZToY(s.elevation);
+  houseGhostGroup.setAttribute("transform", `translate(0 ${cutY})`);
+  layoutHouseGhostLabel(s.label, cutY);
   houseGhostGroup.classList.add("on");
+}
+
+/** Paper chip beside the dashed preview cut. The old 8.5px copper text sat
+ * at 40% opacity and was clipped by the viewBox, so long names such as
+ * "First Floor (inferred) · Floor" were unreadable on hover. */
+function layoutHouseGhostLabel(label, cutY) {
+  if (!houseGhostLabel || !houseGhostBg) return;
+  const xLeft = HOUSE_X0 - 8;
+  const x = xLeft + 8;
+  const padX = 4.5;
+  const chipH = 16;
+  const maxW = HOUSE_RAIL_X - 12 - x;
+  houseGhostLabel.setAttribute("x", String(x));
+  houseGhostLabel.setAttribute("font-size", "14");
+  houseGhostLabel.textContent = label;
+  let tw = houseGhostLabel.getComputedTextLength();
+  if (tw > maxW - padX * 2) {
+    houseGhostLabel.setAttribute("font-size", "12");
+    tw = houseGhostLabel.getComputedTextLength();
+  }
+  const w = Math.min(maxW, tw + padX * 2);
+  // Roof/eaves sits near the top of the viewBox; flip the chip under the
+  // dashed line so it is not clipped off the drawing.
+  const above = cutY - chipH - 2 >= 1;
+  const chipY = above ? -chipH - 2 : 3;
+  houseGhostLabel.setAttribute("y", String(chipY + 12.2));
+  houseGhostBg.setAttribute("x", String(x - padX));
+  houseGhostBg.setAttribute("y", String(chipY));
+  houseGhostBg.setAttribute("width", String(w));
+  houseGhostBg.setAttribute("height", String(chipH));
 }
 
 function hideHouseGhost() {
@@ -878,14 +1173,10 @@ function wireLevelWidget() {
   el.levelHouse.addEventListener("keydown", (e) => {
     if (!houseStations.length) return;
     hideHouseGhost();
-    const idx = activeStationIndex();
-    if (e.key === "ArrowUp" || e.key === "ArrowRight") {
-      e.preventDefault();
-      selectStationIndex(Math.min(houseStations.length - 1, idx + 1));
-    } else if (e.key === "ArrowDown" || e.key === "ArrowLeft") {
-      e.preventDefault();
-      selectStationIndex(Math.max(0, idx - 1));
-    } else if (e.key === "PageUp") {
+    // Arrows deliberately do not page the cut: they pin which side the live
+    // measurements report (see probeSide), which is wanted far more often
+    // than stepping a storey. PageUp/PageDown/Home/End still page.
+    if (e.key === "PageUp") {
       e.preventDefault();
       selectStationIndex(houseStoreyStep(1));
     } else if (e.key === "PageDown") {
@@ -906,6 +1197,25 @@ function wireLevelWidget() {
     const idx = houseStations.findIndex((s) => s.id === btn.dataset.id);
     if (idx !== -1) selectStationIndex(idx);
   });
+
+  el.levelIsolate?.addEventListener("change", () => {
+    setIsolateCurrentLevel(el.levelIsolate.checked);
+  });
+  syncLevelIsolateControl();
+}
+
+/** Widget checkbox and ribbon share one flag; keep the box in the same
+ * state the plan is actually drawing. */
+function syncLevelIsolateControl() {
+  if (el.levelIsolate) el.levelIsolate.checked = isolateCurrentLevel;
+}
+
+function setIsolateCurrentLevel(on) {
+  isolateCurrentLevel = Boolean(on);
+  window.localStorage.setItem("v2-level-isolate", isolateCurrentLevel ? "1" : "0");
+  syncLevelIsolateControl();
+  drawRibbon();
+  render();
 }
 
 // --- canvas sizing and drawing --------------------------------------------
@@ -943,6 +1253,19 @@ function statusStroke(status) {
   return COLOUR[status] || COLOUR.planned;
 }
 
+/** Centred "Nothing drawn" copy is only for an idle plan. Hide it once the user
+ * is working on the canvas: geometry, a selection, an armed tool, a draft, or
+ * a visible underlay to trace. */
+function shouldHidePlanEmpty() {
+  if (store.hasContent()) return true;
+  if (store.selected.length) return true;
+  if (underlaySelected || underlayIsVisible()) return true;
+  if (drag || beamStart || siteDraft?.length || sgPick || attachPick || calibration) return true;
+  if (activeFunction) return true;
+  if (tool !== "select") return true;
+  return false;
+}
+
 function draw() {
   const rect = el.canvasWrap.getBoundingClientRect();
   ctx.clearRect(0, 0, rect.width, rect.height);
@@ -952,6 +1275,7 @@ function draw() {
   drawGrid(rect);
   drawSiteLines();
   const walls = currentWalls();
+  pruneInvisibleSelection();
   const levelWalls = walls.filter(onActiveLevel);
 
   ctx.save();
@@ -960,36 +1284,50 @@ function draw() {
   // rather than clickable-and-then-refused.
   if (attachPick) ctx.globalAlpha = 0.3;
   if (!isolateCurrentLevel) {
-    const below = lookDownLevelId(pack.levels, activeLevel);
-    if (below) drawPlanLevel(below, walls, { ghost: true });
+    const ghost = ghostContext(pack.levels, activeLevel);
+    if (ghost) drawPlanLevel(ghost.levelId, walls, { ghost: true, look: ghost.look });
   }
   drawPlanLevel(activeLevel, walls);
   ctx.restore();
   if (attachPick) drawAttachCandidates();
   if (showDimensions) drawDimensions();
+  if (tool === "measure") drawUserDimensions();
 
   drawSelectionHighlights(levelWalls);
   if (hover && !store.isSelected(hover.kind, hover.id) && tool === "select" && !drag) drawHover(hover);
   if (drag?.kind === "marquee") drawMarquee();
   if (drag?.kind === "wall-new") drawWallDraft();
+  if (drag?.kind?.endsWith("-new") && drag.kind !== "wall-new") drawShapeDraft();
   if (beamStart) drawBeamStart();
   if (tool === "property" && siteDraft) drawPropertyDraft();
   if (tool === "sg-ref" && sgPick) drawSgPick();
+  if (tool === "camera" && cameraDraft?.a) drawCameraDraft();
+  if (tool === "section" && sectionDraft?.a) drawSectionDraft();
+  if (tool === "measure" && measureDraft?.a) drawMeasureDraft();
   drawSnapGuide(rect);
   drawEndpointHandles();
   drawUnderlayHandles();
   if (calibration?.a) drawCalibration();
+  drawOpeningDraft(walls);
 
-  el.empty.hidden = store.hasContent();
+  el.empty.hidden = shouldHidePlanEmpty();
   el.legend.hidden = !store.hasContent();
+  el.canvasWrap.classList.toggle("tool-opening", tool === "door" || tool === "window");
 }
 
 /** Selection outline plus the four corner-scale handles and the free-rotate handle. */
 const UNDERLAY_DRAG_KINDS = new Set(["underlay-move", "underlay-scale", "underlay-rotate"]);
 
+/** Corner handles while the sheet is selected, and again once both scale points are down so the measured length can be resized into. */
+function underlayHandlesActive() {
+  if (!underlayIsVisible()) return false;
+  if (tool === "select" && underlaySelected) return true;
+  if (tool === "calibrate" && calibration?.b) return true;
+  return false;
+}
+
 function drawUnderlayHandles() {
-  if (!underlaySelected || !underlayIsVisible()) return;
-  if (tool !== "select") return; // mid-calibration, the crosshair owns the canvas instead
+  if (!underlayHandlesActive()) return;
   if (drag && !UNDERLAY_DRAG_KINDS.has(drag.kind)) return;
   const corners = underlayCorners(store.doc);
   if (!corners) return;
@@ -1038,8 +1376,10 @@ function drawUnderlayHandles() {
  * anything.
  */
 function drawCalibration() {
-  const target = calibration.b || hoverPoint;
-  const [ax, ay] = worldToScreen(calibration.a.x, calibration.a.y);
+  const a = liveCalibrationPoint(calibration.a);
+  if (!a) return;
+  const target = liveCalibrationPoint(calibration.b) || hoverPoint;
+  const [ax, ay] = worldToScreen(a.x, a.y);
   ctx.save();
   ctx.strokeStyle = COLOUR.hover;
   ctx.fillStyle = COLOUR.hover;
@@ -1059,7 +1399,79 @@ function drawCalibration() {
     ctx.fill();
   }
   ctx.restore();
-  if (target) drawLengthLabel(calibration.a.x, calibration.a.y, target.x, target.y);
+  if (target) drawLengthLabel(a.x, a.y, target.x, target.y);
+}
+
+function drawCameraDraft() {
+  const target = hoverPoint;
+  const [ax, ay] = worldToScreen(cameraDraft.a.x, cameraDraft.a.y);
+  ctx.save();
+  ctx.strokeStyle = COLOUR.hover;
+  ctx.fillStyle = COLOUR.hover;
+  ctx.lineWidth = 1.6;
+  ctx.beginPath();
+  ctx.arc(ax, ay, 5, 0, Math.PI * 2);
+  ctx.fill();
+  if (target) {
+    const [bx, by] = worldToScreen(target.x, target.y);
+    ctx.setLineDash([5, 4]);
+    ctx.beginPath();
+    ctx.moveTo(ax, ay);
+    ctx.lineTo(bx, by);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    const ang = Math.atan2(by - ay, bx - ax);
+    ctx.beginPath();
+    ctx.moveTo(bx, by);
+    ctx.lineTo(bx - 12 * Math.cos(ang - 0.4), by - 12 * Math.sin(ang - 0.4));
+    ctx.lineTo(bx - 12 * Math.cos(ang + 0.4), by - 12 * Math.sin(ang + 0.4));
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawSectionDraft() {
+  const target = hoverPoint;
+  const [ax, ay] = worldToScreen(sectionDraft.a.x, sectionDraft.a.y);
+  ctx.save();
+  ctx.strokeStyle = COLOUR.hover;
+  ctx.fillStyle = COLOUR.hover;
+  ctx.lineWidth = 2.2;
+  ctx.beginPath();
+  ctx.arc(ax, ay, 4, 0, Math.PI * 2);
+  ctx.fill();
+  if (target) {
+    const [bx, by] = worldToScreen(target.x, target.y);
+    ctx.beginPath();
+    ctx.moveTo(ax, ay);
+    ctx.lineTo(bx, by);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(bx, by, 4, 0, Math.PI * 2);
+    ctx.fill();
+    const dx = bx - ax;
+    const dy = by - ay;
+    const len = Math.hypot(dx, dy) || 1;
+    const lx = -dy / len;
+    const ly = dx / len;
+    const mx = (ax + bx) / 2;
+    const my = (ay + by) / 2;
+    ctx.beginPath();
+    ctx.moveTo(mx, my);
+    ctx.lineTo(mx + lx * 22, my + ly * 22);
+    ctx.stroke();
+    const tx = mx + lx * 22;
+    const ty = my + ly * 22;
+    const ang = Math.atan2(ly, lx);
+    ctx.beginPath();
+    ctx.moveTo(tx, ty);
+    ctx.lineTo(tx - 10 * Math.cos(ang - 0.45), ty - 10 * Math.sin(ang - 0.45));
+    ctx.lineTo(tx - 10 * Math.cos(ang + 0.45), ty - 10 * Math.sin(ang + 0.45));
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
 }
 
 let lastRibbonHasSelection = null;
@@ -1071,6 +1483,7 @@ function render() {
   syncUnderlayPanel();
   syncCalibratePanel();
   syncSgPanel();
+  syncLevelPanel();
   syncAttachPanel();
   syncHeaderModify();
   // Simple's Modify tab gates its whole content on selection; refresh it
@@ -1120,7 +1533,11 @@ function syncCalibratePanel() {
       ? "Click the first point of a known distance."
       : !bSet
         ? "Click the second point."
-        : "Enter the real distance between those two points.";
+        : "Drag a corner to resize — the measured length updates — or type the real distance and Set scale.";
+  }
+  if (bSet && !calibration.distanceEdited && el.calibrateDistance && document.activeElement !== el.calibrateDistance) {
+    const guess = calibrationDistanceGuess(liveCalibrationPoint(calibration.a), liveCalibrationPoint(calibration.b));
+    if (guess) el.calibrateDistance.value = guess.toFixed(2);
   }
 }
 
@@ -1190,26 +1607,38 @@ function openingOnLevel(opening, walls, levelId) {
 }
 
 /** One storey's geometry. Ghosted geometry is faded and unlabelled so it
- * reads as context, not as the plan you are editing. */
-function drawPlanLevel(levelId, walls, { ghost = false } = {}) {
+ * reads as context, not as the plan you are editing. Look-up ghosts are
+ * wall/beam markers only: a faded thick wall on a foundation cut would
+ * read as a second foundation, not as "the wall that sits on this". */
+function drawPlanLevel(levelId, walls, { ghost = false, look = "down" } = {}) {
   ctx.save();
+  if (ghost && look === "up") {
+    for (const wall of walls.filter((w) => w.level === levelId && planObjectVisible(w))) drawWall(wall, { marker: true });
+    for (const beam of store.doc.beams.filter((b) => onLevel(b, levelId) && planObjectVisible(b))) drawBeam(beam, { marker: true });
+    ctx.restore();
+    return;
+  }
   if (ghost) ctx.globalAlpha = 0.28;
-  for (const slab of store.doc.slabs.filter((s) => onLevel(s, levelId))) {
+  for (const slab of store.doc.slabs.filter((s) => onLevel(s, levelId) && planObjectVisible(s))) {
     drawPolyFill(shapePolygon(slab.shape), COLOUR.slab, statusStroke(objectStatus(slab)));
   }
-  for (const roof of store.doc.roofs.filter((r) => onLevel(r, levelId))) {
-    drawPolyOutline(shapePolygon(roof.shape), statusStroke(objectStatus(roof)), true);
+  for (const roof of store.doc.roofs.filter((r) => onLevel(r, levelId) && planObjectVisible(r))) {
+    const poly = shapePolygon(roof.shape);
+    drawPolyFill(poly, COLOUR.roof, statusStroke(objectStatus(roof)));
+    drawRoofGuides(bbox(poly), roof.form, roof.ridge);
   }
-  for (const room of store.doc.rooms.filter((r) => onLevel(r, levelId))) {
+  for (const room of store.doc.rooms.filter((r) => onLevel(r, levelId) && planObjectVisible(r))) {
     if (ghost) drawRoomGhost(room);
     else drawRoom(room);
   }
-  for (const wall of walls.filter((w) => w.level === levelId)) drawWall(wall);
-  for (const beam of store.doc.beams.filter((b) => onLevel(b, levelId))) drawBeam(beam);
+  for (const wall of walls.filter((w) => w.level === levelId && planObjectVisible(w))) drawWall(wall);
+  for (const beam of store.doc.beams.filter((b) => onLevel(b, levelId) && planObjectVisible(b))) drawBeam(beam);
   if (!ghost) {
-    for (const item of store.doc.items.filter((i) => onLevel(i, levelId))) drawItem(item);
+    for (const item of store.doc.items.filter((i) => onLevel(i, levelId) && planObjectVisible(i))) drawItem(item);
   }
-  for (const opening of store.doc.openings.filter((o) => openingOnLevel(o, walls, levelId))) {
+  for (const opening of store.doc.openings.filter((o) => openingOnLevel(o, walls, levelId) && planObjectVisible(o))) {
+    const wall = wallForOpening(store.doc, pack, walls, opening);
+    if (wall && !planObjectVisible(wall)) continue;
     drawOpening(opening, walls);
   }
   ctx.restore();
@@ -1265,55 +1694,102 @@ function centroidOf(poly) {
   return [b.x + b.w / 2, b.y + b.h / 2];
 }
 
-function drawWall(wall) {
+function drawWall(wall, { marker = false } = {}) {
   const [ax, ay] = worldToScreen(wall.x1, wall.y1);
   const [bx, by] = worldToScreen(wall.x2, wall.y2);
   ctx.save();
-  ctx.strokeStyle = wall.drawn ? statusStroke(wall.status) : COLOUR.wall;
-  ctx.lineWidth = Math.max(2, wall.thickness * cam.scale);
+  if (marker) {
+    drawAboveMarker(ax, ay, bx, by);
+  } else {
+    ctx.strokeStyle = wall.drawn ? statusStroke(wall.status) : COLOUR.wall;
+    ctx.lineWidth = Math.max(2, wall.thickness * cam.scale);
+    ctx.lineCap = "butt";
+    ctx.beginPath();
+    ctx.moveTo(ax, ay);
+    ctx.lineTo(bx, by);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/** Dashed centreline plus end ticks: "a wall sits here above this cut." */
+function drawAboveMarker(ax, ay, bx, by) {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const len = Math.hypot(dx, dy) || 1;
+  const tx = (-dy / len) * 5;
+  const ty = (dx / len) * 5;
+  ctx.strokeStyle = "#b2451e";
+  ctx.lineWidth = 1.6;
   ctx.lineCap = "butt";
+  ctx.setLineDash([6, 4]);
+  ctx.globalAlpha = 0.7;
   ctx.beginPath();
   ctx.moveTo(ax, ay);
   ctx.lineTo(bx, by);
   ctx.stroke();
-  ctx.restore();
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  ctx.moveTo(ax - tx, ay - ty);
+  ctx.lineTo(ax + tx, ay + ty);
+  ctx.moveTo(bx - tx, by - ty);
+  ctx.lineTo(bx + tx, by + ty);
+  ctx.stroke();
 }
 
-function drawOpening(opening, walls) {
+function drawOpeningDraft(walls) {
+  if (tool !== "door" && tool !== "window") return;
+  if (!hoverPoint || !placeSkuId) return;
+  const levelWalls = walls.filter(onActiveLevel);
+  const draft = openingDraftAt(store.doc, pack, levelWalls, placeSkuId, hoverPoint.x, hoverPoint.y);
+  if (draft) drawOpening(draft, walls, { preview: true });
+}
+
+function drawOpening(opening, walls, { preview = false } = {}) {
   const wall = wallForOpening(store.doc, pack, walls, opening);
   if (!wall) return;
-  const sku = skuById(opening.sku);
-  if (!sku) return;
-  const width = sku.geometry?.width || 0.9;
-  const t = wallT(wall, ...anchorPoint(opening, wall));
-  const half = (width / 2) / (wall.length || 1);
-  const dx = wall.x2 - wall.x1;
-  const dy = wall.y2 - wall.y1;
-  const ax = wall.x1 + dx * (t - half);
-  const ay = wall.y1 + dy * (t - half);
-  const bx = wall.x1 + dx * (t + half);
-  const by = wall.y1 + dy * (t + half);
-  const [sax, say] = worldToScreen(ax, ay);
-  const [sbx, sby] = worldToScreen(bx, by);
+  const placed = openingOnWall(store.doc, pack, opening, wall);
+  if (!placed?.sku) return;
+  const { sku, width, a, b } = placed;
+  const [sax, say] = worldToScreen(a.x, a.y);
+  const [sbx, sby] = worldToScreen(b.x, b.y);
   ctx.save();
+  ctx.globalAlpha = preview ? 0.55 : 1;
+  ctx.lineCap = "butt";
+  ctx.strokeStyle = "#f3eee4";
+  ctx.lineWidth = Math.max(4, (wall.thickness || 0.22) * cam.scale + 2);
+  ctx.beginPath();
+  ctx.moveTo(sax, say);
+  ctx.lineTo(sbx, sby);
+  ctx.stroke();
   ctx.strokeStyle = sku.category === "window" ? COLOUR.window : COLOUR.door;
   ctx.lineWidth = 3;
   ctx.beginPath();
   ctx.moveTo(sax, say);
   ctx.lineTo(sbx, sby);
   ctx.stroke();
+  if (sku.category === "window") {
+    const mx = (a.x + b.x) / 2;
+    const my = (a.y + b.y) / 2;
+    const n = wallNormal(wall, 1);
+    const sill = 0.08;
+    const [px, py] = worldToScreen(mx - n.x * sill, my - n.y * sill);
+    const [qx, qy] = worldToScreen(mx + n.x * sill, my + n.y * sill);
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(px, py);
+    ctx.lineTo(qx, qy);
+    ctx.stroke();
+  }
   if (sku.category === "door") {
-    const len = Math.hypot(dx, dy) || 1;
-    const nx = (-dy / len) * (opening.swing || 1);
-    const ny = (dx / len) * (opening.swing || 1);
-    const [hx, hy] = worldToScreen(ax, ay);
-    const [ex, ey] = worldToScreen(ax + nx * width, ay + ny * width);
+    const n = wallNormal(wall, opening.swing || 1);
+    const [hx, hy] = worldToScreen(a.x, a.y);
+    const [ex, ey] = worldToScreen(a.x + n.x * width, a.y + n.y * width);
     ctx.setLineDash([4, 3]);
-    ctx.lineWidth = 1;
+    ctx.lineWidth = 1.25;
     ctx.beginPath();
     ctx.moveTo(hx, hy);
     ctx.lineTo(ex, ey);
-    ctx.moveTo(ex, ey);
     ctx.lineTo(sbx, sby);
     ctx.stroke();
   }
@@ -1321,8 +1797,54 @@ function drawOpening(opening, walls) {
 }
 
 function drawDimensions() {
-  const boxes = store.doc.rooms.filter(onActiveLevel).map((r) => bbox(roomPolygon(r)));
+  const boxes = store.doc.rooms.filter((r) => onActiveLevel(r) && planObjectVisible(r)).map((r) => bbox(roomPolygon(r)));
   for (const line of planDimensionLines(boxes)) drawDimensionLine(line);
+}
+
+function measureLivePoint() {
+  if (snapGuide) return { x: snapGuide.x, y: snapGuide.y };
+  return hoverPoint;
+}
+
+function drawUserDimensions() {
+  for (const dim of userDimensions) drawPickedDimension(dim.a, dim.b, dim.label);
+}
+
+function drawMeasureDraft() {
+  const target = measureLivePoint();
+  if (!target) {
+    const [ax, ay] = worldToScreen(measureDraft.a.x, measureDraft.a.y);
+    ctx.save();
+    ctx.fillStyle = COLOUR.hover;
+    ctx.beginPath();
+    ctx.arc(ax, ay, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    return;
+  }
+  const live = pickedDimension(measureDraft.a, target);
+  drawPickedDimension(measureDraft.a, target, live?.label);
+}
+
+function drawPickedDimension(a, b, label) {
+  const [ax, ay] = worldToScreen(a.x, a.y);
+  const [bx, by] = worldToScreen(b.x, b.y);
+  ctx.save();
+  ctx.strokeStyle = COLOUR.hover;
+  ctx.fillStyle = COLOUR.hover;
+  ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  ctx.arc(ax, ay, 4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(bx, by, 4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(ax, ay);
+  ctx.lineTo(bx, by);
+  ctx.stroke();
+  ctx.restore();
+  if (label) drawLengthLabel(a.x, a.y, b.x, b.y);
 }
 
 /** A dimension string: extension lines from the object to the offset line, end ticks, and a centred label. */
@@ -1383,18 +1905,22 @@ function anchorPoint(opening, wall) {
   return [edge.x1 + (edge.x2 - edge.x1) * t, edge.y1 + (edge.y2 - edge.y1) * t];
 }
 
-function drawBeam(beam) {
+function drawBeam(beam, { marker = false } = {}) {
   const [ax, ay] = worldToScreen(beam.x1, beam.y1);
   const [bx, by] = worldToScreen(beam.x2, beam.y2);
-  const sku = skuById(beam.sku);
   ctx.save();
-  ctx.strokeStyle = statusStroke(objectStatus(beam));
-  ctx.lineWidth = Math.max(3, (sku?.geometry?.width || 0.11) * cam.scale);
-  ctx.setLineDash([]);
-  ctx.beginPath();
-  ctx.moveTo(ax, ay);
-  ctx.lineTo(bx, by);
-  ctx.stroke();
+  if (marker) {
+    drawAboveMarker(ax, ay, bx, by);
+  } else {
+    const sku = skuById(beam.sku);
+    ctx.strokeStyle = statusStroke(objectStatus(beam));
+    ctx.lineWidth = Math.max(3, (sku?.geometry?.width || 0.11) * cam.scale);
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.moveTo(ax, ay);
+    ctx.lineTo(bx, by);
+    ctx.stroke();
+  }
   ctx.restore();
 }
 
@@ -1525,6 +2051,44 @@ function drawMarquee() {
   ctx.restore();
 }
 
+/** Rubber-band rectangle while dragging a new room, slab or roof. Roofs
+ * also show the ridge/hip/fall that commitRoof() will apply (gable along
+ * the long side), so the eaves you are sizing are not a blank box. */
+function drawShapeDraft() {
+  const r = drag?.rect;
+  if (!r || r.w < 0.05 || r.h < 0.05) return;
+  const [sx, sy] = worldToScreen(r.x, r.y);
+  const [ex, ey] = worldToScreen(r.x + r.w, r.y + r.h);
+  const isRoof = drag.kind === "roof-new";
+  ctx.save();
+  ctx.fillStyle = isRoof ? COLOUR.roof : drag.kind === "slab-new" ? COLOUR.slab : "rgba(180, 69, 30, 0.08)";
+  ctx.strokeStyle = isRoof ? "#3a5f7a" : statusStroke(placementStatus());
+  ctx.lineWidth = 1.4;
+  ctx.setLineDash([5, 4]);
+  ctx.fillRect(sx, sy, ex - sx, ey - sy);
+  ctx.strokeRect(sx, sy, ex - sx, ey - sy);
+  ctx.restore();
+  if (isRoof) drawRoofGuides(r, "gable", "long");
+}
+
+function drawRoofGuides(rect, form, ridge) {
+  const lines = roofGuideLines(rect, form, ridge);
+  if (!lines.length) return;
+  ctx.save();
+  ctx.strokeStyle = "#3a5f7a";
+  for (const line of lines) {
+    const [ax, ay] = worldToScreen(line.x1, line.y1);
+    const [bx, by] = worldToScreen(line.x2, line.y2);
+    ctx.lineWidth = line.kind === "ridge" || line.kind === "high" ? 1.6 : 1.2;
+    ctx.setLineDash(line.kind === "high" ? [] : [5, 4]);
+    ctx.beginPath();
+    ctx.moveTo(ax, ay);
+    ctx.lineTo(bx, by);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function drawWallDraft() {
   const [ax, ay] = worldToScreen(drag.x1, drag.y1);
   const [bx, by] = worldToScreen(drag.x2 ?? drag.x1, drag.y2 ?? drag.y1);
@@ -1565,6 +2129,72 @@ function drawLengthLabel(x1, y1, x2, y2) {
   ctx.fillStyle = "#1a1612";
   ctx.fillText(label, sx, sy - 8);
   ctx.restore();
+}
+
+/** Live snap-gap dimension: a string offset beside the tracking line, with
+ * arrowheads at both witnesses, like `<-- 240 mm -->`. `kind` is the
+ * measured axis (`h` = east-west gap, `v` = north-south) so the string
+ * sits above a horizontal gap and to the left of a vertical one. */
+function drawGapDimension(x1, y1, x2, y2, kind) {
+  const len = segmentLength(x1, y1, x2, y2);
+  if (len < 0.005) return;
+  const [ax, ay] = worldToScreen(x1, y1);
+  const [bx, by] = worldToScreen(x2, y2);
+  const mm = Math.round(len * 1000);
+  const label = `${mm} mm`;
+  const off = 20;
+  const ox = kind === "v" ? -off : 0;
+  const oy = kind === "h" ? -off : 0;
+  const p1 = { x: ax + ox, y: ay + oy };
+  const p2 = { x: bx + ox, y: by + oy };
+  const span = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+  const mx = (p1.x + p2.x) / 2;
+  const my = (p1.y + p2.y) / 2;
+
+  ctx.save();
+  ctx.strokeStyle = "#3a5f7a";
+  ctx.fillStyle = "#3a5f7a";
+  ctx.lineWidth = 1;
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  ctx.moveTo(ax, ay);
+  ctx.lineTo(p1.x, p1.y);
+  ctx.moveTo(bx, by);
+  ctx.lineTo(p2.x, p2.y);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(p1.x, p1.y);
+  ctx.lineTo(p2.x, p2.y);
+  ctx.stroke();
+  drawGapArrow(p1.x, p1.y, p2.x, p2.y);
+  drawGapArrow(p2.x, p2.y, p1.x, p1.y);
+
+  ctx.font = "600 11px Source Sans 3, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  const textW = ctx.measureText(label).width + 8;
+  const tight = span < textW + 16;
+  ctx.translate(mx, my);
+  if (kind === "v") ctx.rotate(-Math.PI / 2);
+  // Tight gaps cannot fit the number between the arrows; park it beside
+  // the string (further along the same offset) so the arrows still read.
+  const shift = tight ? -14 : 0;
+  ctx.fillStyle = "rgba(244, 237, 225, 0.92)";
+  ctx.fillRect(-textW / 2, -8 + shift, textW, 16);
+  ctx.fillStyle = "#3a5f7a";
+  ctx.fillText(label, 0, shift);
+  ctx.restore();
+}
+
+function drawGapArrow(tipX, tipY, fromX, fromY) {
+  const a = Math.atan2(tipY - fromY, tipX - fromX);
+  const size = 7;
+  ctx.beginPath();
+  ctx.moveTo(tipX, tipY);
+  ctx.lineTo(tipX - size * Math.cos(a - 0.4), tipY - size * Math.sin(a - 0.4));
+  ctx.moveTo(tipX, tipY);
+  ctx.lineTo(tipX - size * Math.cos(a + 0.4), tipY - size * Math.sin(a + 0.4));
+  ctx.stroke();
 }
 
 function soleLinearSelection() {
@@ -1630,19 +2260,27 @@ function applySegmentEnd(obj, end, x, y, lockAxis, origin, ref) {
   let nx;
   let ny;
   if (lockAxis && origin) {
-    // Shift keeps the current heading: precision here is the zoom-scaled
-    // grid rather than joins, since the user has already committed to an
-    // angle and just wants a clean length along it.
+    // Shift keeps the current heading: length along that ray prefers round
+    // millimetres rather than joins, since the user has already committed to
+    // an angle and just wants a clean dimension.
     snapGuide = null;
-    nx = roundGrid(x, activeGrid());
-    ny = roundGrid(y, activeGrid());
     const dx = origin.mx - origin.fx;
     const dy = origin.my - origin.fy;
     const denom = dx * dx + dy * dy;
+    const tol = SNAP_PIXEL_TOL / cam.scale;
     if (denom > 1e-8) {
       const t = ((x - origin.fx) * dx + (y - origin.fy) * dy) / denom;
-      nx = roundGrid(origin.fx + dx * t, activeGrid());
-      ny = roundGrid(origin.fy + dy * t, activeGrid());
+      const along = snapLengthFrom(
+        { x: origin.fx, y: origin.fy },
+        { x: origin.fx + dx * t, y: origin.fy + dy * t },
+        tol,
+      );
+      nx = along.x;
+      ny = along.y;
+    } else {
+      const p = applySnap(x, y, undefined);
+      nx = p.x;
+      ny = p.y;
     }
   } else {
     const exclude = ref?.kind === "segment" ? { excludeSegmentIds: new Set([ref.id]) }
@@ -1661,33 +2299,120 @@ function applySegmentEnd(obj, end, x, y, lockAxis, origin, ref) {
   obj.y2 = next.y2;
 }
 
-/** Crosshair + dot showing what applySnap() just latched onto. */
+/** Tracking lines for the live snap preview. Drawn whenever a draw tool is
+ * armed, including before the first click. Gap labels measure to one nearby
+ * corner or wall face (marked with a square), never to a phantom alignment. */
 function drawSnapGuide(rect) {
-  if (!snapGuide || !drag) return;
+  if (!snapGuide) return;
+  const g = snapGuide;
   ctx.save();
-  ctx.strokeStyle = "#3a5f7a";
   ctx.setLineDash([4, 3]);
   ctx.lineWidth = 1;
-  if (snapGuide.guideX !== null && snapGuide.guideX !== undefined) {
-    const [sx] = worldToScreen(snapGuide.guideX, 0);
+  if (g.snapX && g.guideX != null) {
+    ctx.strokeStyle = "#3a5f7a";
+    const [sx] = worldToScreen(g.guideX, 0);
     ctx.beginPath();
     ctx.moveTo(sx, 0);
     ctx.lineTo(sx, rect.height);
     ctx.stroke();
   }
-  if (snapGuide.guideY !== null && snapGuide.guideY !== undefined) {
-    const [, sy] = worldToScreen(0, snapGuide.guideY);
+  if (g.snapY && g.guideY != null) {
+    ctx.strokeStyle = "#3a5f7a";
+    const [, sy] = worldToScreen(0, g.guideY);
     ctx.beginPath();
     ctx.moveTo(0, sy);
     ctx.lineTo(rect.width, sy);
     ctx.stroke();
   }
   ctx.setLineDash([]);
-  const [px, py] = worldToScreen(snapGuide.x, snapGuide.y);
-  ctx.fillStyle = "#3a5f7a";
+  if (g.origin) {
+    const [ox, oy] = worldToScreen(g.origin.x, g.origin.y);
+    ctx.strokeStyle = "#3a5f7a";
+    ctx.fillStyle = "#f4ede1";
+    ctx.lineWidth = 1.4;
+    ctx.fillRect(ox - 4, oy - 4, 8, 8);
+    ctx.strokeRect(ox - 4, oy - 4, 8, 8);
+  }
+  // Mark whichever point actually put the axis guide there, distinct from
+  // `origin` (the nearest-of-all gap target) - an aligned guide can be
+  // latched onto a completely different, further-away point.
+  for (const guidePoint of new Set([g.snapX ? g.guideXPoint : null, g.snapY ? g.guideYPoint : null])) {
+    if (!guidePoint) continue;
+    const [qx, qy] = worldToScreen(guidePoint.x, guidePoint.y);
+    ctx.strokeStyle = "#3a5f7a";
+    ctx.fillStyle = "#f4ede1";
+    ctx.lineWidth = 1.4;
+    ctx.fillRect(qx - 4, qy - 4, 8, 8);
+    ctx.strokeRect(qx - 4, qy - 4, 8, 8);
+  }
+  const [px, py] = worldToScreen(g.x, g.y);
+  ctx.fillStyle = g.snapped ? "#3a5f7a" : "rgba(58, 95, 122, 0.7)";
+  ctx.strokeStyle = "#3a5f7a";
+  ctx.lineWidth = 1.2;
   ctx.beginPath();
-  ctx.arc(px, py, 4, 0, Math.PI * 2);
-  ctx.fill();
+  ctx.arc(px, py, g.snapped ? 4 : 3, 0, Math.PI * 2);
+  if (g.snapped) ctx.fill();
+  else {
+    ctx.fill();
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  const minLabel = Math.max(0.05, g.tol || 0);
+  // A pinned axis replaces that axis' automatic measurement: the user has
+  // said which side they want, so the nearest-object string for the same
+  // axis would only be a second number arguing with it.
+  const pinned = { h: null, v: null };
+  for (const probe of g.probes || []) pinned[probeAxis(probe.side)] = probe;
+
+  if (!pinned.h && g.origin && g.dx != null && !g.snapX && Math.abs(g.dx) > minLabel) {
+    drawGapDimension(g.origin.x, g.y, g.x, g.y, "h");
+  }
+  if (!pinned.v && g.origin && g.dy != null && !g.snapY && Math.abs(g.dy) > minLabel) {
+    drawGapDimension(g.x, g.origin.y, g.x, g.y, "v");
+  }
+  // The alignment guide itself only says "your X/Y matches something else
+  // on the sheet" - it says nothing about *how far* along that line the
+  // matched point is (it could be off the top of the current view, as far
+  // as the line is drawn). Label that distance whenever it's non-trivial.
+  if (!pinned.v && g.snapX && g.guideXPoint && Math.abs(g.y - g.guideXPoint.y) > minLabel) {
+    drawGapDimension(g.x, g.guideXPoint.y, g.x, g.y, "v");
+  }
+  if (!pinned.h && g.snapY && g.guideYPoint && Math.abs(g.x - g.guideYPoint.x) > minLabel) {
+    drawGapDimension(g.guideYPoint.x, g.y, g.x, g.y, "h");
+  }
+  for (const kind of ["h", "v"]) {
+    const probe = pinned[kind];
+    if (!probe) continue;
+    if (probe.to && probe.dist > minLabel) {
+      drawGapDimension(probe.to.x, probe.to.y, probe.from.x, probe.from.y, kind);
+    } else {
+      drawEmptyProbe(probe.from.x, probe.from.y, probe.side);
+    }
+  }
+}
+
+/** A pinned direction with nothing in it: the measurement line still points
+ * that way, fading out instead of carrying a number, so "I asked and there
+ * is nothing there" reads differently from "I never asked". */
+function drawEmptyProbe(x, y, side) {
+  const v = PROBE_VECTORS[side];
+  if (!v) return;
+  const [sx, sy] = worldToScreen(x, y);
+  const len = 80;
+  const ex = sx + v.dx * len;
+  const ey = sy + v.dy * len;
+  const fade = ctx.createLinearGradient(sx, sy, ex, ey);
+  fade.addColorStop(0, "rgba(58, 95, 122, 0.55)");
+  fade.addColorStop(1, "rgba(58, 95, 122, 0)");
+  ctx.save();
+  ctx.setLineDash([]);
+  ctx.strokeStyle = fade;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(sx, sy);
+  ctx.lineTo(ex, ey);
+  ctx.stroke();
   ctx.restore();
 }
 
@@ -1793,29 +2518,36 @@ function refsInMarquee(box) {
   const test = (b) => (box.crossing ? rectsOverlap(box, b) : rectContains(box, b));
   const hits = [];
   for (const room of store.doc.rooms.filter(onActiveLevel)) {
+    if (!planObjectVisible(room)) continue;
     if (test(bbox(roomPolygon(room)))) hits.push({ kind: "room", id: room.id });
   }
   for (const slab of store.doc.slabs.filter(onActiveLevel)) {
+    if (!planObjectVisible(slab)) continue;
     if (test(bbox(shapePolygon(slab.shape)))) hits.push({ kind: "slab", id: slab.id });
   }
   for (const roof of store.doc.roofs.filter(onActiveLevel)) {
+    if (!planObjectVisible(roof)) continue;
     if (test(bbox(shapePolygon(roof.shape)))) hits.push({ kind: "roof", id: roof.id });
   }
   for (const seg of store.doc.segments.filter(onActiveLevel)) {
+    if (!planObjectVisible(seg)) continue;
     const segBox = { x: Math.min(seg.x1, seg.x2), y: Math.min(seg.y1, seg.y2), w: Math.max(0.02, Math.abs(seg.x2 - seg.x1)), h: Math.max(0.02, Math.abs(seg.y2 - seg.y1)) };
     if (test(segBox)) hits.push({ kind: "segment", id: seg.id });
   }
   for (const beam of store.doc.beams.filter(onActiveLevel)) {
+    if (!planObjectVisible(beam)) continue;
     const beamBox = { x: Math.min(beam.x1, beam.x2), y: Math.min(beam.y1, beam.y2), w: Math.max(0.02, Math.abs(beam.x2 - beam.x1)), h: Math.max(0.02, Math.abs(beam.y2 - beam.y1)) };
     if (test(beamBox)) hits.push({ kind: "beam", id: beam.id });
   }
   for (const item of store.doc.items.filter(onActiveLevel)) {
+    if (!planObjectVisible(item)) continue;
     const sku = skuById(item.sku);
     if (sku && test(itemRect(item, sku))) hits.push({ kind: "item", id: item.id });
   }
   for (const opening of store.doc.openings) {
+    if (!planObjectVisible(opening)) continue;
     const wall = wallForOpening(store.doc, pack, wallsCache, opening);
-    if (!wall || wall.level !== activeLevel) continue;
+    if (!wall || wall.level !== activeLevel || !planObjectVisible(wall)) continue;
     const [px, py] = anchorPoint(opening, wall);
     if (px >= box.x && px <= box.x + box.w && py >= box.y && py <= box.y + box.h) {
       hits.push({ kind: "opening", id: opening.id });
@@ -1860,9 +2592,9 @@ function underlayRotateHandlePoint(corners) {
   return { x: topMid.x + (dx / len) * extra, y: topMid.y + (dy / len) * extra };
 }
 
-/** Corner-scale or rotate handle under the pointer, only while the underlay is the active selection. */
+/** Corner-scale or rotate handle under the pointer, only while the underlay handles are shown. */
 function underlayHandleHit(wx, wy) {
-  if (!underlaySelected || !underlayIsVisible()) return null;
+  if (!underlayHandlesActive()) return null;
   const corners = underlayCorners(store.doc);
   if (!corners) return null;
   const tol = (HANDLE / 2 + 4) / cam.scale;
@@ -1886,6 +2618,7 @@ function hitTest(wx, wy) {
   const items = store.doc.items.filter(onActiveLevel);
   for (let i = items.length - 1; i >= 0; i -= 1) {
     const item = items[i];
+    if (!planObjectVisible(item)) continue;
     const sku = skuById(item.sku);
     if (!sku) continue;
     const box = itemRect(item, sku);
@@ -1895,14 +2628,16 @@ function hitTest(wx, wy) {
   }
   for (let i = store.doc.openings.length - 1; i >= 0; i -= 1) {
     const opening = store.doc.openings[i];
+    if (!planObjectVisible(opening)) continue;
     const wall = wallForOpening(store.doc, pack, wallsCache, opening);
-    if (!wall || wall.level !== activeLevel) continue;
+    if (!wall || wall.level !== activeLevel || !planObjectVisible(wall)) continue;
     const [px, py] = anchorPoint(opening, wall);
     if (Math.hypot(px - wx, py - wy) < 0.3) return { kind: "opening", id: opening.id };
   }
   const beams = store.doc.beams.filter(onActiveLevel);
   for (let i = beams.length - 1; i >= 0; i -= 1) {
     const beam = beams[i];
+    if (!planObjectVisible(beam)) continue;
     const sku = skuById(beam.sku);
     const tol = Math.max(0.15, (sku?.geometry?.width || 0.11) / 2 + 0.05);
     if (distToSeg(beam.x1, beam.y1, beam.x2, beam.y2, wx, wy) < tol) return { kind: "beam", id: beam.id };
@@ -1910,13 +2645,15 @@ function hitTest(wx, wy) {
   const segments = store.doc.segments.filter(onActiveLevel);
   for (let i = segments.length - 1; i >= 0; i -= 1) {
     const seg = segments[i];
+    if (!planObjectVisible(seg)) continue;
     const sku = skuById(seg.sku);
-    const tol = Math.max(0.18, (sku?.geometry?.thickness || sku?.geometry?.width || 0.22) / 2 + 0.08);
+    const tol = Math.max(0.18, drawnWallThickness(sku) / 2 + 0.08);
     if (distToSeg(seg.x1, seg.y1, seg.x2, seg.y2, wx, wy) < tol) return { kind: "segment", id: seg.id };
   }
   const slabs = store.doc.slabs.filter(onActiveLevel);
   for (let i = slabs.length - 1; i >= 0; i -= 1) {
     const slab = slabs[i];
+    if (!planObjectVisible(slab)) continue;
     if (pointInPoly(wx, wy, shapePolygon(slab.shape))) return { kind: "slab", id: slab.id };
   }
   // Rooms before roofs: a roof typically envelopes the whole footprint, so
@@ -1925,11 +2662,13 @@ function hitTest(wx, wy) {
   const rooms = store.doc.rooms.filter(onActiveLevel);
   for (let i = rooms.length - 1; i >= 0; i -= 1) {
     const room = rooms[i];
+    if (!planObjectVisible(room)) continue;
     if (pointInPoly(wx, wy, roomPolygon(room))) return { kind: "room", id: room.id };
   }
   const roofs = store.doc.roofs.filter(onActiveLevel);
   for (let i = roofs.length - 1; i >= 0; i -= 1) {
     const roof = roofs[i];
+    if (!planObjectVisible(roof)) continue;
     if (pointInPoly(wx, wy, shapePolygon(roof.shape))) return { kind: "roof", id: roof.id };
   }
   return null;
@@ -1950,8 +2689,9 @@ function attachObjectAt(wx, wy) {
     for (const obj of collectionFor(store.doc, kind) || []) {
       const ref = { kind, id: obj.id };
       if (mine.has(attachRefKey(ref))) continue;
+      if (!planObjectVisible(obj)) continue;
       const sku = skuById(obj.sku);
-      const tol = Math.max(0.18, (sku?.geometry?.thickness || sku?.geometry?.width || 0.22) / 2 + 0.08);
+      const tol = Math.max(0.18, drawnWallThickness(sku) / 2 + 0.08);
       const d = distToSeg(obj.x1, obj.y1, obj.x2, obj.y2, wx, wy);
       if (d < tol && d < bestD) {
         best = ref;
@@ -1976,6 +2716,9 @@ function skuDimLabel(sku) {
   const g = sku.geometry || {};
   if (g.width && g.height && (sku.category === "door" || sku.category === "window")) {
     return `${Math.round(g.width * 1000)} × ${Math.round(g.height * 1000)} mm`;
+  }
+  if (isStripFooting(sku) && g.width && g.depth) {
+    return `${Math.round(g.width * 1000)} × ${Math.round(g.depth * 1000)} mm`;
   }
   if (g.thickness) return `${Math.round(g.thickness * 1000)} mm`;
   if (g.width) return `${Math.round(g.width * 1000)} mm`;
@@ -2161,12 +2904,12 @@ function drawRibbon() {
  * (a category/tool function is active). One-shot commands (rotate,
  * compile, ...) already surface their own feedback, so they do not set this.
  *
- * Overridden by a warning when the armed tool would place something on the
- * active level's foundation storey (a roof, room, ceiling, opening... on
- * "00 FOUNDATION" is never right - see `foundationLevelMismatch`). This only
- * flags the one thing the app can rule out; it never guesses which of the
- * remaining levels the object actually belongs on, and it never moves the
- * level switcher itself - the user stays in control of the cut. */
+ * Overridden by a warning when the armed tool does not belong on the current
+ * cut (a roof on "00 FOUNDATION", a foundation on a ceiling plan — see
+ * `placementCutWarning`). This only flags the one thing the app can rule
+ * out; it never guesses which of the remaining levels the object actually
+ * belongs on, and it never moves the level switcher itself - the user stays
+ * in control of the cut. */
 function updateRibbonHint() {
   if (!el.ribbonHint) return;
   // While the attach target pick is armed the hint is the live preview of what
@@ -2178,11 +2921,35 @@ function updateRibbonHint() {
     el.ribbonHint.textContent = hoverText ? hoverText.text : HINTS.attach;
     return;
   }
-  if (foundationLevelMismatch()) {
-    const level = (pack.levels || []).find((l) => l.id === activeLevel);
+  if (tool === "camera") {
+    el.ribbonHint.hidden = false;
+    el.ribbonHint.classList.remove("ribbon-hint-warn");
+    el.ribbonHint.textContent = cameraDraft?.a
+      ? "Click what you look at."
+      : HINTS["view-camera"];
+    return;
+  }
+  if (tool === "section") {
+    el.ribbonHint.hidden = false;
+    el.ribbonHint.classList.remove("ribbon-hint-warn");
+    el.ribbonHint.textContent = sectionDraft?.a
+      ? "Click the other end of the cut. Look is to the left of the line."
+      : HINTS.section;
+    return;
+  }
+  if (tool === "measure") {
+    el.ribbonHint.hidden = false;
+    el.ribbonHint.classList.remove("ribbon-hint-warn");
+    el.ribbonHint.textContent = measureDraft?.a
+      ? "Click the other end."
+      : HINTS.dimensions;
+    return;
+  }
+  const cutWarning = placementCutWarning();
+  if (cutWarning) {
     el.ribbonHint.hidden = false;
     el.ribbonHint.classList.add("ribbon-hint-warn");
-    el.ribbonHint.textContent = `The level switcher is on "${level?.name || activeLevel}", a foundation storey. Switch levels before placing this here.`;
+    el.ribbonHint.textContent = cutWarning;
     return;
   }
   el.ribbonHint.classList.remove("ribbon-hint-warn");
@@ -2201,15 +2968,30 @@ function setDensity(next) {
 
 /** Hide/show and scale live on the ribbon, so those buttons reflect whether a sheet is loaded, visible, or currently being calibrated. */
 function ribbonCommandState(item) {
+  if (item.id === "add-floor") {
+    if (!canAddFloor()) {
+      const cappedByTemplate = floorsAvailableToAdd() < MAX_FLOORS_TO_ADD;
+      return {
+        disabled: true,
+        title: cappedByTemplate
+          ? "The template defines no more storeys above this one."
+          : `Every storey this document can add (${MAX_FLOORS_TO_ADD}) is already shown.`,
+      };
+    }
+    const revealed = store.doc?.floorsRevealed || 0;
+    return { title: `Reveal the next storey (${revealed} of ${Math.min(MAX_FLOORS_TO_ADD, floorsAvailableToAdd())} added).` };
+  }
   if (item.id === "level-isolate") {
-    const below = lookDownLevelId(pack?.levels, activeLevel);
+    const ghost = pack ? ghostContext(pack.levels, activeLevel) : null;
     return {
       active: isolateCurrentLevel,
       title: isolateCurrentLevel
-        ? "Showing this storey only. Click to ghost the floor below."
-        : below
-          ? "Ghosting the floor below. Click to show this storey only."
-          : "Nothing below this cut to ghost. Click to keep this storey only.",
+        ? "Showing this level only. Click to ghost the neighbouring level."
+        : ghost?.look === "up"
+          ? "Ghosting the walls above. Click to show this level only."
+          : ghost
+            ? "Ghosting the floor below. Click to show this level only."
+            : "Nothing next to this cut to ghost. Click to keep this level only.",
     };
   }
   // Attach/detach act on a wall or beam, so say which is missing rather than
@@ -2223,6 +3005,15 @@ function ribbonCommandState(item) {
       disabled: !attached.length,
       title: attached.length ? HINTS.detach : "Nothing selected is attached to anything.",
     };
+  }
+  if (item.id === "view-camera") {
+    return { active: tool === "camera", title: HINTS["view-camera"] };
+  }
+  if (item.id === "section") {
+    return { active: tool === "section", title: HINTS.section };
+  }
+  if (item.id === "dimensions") {
+    return { active: tool === "measure", title: HINTS.dimensions };
   }
   const ids = new Set(["underlay-adjust", "calibrate", "underlay-toggle", "underlay-off"]);
   if (!ids.has(item.id)) return null;
@@ -2262,6 +3053,9 @@ function onRibbonFunction(item) {
   tool = item.tool || "select";
   placeSkuId = pack.skus.find((s) => (item.categories || []).includes(s.category))?.id ?? null;
   beamStart = null;
+  measureDraft = null;
+  userDimensions = [];
+  showDimensions = false;
   underlaySelected = false;
   syncToolButtons();
   drawRibbon();
@@ -2272,37 +3066,42 @@ function onRibbonFunction(item) {
 /** One entry point so the ribbon, the keyboard and the header buttons agree. */
 function runCommand(name) {
   switch (name) {
-    case "undo": store.undo(); break;
+    // Undo can restore a document with a different level stack (an inserted
+    // level, or one that had not been inserted yet), so the merged pack has to
+    // be rebuilt before anything redraws.
+    case "undo": store.undo(); syncPackLevels(); drawLevelSwitcher(); break;
     case "group": store.groupSelection(); store.persist(); break;
     case "ungroup": store.ungroupSelection(); store.persist(); break;
     case "delete": deleteSelection(); break;
     case "compile": runCompile(); return;
+    case "export-dxf": runExportDxf(); return;
+    case "export-ifc": runExportIfc(); return;
     case "gaps": case "check":
       activeTab = "check";
       drawRibbon();
       openCheck();
       return;
     case "view-3d": openMassing(); return;
+    case "view-camera": startCameraLook(); return;
+    case "section": startSectionCut(); return;
     case "sheets": openSheets(); return;
     case "underlay": openUnderlayPicker(); return;
     case "underlay-adjust": startUnderlayAdjust(); return;
     case "calibrate": startCalibration(); return;
     case "underlay-toggle": toggleUnderlayVisibility(); return;
     case "level-isolate":
-      isolateCurrentLevel = !isolateCurrentLevel;
-      window.localStorage.setItem("v2-level-isolate", isolateCurrentLevel ? "1" : "0");
-      drawRibbon();
-      render();
+      setIsolateCurrentLevel(!isolateCurrentLevel);
       return;
+    case "add-floor": addFloor(); return;
+    case "insert-level": openLevelInsert(); return;
     case "underlay-off": removeUnderlay(); return;
     case "property-line": startPropertyLineDraw(); return;
     case "sg-coords": startSgPick(); return;
     case "building-line": runAutoBuildingLine(); return;
     case "dimensions":
-      showDimensions = !showDimensions;
-      activeFunction = showDimensions ? "dimensions" : null;
-      drawRibbon();
-      break;
+      if (tool === "measure") stopMeasure();
+      else startMeasure();
+      return;
     case "attach": startAttachPick(); return;
     case "detach": runDetach(); return;
     case "rotate": case "mirror": case "copy": case "align":
@@ -2348,14 +3147,121 @@ function modifySelection(op) {
 
 // --- 3D massing ----------------------------------------------------------
 
-function openMassing() {
+function openMassing(view) {
+  if (!view && (tool === "camera" || tool === "section")) {
+    cameraDraft = null;
+    sectionDraft = null;
+    tool = "select";
+    if (activeFunction === "view-camera" || activeFunction === "section") activeFunction = null;
+    syncToolButtons();
+    drawRibbon();
+  }
+  if (view?.mode === "look") massView.setLook(view);
+  else if (view?.mode === "section") massView.setSection(view);
+  else massView.setOrbit();
   massView.setPayload(compile(store.doc, pack));
   el.massOverlay.hidden = false;
-  requestAnimationFrame(() => massView.resize());
+  requestAnimationFrame(() => requestAnimationFrame(() => massView.resize()));
 }
 
 function closeMassing() {
   el.massOverlay.hidden = true;
+}
+
+function cameraEyeZ() {
+  const level = (pack.levels || []).find((l) => l.id === activeLevel);
+  const z0 = Number(level?.elevation);
+  return (Number.isFinite(z0) ? z0 : 0) + EYE_HEIGHT_M;
+}
+
+function startCameraLook() {
+  cameraDraft = { a: null };
+  tool = "camera";
+  activeFunction = "view-camera";
+  underlaySelected = false;
+  store.clearSelection();
+  syncToolButtons();
+  drawRibbon();
+  setStatusMessage("Click where you stand, then click what you look at.", "ok");
+  render();
+}
+
+function finishCameraLook(target) {
+  const look = lookFromClicks(cameraDraft.a, target, cameraEyeZ());
+  if (!look) {
+    setStatusMessage("Stand and look-at need to be different points.", "warn");
+    return;
+  }
+  cameraDraft = null;
+  tool = "select";
+  activeFunction = null;
+  syncToolButtons();
+  drawRibbon();
+  openMassing(look);
+}
+
+function startSectionCut() {
+  sectionDraft = { a: null };
+  tool = "section";
+  activeFunction = "section";
+  underlaySelected = false;
+  store.clearSelection();
+  syncToolButtons();
+  drawRibbon();
+  setStatusMessage("Click two points to cut. Look is to the left of the line.", "ok");
+  render();
+}
+
+function finishSectionCut(target) {
+  const cut = sectionFromClicks(sectionDraft.a, target);
+  if (!cut) {
+    setStatusMessage("The two ends of the cut need to be different points.", "warn");
+    return;
+  }
+  sectionDraft = null;
+  tool = "select";
+  activeFunction = null;
+  syncToolButtons();
+  drawRibbon();
+  openMassing(cut);
+}
+
+function startMeasure() {
+  measureDraft = { a: null };
+  userDimensions = [];
+  tool = "measure";
+  activeFunction = "dimensions";
+  showDimensions = true;
+  underlaySelected = false;
+  store.clearSelection();
+  syncToolButtons();
+  drawRibbon();
+  setStatusMessage(HINTS.dimensions, "ok");
+  render();
+}
+
+function stopMeasure() {
+  measureDraft = null;
+  userDimensions = [];
+  showDimensions = false;
+  if (tool === "measure") tool = "select";
+  if (activeFunction === "dimensions") activeFunction = null;
+  syncToolButtons();
+  drawRibbon();
+  render();
+}
+
+function finishMeasure(target) {
+  const dim = pickedDimension(measureDraft.a, target);
+  if (!dim) {
+    setStatusMessage("The two points need to be different.", "warn");
+    return;
+  }
+  userDimensions.push(dim);
+  measureDraft = { a: null };
+  setStatusMessage(dim.label, "ok");
+  updateRibbonHint();
+  render();
 }
 
 function wireMassing() {
@@ -2369,7 +3275,14 @@ function wireMassing() {
       massView.setStatusFilter(btn.dataset.massStatus || "both");
     });
   });
-  new ResizeObserver(() => massView.resize()).observe(el.massCanvas);
+  let massResizeFrame = 0;
+  const onMassResize = () => {
+    cancelAnimationFrame(massResizeFrame);
+    massResizeFrame = requestAnimationFrame(() => massView.resize());
+  };
+  const massWrap = el.massCanvas?.parentElement;
+  if (massWrap) new ResizeObserver(onMassResize).observe(massWrap);
+  if (el.massPlanWrap) new ResizeObserver(onMassResize).observe(el.massPlanWrap);
 }
 
 // --- sheets ---------------------------------------------------------------
@@ -2652,6 +3565,23 @@ function wireCheck() {
   });
 }
 
+function openAbout() {
+  if (el.aboutOverlay) el.aboutOverlay.hidden = false;
+}
+
+function closeAbout() {
+  if (el.aboutOverlay) el.aboutOverlay.hidden = true;
+}
+
+function wireAbout() {
+  el.aboutOpen?.addEventListener("click", openAbout);
+  el.aboutClose?.addEventListener("click", closeAbout);
+  el.aboutOk?.addEventListener("click", closeAbout);
+  el.aboutOverlay?.addEventListener("click", (event) => {
+    if (event.target === el.aboutOverlay) closeAbout();
+  });
+}
+
 // --- underlay -----------------------------------------------------------
 
 let calibration = null;
@@ -2691,7 +3621,7 @@ function startCalibration() {
   store.clearSelection();
   syncToolButtons();
   drawRibbon();
-  setStatusMessage("Click two points a known distance apart, then enter the real length.", "ok");
+  setStatusMessage("Click two points a known distance apart. Then type the real length, or drag a corner to resize.", "ok");
   render();
 }
 
@@ -2714,6 +3644,19 @@ function startUnderlayAdjust() {
   render();
 }
 
+/** Pin a click to both world space and the sheet pixel it landed on. */
+function captureCalibrationPoint(wx, wy) {
+  const pixel = underlayPixelFromWorld(store.doc.underlay, wx, wy);
+  return { x: wx, y: wy, pixel };
+}
+
+/** World position of a calibration pick — follows the sheet when it is resized. */
+function liveCalibrationPoint(pt) {
+  if (!pt) return null;
+  if (pt.pixel && store.doc.underlay) return underlayWorldFromPixel(store.doc.underlay, pt.pixel.x, pt.pixel.y);
+  return { x: pt.x, y: pt.y };
+}
+
 /** The distance calibration would report right now, using the (probably wrong) current scale - a starting guess for the field, and what the live label shows while the second point is still being placed. */
 function calibrationDistanceGuess(a, b) {
   if (!store.doc.underlay || !a || !b) return null;
@@ -2722,15 +3665,16 @@ function calibrationDistanceGuess(a, b) {
 
 /** Second half of calibration: both points are down, so show the real-distance field instead of blocking on window.prompt. */
 function promptCalibrationDistance() {
-  const guess = calibrationDistanceGuess(calibration.a, calibration.b);
+  const guess = calibrationDistanceGuess(liveCalibrationPoint(calibration.a), liveCalibrationPoint(calibration.b));
   if (el.calibrateDistance) el.calibrateDistance.value = guess ? guess.toFixed(2) : "";
   render();
-  requestAnimationFrame(() => el.calibrateDistance?.focus());
 }
 
 function confirmCalibration() {
   if (!calibration?.a || !calibration?.b) return;
-  const result = calibrate(store.doc, calibration.a, calibration.b, Number(el.calibrateDistance?.value));
+  const a = liveCalibrationPoint(calibration.a);
+  const b = liveCalibrationPoint(calibration.b);
+  const result = calibrate(store.doc, a, b, Number(el.calibrateDistance?.value));
   setStatusMessage(result.message, result.ok ? "ok" : "warn");
   if (result.ok) {
     calibration = null;
@@ -3082,6 +4026,18 @@ function renderAttachReport() {
   `).join("");
 }
 
+el.levelConfirm?.addEventListener("click", () => commitLevelInsert());
+el.levelCancel?.addEventListener("click", () => {
+  closeLevelInsert();
+  setStatusMessage("Insert level cancelled; the level stack is unchanged.", "warn");
+});
+for (const input of [el.levelName, el.levelElevation]) {
+  input?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") commitLevelInsert();
+    if (e.key === "Escape") closeLevelInsert();
+  });
+}
+
 el.attachCancel?.addEventListener("click", () => {
   cancelAttachPick();
   setStatusMessage("Attach cancelled; nothing changed.", "warn");
@@ -3120,16 +4076,76 @@ function syncToolButtons() {
   document.querySelectorAll("[data-tool]").forEach((btn) => btn.classList.toggle("active", btn.dataset.tool === tool));
 }
 
+// Drags that edit geometry already in the document mutate it live, off the
+// speculative undo entry pushed on pointer-down. Cancelling one therefore
+// means rolling that entry back, not just forgetting the drag.
+const REVERTIBLE_DRAGS = new Set(["move", "segment-end", "underlay-move", "underlay-scale", "underlay-rotate"]);
+
+/**
+ * Escape: throw away whatever is half-drawn and step back to Select, which is
+ * what the ribbon hints ("Esc to stop", "Esc to cancel") promise. A draft can
+ * live in any of several places - a pointer drag, the beam's first click, the
+ * property-line and calibration point lists, an armed target pick - so all of
+ * them are dropped here rather than tool by tool.
+ */
+function cancelDrawing() {
+  // Nothing mid-flight? Escape is then about the current selection, not the
+  // tool state - deselect whatever is selected instead of being a no-op.
+  const wasDrawing = Boolean(
+    drag || beamStart || siteDraft || calibration || sgPick || attachPick ||     cameraDraft || sectionDraft || measureDraft ||
+    (tool !== "select") || activeFunction
+  );
+
+  if (REVERTIBLE_DRAGS.has(drag?.kind)) {
+    // undo() clears the selection; the user only cancelled a move, so put the
+    // same objects back under the pointer.
+    const selection = store.selected.slice();
+    const primary = store.primary;
+    store.undo();
+    store.setSelection(selection, primary);
+  }
+  drag = null;
+  beamStart = null;
+  sizeDraft = null;
+  snapGuide = null;
+  underlaySelected = false;
+  calibration = null;
+  siteDraft = null;
+  sgPick = null;
+  attachPick = null;
+  cameraDraft = null;
+  sectionDraft = null;
+  measureDraft = null;
+  userDimensions = [];
+  showDimensions = false;
+  if (tool !== "select") {
+    tool = "select";
+    syncToolButtons();
+  }
+  if (activeFunction) {
+    activeFunction = null;
+    renderPalette();
+  }
+  if (!wasDrawing && store.selected.length) {
+    store.clearSelection();
+  }
+  drawRibbon();
+  render();
+}
+
 function wireToolbar() {
   document.querySelectorAll("[data-tool]").forEach((btn) => {
     btn.addEventListener("click", () => {
       tool = btn.dataset.tool;
       if (tool !== "select") placeSkuId = placeSkuId || defaultSkuFor(tool);
-      else if (activeFunction && activeFunction !== "dimensions") {
+      else if (activeFunction) {
         // Stepping back to Select un-arms the draw tool so the next-step
         // hint does not keep pointing at it. The type list stays on the last
         // category so a selected wall can still be retyped.
         activeFunction = null;
+        showDimensions = false;
+        measureDraft = null;
+        userDimensions = [];
         drawRibbon();
         renderPalette();
       }
@@ -3137,23 +4153,22 @@ function wireToolbar() {
       siteDraft = null;
       sgPick = null;
       attachPick = null;
+      cameraDraft = null;
+      sectionDraft = null;
+      measureDraft = null;
+      userDimensions = [];
       syncToolButtons();
       render();
     });
   });
-  document.querySelectorAll("[data-status]").forEach((btn) => {
+  document.querySelectorAll("[data-plan-status]").forEach((btn) => {
     btn.addEventListener("click", () => {
-      placeStatus = btn.dataset.status;
-      document.querySelectorAll("[data-status]").forEach((b) => b.classList.toggle("active", b === btn));
-      if (store.selected.length) {
-        store.pushUndo();
-        for (const ref of store.selected) {
-          const obj = objByRef(ref);
-          if (obj) obj.status = placeStatus;
-        }
-        store.persist();
-        render();
+      planStatusFilter = btn.dataset.planStatus || "both";
+      if (planStatusFilter === "existing" || planStatusFilter === "planned") {
+        placeStatus = planStatusFilter;
       }
+      document.querySelectorAll("[data-plan-status]").forEach((b) => b.classList.toggle("active", b === btn));
+      render();
     });
   });
   document.getElementById("v2-undo").addEventListener("click", () => runCommand("undo"));
@@ -3192,6 +4207,11 @@ function defaultSkuFor(nextTool) {
 function wireCanvas() {
   el.canvas.addEventListener("pointerdown", onPointerDown);
   el.canvas.addEventListener("pointermove", onPointerMove);
+  el.canvas.addEventListener("pointerleave", () => {
+    hoverPoint = null;
+    hover = null;
+    if (tool === "door" || tool === "window" || (tool === "camera" && cameraDraft?.a) || (tool === "section" && sectionDraft?.a) || (tool === "measure" && measureDraft?.a)) render();
+  });
   window.addEventListener("pointerup", onPointerUp);
   el.canvas.addEventListener("wheel", onWheel, { passive: false });
   el.canvas.addEventListener("contextmenu", (e) => e.preventDefault());
@@ -3219,9 +4239,9 @@ function onPointerDown(ev) {
   }
   const [wx, wy] = pointerWorld(ev);
 
-  // Endpoint handles are the selection's own; while a target pick is armed the
-  // click belongs to the pick, not to dragging what is already selected.
-  const handle = attachPick ? null : endpointHandleHit(wx, wy);
+  // Endpoint handles are the selection's own; while a target pick or draw
+  // tool is armed the click belongs to that tool, not to stretching a wall.
+  const handle = (attachPick || tool !== "select") ? null : endpointHandleHit(wx, wy);
   if (handle && !ev.shiftKey) {
     const obj = objByRef({ kind: handle.target, id: handle.id });
     if (obj) {
@@ -3242,7 +4262,7 @@ function onPointerDown(ev) {
     }
   }
 
-  if (tool === "select" && underlaySelected) {
+  if (underlayHandlesActive()) {
     const uHandle = underlayHandleHit(wx, wy);
     if (uHandle) {
       store.pushUndo();
@@ -3279,11 +4299,22 @@ function onPointerDown(ev) {
   }
 
   if (tool === "calibrate") {
-    if (!calibration.a) calibration.a = { x: wx, y: wy };
+    if (!calibration.a) calibration.a = captureCalibrationPoint(wx, wy);
     else if (!calibration.b) {
-      calibration.b = { x: wx, y: wy };
+      calibration.b = captureCalibrationPoint(wx, wy);
       promptCalibrationDistance();
       return;
+    } else if (hitUnderlay(wx, wy)) {
+      store.pushUndo();
+      drag = {
+        kind: "underlay-move",
+        x0: wx,
+        y0: wy,
+        ox: store.doc.underlay.x,
+        oy: store.doc.underlay.y,
+        moved: false,
+      };
+      el.canvas.setPointerCapture(ev.pointerId);
     }
     render();
     return;
@@ -3306,6 +4337,39 @@ function onPointerDown(ev) {
   if (tool === "sg-ref") {
     sgPick = applySnap(wx, wy);
     render();
+    return;
+  }
+  if (tool === "camera") {
+    const p = applySnap(wx, wy);
+    if (!cameraDraft?.a) {
+      cameraDraft = { a: p };
+      updateRibbonHint();
+      render();
+      return;
+    }
+    finishCameraLook(p);
+    return;
+  }
+  if (tool === "section") {
+    const p = applySnap(wx, wy);
+    if (!sectionDraft?.a) {
+      sectionDraft = { a: p };
+      updateRibbonHint();
+      render();
+      return;
+    }
+    finishSectionCut(p);
+    return;
+  }
+  if (tool === "measure") {
+    const p = applySnap(wx, wy);
+    if (!measureDraft?.a) {
+      measureDraft = { a: p };
+      updateRibbonHint();
+      render();
+      return;
+    }
+    finishMeasure(p);
     return;
   }
   if (tool === "attach") {
@@ -3393,7 +4457,8 @@ function onPointerDown(ev) {
 function startNewShapeDrag(wx, wy) {
   if (!placeSkuId) placeSkuId = defaultSkuFor(tool);
   sizeDraft = { lockW: false, lockH: false, typedW: "", typedH: "", axis: "w" };
-  drag = { kind: `${tool}-new`, x0: wx, y0: wy, rect: null };
+  const p0 = applySnap(wx, wy);
+  drag = { kind: `${tool}-new`, x0: p0.x, y0: p0.y, rect: null };
   render();
 }
 
@@ -3432,10 +4497,32 @@ function onPointerMove(ev) {
   }
 
   if (tool === "calibrate") {
+    if (calibration?.b && !drag) {
+      const uHandle = underlayHandleHit(wx, wy);
+      el.canvas.style.cursor = uHandle?.kind === "underlay-rotate" ? "grab"
+        : uHandle?.kind === "underlay-scale" ? "nwse-resize"
+        : hitUnderlay(wx, wy) ? "move"
+        : "crosshair";
+    }
     if (calibration?.a) render();
     return;
   }
+  if (tool === "camera") {
+    if (cameraDraft?.a) render();
+    return;
+  }
+  if (tool === "section") {
+    if (sectionDraft?.a) render();
+    return;
+  }
+  if (tool === "measure") {
+    applySnap(wx, wy);
+    el.canvas.style.cursor = "crosshair";
+    render();
+    return;
+  }
   if (tool === "property" || tool === "sg-ref") {
+    applySnap(wx, wy);
     render();
     return;
   }
@@ -3470,7 +4557,7 @@ function onPointerMove(ev) {
       const single = drag.snaps[0];
       const exclude = single.ref.kind === "segment" ? { excludeSegmentIds: new Set([single.ref.id]) }
         : { excludeBeamIds: new Set([single.ref.id]) };
-      const targets = collectSnapTargets(store.doc, exclude);
+      const targets = collectSnapTargets(store.doc, snapOpts(exclude));
       const tol = SNAP_PIXEL_TOL / cam.scale;
       const points = [
         { x: single.x1 + dx, y: single.y1 + dy },
@@ -3481,7 +4568,15 @@ function onPointerMove(ev) {
         dx += best.dx;
         dy += best.dy;
         grid = null; // best.dx/dy already lands exactly on the target
-        snapGuide = best.guide;
+        // Same shape applySnap() builds, so drawSnapGuide's tracking lines
+        // and "how far along this guide" label render identically whether
+        // the guide came from drawing a new object or moving an existing
+        // one.
+        snapGuide = {
+          ...best.guide,
+          snapX: best.guide.guideX != null,
+          snapY: best.guide.guideY != null,
+        };
       }
     }
     store.applyMoveSnapshot(drag.snaps, dx, dy, grid);
@@ -3512,19 +4607,24 @@ function onPointerMove(ev) {
     return;
   }
   if (drag?.kind?.endsWith("-new") && drag.kind !== "wall-new") {
-    drag.rect = rectFromDrag(drag.x0, drag.y0, wx, wy);
+    const p = applySnap(wx, wy);
+    drag.rect = rectFromDrag(drag.x0, drag.y0, p.x, p.y);
     render();
     return;
   }
+  if (!drag && (snapPreviewTool() || beamStart)) applySnap(wx, wy);
+  else if (!drag) snapGuide = null;
   render();
 }
 
 function rectFromDrag(x0, y0, wx, wy) {
-  const grid = activeGrid();
-  const x = roundGrid(Math.min(x0, wx), grid);
-  const y = roundGrid(Math.min(y0, wy), grid);
-  const w = sizeDraft?.lockW ? parseMetres(sizeDraft.typedW, 1) : roundGrid(Math.abs(wx - x0), grid);
-  const h = sizeDraft?.lockH ? parseMetres(sizeDraft.typedH, 1) : roundGrid(Math.abs(wy - y0), grid);
+  // x0/y0 and wx/wy are already snapped or grid-rounded by applySnap.
+  // Rounding again here would pull an exact wall-corner join back onto
+  // the grid and undo the snap.
+  const x = Math.min(x0, wx);
+  const y = Math.min(y0, wy);
+  const w = sizeDraft?.lockW ? parseMetres(sizeDraft.typedW, 1) : Math.abs(wx - x0);
+  const h = sizeDraft?.lockH ? parseMetres(sizeDraft.typedH, 1) : Math.abs(wy - y0);
   return { x, y, w, h };
 }
 
@@ -3556,6 +4656,7 @@ function onPointerUp(ev) {
   drag = null;
   sizeDraft = null;
   snapGuide = null;
+  if (hoverPoint && snapPreviewTool()) applySnap(hoverPoint.x, hoverPoint.y);
   store.pruneGroups();
   store.persist();
   render();
@@ -3580,9 +4681,16 @@ function wireKeyboard() {
     const typing = tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA";
 
     if (handleSizeTyping(ev)) return;
-    if (typing) return;
+    // Escape still has to get through from a field: the size HUD is part of
+    // drawing, so typing a width there must not trap the draft.
+    if (typing && ev.key === "Escape") document.activeElement.blur();
+    else if (typing) return;
 
     if (ev.key === "Escape") {
+      if (el.aboutOverlay && !el.aboutOverlay.hidden) {
+        closeAbout();
+        return;
+      }
       if (el.massOverlay && !el.massOverlay.hidden) {
         closeMassing();
         return;
@@ -3591,33 +4699,19 @@ function wireKeyboard() {
         closeCheck();
         return;
       }
-      drag = null;
-      beamStart = null;
-      sizeDraft = null;
-      snapGuide = null;
-      underlaySelected = false;
-      if (tool === "calibrate") {
-        calibration = null;
-        tool = "select";
-        syncToolButtons();
-      }
-      if (tool === "property") {
-        siteDraft = null;
-        tool = "select";
-        syncToolButtons();
-      }
-      if (tool === "sg-ref") {
-        sgPick = null;
-        tool = "select";
-        syncToolButtons();
-      }
-      if (attachPick) {
-        attachPick = null;
-        tool = "select";
-        activeFunction = null;
-        syncToolButtons();
-      }
-      drawRibbon();
+      cancelDrawing();
+    } else if (PROBE_KEYS[ev.key]) {
+      ev.preventDefault();
+      const side = PROBE_KEYS[ev.key];
+      const axis = probeAxis(side);
+      probeSide[axis] = probeSide[axis] === side ? null : side;
+      const pinned = [probeSide.h, probeSide.v].filter(Boolean);
+      setStatusMessage(pinned.length
+        ? `Measuring ${pinned.join(" and ")} - same arrow again to go back to nearest`
+        : "Measuring to the nearest object");
+      // Re-resolve from the last pointer position so the new side appears
+      // straight away, without waiting for the mouse to twitch.
+      if (hoverPoint && (snapPreviewTool() || beamStart)) applySnap(hoverPoint.x, hoverPoint.y);
       render();
     } else if (ev.key === "Enter" && tool === "property" && siteDraft?.length >= 3) {
       finishPropertyLine();
@@ -3668,7 +4762,7 @@ function commitRoom(rect) {
     level: activeLevel,
     wallSku: pack.system.defaultWallSku,
     floorSku: pack.system.defaultFloorSku,
-    status: placeStatus,
+    status: placementStatus(),
     shape: rectShape(rect.x, rect.y, rect.w, rect.h),
   });
 }
@@ -3680,7 +4774,7 @@ function commitSlab(rect) {
     id: nid("sl"),
     sku: placeSkuId,
     level: activeLevel,
-    status: placeStatus,
+    status: placementStatus(),
     shape: rectShape(rect.x, rect.y, rect.w, rect.h),
   });
 }
@@ -3693,9 +4787,9 @@ function commitRoof(rect) {
     sku: placeSkuId,
     level: activeLevel,
     form: "gable",
-    pitch: 30,
+    pitch: DEFAULT_ROOF_PITCH,
     ridge: "long",
-    status: placeStatus,
+    status: placementStatus(),
     shape: rectShape(rect.x, rect.y, rect.w, rect.h),
   });
 }
@@ -3705,7 +4799,7 @@ function commitWall(d) {
   if (len < MIN_TRACE) return;
   store.pushUndo();
   const id = nid("s");
-  store.doc.segments.push({ id, sku: placeSkuId, level: activeLevel, x1: d.x1, y1: d.y1, x2: d.x2, y2: d.y2, status: placeStatus });
+  store.doc.segments.push({ id, sku: placeSkuId, level: activeLevel, x1: d.x1, y1: d.y1, x2: d.x2, y2: d.y2, status: placementStatus() });
   store.selectOne({ kind: "segment", id });
 }
 
@@ -3713,35 +4807,16 @@ function commitBeam(a, b) {
   const len = Math.hypot(b.x - a.x, b.y - a.y);
   if (len < 0.3) return;
   store.pushUndo();
-  store.doc.beams.push({ id: nid("b"), sku: placeSkuId, level: activeLevel, x1: a.x, y1: a.y, x2: b.x, y2: b.y, status: placeStatus });
+  store.doc.beams.push({ id: nid("b"), sku: placeSkuId, level: activeLevel, x1: a.x, y1: a.y, x2: b.x, y2: b.y, status: placementStatus() });
   store.persist();
 }
 
 function placeOpening(wx, wy) {
   const walls = currentWalls().filter(onActiveLevel);
-  const wall = nearestPlaceWall(walls, pack, wx, wy, placeSkuId);
-  if (!wall) return;
+  const draft = openingDraftAt(store.doc, pack, walls, placeSkuId, wx, wy);
+  if (!draft) return;
   store.pushUndo();
-  const swing = swingToward(wall, wx, wy);
-  const t = wallT(wall, wx, wy);
-  let row;
-  if (wall.drawn) {
-    row = { id: nid("o"), sku: placeSkuId, wallId: wall.id, t, swing, status: placeStatus };
-  } else {
-    const edge = wall.edges[0];
-    const room = store.doc.rooms.find((r) => r.id === edge.roomId);
-    const edgeSeg = roomEdgeSegment(room, edge.edgeIndex);
-    row = {
-      id: nid("o"),
-      sku: placeSkuId,
-      roomId: edge.roomId,
-      edgeIndex: edge.edgeIndex,
-      t: wallT(edgeSeg, wx, wy),
-      swing,
-      status: placeStatus,
-    };
-  }
-  store.doc.openings.push(row);
+  store.doc.openings.push({ id: nid("o"), status: placementStatus(), ...draft });
   store.persist();
   render();
 }
@@ -3756,7 +4831,7 @@ function placeItem(wx, wy) {
     x: p.x,
     y: p.y,
     rotation: placeRotation,
-    status: placeStatus,
+    status: placementStatus(),
   });
   store.persist();
   render();
@@ -3811,7 +4886,11 @@ function syncSizeHud() {
   if (!rectDraft) return;
   el.sizeHud.classList.remove("length-only");
   if (el.hudWName) el.hudWName.textContent = "Width";
-  if (el.hudHint) el.hudHint.textContent = "Drag to size, or type metres. Tab switches width / height.";
+  if (el.hudHint) {
+    el.hudHint.textContent = drag.kind === "roof-new"
+      ? "Drag the eaves. Corners snap to walls; draw past them for an overhang."
+      : "Drag to size, or type metres. Tab switches width / height.";
+  }
   if (document.activeElement !== el.hudW) el.hudW.value = sizeDraft?.lockW ? sizeDraft.typedW : drag.rect.w.toFixed(1);
   if (document.activeElement !== el.hudH) el.hudH.value = sizeDraft?.lockH ? sizeDraft.typedH : drag.rect.h.toFixed(1);
 }
@@ -3878,15 +4957,20 @@ function fillContextTypeSelect(kind, skuId) {
   }
 }
 
-function syncStatusButtons() {
-  let status = placeStatus;
-  if (store.selected.length === 1) {
-    const obj = objByRef(store.primary);
-    if (obj) status = objectStatus(obj);
-  }
-  document.querySelectorAll(".planner-tools [data-status]").forEach((b) => {
-    b.classList.toggle("active", b.dataset.status === status);
+function syncPlanFilterButtons() {
+  document.querySelectorAll(".planner-tools [data-plan-status]").forEach((b) => {
+    b.classList.toggle("active", b.dataset.planStatus === planStatusFilter);
   });
+}
+
+function syncInspectStatus(obj, draft) {
+  const show = Boolean(el.ctxStatusWrap) && (draft || obj);
+  setHidden(el.ctxStatusWrap, !show);
+  if (!show) return;
+  const status = draft ? placementStatus() : objectStatus(obj);
+  for (const input of el.ctxStatusWrap.querySelectorAll("input[name='v2-ctx-status']")) {
+    input.checked = input.value === status;
+  }
 }
 
 function syncInspectKicker(text) {
@@ -3895,20 +4979,23 @@ function syncInspectKicker(text) {
 }
 
 function syncObjectLevel(obj) {
-  const levels = pack.levels || [];
-  const show = levels.length >= 2 && obj;
+  const stations = inspectorStations(
+    houseStations.length ? houseStations : buildHouseStations(visibleLevels()),
+    pack.levels || [],
+    obj?.level
+  );
+  const show = stations.length >= 2 && obj;
   setHidden(el.ctxOLevelWrap, !show);
   if (!show) return;
-  const html = levels
-    .map((l) => `<option value="${escapeHtml(l.id)}">${escapeHtml(l.name)}</option>`)
+  el.ctxOLevel.innerHTML = stations
+    .map((s) => `<option value="${escapeHtml(s.id)}">${escapeHtml(s.label)}</option>`)
     .join("");
-  if (el.ctxOLevel.options.length !== levels.length) el.ctxOLevel.innerHTML = html;
-  const id = obj.level || pack.system.defaultLevel;
+  const id = selectedInspectorStationId(stations, obj.level || pack.system.defaultLevel, activeStationId);
   if (document.activeElement !== el.ctxOLevel) el.ctxOLevel.value = id;
 }
 
 function syncPlanContext() {
-  syncStatusButtons();
+  syncPlanFilterButtons();
   const draft = drag?.kind === "wall-new";
   const refs = store.selected;
   const ref = !draft && refs.length === 1 ? store.primary : null;
@@ -3959,8 +5046,11 @@ function syncPlanContext() {
   setHidden(el.ctxWWrap, !rect);
   setHidden(el.ctxHWrap, !rect);
   setHidden(el.ctxFormWrap, !roof);
-  setHidden(el.ctxPitchWrap, !roof);
+  const pitched = Boolean(roof && obj && obj.form !== "flat");
+  setHidden(el.ctxPitchWrap, !pitched);
+  setHidden(el.ctxRidgeWrap, !pitched);
   setHidden(el.ctxTypeWrap, !showType);
+  syncInspectStatus(showInspect && !multi ? obj : null, draft);
   setHidden(el.ctxFlip, !(opening && skuById(obj.sku)?.category === "door"));
   const attachable = Boolean(obj && ATTACHABLE_KINDS.has(ref.kind));
   setHidden(el.ctxAttachWrap, !attachable);
@@ -4002,6 +5092,7 @@ function syncPlanContext() {
   if (roof) {
     if (document.activeElement !== el.ctxForm) el.ctxForm.value = obj.form;
     if (document.activeElement !== el.ctxPitch) el.ctxPitch.value = String(obj.pitch);
+    if (el.ctxRidge && document.activeElement !== el.ctxRidge) el.ctxRidge.value = obj.ridge === "short" ? "short" : "long";
   }
 }
 
@@ -4054,6 +5145,24 @@ el.ctxType?.addEventListener("change", () => {
     renderPalette();
     render();
   }
+});
+
+el.ctxStatusWrap?.addEventListener("change", (e) => {
+  const next = e.target?.value;
+  if (next !== "existing" && next !== "planned") return;
+  placeStatus = next;
+  if (drag?.kind === "wall-new" || drag?.kind?.endsWith("-new")) {
+    render();
+    return;
+  }
+  if (!store.selected.length) return;
+  store.pushUndo();
+  for (const ref of store.selected) {
+    const obj = objByRef(ref);
+    if (obj) obj.status = next;
+  }
+  store.persist();
+  render();
 });
 
 function soleOf(kind) {
@@ -4112,7 +5221,16 @@ el.ctxPitch?.addEventListener("change", (e) => {
   const roof = soleOf("roof");
   if (!roof) return;
   store.pushUndo();
-  roof.pitch = Number(e.target.value) || 30;
+  roof.pitch = Number(e.target.value) || DEFAULT_ROOF_PITCH;
+  store.persist();
+  render();
+});
+
+el.ctxRidge?.addEventListener("change", (e) => {
+  const roof = soleOf("roof");
+  if (!roof) return;
+  store.pushUndo();
+  roof.ridge = e.target.value === "short" ? "short" : "long";
   store.persist();
   render();
 });
@@ -4130,13 +5248,27 @@ el.ctxOLevel?.addEventListener("change", (e) => {
   if (store.selected.length !== 1) return;
   const obj = objByRef(store.primary);
   if (!obj || store.primary.kind === "opening") return;
-  store.pushUndo();
-  const newLevel = e.target.value;
-  obj.level = newLevel;
-  store.persist();
-  // Jump the active level (and slider) to match, rather than leaving the
-  // object selected-but-invisible on a level the canvas is no longer
-  // showing - the "moved a ceiling and it vanished" failure mode.
+  const stations = inspectorStations(
+    houseStations.length ? houseStations : buildHouseStations(visibleLevels()),
+    pack.levels || [],
+    obj.level
+  );
+  const station = stations.find((s) => s.id === e.target.value);
+  if (!station?.levelId) return;
+  const newLevel = station.levelId;
+  if (newLevel !== obj.level) {
+    store.pushUndo();
+    obj.level = newLevel;
+    store.persist();
+  }
+  // Jump the active cut (not only the storey) to the chosen station, rather
+  // than leaving the object selected-but-invisible, or snapping a ceiling
+  // pick back to that storey's floor.
+  const idx = houseStations.findIndex((s) => s.id === station.id);
+  if (idx >= 0) {
+    selectStationIndex(idx, { keepSelection: true });
+    return;
+  }
   if (newLevel !== activeLevel) {
     activeLevel = newLevel;
     drawLevelSwitcher();
@@ -4185,6 +5317,9 @@ el.underlayRotateCw?.addEventListener("click", () => {
 
 el.calibrateConfirm?.addEventListener("click", confirmCalibration);
 el.calibrateCancel?.addEventListener("click", cancelCalibration);
+el.calibrateDistance?.addEventListener("input", () => {
+  if (calibration) calibration.distanceEdited = true;
+});
 el.calibrateDistance?.addEventListener("keydown", (ev) => {
   if (ev.key === "Enter") {
     ev.preventDefault();
@@ -4204,6 +5339,8 @@ function runCompile() {
   if (!out) return;
   openCheck();
   el.compilePanel.hidden = false;
+  // The panel is shared with the IFC export, which renames it while it owns it.
+  el.compilePanel.querySelector("h2").textContent = "Compile result";
   const walls = out.walls || [];
   const external = walls.filter((w) => w.external).length;
   const doors = out.instances.filter((r) => r.category === "Doors").length;
@@ -4228,6 +5365,88 @@ function runCompile() {
   // eslint-disable-next-line no-console
   console.log("v2 compile:", out);
   console.table(out.instances.map(({ profileLoops, ...rest }) => rest));
+}
+
+function downloadText(fileName, text, mime) {
+  const url = URL.createObjectURL(new Blob([text], { type: mime }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function showExportPanel(title, fileName, report, extraHints) {
+  const c = report.counts;
+  const notes = [
+    ...(report.unmappedTypes || []).map((m) => ["warn", m]),
+    ...(report.skipped || []).map((m) => ["warn", m]),
+    ...(report.warnings || []).map((m) => ["warn", m]),
+  ];
+  openCheck();
+  el.compilePanel.hidden = false;
+  el.compilePanel.querySelector("h2").textContent = title;
+  el.compileKicker.textContent = fileName || "not exported";
+  el.compileOut.innerHTML = `
+    ${notes.length ? `<div class="compile-warnings">${notes.map(([, m]) => `<p class="warn">⚠ ${escapeHtml(m)}</p>`).join("")}</div>` : ""}
+    <dl class="meta">
+      <div><dt>Levels</dt><dd>${c.levels} storeys</dd></div>
+      <div><dt>Walls</dt><dd>${c.walls}</dd></div>
+      <div><dt>Openings</dt><dd>${c.doors} doors, ${c.windows} windows</dd></div>
+      <div><dt>Rooms</dt><dd>${c.rooms}</dd></div>
+    </dl>
+    ${extraHints}
+    ${report.notExported?.length ? `<p class="hint">Still in the drawing but not in this file: ${escapeHtml(report.notExported.join(", "))}.</p>` : ""}
+  `;
+}
+
+// --- CAD export -----------------------------------------------------------
+//
+// Output > Exchange > Export CAD. A DXF is 2D linework. Revit inserts it with
+// Insert → Link CAD; File → Open will not, because that command only lists
+// Revit projects. No add-in is involved.
+
+function runExportDxf() {
+  const result = exportDxf(store.doc, pack);
+  if (!result) {
+    setStatusMessage("Load a SKU pack before exporting.", "warn");
+    return;
+  }
+  const { text, fileName, report } = result;
+  if (text) {
+    downloadText(fileName, text, "application/dxf");
+    setStatusMessage(`${fileName}: in Revit, Insert → Link CAD. File → Open will not load a DXF.`);
+  } else {
+    setStatusMessage("Nothing could be exported - see the report.", "warn");
+  }
+  showExportPanel("CAD export", text ? fileName : "not exported", report, `
+    <p class="hint"><strong>This is not a .rvt</strong> and not a model. It is a 2D CAD drawing of the plan (millimetres, one layer per storey).</p>
+    <p class="hint">In Revit, with <em>no add-in</em>: open the firm's template, then <strong>Insert → Link CAD</strong> (or Import CAD). Set Files of type to DXF. File → Open will ignore this file the same way it ignores IFC.</p>
+  `);
+}
+
+// --- IFC export -----------------------------------------------------------
+//
+// Still available for a machine that can File → Open → IFC. The receiving
+// Revit user is not assumed to have this add-in.
+
+function runExportIfc() {
+  const result = exportIfc(store.doc, pack);
+  if (!result) {
+    setStatusMessage("Load a SKU pack before exporting.", "warn");
+    return;
+  }
+
+  const { text, fileName, report } = result;
+  if (text) {
+    downloadText(fileName, text, "application/x-step");
+    setStatusMessage(`${fileName}: in Revit, File → Open → IFC (not Open → Project), then Save As .rvt.`);
+  } else {
+    setStatusMessage("Nothing could be exported - see the report.", "warn");
+  }
+  showExportPanel("IFC export", text ? fileName : "not exported", report, `
+    <p class="hint"><strong>This is not a .rvt.</strong> File → Open → Project will not load it. Use File → Open → IFC, then File → Save As a project.</p>
+  `);
 }
 
 // --- demo doc ------------------------------------------------------------

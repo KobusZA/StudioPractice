@@ -78,6 +78,7 @@ const GLYPHS = {
   undo: '<path d="M9 13H5V9"/><path d="M5 13a8 8 0 111.5 4.5"/>',
   delete: '<path d="M5 7h14M9 7V5h6v2M8 7l1 13h6l1-13"/>',
   "view-3d": '<path d="M12 4l8 4v8l-8 4-8-4V8z"/><path d="M12 12V20M12 12l8-4M12 12L4 8"/>',
+  "view-camera": '<path d="M4 9h11v8H4z"/><path d="M15 12l5-3v8l-5-3z"/><circle cx="9.5" cy="13" r="2"/>',
   callout: '<circle cx="8" cy="8" r="3"/><path d="M10.5 10.5L20 20"/>',
   "view-section": '<path d="M4 4l16 16M8 4h-4v4M16 20h4v-4"/>',
   boq: '<path d="M7 4h10v16H7z"/><path d="M9 9h6M9 13h6M9 17h4"/>',

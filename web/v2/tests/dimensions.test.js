@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { boxDimensionLines, planDimensionLines, unionBox } from "../dimensions.js";
+import { boxDimensionLines, pickedDimension, planDimensionLines, unionBox } from "../dimensions.js";
 
 test("a box gets one horizontal and one vertical dimension line", () => {
   const lines = boxDimensionLines({ x: 0, y: 0, w: 4, h: 3 }, 0.25);
@@ -43,4 +43,15 @@ test("plan dimensions are one pair per room plus one overall pair", () => {
 
 test("an empty plan produces no dimension lines", () => {
   assert.deepEqual(planDimensionLines([]), []);
+});
+
+test("two picked points become a labelled distance", () => {
+  const dim = pickedDimension({ x: 0, y: 0 }, { x: 3, y: 4 });
+  assert.equal(dim.length, 5);
+  assert.equal(dim.label, "5.00 m");
+});
+
+test("a zero-length pick is refused", () => {
+  assert.equal(pickedDimension({ x: 1, y: 1 }, { x: 1, y: 1 }), null);
+  assert.equal(pickedDimension(null, { x: 1, y: 1 }), null);
 });

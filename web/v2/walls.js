@@ -23,6 +23,38 @@ function skuById(pack, id) {
   return pack?.skus?.find((s) => s.id === id) || null;
 }
 
+/**
+ * A strip footing is named width-by-depth ("600X200"): `width` is the pad in
+ * plan, `depth` is how tall it is, and `thickness` is copied from depth so the
+ * SKU still has a wall-like thickness field. A masonry foundation wall either
+ * states a height, or is no wider than its wall thickness.
+ */
+export function isStripFooting(sku) {
+  if (sku?.category !== "foundation") return false;
+  const g = sku.geometry || {};
+  if (Number.isFinite(g.height) && g.height > 0) return false;
+  const t = g.thickness;
+  const w = g.width;
+  const d = g.depth;
+  if (!(w > 0) || !(t > 0) || !(d > 0)) return false;
+  return w > t + 1e-6 && Math.abs(t - d) < 1e-4;
+}
+
+/** Plan thickness of a drawn wall/foundation segment. */
+export function drawnWallThickness(sku) {
+  const g = sku?.geometry || {};
+  if (isStripFooting(sku)) return g.width;
+  return g.thickness ?? g.width ?? 0.22;
+}
+
+/** Height the SKU itself states, or the strip's depth. Null if unknown. */
+export function skuDrawnHeight(sku) {
+  const g = sku?.geometry || {};
+  if (Number.isFinite(g.height) && g.height > 0) return g.height;
+  if (isStripFooting(sku) && Number.isFinite(g.depth) && g.depth > 0) return g.depth;
+  return null;
+}
+
 function skuIdOrDefault(pack, id) {
   return skuById(pack, id) ? id : pack?.system?.defaultWallSku;
 }
@@ -42,8 +74,17 @@ function pickWallSku(pack, rooms) {
   return skuIdOrDefault(pack, best);
 }
 
-function objectStatus(obj) {
+export function objectStatus(obj) {
   return obj?.status === "existing" ? "existing" : "planned";
+}
+
+/** Plan and 3D filters share this: mixed (a wall shared by existing and
+ *  planned rooms) stays visible in either slice. */
+export function statusVisible(status, filter) {
+  if (!filter || filter === "both") return true;
+  if (status === "mixed") return true;
+  const s = status === "existing" ? "existing" : "planned";
+  return s === filter;
 }
 
 function combineStatus(objs) {
@@ -164,11 +205,12 @@ export function deriveDrawnWalls(doc, pack, minLength = 0.3) {
       length,
       sku: sku.id,
       category: sku.category,
-      thickness: sku.geometry?.thickness ?? sku.geometry?.width ?? 0.22,
+      thickness: drawnWallThickness(sku),
       // `seg.height` is the per-object override Detach writes when it freezes a
       // wall at the height its attach had resolved to; everything else falls
-      // through to the SKU and the document default as before.
-      height: seg.height ?? sku.geometry?.height ?? pack.system.wallHeight,
+      // through to the SKU and the document default as before. A strip footing
+      // uses its depth here so it is not extruded to `system.wallHeight`.
+      height: seg.height ?? skuDrawnHeight(sku) ?? pack.system.wallHeight,
       level: effectiveLevel(seg, pack),
       // Passed through untouched - compile.js resolves it, because that is
       // where the level datums and the target's height already are.

@@ -1,5 +1,10 @@
 # SKU pack v2 — frozen schema
 
+Why any of this is shaped the way it is: [../../PHILOSOPHY.md](../../PHILOSOPHY.md).
+This file states the schema and the decisions; that one states the three
+principles the decisions come from, and which kinds of "no" are allowed to
+refuse a feature.
+
 Status: **frozen** for the four-week demo build. Version `sp.pack/3`.
 Machine-readable definition and validator: [schema.js](schema.js).
 Migrated pack: [../samples/planner-pack-v2.json](../samples/planner-pack-v2.json).
@@ -197,12 +202,16 @@ What the real catalog changed:
 - **Electrical is 64 count-only SKUs.** Every conduit, cable tray, duct and
   piping type in the template is unplaced; the firm counts points and prices
   them as PC sums. We place symbols and count them, and never route services.
-- **Levels are inferred, not read.** The family report lists Levels as an
-  annotation category with a placed count, never names or elevations. A placed
-  cast-in-place stair is evidence of a second storey, so `catalog-from-tsv.js`
-  synthesises two levels named "(inferred)" so the level switcher has something
-  to switch between. `build-pack.js` prints `INFERRED` when it sees this.
-  Export Catalog replaces this with the template's real levels and names.
+- **Levels come from Export Catalog; the TSV path still infers.** The family
+  report lists Levels as an annotation category with a placed count, never
+  names or elevations, so `catalog-from-tsv.js` can only guess: a placed
+  cast-in-place stair is evidence of a second storey, so it synthesises two
+  levels named "(inferred)" so the level switcher has something to switch
+  between in tests, and `build-pack.js` prints `INFERRED` when it sees this.
+  That inference is a stand-in for the TSV pipeline only - the app's real
+  pack is built from `output/type-catalog.json` (Export Catalog), which
+  states the template's actual storey names and elevations directly, so
+  `build-pack.js` reads them verbatim rather than inferring anything.
 
 ## The plan canvas is level-aware
 
@@ -216,6 +225,30 @@ of its own; it inherits its host wall's level. `web/v2/ui.js` filters drawing,
 hit-testing and marquee selection to the active level, and stamps new objects
 with it, so a two-storey house draws as two separate plans rather than one
 plan with everything stacked on top of itself.
+
+### Levels the user inserts
+
+The template's four storeys are the plan's **default** stack, not its limit
+([../../PHILOSOPHY.md](../../PHILOSOPHY.md) principle 2). Two separate commands:
+`+ Add floor` reveals a storey the template already defines (capped at
+`MAX_FLOORS_TO_ADD`), while **Insert level** adds one it does not — a third
+storey, a mezzanine, a different floor-to-floor.
+
+An inserted level lives on the document as `doc.levels[]` (additive, no
+`DOC_SCHEMA` bump), never written into the pack: the pack is regenerated from
+the template by `build-pack.js`, so a job editing it would be both overwritten
+and shared with every other job. `ui.js`'s `syncPackLevels()` merges the two
+stacks into the `pack` object every consumer reads, so `compile.js`, `walls.js`
+and the level switcher see one ordered stack and never need to know which
+storey came from where. An inserted level carries `userSupplied: true`, which is
+what keeps it always visible in the switcher and out of `+ Add floor`'s count.
+
+This is not a hole in "unknown is `null`": an elevation the user types is a
+supplied fact, the same as a calibration distance or an erf number. What is
+*not* asked for stays null — `floorToFloor` and `floorToCeiling` on an inserted
+level are null rather than copied from the storey below, and the status message
+says so when the level is created rather than letting the Part C check be the
+first place the user finds out.
 
 ## Week 2: the compliance rule engine
 
@@ -318,12 +351,77 @@ belong to one printed drawing, not to the SKU catalog or the rule pack.
   and `callout`'s job "once sheets exist" - this file is the "sheets exist"
   part they depend on.
 
+## The drawing leaves as CAD for a Revit user who has no add-in
+
+[dxf.js](dxf.js) writes a millimetre DXF (Output > Exchange > Export CAD).
+**File → Open will not load it** — that command only lists Revit projects.
+What Revit does without any add-in is **Insert → Link CAD** (or Import CAD),
+Files of type DXF, into the firm's template. The result is 2D linework to
+trace (wall outlines, door swings, window marks, room names), one layer per
+storey, not native walls. `.dwg` is Autodesk's closed CAD format and is not
+written here; DXF is the text equivalent Revit's CAD importer already reads.
+
+IFC remains available (Export IFC) for a machine that can File → Open → IFC
+and Save As a project. It is not the path that works when the recipient only
+has stock Revit and expects File → Open to behave like a drawing.
+
+[ifc.js](ifc.js) still writes IFC 2x3. `.rvt` remains something only Revit
+can create.
+
+What that costs, stated rather than hidden:
+
+- **Types arrive by name, not by identity.** Revit's IFC importer creates one
+  type per distinct `ObjectType` string, so we write the template's own
+  "family : type" there, straight off `sku.revit` (which `build-pack.js` reads
+  from Export Catalog). The imported wall is therefore labelled
+  `Basic Wall : Masonary wall 220mm (plaster)` and a user maps it to the real
+  template type in one step. A SKU with no recorded template type falls back to
+  its own SKU name and is **reported**, never given a lookalike type - the same
+  rule `build-pack.js` applies to an unmapped Revit category.
+- **Geometry is `compile()`'s, never re-derived.** Wall heights and base
+  elevations are the *attach-resolved* ones, so an IFC wall standing on a
+  foundation lands at the elevation the BOQ priced it at. `compile()`'s payload
+  gained one additive field for this, `walls[].level`, so the exporter can file
+  a wall under a storey without deriving walls a second time.
+- **Canvas y is negated on the way out.** The plan canvas draws +y downwards;
+  Revit and IFC put +y north. Without the flip the house imports mirrored about
+  its own east-west axis, which reads as a plausible plan and is not one. That
+  is the only coordinate change made - no re-origining and no rotation, because
+  the plan is already assumed true-north and true-scale, the same assumption the
+  underlay calibration and the SG reference point make.
+- **Scope is the permit-drawing core**: levels, walls, doors, windows, rooms.
+  Floors, roofs, beams, stairs and placed items are already compiled and are a
+  later addition to this file rather than a redesign of it - a scheduling block,
+  not an integrity one.
+
+Three things carry over from the pack's own rules:
+
+1. **Unknown stays unknown.** A room with no ceiling height exports as a named
+   space with no solid rather than one extruded to a believable height, and a
+   null `rateRef` is an absent property rather than a `0`.
+2. **A fact we cannot write is reported, not guessed.** A wall with no
+   thickness or no resolvable height is skipped and named in the report, which
+   the Export panel shows rather than swallowing.
+3. **Rates are referenced, not embedded.** Each element carries `SP_SKU`
+   (SKU id, unit, rate reference, colour class, status, planner id) and
+   `SP_Schedule` (the measures that SKU declares), so the imported model is
+   still priceable against a rate book the file itself does not contain.
+
+`GlobalId`s are derived from each element's own planner id rather than randomly,
+so re-exporting an unchanged drawing produces byte-identical ids. That is what
+makes a revised file a revision rather than a second copy of the building.
+
 ## Open decisions carried into week 2
 
-1. **`floorToCeiling` is null on both levels.** Part C heights (2.4 m over 70% of
-   a habitable room, 2.1 m in a passage) cannot be checked until the ceiling
-   build-up is known. `compile()` currently falls back to `system.wallHeight`,
-   which is floor-to-floor and therefore optimistic.
+1. **`floorToCeiling` was null on every level; the real export supplies it.**
+   Export Catalog states 2.902 m on all four template storeys, so Part C heights
+   (2.4 m over 70% of a habitable room, 2.1 m in a passage) can now be checked
+   against a real value rather than the optimistic `system.wallHeight` fallback.
+   Two cases still hit that fallback and still need the bound below: a level the
+   user inserted (null by design, see "Levels the user inserts"), and a target
+   whose type states no height. Confirming that 2.902 m is intended on the
+   foundation storey too is an open ask - see
+   [../../TEMPLATE-ASKS.md](../../TEMPLATE-ASKS.md).
 
    **Bounded, not closed** (required before base attach landed, see
    [../../LEVEL-ATTACH-PLAN.md](../../LEVEL-ATTACH-PLAN.md) rollout step 6): an
@@ -359,6 +457,8 @@ belong to one printed drawing, not to the SKU catalog or the rule pack.
 | [walls.js](walls.js) | Wall derivation from polygons |
 | [openings.js](openings.js) | Host validation, opening placement, Part O areas |
 | [compile.js](compile.js) | Extract payload, recipes, quantities, base-attach resolution |
+| [ifc.js](ifc.js) | IFC 2x3 export: a model file Revit can Open → IFC, then Save As |
+| [dxf.js](dxf.js) | DXF export: 2D CAD Revit inserts with Link CAD, no add-in |
 | [migrate-pack.js](migrate-pack.js) | v1 to v2 pack migration plus gap report |
 | [build-pack.js](build-pack.js) | Revit type catalog to v2 pack, plus assumption report |
 | [catalog-from-tsv.js](catalog-from-tsv.js) | The family report as a stand-in catalog |
@@ -368,4 +468,4 @@ belong to one printed drawing, not to the SKU catalog or the rule pack.
 | [sheets.js](sheets.js) | Week 3: A0-A4 title blocks, scale, revisions |
 | [modify.js](modify.js) | Rotate, mirror, copy, align, merge, split, cut, join, attach/detach base |
 | [underlay.js](underlay.js) | PDF and image underlay with two-point calibration |
-| [tests/](tests/) | 207 tests over all of the above |
+| [tests/](tests/) | 280 tests over all of the above |

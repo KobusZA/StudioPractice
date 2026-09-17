@@ -88,6 +88,16 @@ export function emptyDoc() {
     stairs: [],
     groups: [],
     sheets: [],
+    // How many storeys above the ground floor the level switcher currently
+    // offers, beyond the pack's own lowest non-foundation level - see
+    // ui.js's "+ Add floor" ribbon command. 0 is "waiting, like a new Revit
+    // project": just the ground floor and its foundation, never every
+    // storey the template happens to define, even on a four-level pack.
+    floorsRevealed: 0,
+    // Storeys this document added beyond the ones the template names - see
+    // level-view.js's insertLevel(). Kept on the document, never merged into
+    // the pack, because the pack is regenerated from the template.
+    levels: [],
   };
 }
 
@@ -628,6 +638,20 @@ export function normalizeDoc(raw) {
   doc.stairs = (raw.stairs || []).map((s) => ({ ...s, id: s.id || nid("st") }));
   doc.groups = Array.isArray(raw.groups) ? raw.groups : [];
   doc.sheets = Array.isArray(raw.sheets) ? raw.sheets : [];
+  doc.floorsRevealed = Number.isInteger(raw.floorsRevealed) && raw.floorsRevealed >= 0 ? raw.floorsRevealed : 0;
+  // `num` rather than `Number(x)`: null and "" both coerce to 0, which would
+  // silently turn an unstated floor-to-ceiling into a floor-to-ceiling of zero.
+  const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  doc.levels = (Array.isArray(raw.levels) ? raw.levels : [])
+    .filter((l) => l && l.id && num(l.elevation) !== null)
+    .map((l) => ({
+      id: l.id,
+      name: l.name || l.id,
+      elevation: num(l.elevation),
+      floorToFloor: num(l.floorToFloor),
+      floorToCeiling: num(l.floorToCeiling),
+      userSupplied: true,
+    }));
 
   if (isV1) doc.migratedFrom = raw.schema || "sp.doc/1";
   return doc;

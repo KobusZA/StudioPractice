@@ -1,5 +1,6 @@
-// Overall and per-room dimension strings: Document -> Annotate, row 3 of the
-// customer's requirements sheet.
+// Overall and per-room dimension strings, plus a two-point pick used by
+// Document -> Annotate -> Dimensions. Bounding-box based for the automatic
+// overlay; the pick is just the distance between the two clicks.
 //
 // Bounding-box based, matching the marquee selection's existing simplification
 // (see ui.js's refsInMarquee comment): exact for the rectangles and rectangle
@@ -59,4 +60,20 @@ export function planDimensionLines(boxes) {
     for (const line of boxDimensionLines(overall, OVERALL_OFFSET)) lines.push({ ...line, overall: true });
   }
   return lines;
+}
+
+/**
+ * A string between two picked points. Null when the clicks are the same
+ * place, so the UI can ask for the other end instead of drawing 0.00 m.
+ */
+export function pickedDimension(a, b) {
+  if (!a || !b) return null;
+  const length = Math.hypot(b.x - a.x, b.y - a.y);
+  if (!(length > 0)) return null;
+  return {
+    a: { x: a.x, y: a.y },
+    b: { x: b.x, y: b.y },
+    length,
+    label: fmt(length),
+  };
 }

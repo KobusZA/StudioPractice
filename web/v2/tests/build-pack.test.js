@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { buildPack } from "../build-pack.js";
+import { buildPack, assertMillimetreCatalog } from "../build-pack.js";
 import { catalogFromTsv } from "../catalog-from-tsv.js";
 import { validatePack } from "../schema.js";
 
@@ -195,6 +195,74 @@ test("floorToCeiling is read from a placed ceiling's Height Offset From Level", 
   // one offset the template does state, rather than staying null forever.
   const l1 = ceilingPack.levels.find((l) => l.id === "02 L1");
   assert.equal(l1.floorToCeiling, 2.902);
+});
+
+// A day-old dump that predates the millimetre extractor states "units":
+// "meters" and reports a "220mm" wall's Width as 0.22. Rounding that into the
+// pack would silently produce a 0mm wall (Math.round(0.22)), so this must
+// throw rather than build.
+test("a metres catalog is refused, not silently rounded to zero", () => {
+  const metresCatalog = {
+    schema: "sp.catalog/1",
+    units: "meters",
+    levels: [{ id: "1", name: "01 GFL", elevation: 0 }],
+    types: [
+      {
+        id: "t1", category: "Walls", family: "Basic Wall",
+        type: "Masonary wall 220mm (plaster)", placedCount: 5,
+        typeParams: { Width: 0.22 },
+      },
+    ],
+  };
+  assert.throws(() => assertMillimetreCatalog(metresCatalog), /metres/i);
+  assert.throws(() => buildPack(metresCatalog), /re-export with the millimetre extractor/i);
+});
+
+// Even without an explicit "meters" units string, a "220mm"-named wall
+// reporting a sub-1 Width is the same mistake under a different label.
+test("a metres catalog is refused even when the units string is missing", () => {
+  const noUnitsCatalog = {
+    schema: "sp.catalog/1",
+    levels: [{ id: "1", name: "01 GFL", elevation: 0 }],
+    types: [
+      {
+        id: "t1", category: "Walls", family: "Basic Wall",
+        type: "Masonary wall 220mm (plaster)", placedCount: 5,
+        typeParams: { Width: 0.22 },
+      },
+    ],
+  };
+  assert.throws(() => buildPack(noUnitsCatalog), /millimetre/i);
+});
+
+// A real millimetre catalog states the template's four TSP levels directly
+// (no inference); the default level is the ground floor, never the
+// below-datum foundation, and the foundation's elevation is read verbatim.
+test("a millimetre catalog with the four TSP levels resolves the real storeys", () => {
+  const mmCatalog = {
+    schema: "sp.catalog/1",
+    units: "millimeters (lengths, widths, structure) / meters (level elevations)",
+    levels: [
+      { id: "2680616", name: "00 FOUNDATION", elevation: -0.6 },
+      { id: "1616914", name: "01 GFL", elevation: 0 },
+      { id: "1617100", name: "02 L1", elevation: 3 },
+      { id: "2568591", name: "03 L2", elevation: 6 },
+    ],
+    types: [
+      {
+        id: "t1", category: "Walls", family: "Basic Wall",
+        type: "Masonary wall 220mm (plaster)", placedCount: 5,
+        typeParams: { Width: 220 },
+      },
+    ],
+  };
+  const { pack: mmPack } = buildPack(mmCatalog);
+  assert.equal(mmPack.system.defaultLevel, "01 GFL");
+  const foundation = mmPack.levels.find((l) => l.id === "00 FOUNDATION");
+  assert.equal(foundation.elevation, -0.6);
+  assert.equal(foundation.floorToFloor, 0.6);
+  const wall = mmPack.skus.find((s) => s.category === "wall");
+  assert.equal(wall.geometry.thickness, 220);
 });
 
 test("floorToCeiling stays null when the template places no ceilings at all", () => {

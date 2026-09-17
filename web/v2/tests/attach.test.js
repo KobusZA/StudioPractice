@@ -229,6 +229,26 @@ test("a beam with no height left above its target warns like a wall does", () =>
   assert.equal(out.sketchForms.find((f) => f.elementId === "b1").elevation, 0);
 });
 
+test("a wall attached to a 600X200 strip footing sits on the 200 mm pad", () => {
+  const strip = {
+    id: "TSP_FND_STRIP",
+    name: "Bearing Footing - 600X200 mm",
+    category: "foundation",
+    geometry: { thickness: 0.2, width: 0.6, depth: 0.2 },
+  };
+  const stripPack = { ...pack, skus: [...pack.skus, strip] };
+  const doc = docWith([
+    seg("f1", strip.id, "01 GFL"),
+    seg("w1", WALL_SKU, "01 GFL", { baseAttach: { kind: "segment", id: "f1" } }),
+  ]);
+  const out = compile(doc, stripPack);
+  assert.equal(wallRow(out, "f1").thickness, 0.6);
+  assert.equal(wallRow(out, "f1").height, 0.2);
+  assert.equal(wallRow(out, "w1").baseElevation, 0.2);
+  assert.equal(m(wallRow(out, "w1").height), 2.6);
+  assert.equal(out.warnings.length, 0);
+});
+
 test("attachPreview says what an attach would do without touching the document", () => {
   const doc = docWith([seg("f1", FOUNDATION_SKU, "01 GFL"), seg("w1", WALL_SKU, "01 GFL")]);
   const preview = attachPreview(doc, pack, doc.segments[1], { kind: "segment", id: "f1" });

@@ -27,7 +27,7 @@ import {
   roomPolygon,
   shapePolygon,
 } from "../model.js";
-import { deriveWalls, deriveRoomWalls, isExternalWall } from "../walls.js";
+import { deriveWalls, deriveRoomWalls, isExternalWall, statusVisible } from "../walls.js";
 import { compile } from "../compile.js";
 import { roomEdgeSegment, roomOpeningAreas } from "../openings.js";
 import { validatePack, complianceGaps, normalizePackUnits } from "../schema.js";
@@ -229,6 +229,21 @@ test("shared wall is found between rooms at an angle", () => {
   assert.equal(Math.round(shared[0].length * 1e4) / 1e4, Math.round(Math.hypot(4, 4) * 1e4) / 1e4);
 });
 
+test("shared wall of existing and planned rooms is mixed", () => {
+  const shared = deriveRoomWalls(twoRoomDoc(), pack).find((w) => w.shared);
+  assert.equal(shared.status, "mixed");
+});
+
+test("statusVisible matches the plan/3D filter; mixed stays in both slices", () => {
+  assert.equal(statusVisible("planned", "both"), true);
+  assert.equal(statusVisible("existing", "both"), true);
+  assert.equal(statusVisible("existing", "planned"), false);
+  assert.equal(statusVisible("planned", "planned"), true);
+  assert.equal(statusVisible("existing", "existing"), true);
+  assert.equal(statusVisible("mixed", "existing"), true);
+  assert.equal(statusVisible("mixed", "planned"), true);
+});
+
 test("thickest wall SKU wins where two rooms disagree", () => {
   const doc = normalizeDoc({
     rooms: [
@@ -280,6 +295,39 @@ test("a drawn segment's own level carries onto its derived wall", () => {
   });
   const walls = deriveWalls(doc, pack);
   assert.equal(walls[0].level, "02 L1");
+});
+
+// A 600X200 bearing footing is a strip: 600 mm in plan, 200 mm tall. Drawing it
+// as a storey-high 200 mm wall is what the 3D view used to do.
+const STRIP_SKU = {
+  id: "TSP_FND_STRIP",
+  name: "Bearing Footing - 600X200 mm",
+  category: "foundation",
+  geometry: { thickness: 0.2, width: 0.6, depth: 0.2 },
+};
+const stripPack = { ...pack, skus: [...pack.skus, STRIP_SKU] };
+
+test("a strip footing is 600 mm wide and 200 mm tall, not a storey-high wall", () => {
+  const doc = normalizeDoc({
+    segments: [{ id: "f1", sku: STRIP_SKU.id, level: "01 GFL", x1: 0, y1: 0, x2: 6, y2: 0 }],
+  });
+  const walls = deriveWalls(doc, stripPack);
+  assert.equal(walls[0].thickness, 0.6);
+  assert.equal(walls[0].height, 0.2);
+
+  const form = compile(doc, stripPack).sketchForms.find((f) => f.elementId === "f1");
+  assert.equal(form.thickness, 0.6);
+  assert.equal(form.depth, 0.2);
+  assert.equal(form.elevation, 0);
+});
+
+test("a masonry foundation wall keeps its wall thickness and stated height", () => {
+  const doc = normalizeDoc({
+    segments: [{ id: "f1", sku: "TSP_CON052", level: "01 GFL", x1: 0, y1: 0, x2: 6, y2: 0 }],
+  });
+  const walls = deriveWalls(doc, pack);
+  assert.equal(walls[0].thickness, 0.22);
+  assert.equal(walls[0].height, 0.6);
 });
 
 // --- opening migration ----------------------------------------------------

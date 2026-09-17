@@ -407,9 +407,10 @@
           /* Invisible grab area: the drawn thumb stays small, the target does not. */
           .rail-band, .thumb-hit { fill: transparent; cursor: ns-resize; }
           .ghost { opacity: 0; pointer-events: none; }
-          .ghost.on { opacity: 0.4; }
-          .ghost line { stroke: #b2451e; stroke-width: 1.1; stroke-dasharray: 3.2 2.4; }
-          .ghost text { fill: #b2451e; font-size: 8.5px; font-family: "Source Sans 3", sans-serif; }
+          .ghost.on { opacity: 1; }
+          .ghost line { stroke: #b2451e; stroke-width: 1.1; stroke-dasharray: 3.2 2.4; opacity: 0.55; }
+          .ghost-chip { fill: #f6f1e8; stroke: #d2c6b4; stroke-width: 0.7; }
+          .ghost text { fill: #1a1612; font-size: 13px; font-weight: 600; font-family: "Source Sans 3", sans-serif; }
           @media (prefers-reduced-motion: no-preference) {
             .cut-group { transition: transform 120ms ease-out; }
             .ghost { transition: transform 120ms ease-out, opacity 120ms ease-out; }
@@ -441,12 +442,15 @@
       const cutLayer = svg.querySelector("#cut-layer");
       const xLeft = x0 - 8;
 
-      ghostLabel = svgEl("text", { x: breakX + 6, y: -3 });
+      ghostLabel = svgEl("text", { x: xLeft + 8, y: -5 });
+      const ghostBg = svgEl("rect", { class: "ghost-chip", rx: "2.5", ry: "2.5" });
       ghostGroup = svgEl("g", { class: "ghost" });
       ghostGroup.append(
         svgEl("line", { x1: xLeft, y1: 0, x2: railX - 7, y2: 0 }),
+        ghostBg,
         ghostLabel,
       );
+      ghostGroup._bg = ghostBg;
 
       // Built once and moved with a transform, so the cut can ease between
       // stations instead of teleporting.
@@ -506,7 +510,23 @@
     function showGhost(idx) {
       if (idx === index) { hideGhost(); return; }
       ghostGroup.setAttribute("transform", `translate(0 ${zToY(stations[idx].elevation)})`);
+      const xLeft = 28 - 8;
+      const x = xLeft + 8;
+      const padX = 4;
+      const maxW = 214 - 12 - x;
+      ghostLabel.setAttribute("x", String(x));
+      ghostLabel.setAttribute("font-size", "13");
       ghostLabel.textContent = stations[idx].label;
+      let tw = ghostLabel.getComputedTextLength();
+      if (tw > maxW - padX * 2) {
+        ghostLabel.setAttribute("font-size", "11");
+        tw = ghostLabel.getComputedTextLength();
+      }
+      const bg = ghostGroup._bg;
+      bg.setAttribute("x", String(x - padX));
+      bg.setAttribute("y", "-16.5");
+      bg.setAttribute("width", String(Math.min(maxW, tw + padX * 2)));
+      bg.setAttribute("height", "14.5");
       ghostGroup.classList.add("on");
     }
 

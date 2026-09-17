@@ -13,16 +13,14 @@
 </head>
 <body>
   <div class="chrome">
-    <header class="topbar">
-      <div class="brand">
+    <header class="topbar" title="Part 3 — v2 core preview">
+      <button type="button" class="brand" id="v2-about-open" title="About StudioPractice">
         <div class="brand-mark">
-          <img class="brand-logo" src="../logo.png" alt="The Studio Practice" />
+          <img class="brand-logo" src="../logo.png" alt="" />
         </div>
-        <div>
-          <h1>StudioPractice</h1>
-          <p>Part 3 — v2 core preview</p>
-        </div>
-      </div>
+        <span class="brand-name">StudioPractice</span>
+        <p class="visually-hidden">Part 3 — v2 core preview</p>
+      </button>
       <div class="status">
         <span class="dot" id="v2-health-dot"></span>
         <span id="v2-health-label">Loading pack…</span>
@@ -62,9 +60,10 @@
         <div class="planner-tools" role="toolbar" aria-label="Tools">
           <button type="button" data-tool="select" class="active">Select</button>
           <button type="button" id="v2-undo">Undo</button>
-          <div class="seg" role="group" aria-label="Place as">
-            <button type="button" data-status="existing">Existing</button>
-            <button type="button" data-status="planned" class="active">Planned</button>
+          <div class="seg" role="group" aria-label="Show on plan">
+            <button type="button" data-plan-status="both" class="active">Both</button>
+            <button type="button" data-plan-status="existing">Existing</button>
+            <button type="button" data-plan-status="planned">Planned</button>
           </div>
           <span class="header-modify" id="v2-header-modify" hidden>
             <button type="button" id="v2-hm-rotate">Rotate</button>
@@ -81,6 +80,10 @@
             <span id="v2-cut-elev">—</span>
             <span class="level-kind-chip" id="v2-cut-kind">—</span>
           </p>
+          <label class="level-isolate" title="Show only what sits on this level. Off ghosts the neighbouring level.">
+            <input type="checkbox" id="v2-level-isolate" />
+            Show only this level
+          </label>
           <svg class="level-house" id="v2-level-house" viewBox="0 0 248 318" role="slider"
                aria-label="Building cut" aria-orientation="vertical"
                aria-valuemin="0" tabindex="0"></svg>
@@ -155,7 +158,7 @@
         </div>
         <div class="planner-underlay-panel" id="v2-calibrate-panel" hidden>
           <strong>Set scale</strong>
-          <p class="hint" id="v2-calibrate-hint">Click a point, then a second point a known distance away.</p>
+          <p class="hint" id="v2-calibrate-hint">Click a point, then a second point a known distance away. After that you can drag a corner to resize.</p>
           <label id="v2-calibrate-distance-wrap" hidden>Real distance
             <span class="plan-context-field">
               <input id="v2-calibrate-distance" type="text" inputmode="decimal" autocomplete="off" />
@@ -181,6 +184,24 @@
             <button type="button" id="v2-sg-confirm">Set reference</button>
           </div>
           <button type="button" id="v2-sg-cancel">Cancel</button>
+        </div>
+        <!-- Insert level: a storey the template does not define. Name and
+             elevation are the only fields, because they are the only two facts
+             the user is being asked to supply. -->
+        <div class="planner-underlay-panel" id="v2-level-panel" hidden>
+          <strong>Insert level</strong>
+          <p class="hint" id="v2-level-hint">Name the storey and its elevation above the ground floor.</p>
+          <label>Name
+            <input id="v2-level-name" type="text" autocomplete="off" placeholder="03 L2" />
+          </label>
+          <label>Elevation
+            <span class="plan-context-field">
+              <input id="v2-level-elevation" type="text" inputmode="decimal" autocomplete="off" />
+              <span>m</span>
+            </span>
+          </label>
+          <button type="button" id="v2-level-confirm">Insert level</button>
+          <button type="button" id="v2-level-cancel">Cancel</button>
         </div>
         <!-- Attach base: the named-list alternative to clicking the target on
              the plan, so a thin foundation strip at low zoom does not have to
@@ -215,6 +236,13 @@
           <label id="v2-ctx-type-wrap" hidden>Type
             <select id="v2-ctx-type"></select>
           </label>
+          <fieldset class="planner-status" id="v2-ctx-status-wrap" hidden>
+            <legend>Status</legend>
+            <div class="planner-status-opts">
+              <label><input type="radio" name="v2-ctx-status" value="existing" /> Existing</label>
+              <label><input type="radio" name="v2-ctx-status" value="planned" /> Planned</label>
+            </div>
+          </fieldset>
           <label id="v2-ctx-form-wrap" hidden>Form
             <select id="v2-ctx-form">
               <option value="flat">flat</option>
@@ -229,7 +257,13 @@
               <span>°</span>
             </span>
           </label>
-          <label id="v2-ctx-olevel-wrap" hidden>On level
+          <label id="v2-ctx-ridge-wrap" hidden>Ridge
+            <select id="v2-ctx-ridge">
+              <option value="long">along long side</option>
+              <option value="short">along short side</option>
+            </select>
+          </label>
+          <label id="v2-ctx-olevel-wrap" hidden>Cut
             <select id="v2-ctx-olevel"></select>
           </label>
           <!-- Attach state on the object itself, not only in the Check panel:
@@ -291,7 +325,7 @@
   <div class="mass-overlay" id="v2-mass-overlay" hidden>
     <div class="panel mass-panel">
       <header>
-        <h2>3D massing</h2>
+        <h2 id="v2-mass-title">3D massing</h2>
         <div class="seg" role="group" aria-label="Show in 3D">
           <button type="button" data-mass-status="both" class="active">Both</button>
           <button type="button" data-mass-status="existing">Existing</button>
@@ -300,11 +334,18 @@
         <span id="v2-mass-caption">Drag to orbit · scroll to zoom</span>
         <button type="button" id="v2-mass-close">Close</button>
       </header>
-      <div class="canvas-wrap mass-wrap" id="v2-mass-wrap">
-        <canvas id="v2-mass-canvas"></canvas>
-        <div class="empty" id="v2-mass-empty">
-          <h3>Nothing to show</h3>
-          <p>Draw a room, wall, roof, floor, door or window, then open 3D again.</p>
+      <div class="mass-split" id="v2-mass-split">
+        <div class="canvas-wrap mass-wrap mass-plan-wrap" id="v2-mass-plan-wrap" hidden>
+          <p class="mass-pane-label">Plan · distances</p>
+          <canvas id="v2-mass-plan-canvas"></canvas>
+        </div>
+        <div class="canvas-wrap mass-wrap" id="v2-mass-wrap">
+          <p class="mass-pane-label" id="v2-mass-view-label">3D</p>
+          <canvas id="v2-mass-canvas"></canvas>
+          <div class="empty" id="v2-mass-empty">
+            <h3>Nothing to show</h3>
+            <p>Draw a room, wall, roof, floor, door or window, then open 3D again.</p>
+          </div>
         </div>
       </div>
     </div>
@@ -362,6 +403,118 @@
     </div>
   </div>
 
-  <script type="module" src="./ui.js?v=20260915-level-isolate"></script>
+  <div class="about-overlay" id="v2-about-overlay" hidden>
+    <div class="panel about-panel" role="dialog" aria-modal="true" aria-labelledby="v2-about-title">
+      <header>
+        <h2>About StudioPractice</h2>
+        <button type="button" id="v2-about-close" aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </header>
+      <div class="about-body">
+        <div class="about-logo-container">
+          <img class="about-logo" src="../logo-full.png" alt="The Studio Practice" />
+          <div class="about-logo-glow"></div>
+        </div>
+        <h1 class="about-title" id="v2-about-title">StudioPractice</h1>
+        <p class="about-tagline">A plan, a price, a picture, and a permit</p>
+        <div class="about-version-badge">
+          <span class="version-label">Version</span>
+          <span class="version-number">Part 3 preview</span>
+        </div>
+        <div class="about-info-grid">
+          <div class="about-info-item">
+            <div class="about-info-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+                <line x1="16" y1="2" x2="16" y2="6"/>
+                <line x1="8" y1="2" x2="8" y2="6"/>
+                <line x1="3" y1="10" x2="21" y2="10"/>
+              </svg>
+            </div>
+            <div class="about-info-content">
+              <span class="about-info-label">Release</span>
+              <span class="about-info-value">17 September 2026</span>
+            </div>
+          </div>
+          <div class="about-info-item">
+            <div class="about-info-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+                <line x1="8" y1="21" x2="16" y2="21"/>
+                <line x1="12" y1="17" x2="12" y2="21"/>
+              </svg>
+            </div>
+            <div class="about-info-content">
+              <span class="about-info-label">Platform</span>
+              <span class="about-info-value">Web application</span>
+            </div>
+          </div>
+          <div class="about-info-item">
+            <div class="about-info-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+                <polyline points="9 22 9 12 15 12 15 22"/>
+              </svg>
+            </div>
+            <div class="about-info-content">
+              <span class="about-info-label">Behaviours</span>
+              <span class="about-info-value">Revit, without the engines</span>
+            </div>
+          </div>
+          <div class="about-info-item">
+            <div class="about-info-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <circle cx="12" cy="12" r="10"/>
+                <path d="M2 12h20"/>
+                <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+              </svg>
+            </div>
+            <div class="about-info-content">
+              <span class="about-info-label">License</span>
+              <span class="about-info-value">Proprietary</span>
+            </div>
+          </div>
+        </div>
+        <div class="about-description">
+          <p>StudioPractice helps a builder get to four things: a plan, a price, a picture, and a permit. Draw the job, price it, show the client what it will look like, and produce the compliance documentation the municipality asks for. Types, levels, sheets and title blocks come from the firm’s Revit template. Unknown facts stay unknown — they are asked for, never guessed.</p>
+        </div>
+        <div class="about-features">
+          <div class="about-feature">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+            Plan: storeys, walls, openings, snapping
+          </div>
+          <div class="about-feature">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+            Price: live takeoff from the drawing
+          </div>
+          <div class="about-feature">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+            Picture: 3D massing for the client
+          </div>
+          <div class="about-feature">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+            Permit: sheets, title block, Check
+          </div>
+          <div class="about-feature">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+            Firm template as the type catalogue
+          </div>
+          <div class="about-feature">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+            Export IFC for Revit File → Open
+          </div>
+        </div>
+      </div>
+      <div class="about-footer">
+        <span class="about-copyright">© 2026 The Studio Practice</span>
+        <button type="button" class="primary" id="v2-about-ok">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="./ui.js?v=20260917-about"></script>
 </body>
 </html>

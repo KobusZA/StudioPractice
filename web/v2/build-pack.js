@@ -360,9 +360,69 @@ function displayName(type) {
   return `${type.family} — ${type.type}`;
 }
 
+// --- unit guard -------------------------------------------------------------
+
+// The one legacy shape actually seen in the wild: a day-old dump whose
+// `units` field is the bare pre-migration string. Anything that already
+// states the current millimetre convention (see
+// Models/TypeCatalogPayload.cs's units note) passes.
+const LEGACY_METRES_UNITS = /^meters$/i;
+
+/** e.g. "220mm" -> 220, "600 x 200 mm" -> 600 (the larger of the pair). */
+function nameStatesMm(name) {
+  const pair = PAIR.exec(name);
+  if (pair) return Math.max(parseMm(pair[1]), parseMm(pair[2]));
+  const single = SINGLE.exec(name);
+  if (single) return parseMm(single[1]);
+  return null;
+}
+
+/**
+ * Belt-and-braces beyond the `units` string itself: a wall type whose own
+ * name states "220mm" but whose Width/Thickness param comes back sub-1 is a
+ * metres dump that slipped through under some other units label. Rounding
+ * that straight into the pack turns a 220 mm wall into 0 mm
+ * (`Math.round(0.22)`), so this has to be caught before geometryFor() ever
+ * sees it, not reported as an "assumed dimension" afterwards.
+ */
+function looksLikeMetresCatalog(catalog) {
+  if (typeof catalog.units === "string" && LEGACY_METRES_UNITS.test(catalog.units.trim())) {
+    return true;
+  }
+  for (const type of catalog.types || []) {
+    if (type.category !== "Walls" && type.category !== "Structural Foundations") continue;
+    const name = `${type.family || ""} ${type.type || ""}`;
+    const stated = nameStatesMm(name);
+    if (!stated || stated < 10) continue;
+    for (const key of ["Width", "Thickness", "Default Thickness", "Structural Thickness"]) {
+      const value = type.typeParams?.[key];
+      if (Number.isFinite(value) && value > 0 && value < 5) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Fail loudly rather than silently rounding metres into the pack as if they
+ * were millimetres. Exported so the CLI and the test suite can both assert
+ * on the same message.
+ */
+export function assertMillimetreCatalog(catalog) {
+  if (!looksLikeMetresCatalog(catalog)) return;
+  throw new Error(
+    `This catalog looks like it is in metres, not millimetres (units: "${catalog.units}"). ` +
+      "Re-export with the millimetre extractor: run Export Catalog again from the template " +
+      "with the current add-in build, which emits lengths in millimetres and records " +
+      "instanceLevel. Do not run build-pack against a metres dump - Math.round(0.22) " +
+      "becomes 0 mm."
+  );
+}
+
 // --- build -----------------------------------------------------------------
 
 export function buildPack(catalog, { includeUnplaced = false, id, name, version } = {}) {
+  assertMillimetreCatalog(catalog);
+
   const notes = [];
   const assumed = [];
   const skipped = new Map();
@@ -570,7 +630,15 @@ if (isMain) {
   }
 
   const catalog = JSON.parse(readFileSync(inPath, "utf8"));
-  const { pack, notes, assumed, skipped } = buildPack(catalog, { includeUnplaced: flags.includes("--all") });
+
+  let built;
+  try {
+    built = buildPack(catalog, { includeUnplaced: flags.includes("--all") });
+  } catch (err) {
+    console.error(`\nERROR  ${err.message}`);
+    process.exit(1);
+  }
+  const { pack, notes, assumed, skipped } = built;
   const result = validatePack(pack);
 
   if (outPath) {

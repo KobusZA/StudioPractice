@@ -6,6 +6,13 @@
 // has empty typeParams, which is honest: build-pack.js falls back to parsing the
 // firm's dimensional type names and reports everything it had to assume.
 //
+// This is a fallback for the test suite and for exercising build-pack.js
+// without Revit, not the app's real levels: `inferLevels()` below guesses a
+// storey from a placed stair because the report carries no level data at
+// all. The app's level switcher must come from `npm run build-pack` against
+// a real `output/type-catalog.json` (Export Catalog), which states the
+// template's actual storeys and elevations - never from this inference.
+//
 //   node web/v2/catalog-from-tsv.js ../samples/tsp-template-families.tsv
 
 import { readFileSync, writeFileSync } from "node:fs";

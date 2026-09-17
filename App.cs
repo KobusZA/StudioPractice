@@ -76,6 +76,14 @@ public class App : IExternalApplication
         catalog.ToolTip = "Dump every wall, floor, roof, door, window and fixture type in this template to type-catalog.json, so the web app's SKU pack can be regenerated from the firm's own file.";
         AssignIcons(catalog, "SendToApp32.png", "SendToApp16.png");
 
+        var openIfc = new PushButtonData(
+            "StudioPractice.OpenIfc",
+            "IFC to\nRVT",
+            assemblyPath,
+            "StudioPractice.RevitConnector.OpenIfcCommand");
+        openIfc.ToolTip = "Pick a planner IFC and save it as a Revit project (.rvt). File → Open will not do this — that command only lists Revit files, which is why the IFC looks like it does nothing.";
+        AssignIcons(openIfc, "SendToApp32.png", "SendToApp16.png");
+
         var info = new PushButtonData(
             "StudioPractice.DocumentInfo",
             "Document\nInfo",
@@ -161,6 +169,7 @@ public class App : IExternalApplication
         panel.AddItem(drawWall);
         panel.AddItem(placeRoom);
         panel.AddItem(bom);
+        panel.AddItem(openIfc);
         panel.AddItem(catalog);
         panel.AddItem(info);
         panel.AddItem(reload);

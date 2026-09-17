@@ -8,6 +8,6 @@
     "migrate-pack": "node migrate-pack.js ../samples/planner-pack.json ../samples/planner-pack-v2.json",
     "catalog-from-tsv": "node catalog-from-tsv.js ../samples/tsp-template-families.tsv ../samples/tsp-template-catalog.json",
     "build-pack": "node build-pack.js ../../output/type-catalog.json ../samples/tsp-pack.json",
-    "build-pack-from-report": "npm run catalog-from-tsv && node build-pack.js ../samples/tsp-template-catalog.json ../samples/tsp-pack.json"
+    "build-pack-from-report": "npm run catalog-from-tsv && node build-pack.js ../samples/tsp-template-catalog.json ../samples/tsp-pack-from-report.json"
   }
 }

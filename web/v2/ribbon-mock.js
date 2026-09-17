@@ -7,7 +7,7 @@ const EMPTY_CATEGORIES = new Set(["boundarywall", "beam", "furniture"]);
 
 const HINTS = {
   underlay: "Load a PDF or image to trace.",
-  calibrate: "Click two points on the sheet, then type the real distance.",
+  calibrate: "Click two points on the sheet, then type the real distance or drag a corner to resize.",
   "underlay-adjust": "Drag the sheet to move, a corner to resize, the top handle to rotate.",
   "underlay-toggle": "Hide the sheet without removing it.",
   "underlay-off": "Remove the sheet from the plan.",
@@ -23,9 +23,10 @@ const HINTS = {
   waterheater: "Click to place a water heater.",
   drainage: "Click to place a drainage fitting.",
   rooms: "Click inside enclosed walls to tag a room.",
-  dimensions: "Click two points to measure.",
+  dimensions: "Click two points to measure. Esc to stop.",
   rotate: "Select something first, then rotate.",
   "view-3d": "Open a massing view of the current plan.",
+  "view-camera": "Click where you stand, then click what you look at.",
   compile: "Build the bill of quantities from what you have drawn.",
   gaps: "List facts the template still needs before compliance can run.",
 };
@@ -41,13 +42,13 @@ const SIMPLE = [
         items: [
           { id: "underlay", label: "PDF / image", command: "underlay", primary: true },
           { id: "calibrate", label: "Set scale", command: "calibrate" },
-          { id: "underlay-adjust", label: "Move / rotate", command: "underlay-adjust" },
+          { id: "underlay-adjust", label: "Adjust", command: "underlay-adjust" },
           { id: "underlay-toggle", label: "Hide", command: "underlay-toggle" },
         ],
       },
       {
         label: "Levels",
-        items: [{ id: "level-isolate", label: "This storey only", command: "level-isolate" }],
+        items: [{ id: "level-isolate", label: "This level only", command: "level-isolate" }],
       },
       {
         label: "Walls",
@@ -132,7 +133,11 @@ const SIMPLE = [
     groups: [
       {
         label: "Views",
-        items: [{ id: "view-3d", label: "3D", command: "view-3d" }],
+        items: [
+          { id: "view-3d", label: "3D", command: "view-3d" },
+          { id: "view-camera", label: "Camera", command: "view-camera" },
+          { id: "section", label: "Section", command: "section" },
+        ],
       },
       {
         label: "Quantities",
@@ -310,6 +315,7 @@ const GLYPHS = {
   undo: '<path d="M9 13H5V9"/><path d="M5 13a8 8 0 111.5 4.5"/>',
   delete: '<path d="M5 7h14M9 7V5h6v2M8 7l1 13h6l1-13"/>',
   "view-3d": '<path d="M12 4l8 4v8l-8 4-8-4V8z"/><path d="M12 12V20M12 12l8-4M12 12L4 8"/>',
+  "view-camera": '<path d="M4 9h11v8H4z"/><path d="M15 12l5-3v8l-5-3z"/><circle cx="9.5" cy="13" r="2"/>',
   callout: '<circle cx="8" cy="8" r="3"/><path d="M10.5 10.5L20 20"/>',
   "view-section": '<path d="M4 4l16 16M8 4h-4v4M16 20h4v-4"/>',
   boq: '<path d="M7 4h10v16H7z"/><path d="M9 9h6M9 13h6M9 17h4"/>',

@@ -128,6 +128,41 @@ function underlayCentre(placement) {
 }
 
 /**
+ * Map a world point onto the sheet's pixel space (origin top-left, unrotated).
+ * Used so a calibration pick stays glued to the same PDF pixel while the
+ * sheet is resized, moved or rotated.
+ */
+export function underlayPixelFromWorld(placement, wx, wy) {
+  if (!placement) return null;
+  const { x: cx, y: cy, w, h } = underlayCentre(placement);
+  const rad = ((placement.rotation || 0) * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const dx = wx - cx;
+  const dy = wy - cy;
+  const lx = dx * cos + dy * sin;
+  const ly = -dx * sin + dy * cos;
+  const mpp = placement.metresPerPixel || 1;
+  return { x: (lx + w / 2) / mpp, y: (ly + h / 2) / mpp };
+}
+
+/** Inverse of underlayPixelFromWorld: a sheet pixel back into world coordinates. */
+export function underlayWorldFromPixel(placement, px, py) {
+  if (!placement) return null;
+  const { x: cx, y: cy, w, h } = underlayCentre(placement);
+  const mpp = placement.metresPerPixel || 1;
+  const lx = px * mpp - w / 2;
+  const ly = py * mpp - h / 2;
+  const rad = ((placement.rotation || 0) * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  return {
+    x: cx + lx * cos - ly * sin,
+    y: cy + lx * sin + ly * cos,
+  };
+}
+
+/**
  * The sheet's four corners in world space, rotated about its centre. Order is
  * top-left, top-right, bottom-right, bottom-left (pre-rotation), which is what
  * both the hit test and the on-canvas handles key off.

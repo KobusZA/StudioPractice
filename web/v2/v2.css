@@ -1,6 +1,95 @@
 /* Small additions on top of ../styles.css for the v2 core preview page.
    Everything else reuses the existing planner-* classes untouched. */
 
+/* Compact app chrome: one 36px row instead of the 48px mark + two-line
+   title + 14px padding that was eating the plan. Preview subtitle lives
+   on the header title / visually-hidden copy, not a second line. */
+.chrome .topbar {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px 14px;
+  padding: 4px 14px;
+  min-height: 36px;
+}
+
+.chrome .brand {
+  gap: 8px;
+  border: none;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  border-radius: 4px;
+}
+
+.chrome .topbar button.brand {
+  padding: 0;
+}
+
+.chrome .brand:hover {
+  background: transparent;
+}
+
+.chrome .brand:hover .brand-logo {
+  transform: scale(1.55) rotate(-4deg);
+}
+
+.chrome .brand:focus-visible {
+  outline: 2px solid var(--copper);
+  outline-offset: 3px;
+}
+
+.chrome .brand-mark {
+  width: 26px;
+  height: 26px;
+}
+
+.chrome .brand h1,
+.chrome .brand .brand-name {
+  margin: 0;
+  font-family: Fraunces, Georgia, serif;
+  font-size: 0.92rem;
+  font-weight: 560;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.chrome .brand-logo {
+  transition: transform 0.18s ease;
+}
+
+.chrome .status {
+  font-size: 0.74rem;
+  min-width: 0;
+}
+
+.chrome .actions {
+  flex-wrap: nowrap;
+  gap: 6px;
+}
+
+.chrome .topbar button {
+  padding: 3px 9px;
+  font-size: 0.8rem;
+}
+
+@media (max-width: 960px) {
+  .chrome .topbar {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .chrome .actions {
+    grid-column: auto;
+    justify-content: flex-end;
+  }
+}
+
+@media (max-width: 720px) {
+  .chrome .status {
+    display: none;
+  }
+}
+
 /* Active-level widget: a permanent sidebar beside the plan canvas, ported in
    full from level-slider-mock.html (house cutaway, stations list, elevation-
    accurate rail) rather than the flat evenly-spaced-tick rail this replaces.
@@ -23,14 +112,25 @@
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  min-height: 0;
-  overflow-y: auto;
+  /* A real four-storey template (00 FOUNDATION, 01 GFL, 02 L1, 03 L2) puts
+     roof + two stations per occupied storey in the list below the house -
+     taller than the placeholder two-level pack this was built against, and
+     taller than the widget's stretched height on a modest window. Without
+     this floor the whole widget (house cutaway included) used to be the
+     thing that scrolled, so a short window hid the house behind a scrollbar
+     before showing a single station - a scroll stub, not a level switcher.
+     The floor covers the pinned house/name/meta/isolate/hint; only the
+     station list scrolls internally now (see .level-stations below), so the
+     house stays visible even where the list itself does not fully fit. */
+  min-height: 360px;
+  overflow: hidden;
   padding: 12px 12px 14px;
   border-right: 1px solid var(--line);
   box-shadow: none;
 }
 
 .level-widget h2 {
+  flex-shrink: 0;
   margin: 0 0 4px;
   font-size: var(--label-size);
   letter-spacing: 0.1em;
@@ -40,13 +140,21 @@
 }
 
 .level-cut-name {
+  flex-shrink: 0;
   font-family: Fraunces, Georgia, serif;
   font-size: 1.05rem;
   font-weight: 500;
   margin: 0 0 2px;
+  /* Two lines always: "Roof · eaves" is one line and the storey labels wrap,
+     and that height change used to shove the house (and the moving cut) by a
+     line at the same moment the 120ms ease started — the jitter on roof ↔
+     floor. */
+  line-height: 1.2;
+  min-height: 2.4em;
 }
 
 .level-cut-meta {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -65,6 +173,26 @@
   padding: 1px 6px;
 }
 
+/* Isolate lives on the widget, next to the named cut, rather than as a
+   second dashed rule on the house: one more line on that drawing is easy
+   to confuse with the cut itself. Same flag as the ribbon command. */
+.level-isolate {
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0 0 8px;
+  font-size: 0.76rem;
+  color: var(--ink);
+  cursor: pointer;
+  line-height: 1.3;
+}
+
+.level-isolate input {
+  margin: 0.15em 0 0;
+  flex-shrink: 0;
+}
+
 .level-house {
   display: block;
   width: 100%;
@@ -73,11 +201,13 @@
   touch-action: none;
   user-select: none;
   flex-shrink: 0;
+  overflow: visible;
 }
 .level-house:focus { outline: none; }
 .level-house:focus-visible { outline: 1px solid var(--ink); outline-offset: 3px; }
 
 .level-widget .hint {
+  flex-shrink: 0;
   font-size: 0.74rem;
   color: var(--ink-soft);
   margin: 8px 0 10px;
@@ -86,6 +216,14 @@
 }
 
 .level-stations {
+  /* The one part of this widget that is allowed to scroll - see the
+     .level-widget comment above. flex:1 lets it take whatever height is
+     left after the pinned house/name/meta/isolate/hint above it, and min-height:0
+     is required for a flex child to shrink below its content size instead
+     of forcing the column taller than the widget's own min-height. */
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   list-style: none;
   margin: 0;
   padding: 0;
@@ -695,6 +833,38 @@
 
 /* Attach base: a read-only Inspector row, so a selected wall states what its
    base follows without that being mistaken for an editable field. */
+.planner-status {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+
+.planner-status[hidden] {
+  display: none !important;
+}
+
+.planner-status legend {
+  font-size: 0.82rem;
+  padding: 0;
+  margin-bottom: 6px;
+}
+
+.planner-status-opts {
+  display: flex;
+  gap: 14px;
+}
+
+.planner-status-opts label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+/* Attach base: a read-only Inspector row, so a selected wall states what its
+   base follows without that being mistaken for an editable field. */
 .planner-read-field {
   display: flex;
   align-items: baseline;
@@ -771,6 +941,42 @@
   height: min(760px, 100%);
   display: flex;
   flex-direction: column;
+}
+
+.mass-panel.mass-panel--look {
+  width: min(1400px, 100%);
+}
+
+.mass-split {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  gap: 10px;
+}
+
+.mass-split .canvas-wrap {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+}
+
+.mass-plan-wrap[hidden] {
+  display: none !important;
+}
+
+.mass-pane-label {
+  position: absolute;
+  top: 8px;
+  left: 10px;
+  z-index: 2;
+  margin: 0;
+  padding: 2px 8px;
+  font-size: 0.75rem;
+  letter-spacing: 0.02em;
+  color: #5c5348;
+  background: rgba(244, 237, 225, 0.88);
+  border-radius: 4px;
+  pointer-events: none;
 }
 
 .mass-panel header {
@@ -982,4 +1188,302 @@
   background: #fff;
   border-radius: 3px;
   cursor: pointer;
+}
+
+/* About: logo click in the top-left chrome. Layout copied from the NettGEO
+   about modal; colours and type stay on the StudioPractice paper/copper
+   register so it does not look like a second product. */
+.about-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(20, 18, 15, 0.55);
+  padding: 24px;
+}
+
+.about-overlay[hidden] {
+  display: none !important;
+}
+
+.about-panel {
+  width: min(540px, 100%);
+  max-height: min(92vh, 860px);
+  display: flex;
+  flex-direction: column;
+  text-align: center;
+  overflow: hidden;
+}
+
+.about-panel > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.about-panel > header h2 {
+  margin: 0;
+}
+
+.about-panel > header button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--line);
+  background: transparent;
+  cursor: pointer;
+}
+
+.about-panel > header button svg {
+  width: 16px;
+  height: 16px;
+}
+
+.about-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 28px 24px 20px;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.about-logo-container {
+  position: relative;
+  margin-bottom: 4px;
+  width: 280px;
+  height: 280px;
+  display: grid;
+  place-items: center;
+}
+
+.about-logo {
+  width: 260px;
+  height: 260px;
+  object-fit: contain;
+  position: relative;
+  z-index: 1;
+  animation: about-logo-float 4s ease-in-out infinite;
+}
+
+.about-logo-glow {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 300px;
+  height: 300px;
+  transform: translate(-50%, -50%);
+  background: radial-gradient(circle, var(--copper) 0%, transparent 70%);
+  opacity: 0.28;
+  border-radius: 50%;
+  filter: blur(18px);
+  animation: about-glow-pulse 3s ease-in-out infinite;
+}
+
+@keyframes about-logo-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+
+@keyframes about-glow-pulse {
+  0%, 100% {
+    opacity: 0.18;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  50% {
+    opacity: 0.38;
+    transform: translate(-50%, -50%) scale(1.08);
+  }
+}
+
+.about-title {
+  font-family: Fraunces, Georgia, serif;
+  font-size: 1.7rem;
+  font-weight: 560;
+  margin: 0 0 2px;
+  background: linear-gradient(135deg, var(--copper) 0%, var(--navy) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.about-tagline {
+  font-size: 0.72rem;
+  color: var(--ink-soft);
+  margin: 0 0 14px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.about-version-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(178, 69, 30, 0.08);
+  border: 1px solid var(--copper);
+  border-radius: 999px;
+  padding: 6px 16px;
+  margin-bottom: 18px;
+}
+
+.about-version-badge .version-label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ink-soft);
+}
+
+.about-version-badge .version-number {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--copper);
+}
+
+.about-info-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  width: 100%;
+  margin-bottom: 16px;
+}
+
+.about-info-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  padding: 10px;
+  text-align: left;
+}
+
+.about-info-item:hover {
+  background: #fff;
+  border-color: var(--ink);
+}
+
+.about-info-icon {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(178, 69, 30, 0.1);
+}
+
+.about-info-icon svg {
+  width: 18px;
+  height: 18px;
+  color: var(--copper);
+}
+
+.about-info-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.about-info-label {
+  font-size: 0.64rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-soft);
+}
+
+.about-info-value {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.about-description {
+  margin-bottom: 16px;
+  text-align: left;
+}
+
+.about-description p {
+  font-size: 0.84rem;
+  color: var(--ink-soft);
+  line-height: 1.65;
+  margin: 0;
+}
+
+.about-features {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  width: 100%;
+}
+
+.about-feature {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.76rem;
+  color: var(--ink-soft);
+  padding: 8px 12px;
+  background: var(--paper);
+  text-align: left;
+}
+
+.about-feature:hover {
+  background: #fff;
+  color: var(--ink);
+}
+
+.about-feature svg {
+  width: 14px;
+  height: 14px;
+  color: var(--copper);
+  flex-shrink: 0;
+}
+
+.about-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--line);
+  background: var(--paper-2);
+  flex-shrink: 0;
+}
+
+.about-copyright {
+  font-size: 0.76rem;
+  color: var(--ink-soft);
+}
+
+@media (max-width: 560px) {
+  .about-info-grid,
+  .about-features {
+    grid-template-columns: 1fr;
+  }
+
+  .about-logo-container {
+    width: 200px;
+    height: 200px;
+  }
+
+  .about-logo,
+  .about-logo-glow {
+    width: 180px;
+    height: 180px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .about-logo,
+  .about-logo-glow,
+  .chrome .brand:hover .brand-logo {
+    animation: none;
+    transform: none;
+  }
 }

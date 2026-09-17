@@ -32,7 +32,7 @@ import {
   wallForOpening,
   wallNormal,
 } from "./openings.js";
-import { deriveDrawnWalls, deriveWalls, isExternalWall } from "./walls.js";
+import { deriveDrawnWalls, deriveWalls, isExternalWall, skuDrawnHeight } from "./walls.js";
 
 const CATEGORY_TO_SCHEDULE = {
   wall: "Walls",
@@ -105,13 +105,12 @@ export function objectLabel(pack, obj) {
 /**
  * The height the document actually states for an object: the per-object
  * override Detach writes, else the SKU's. `null` where neither exists - which
- * is the real case for a template whose foundation types carry a thickness and
- * a depth but no height.
+ * is the real case for a masonry foundation that carries a thickness and a
+ * depth but no height. A strip footing (600X200) states its height as depth.
  */
 export function statedHeight(pack, obj) {
   if (Number.isFinite(obj?.height)) return obj.height;
-  const height = skuById(pack, obj?.sku)?.geometry?.height;
-  return Number.isFinite(height) ? height : null;
+  return skuDrawnHeight(skuById(pack, obj?.sku));
 }
 
 /**
@@ -661,6 +660,11 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
     walls: walls.map((w) => ({
       id: w.id,
       sku: w.sku,
+      // The storey this wall belongs to. Additive (the payload is
+      // additive-only), and the reason it is here is ifc.js: an exporter that
+      // has to file every wall under a building storey would otherwise have to
+      // re-derive walls just to learn which one.
+      level: w.level,
       length: w.length,
       thickness: w.thickness,
       // The attached height and base, not the as-drawn ones, so a consumer of

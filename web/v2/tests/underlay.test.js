@@ -10,6 +10,8 @@ import {
   setUnderlayRotation,
   toggleUnderlayHidden,
   underlayCorners,
+  underlayPixelFromWorld,
+  underlayWorldFromPixel,
 } from "../underlay.js";
 import { RIBBON, ribbonItems } from "../ribbon.js";
 
@@ -188,6 +190,36 @@ test("grabOffset corrects for the click not landing exactly on the handle", () =
 
   scaleUnderlayFromCorner(doc, 2, anchorWorld, diagUnit, grabOffset, clickPoint);
   assert.ok(Math.abs(doc.underlay.metresPerPixel - 0.1) < 1e-9);
+});
+
+test("world and pixel mappings round-trip, including rotation", () => {
+  const doc = docWithUnderlay({ x: -3, y: 2, metresPerPixel: 0.02, rotation: 35 });
+  const world = { x: 4.5, y: -1.25 };
+  const pixel = underlayPixelFromWorld(doc.underlay, world.x, world.y);
+  const back = underlayWorldFromPixel(doc.underlay, pixel.x, pixel.y);
+  assert.ok(Math.abs(back.x - world.x) < 1e-9);
+  assert.ok(Math.abs(back.y - world.y) < 1e-9);
+});
+
+test("resizing keeps a calibration pick on the same pixel and stretches its world length", () => {
+  const doc = docWithUnderlay({ x: 0, y: 0, pixelWidth: 200, pixelHeight: 100, metresPerPixel: 0.1 });
+  const a = { x: 2, y: 2 };
+  const b = { x: 12, y: 2 };
+  const aPx = underlayPixelFromWorld(doc.underlay, a.x, a.y);
+  const bPx = underlayPixelFromWorld(doc.underlay, b.x, b.y);
+  const before = Math.hypot(b.x - a.x, b.y - a.y);
+
+  const { anchorWorld, diagUnit } = cornerDrag(doc, 2);
+  scaleUnderlayFromCorner(doc, 2, anchorWorld, diagUnit, 0, { x: 40, y: 20 });
+
+  const a2 = underlayWorldFromPixel(doc.underlay, aPx.x, aPx.y);
+  const b2 = underlayWorldFromPixel(doc.underlay, bPx.x, bPx.y);
+  const after = Math.hypot(b2.x - a2.x, b2.y - a2.y);
+  const aPxAfter = underlayPixelFromWorld(doc.underlay, a2.x, a2.y);
+
+  assert.ok(Math.abs(aPxAfter.x - aPx.x) < 1e-9);
+  assert.ok(Math.abs(aPxAfter.y - aPx.y) < 1e-9);
+  assert.ok(Math.abs(after - before * 2) < 1e-6, `world length ${after}, expected ${before * 2}`);
 });
 
 test("scaleUnderlayFromCorner never produces a negative or zero scale", () => {
