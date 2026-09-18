@@ -9,7 +9,7 @@
 //    sheet gets, so a sheet is not blank the day it is created.
 //  - `project-info` (job number, client) is still its own unbuilt ribbon
 //    item. Until it lands, the title block reads what the document already
-//    knows (`pack.name`, `pack.locale`, `doc.site.erfNumber`) and leaves
+//    knows (`doc.name`, `pack.locale`, `doc.site.erfNumber`) and leaves
 //    drawn-by/checked-by/date as per-sheet fields rather than a shared
 //    project record, so the two features do not end up fighting over the
 //    same box on the title block when project-info does land.
@@ -185,7 +185,10 @@ export function titleBlockFields(doc, pack, sheet, planExtentMeters) {
   const site = doc?.site || {};
   const scale = sheetScale(sheet, planExtentMeters);
   return {
-    projectName: pack?.name || "—",
+    // The job's own name, never the pack's: the pack is the firm's template,
+    // and printing "TSP standard pack" where the client's name belongs is a
+    // plausible default rather than a fact.
+    projectName: doc?.name || "—",
     drawingTitle: sheet.drawingTitle || sheet.name || "—",
     erf: [site.erfNumber ? `Erf ${site.erfNumber}` : null, pack?.locale?.municipality]
       .filter(Boolean).join(", ") || "—",

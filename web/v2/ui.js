@@ -117,6 +117,7 @@ import {
   titleBlockFields,
   titleBlockLayout,
 } from "./sheets.js";
+import { DocSync, localTransport, syncStateLabel } from "./sync.js";
 
 const GRID = 0.1;
 const MIN_ROOM = 1;
@@ -140,6 +141,8 @@ const el = {
   compileOut: document.getElementById("v2-compile-out"),
   healthDot: document.getElementById("v2-health-dot"),
   healthLabel: document.getElementById("v2-health-label"),
+  jobName: document.getElementById("v2-job-name"),
+  syncState: document.getElementById("v2-sync-state"),
   sizeHud: document.getElementById("v2-size-hud"),
   hudWLabel: document.getElementById("v2-hud-w-label"),
   hudWName: document.getElementById("v2-hud-w-name"),
@@ -269,7 +272,16 @@ const ctx = el.canvas.getContext("2d");
 // place a user level is stored - see syncPackLevels().
 let templatePack = null;
 let pack = null;
-const store = new PlanStore(emptyDoc(), { storage: window.localStorage });
+// The document's save path. Every mutation still calls store.persist(); what
+// changed is that persist() now goes through a sink that coalesces writes and
+// reports whether they landed. The transport is still localStorage - the seam,
+// not the server, is what exists today - so pointing this at the API later is a
+// one-line change here and nowhere else.
+const sync = new DocSync({
+  transport: localTransport(window.localStorage),
+  onState: drawSyncState,
+});
+const store = new PlanStore(emptyDoc(), { sink: sync });
 
 let tool = "select";
 let placeSkuId = null;
@@ -419,6 +431,11 @@ async function boot() {
   if (!store.load()) {
     store.doc.packId = pack.id;
   }
+  // Normalising can fill in keys the stored document never had - an id, most
+  // of all - so what is held now is not byte-for-byte what was read. Writing it
+  // once here is what makes that identity survive the next reload.
+  store.persist();
+  drawJobName();
   syncPackLevels();
 
   activeLevel = pack.system.defaultLevel;
@@ -439,10 +456,57 @@ async function boot() {
   wireCheck();
   wireAbout();
   wireSheets();
+  wireJobName();
   wireRibbonFit();
   resizeCanvas();
   new ResizeObserver(resizeCanvas).observe(el.canvasWrap);
   render();
+}
+
+// --- the job's name and its save state --------------------------------
+
+/**
+ * Whatever sync.js reports, in its own words. The wording lives there so this
+ * file cannot drift into calling an unconfirmed write "Saved".
+ */
+function drawSyncState(state) {
+  if (!el.syncState) return;
+  el.syncState.textContent = syncStateLabel(state);
+  el.syncState.dataset.kind = state?.kind || "saved";
+  el.syncState.title = state?.kind === "conflict"
+    ? "This drawing changed somewhere else. Reload it to take those changes, or keep editing to overwrite them."
+    : "";
+}
+
+function drawJobName() {
+  if (!el.jobName) return;
+  const name = store.doc.name || "";
+  if (el.jobName.value !== name) el.jobName.value = name;
+}
+
+function wireJobName() {
+  el.jobName?.addEventListener("input", () => {
+    // Blank means unnamed, not the string "": the title block prints an
+    // em-dash for a fact the document does not have.
+    const typed = el.jobName.value.trim();
+    store.doc.name = typed || null;
+    store.persist();
+    drawActiveSheet();
+  });
+
+  // Two things a browser tab does that a save schedule has to respect: it gets
+  // hidden (the phone locked, the tab switched) and it goes away.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") sync.flush();
+  });
+  window.addEventListener("beforeunload", (ev) => {
+    sync.flush();
+    if (!sync.isDirty()) return;
+    // Only reached when a write is still unconfirmed, which is the one case
+    // where the browser's own warning is telling the truth.
+    ev.preventDefault();
+    ev.returnValue = "";
+  });
 }
 
 /** Close an open group dropdown on any outside click, and re-run the
@@ -4190,6 +4254,7 @@ function wireToolbar() {
     store.clearSelection();
     underlaySelected = false;
     store.persist();
+    drawJobName();
     render();
   });
   document.getElementById("v2-compile").addEventListener("click", runCompile);
@@ -5463,6 +5528,9 @@ function loadDemo() {
 
   store.doc = {
     ...emptyDoc(),
+    // Named, so the title block prints something real. This still replaces the
+    // open plan in place; making it a project of its own is the library's job.
+    name: "Demo house",
     packId: pack.id,
     rooms: [
       {
@@ -5525,6 +5593,7 @@ function loadDemo() {
 
   store.clearSelection();
   store.persist();
+  drawJobName();
   render();
 }
 

@@ -76,6 +76,12 @@ export function effectiveLevel(obj, pack) {
 export function emptyDoc() {
   return {
     schema: DOC_SCHEMA,
+    // Stable drawing id, generated here rather than by the server, so a
+    // document has an identity before it has ever been written anywhere.
+    id: nid("doc"),
+    // The job name the builder typed. `null`, never "Untitled Project": an
+    // unnamed job prints an em-dash on the title block rather than a guess.
+    name: null,
     packId: null,
     site: null,
     rooms: [],
@@ -378,9 +384,15 @@ function clone(value) {
  * object so tests construct one directly.
  */
 export class PlanStore {
-  constructor(doc = emptyDoc(), { storage = null, undoLimit = 60 } = {}) {
+  /**
+   * `sink` is where the document is written and read - a `DocSync` in the app,
+   * anything with `save(doc)` and `load()` in a test. It replaced a raw
+   * `storage` because a save can fail and the failure has to be reported, which
+   * is sync.js's job, not this class's.
+   */
+  constructor(doc = emptyDoc(), { sink = null, undoLimit = 60 } = {}) {
     this.doc = doc;
-    this.storage = storage;
+    this.sink = sink;
     this.undoLimit = undoLimit;
     this.undoStack = [];
     this.selected = [];
@@ -402,20 +414,15 @@ export class PlanStore {
   }
 
   persist() {
-    if (!this.storage) return;
-    try {
-      this.storage.setItem(DOC_STORE_KEY, JSON.stringify(this.doc));
-    } catch {
-      // quota or private mode - editing continues in memory
-    }
+    this.sink?.save(this.doc);
   }
 
   load() {
-    if (!this.storage) return false;
+    if (!this.sink) return false;
     try {
-      const raw = this.storage.getItem(DOC_STORE_KEY);
+      const raw = this.sink.load();
       if (!raw) return false;
-      this.doc = normalizeDoc(JSON.parse(raw));
+      this.doc = normalizeDoc(raw);
       this.pruneGroups();
       return true;
     } catch {
@@ -571,10 +578,44 @@ export class PlanStore {
     }
   }
 
+  /** Drawn plan geometry only - what the canvas legend and the empty-canvas
+   * hint care about. For "is this job worth keeping" use hasJobContent(). */
   hasContent() {
     return Boolean(this.doc.rooms.length || this.doc.segments.length
       || this.doc.slabs.length || this.doc.roofs.length);
   }
+}
+
+/** Every array whose contents are work someone did. */
+const JOB_CONTENT_ARRAYS = [
+  "rooms",
+  "segments",
+  "slabs",
+  "roofs",
+  "openings",
+  "items",
+  "beams",
+  "stairs",
+  "sheets",
+  "levels",
+];
+
+/**
+ * Whether a document holds work worth listing and worth importing. Broader
+ * than hasContent() on purpose: a job that is so far only a site boundary, or
+ * only openings cut into a scanned underlay, is a real job, and treating it as
+ * empty is how it gets thrown away.
+ *
+ * `packId` is deliberately not content - it is set for every document the
+ * moment a pack loads, so counting it would make every empty document look used.
+ */
+export function hasJobContent(doc) {
+  if (!doc || typeof doc !== "object") return false;
+  if (JOB_CONTENT_ARRAYS.some((key) => Array.isArray(doc[key]) && doc[key].length > 0)) return true;
+  if (doc.site) return true;
+  if (doc.underlay) return true;
+  if (Number.isInteger(doc.floorsRevealed) && doc.floorsRevealed > 0) return true;
+  return false;
 }
 
 // --- normalisation and v1 migration --------------------------------------
@@ -585,6 +626,10 @@ export function normalizeDoc(raw) {
   if (!raw || typeof raw !== "object") return doc;
 
   const isV1 = raw.schema !== DOC_SCHEMA;
+  // Both identity keys are optional: every document written before they
+  // existed still loads, and keeps the id this call invents for it from then on.
+  if (typeof raw.id === "string" && raw.id) doc.id = raw.id;
+  doc.name = typeof raw.name === "string" && raw.name.trim() ? raw.name.trim() : null;
   doc.packId = raw.packId ?? null;
   doc.site = raw.site ?? null;
 

@@ -161,12 +161,22 @@ test("titleBlockFields prints an em-dash for every fact the document does not ha
   assert.equal(fields.revision, "-");
 });
 
+test("titleBlockFields prints the job name, never the pack's", () => {
+  const doc = emptyDoc();
+  const { sheet } = createSheet(doc, {});
+  const pack = { name: "TSP standard pack" };
+  assert.equal(titleBlockFields(doc, pack, sheet, { w: 10, h: 10 }).projectName, "—");
+  doc.name = "Smith Residence";
+  assert.equal(titleBlockFields(doc, pack, sheet, { w: 10, h: 10 }).projectName, "Smith Residence");
+});
+
 test("titleBlockFields reads the project name, locale and erf once they exist", () => {
   const doc = emptyDoc();
+  doc.name = "Smith Residence";
   doc.site = { erfNumber: "1234" };
   const { sheet } = createSheet(doc, { size: "A3", name: "Ground Floor Plan" });
   addRevision(sheet, { description: "Issued for comment" });
-  const pack = { name: "Smith Residence", locale: { municipality: "City of Cape Town" } };
+  const pack = { name: "TSP standard pack", locale: { municipality: "City of Cape Town" } };
   const fields = titleBlockFields(doc, pack, sheet, { w: 30, h: 18 });
   assert.equal(fields.projectName, "Smith Residence");
   assert.equal(fields.erf, "Erf 1234, City of Cape Town");

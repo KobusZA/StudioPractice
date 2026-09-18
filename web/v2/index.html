@@ -24,6 +24,11 @@
       <div class="status">
         <span class="dot" id="v2-health-dot"></span>
         <span id="v2-health-label">Loading pack…</span>
+        <span class="status-sep" aria-hidden="true">·</span>
+        <label class="visually-hidden" for="v2-job-name">Job name</label>
+        <input id="v2-job-name" class="job-name" type="text" placeholder="Name this job"
+               autocomplete="off" spellcheck="false" maxlength="120" />
+        <span class="sync-state" id="v2-sync-state" data-kind="saved">Saved</span>
       </div>
       <div class="actions">
         <div class="seg" role="group" aria-label="Ribbon density">

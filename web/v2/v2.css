@@ -68,6 +68,50 @@
   gap: 6px;
 }
 
+/* The job's name and its save state, in the chrome, because the title block
+   prints doc.name and there has to be somewhere to type it. The sync state sits
+   beside it deliberately: the name identifies which job is open and the state
+   says whether what is on screen has been written anywhere. */
+.chrome .status-sep {
+  opacity: 0.4;
+}
+
+.chrome .job-name {
+  min-width: 8ch;
+  max-width: 26ch;
+  padding: 2px 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.78rem;
+}
+
+.chrome .job-name:hover {
+  border-color: color-mix(in srgb, currentColor 25%, transparent);
+}
+
+.chrome .job-name:focus-visible {
+  outline: 2px solid var(--copper);
+  outline-offset: 1px;
+}
+
+.chrome .sync-state {
+  font-size: 0.72rem;
+  white-space: nowrap;
+  opacity: 0.75;
+}
+
+/* Anything other than "Saved" is a state the drawer has to be able to read at a
+   glance, so only those are given colour. */
+.chrome .sync-state[data-kind="offline"],
+.chrome .sync-state[data-kind="conflict"] {
+  color: var(--copper);
+  opacity: 1;
+  font-weight: 600;
+}
+
 .chrome .topbar button {
   padding: 3px 9px;
   font-size: 0.8rem;

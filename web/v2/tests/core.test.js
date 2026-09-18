@@ -17,6 +17,7 @@ import {
 import {
   PlanStore,
   emptyDoc,
+  hasJobContent,
   normalizeDoc,
   rectShape,
   rectsShape,
@@ -545,18 +546,32 @@ test("moving a room translates its shape on the grid", () => {
   assert.equal(Math.round(poly[0][1] * 1e6) / 1e6, -0.1);
 });
 
-test("persist and load round-trip through a storage stub", () => {
-  const mem = new Map();
-  const storage = {
-    getItem: (k) => (mem.has(k) ? mem.get(k) : null),
-    setItem: (k, v) => mem.set(k, v),
+// The whole sink interface: save(doc) and load(). sync.test.js covers the real
+// one; this stub is here to show how little PlanStore asks of it.
+function memorySink() {
+  let held = null;
+  return {
+    save: (doc) => { held = JSON.parse(JSON.stringify(doc)); },
+    load: () => held,
   };
-  const store = new PlanStore(twoRoomDoc(), { storage });
+}
+
+test("persist and load round-trip through a sink", () => {
+  const sink = memorySink();
+  const store = new PlanStore(twoRoomDoc(), { sink });
   store.persist();
-  const reloaded = new PlanStore(emptyDoc(), { storage });
+  const reloaded = new PlanStore(emptyDoc(), { sink });
   assert.equal(reloaded.load(), true);
   assert.equal(reloaded.doc.rooms.length, 2);
   assert.equal(reloaded.doc.schema, "sp.doc/2");
+  assert.equal(reloaded.doc.id, store.doc.id, "reloading a document keeps its identity");
+});
+
+test("a store with no sink still edits, and load reports that there was nothing", () => {
+  const store = new PlanStore(twoRoomDoc());
+  store.persist();
+  assert.equal(store.load(), false);
+  assert.equal(store.doc.rooms.length, 2);
 });
 
 test("a v1 document migrates without loss", () => {
@@ -581,3 +596,74 @@ test("a v1 document migrates without loss", () => {
   const out = compile(doc, pack);
   assert.ok(out.instances.length > 0);
 });
+
+// --- document identity -----------------------------------------------------
+
+test("every new document has its own id and no invented name", () => {
+  const a = emptyDoc();
+  const b = emptyDoc();
+  assert.ok(a.id, "a fresh document has an id before it is ever saved");
+  assert.notEqual(a.id, b.id);
+  assert.equal(a.name, null);
+});
+
+test("a document written before identity existed keeps the id it is given and stays unnamed", () => {
+  const doc = normalizeDoc({ schema: "sp.doc/2", rooms: [], segments: [] });
+  assert.ok(doc.id);
+  assert.equal(doc.name, null);
+});
+
+test("normalizeDoc preserves an id and trims a name, treating blank as unnamed", () => {
+  const kept = normalizeDoc({ schema: "sp.doc/2", id: "doc123", name: "  Smith Residence  " });
+  assert.equal(kept.id, "doc123");
+  assert.equal(kept.name, "Smith Residence");
+  assert.equal(normalizeDoc({ schema: "sp.doc/2", name: "   " }).name, null);
+});
+
+// --- hasJobContent ---------------------------------------------------------
+
+test("hasJobContent counts a site-only and an openings-only job as real work", () => {
+  const siteOnly = emptyDoc();
+  siteOnly.site = { propertyLine: [[0, 0], [10, 0], [10, 10]] };
+  assert.equal(hasJobContent(siteOnly), true);
+
+  const openingsOnly = emptyDoc();
+  openingsOnly.openings = [{ id: "o1", sku: "TSP_DR900" }];
+  assert.equal(hasJobContent(openingsOnly), true);
+});
+
+test("hasJobContent also counts underlay, sheets, revealed floors and inserted levels", () => {
+  const withUnderlay = emptyDoc();
+  withUnderlay.underlay = { name: "scan.pdf", x: 0, y: 0 };
+  assert.equal(hasJobContent(withUnderlay), true);
+
+  const withSheet = emptyDoc();
+  withSheet.sheets = [{ id: "sh1", size: "A1" }];
+  assert.equal(hasJobContent(withSheet), true);
+
+  const withFloor = emptyDoc();
+  withFloor.floorsRevealed = 1;
+  assert.equal(hasJobContent(withFloor), true);
+
+  const withLevel = emptyDoc();
+  withLevel.levels = [{ id: "04 L3", name: "04 L3", elevation: 9 }];
+  assert.equal(hasJobContent(withLevel), true);
+});
+
+test("hasJobContent is false for an empty document, a pack id, and a bare name", () => {
+  const doc = emptyDoc();
+  assert.equal(hasJobContent(doc), false);
+  doc.packId = "tsp-pack";
+  assert.equal(hasJobContent(doc), false, "a pack id is set for every document, so it is not work");
+  doc.name = "Smith Residence";
+  assert.equal(hasJobContent(doc), false);
+  assert.equal(hasJobContent(null), false);
+});
+
+test("hasContent stays narrower than hasJobContent, because the legend is about drawn geometry", () => {
+  const store = new PlanStore(emptyDoc());
+  store.doc.site = { propertyLine: [[0, 0], [10, 0], [10, 10]] };
+  assert.equal(store.hasContent(), false);
+  assert.equal(hasJobContent(store.doc), true);
+});
+
