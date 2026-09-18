@@ -2,9 +2,16 @@
 //
 // The payload shape is the contract with web/app.js and with the TSP schedules in
 // calculators/, so it is additive-only: v2 adds fields (rateRef, colourClass,
-// use, measures) but never renames or removes one. The seven columns the QS
-// workbook reads - Model, Family, Type, Length, Area, Volume, Count - all still
-// come off these rows unchanged.
+// use, measures, kind) but never renames or removes one. The seven columns the
+// QS workbook reads - Model, Family, Type, Length, Area, Volume, Count - all
+// still come off these rows unchanged.
+//
+// `row.kind` (added for schedule.js's BOQ/BOM "locate on plan") is the
+// selection kind model.js's `collectionFor`/`objectByRef` expect - "room",
+// "slab", "roof", "segment", "opening", "item", "beam" or "stair" - or `null`
+// for a row with no selectable doc entity behind it: a room-derived shared
+// wall (only the drawn segment is a real entity) and every recipe-implied row
+// from `explodeRecipes` below (a foundation nobody drew has nothing to click).
 
 import { area as polyArea, perimeter as polyPerimeter } from "./geom.js";
 import { lookDownLevelId } from "./level-view.js";
@@ -390,6 +397,7 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
         count: 1,
       });
       row.level = level;
+      row.kind = "room";
       row.phaseCreated = phase;
       instances.push(row);
       floorSeq += 1;
@@ -444,6 +452,7 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
       count: 1,
     });
     row.level = level;
+    row.kind = "slab";
     row.phaseCreated = phase;
     instances.push(row);
   }
@@ -478,6 +487,8 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
       ? "Basic Roof"
       : `${form.charAt(0).toUpperCase()}${form.slice(1)} Roof`;
     applyMeasures(row, sku, { area: a, count: 1 });
+    row.level = roof.level || defaultLevelFor(pack, sku);
+    row.kind = "roof";
     row.phaseCreated = phase;
     row.phaseDemolished = "None";
     instances.push(row);
@@ -509,6 +520,12 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
       count: 1,
     });
     row.external = isExternalWall(wall);
+    row.level = wall.level;
+    // Only a directly-drawn wall/foundation segment is a selectable doc
+    // entity (kind "segment" - see model.js's KIND_TO_ARRAY). A room-derived
+    // shared wall exists only for the duration of this compile and has
+    // nothing on the plan a click could select, so it carries no kind.
+    row.kind = wall.drawn ? "segment" : null;
     instances.push(row);
 
     sketchForms.push({
@@ -544,6 +561,8 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
     applyMeasures(row, sku, { count: 1, area: (g.width || 0) * (g.height || 0) });
     row.hostWallId = wall.id;
     row.external = isExternalWall(wall);
+    row.level = wall.level;
+    row.kind = "opening";
     instances.push(row);
 
     const tick = {
@@ -584,6 +603,8 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
     if (!sku) continue;
     const row = baseRow(pack, sku, item.id, objectStatus(item));
     applyMeasures(row, sku, { count: 1 });
+    row.level = effectiveLevel(item, pack);
+    row.kind = "item";
     instances.push(row);
 
     const box = itemRect(item, sku);
@@ -616,6 +637,8 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
 
     const row = baseRow(pack, sku, beam.id, objectStatus(beam));
     applyMeasures(row, sku, { length: len, count: 1 });
+    row.level = effectiveLevel(beam, pack);
+    row.kind = "beam";
     instances.push(row);
 
     const base = resolvedBase(doc, pack, beam, drawnObjectHeight(pack, beam));
@@ -639,6 +662,7 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
     const row = baseRow(pack, sku, stair.id, objectStatus(stair));
     applyMeasures(row, sku, { count: 1 });
     row.level = stair.level || defaultLevelFor(pack, sku);
+    row.kind = "stair";
     instances.push(row);
   }
 

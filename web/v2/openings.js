@@ -143,6 +143,43 @@ export function openingOnWall(doc, pack, opening, wall) {
   };
 }
 
+/**
+ * Live strings along a host wall while an opening is being placed: from each
+ * jamb to the next thing on that side (a neighbouring opening, or the wall
+ * end). Same idea as the object-placement probes, except both sides of the
+ * host are always known so they draw without waiting for an arrow key.
+ */
+export function openingSideGaps(wall, placed, neighbors = []) {
+  const len = wall?.length || (wall ? Math.hypot(wall.x2 - wall.x1, wall.y2 - wall.y1) : 0);
+  if (!(len > EPS) || !placed) return [];
+  const half = (Number(placed.width) || 0) / 2;
+  const tLo = placed.t - half / len;
+  const tHi = placed.t + half / len;
+  let leftT = 0;
+  let rightT = 1;
+  for (const n of neighbors) {
+    const nh = (Number(n.width) || 0) / 2;
+    const nLo = n.t - nh / len;
+    const nHi = n.t + nh / len;
+    if (nHi <= tLo + EPS && nHi > leftT) leftT = nHi;
+    if (nLo >= tHi - EPS && nLo < rightT) rightT = nLo;
+  }
+  const a = placed.a || pointOnWall(wall, tLo);
+  const b = placed.b || pointOnWall(wall, tHi);
+  const gaps = [];
+  const leftDist = (tLo - leftT) * len;
+  const rightDist = (rightT - tHi) * len;
+  if (leftDist > EPS) {
+    const from = pointOnWall(wall, leftT);
+    gaps.push({ x1: from.x, y1: from.y, x2: a.x, y2: a.y, dist: leftDist });
+  }
+  if (rightDist > EPS) {
+    const to = pointOnWall(wall, rightT);
+    gaps.push({ x1: b.x, y1: b.y, x2: to.x, y2: to.y, dist: rightDist });
+  }
+  return gaps;
+}
+
 export function swingToward(wall, x, y) {
   const t = wallT(wall, x, y);
   const p = pointOnWall(wall, t);

@@ -57,6 +57,36 @@ test("geometry behind the cut is clipped off, the cut face is kept", () => {
   assert.equal(kept.some((f) => f.pts.every((p) => p[1] < -0.2)), false);
   assert.ok(kept.some((f) => f.cut), "the wall the plane slices is marked as a cut");
   assert.ok(kept.some((f) => f.pts.every((p) => p[1] > 0.5)), "beyond the cut still shows");
+  const receding = kept.filter((f) => f.pts.some((p) => p[1] > 0.5));
+  assert.ok(receding.every((f) => !f.cut), "faces that run into the look volume are not poche");
+});
+
+test("a gable slope is projection, not a hatched cut", () => {
+  const doc = normalizeDoc({
+    rooms: [{
+      id: "r1",
+      name: "Room",
+      level: pack.system.defaultLevel,
+      wallSku: pack.system.defaultWallSku,
+      status: "planned",
+      shape: rectShape(0, 0, 8, 6),
+    }],
+    roofs: [{
+      id: "rf1",
+      sku: pack.system.defaultRoofSku,
+      form: "gable",
+      pitch: 30,
+      ridge: "long",
+      status: "planned",
+      shape: rectShape(-0.3, -0.3, 8.6, 6.6),
+    }],
+  });
+  const faces = facesFromPayload(compile(doc, pack));
+  const cut = sectionFromClicks([-1, 0], [9, 0]);
+  const kept = clipFacesForSection(faces, cut);
+  const roofCuts = kept.filter((f) => f.kind === "roof" && f.cut);
+  assert.equal(roofCuts.length, 0, "receding roof planes must not hatch");
+  assert.ok(kept.some((f) => f.kind === "wall" && f.cut), "the wall poche on the plane still hatches");
 });
 
 test("a storey-high wall reads as a rectangle on the section", () => {

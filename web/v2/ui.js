@@ -75,8 +75,11 @@ import {
   effectiveLevel,
   emptyDoc,
   nid,
+  normalizeDoc,
+  objectByRef,
   rectShape,
   roomArea,
+  roomCentroid,
   roomMinDimension,
   roomPerimeter,
   roomPolygon,
@@ -86,6 +89,7 @@ import { deriveWalls, drawnWallThickness, isStripFooting, statusVisible } from "
 import {
   openingDraftAt,
   openingOnWall,
+  openingSideGaps,
   roomEdgeSegment,
   wallForOpening,
   wallNormal,
@@ -102,6 +106,7 @@ import {
 } from "./compile.js";
 import { exportDxf } from "./dxf.js";
 import { exportIfc } from "./ifc.js";
+import { boqRows, bomRows, scheduleTotal } from "./schedule.js";
 import { createMassingView, lookFromClicks, EYE_HEIGHT_M } from "./massing.js";
 import { drawLookPlan, lookPlanCaption } from "./look-plan.js";
 import { sectionFromClicks } from "./section.js";
@@ -117,7 +122,13 @@ import {
   titleBlockFields,
   titleBlockLayout,
 } from "./sheets.js";
-import { DocSync, localTransport, syncStateLabel } from "./sync.js";
+import {
+  AuthRequiredError, DocSync, docSignature, httpTransport, syncStateLabel,
+} from "./sync.js";
+import { CloudError, createCloud, importLocalDocument } from "./cloud.js";
+import {
+  NavigationBlocked, createJob, duplicateJob, jobRowFields, openJob, renameJob, splitLibrary,
+} from "./library.js";
 
 const GRID = 0.1;
 const MIN_ROOM = 1;
@@ -139,10 +150,36 @@ const el = {
   compilePanel: document.getElementById("v2-compile-panel"),
   compileKicker: document.getElementById("v2-compile-kicker"),
   compileOut: document.getElementById("v2-compile-out"),
+  scheduleOverlay: document.getElementById("v2-schedule-overlay"),
+  scheduleTitle: document.getElementById("v2-schedule-title"),
+  scheduleKicker: document.getElementById("v2-schedule-kicker"),
+  scheduleBody: document.getElementById("v2-schedule-body"),
+  scheduleClose: document.getElementById("v2-schedule-close"),
   healthDot: document.getElementById("v2-health-dot"),
   healthLabel: document.getElementById("v2-health-label"),
   jobName: document.getElementById("v2-job-name"),
   syncState: document.getElementById("v2-sync-state"),
+  conflict: document.getElementById("v2-conflict"),
+  conflictText: document.getElementById("v2-conflict-text"),
+  conflictTheirs: document.getElementById("v2-conflict-theirs"),
+  conflictMine: document.getElementById("v2-conflict-mine"),
+  libraryOverlay: document.getElementById("v2-library-overlay"),
+  libraryList: document.getElementById("v2-library-list"),
+  libraryMessage: document.getElementById("v2-library-message"),
+  libraryNew: document.getElementById("v2-library-new"),
+  librarySignOut: document.getElementById("v2-library-signout"),
+  libraryClose: document.getElementById("v2-library-close"),
+  auth: document.getElementById("v2-auth"),
+  authForm: document.getElementById("v2-auth-form"),
+  authTitle: document.getElementById("v2-auth-title"),
+  authKicker: document.getElementById("v2-auth-kicker"),
+  authEmail: document.getElementById("v2-auth-email"),
+  authPassword: document.getElementById("v2-auth-password"),
+  authOrg: document.getElementById("v2-auth-org"),
+  authOrgWrap: document.getElementById("v2-auth-org-wrap"),
+  authError: document.getElementById("v2-auth-error"),
+  authSubmit: document.getElementById("v2-auth-submit"),
+  authToggle: document.getElementById("v2-auth-toggle"),
   sizeHud: document.getElementById("v2-size-hud"),
   hudWLabel: document.getElementById("v2-hud-w-label"),
   hudWName: document.getElementById("v2-hud-w-name"),
@@ -272,16 +309,25 @@ const ctx = el.canvas.getContext("2d");
 // place a user level is stored - see syncPackLevels().
 let templatePack = null;
 let pack = null;
+// The rate book BOQ prices against (SCHEMA.md #4: rates are referenced, never
+// embedded in the pack). Missing entirely, or missing a given SKU, both read
+// as "no rate on file" - schedule.js's findRate()/boqRows() already treat a
+// null rate as "-", never a guessed 0.
+let rateBook = null;
 // The document's save path. Every mutation still calls store.persist(); what
-// changed is that persist() now goes through a sink that coalesces writes and
-// reports whether they landed. The transport is still localStorage - the seam,
-// not the server, is what exists today - so pointing this at the API later is a
-// one-line change here and nowhere else.
-const sync = new DocSync({
-  transport: localTransport(window.localStorage),
-  onState: drawSyncState,
-});
+// persist() reaches is a sink that coalesces writes and reports whether they
+// landed.
+//
+// No transport yet: which drawing this writes to is not known until the server
+// says which job we are in, so openJob() attaches one. Before that there is
+// nothing open and nothing to write.
+const sync = new DocSync({ onState: drawSyncState });
 const store = new PlanStore(emptyDoc(), { sink: sync });
+const cloud = createCloud();
+
+// The job currently open, as the server described it. Null until sign-in.
+let openProject = null;
+let openDrawingId = null;
 
 let tool = "select";
 let placeSkuId = null;
@@ -424,17 +470,20 @@ async function boot() {
     el.healthLabel.textContent = `Pack failed to load: ${err.message}`;
     return;
   }
+
+  // Best-effort: a missing or unreachable rate book means every BOQ line
+  // prices at "-", not that the pack itself failed to load.
+  try {
+    const rateRes = await fetch("../samples/tsp-rates.json");
+    if (rateRes.ok) rateBook = await rateRes.json();
+  } catch {
+    rateBook = null;
+  }
   el.healthDot.classList.add("ok");
   el.healthLabel.textContent = `${pack.skus.length} SKUs loaded`;
   el.packName.textContent = pack.name;
 
-  if (!store.load()) {
-    store.doc.packId = pack.id;
-  }
-  // Normalising can fill in keys the stored document never had - an id, most
-  // of all - so what is held now is not byte-for-byte what was read. Writing it
-  // once here is what makes that identity survive the next reload.
-  store.persist();
+  store.doc.packId = pack.id;
   drawJobName();
   syncPackLevels();
 
@@ -454,13 +503,654 @@ async function boot() {
   wireKeyboard();
   wireMassing();
   wireCheck();
+  wireSchedule();
   wireAbout();
   wireSheets();
   wireJobName();
+  wireAuth();
+  wireLibrary();
+  wireConflict();
   wireRibbonFit();
   resizeCanvas();
   new ResizeObserver(resizeCanvas).observe(el.canvasWrap);
   render();
+
+  // Everything above is the editor, which is the same whoever is signed in.
+  // This is what gives it a job to edit.
+  await restoreSession();
+}
+
+// --- the account, and the job it owns ---------------------------------
+
+/**
+ * Boot's last step, and the sign-out path's landing point. There is no
+ * anonymous mode to fall back to: the server is the system of record, so a
+ * drawing has nowhere to be saved until an account owns it, and an editor that
+ * accepted work it could not keep is the failure this plan was written about.
+ */
+async function restoreSession() {
+  let session;
+  try {
+    session = await cloud.session();
+  } catch (error) {
+    // Unreachable is not signed out. Saying "sign in" to someone whose wifi
+    // dropped sends them to type a password that will not go anywhere either.
+    showAuth({ message: offlineMessage(error), signedOut: false });
+    return;
+  }
+  if (!session) {
+    showAuth();
+    return;
+  }
+  await enterApp();
+}
+
+/**
+ * Signed in: recover anything left in the old browser slot, then land somewhere.
+ * The import runs first so that the recovered work is a candidate for being the
+ * job we land in, rather than appearing behind it.
+ *
+ * Landing is the last job this account opened - the server's `opened_at`, which
+ * `GET /api/projects/:id` maintains - because that is the job the person was in
+ * when they closed the tab. A firm with no jobs at all gets the library and its
+ * New button, not a canvas that looks like a drawing but belongs to no row.
+ */
+async function enterApp() {
+  try {
+    const recovered = await importLocalDocument({ storage: window.localStorage, cloud });
+    if (recovered?.reason === "unreadable") {
+      // Left in place on purpose - it is somebody's only copy - so say so
+      // rather than letting it look imported.
+      setStatusMessage("A drawing in this browser could not be read, and was left alone", "warn");
+    }
+    const projects = await cloud.listProjects();
+    hideAuth();
+    const mostRecent = projects.find((p) => p.openedAt) || projects[0];
+    if (mostRecent) {
+      await openJob({ cloud, sync, projectId: mostRecent.id, apply: applyOpenedJob });
+      return;
+    }
+    await openLibrary({
+      message: "No jobs yet. New job starts one - it saves to your firm's account as you draw.",
+    });
+  } catch (error) {
+    if (error instanceof CloudError && error.authRequired) {
+      showAuth({ message: "That session has expired. Sign in again." });
+      return;
+    }
+    if (error instanceof NavigationBlocked) {
+      // Reachable when a session is re-established with a queue still standing:
+      // whatever is unconfirmed stays open rather than being replaced.
+      setStatusMessage(error.message, "warn");
+      return;
+    }
+    if (!(error instanceof CloudError)) {
+      // A bug on this side, not a server that is down. Blaming the network for
+      // it sends someone to check their wifi over a broken build, so it is
+      // reported as what it is and left in the console to be read.
+      console.error("opening a job failed", error);
+      showAuth({ message: `This app hit an error opening your job: ${error?.message || error}` });
+      return;
+    }
+    showAuth({ message: offlineMessage(error), signedOut: false });
+  }
+}
+
+/**
+ * Put a job the server just handed us into the editor, and point the save path
+ * at it. The order matters: the document is in place before the transport is
+ * attached, so the first thing sync knows about this drawing is that the server
+ * already holds exactly it - and nothing is queued as if it were an edit.
+ */
+function applyOpenedJob({ project, drawing }) {
+  openProject = project;
+  openDrawingId = drawing.id;
+
+  clearUnderlay(store.doc);
+  store.doc = normalizeDoc(drawing.doc);
+  if (!store.doc.packId) store.doc.packId = pack.id;
+  store.clearSelection();
+  // A job's undo history is its own. Carrying the previous job's stack across
+  // would let Ctrl+Z paste one drawing into another.
+  store.undoStack = [];
+  underlaySelected = false;
+
+  sync.attach({
+    transport: httpTransport({
+      drawingId: drawing.id,
+      onAuthRequired: () => showAuth({ message: "That session has expired. Sign in again." }),
+    }),
+    // What the server holds, not the normalised copy in the store: see
+    // reconcileNormalisation() below.
+    doc: drawing.doc,
+    revision: drawing.revision,
+  });
+  reconcileNormalisation(drawing.doc);
+
+  // Sheets belong to the document, so the one being edited in the Sheets panel
+  // belongs to the document that just closed.
+  activeSheetId = store.doc.sheets?.[0]?.id || null;
+
+  activeLevel = pack.system.defaultLevel;
+  syncPackLevels();
+  drawLevelSwitcher();
+  drawJobName();
+  render();
+}
+
+function offlineMessage(error) {
+  return error instanceof CloudError && error.status === 0
+    ? "No connection to the server. Your work is saved there, so this waits rather than opening something it cannot keep."
+    : `The server could not be reached: ${error?.message || "unknown error"}`;
+}
+
+// --- the sign-in veil -------------------------------------------------
+
+// Which of the two the form is doing. Sign-in first: creating a second account
+// for a firm that already has one is the more expensive mistake.
+let authMode = "sign-in";
+
+function showAuth({ message = "", signedOut = true } = {}) {
+  if (!el.auth) return;
+  el.auth.hidden = false;
+  setAuthError(message);
+  // A dropped connection is not a credentials problem, so do not invite a
+  // password that has nowhere to go; offer the retry instead.
+  el.authForm?.classList.toggle("is-unreachable", !signedOut);
+  el.authSubmit.textContent = signedOut ? submitLabel() : "Try again";
+  el.authSubmit.dataset.retry = signedOut ? "" : "1";
+  if (signedOut) el.authEmail?.focus();
+}
+
+function hideAuth() {
+  if (!el.auth) return;
+  el.auth.hidden = true;
+  setAuthError("");
+}
+
+function setAuthError(message) {
+  if (!el.authError) return;
+  el.authError.textContent = message || "";
+  el.authError.hidden = !message;
+}
+
+function submitLabel() {
+  return authMode === "sign-in" ? "Sign in" : "Create account";
+}
+
+function drawAuthMode() {
+  el.authTitle.textContent = authMode === "sign-in" ? "Sign in" : "Create an account";
+  el.authKicker.textContent = authMode === "sign-in"
+    ? "Your jobs are saved to your firm's account."
+    : "One account per person, one firm per account.";
+  el.authSubmit.textContent = submitLabel();
+  el.authSubmit.dataset.retry = "";
+  el.authToggle.textContent = authMode === "sign-in" ? "Create an account" : "I have an account";
+  el.authOrgWrap.hidden = authMode === "sign-in";
+  el.authPassword.autocomplete = authMode === "sign-in" ? "current-password" : "new-password";
+  setAuthError("");
+}
+
+function wireAuth() {
+  if (!el.authForm) return;
+
+  el.authToggle.addEventListener("click", () => {
+    authMode = authMode === "sign-in" ? "sign-up" : "sign-in";
+    drawAuthMode();
+  });
+
+  el.authForm.addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    if (el.authSubmit.disabled) return;
+
+    // The unreachable-server case: there is nothing to submit, only something
+    // to try again.
+    if (el.authSubmit.dataset.retry === "1") {
+      el.authSubmit.dataset.retry = "";
+      await restoreSession();
+      return;
+    }
+
+    const email = el.authEmail.value.trim();
+    const password = el.authPassword.value;
+    const orgName = el.authOrg.value.trim();
+
+    el.authSubmit.disabled = true;
+    el.authSubmit.textContent = authMode === "sign-in" ? "Signing in…" : "Creating…";
+    setAuthError("");
+    try {
+      if (authMode === "sign-in") await cloud.signIn({ email, password });
+      else await cloud.signUp({ email, password, orgName });
+      // Not kept anywhere: the session is an httpOnly cookie, and this field
+      // is the only place the password ever existed.
+      el.authPassword.value = "";
+      await enterApp();
+    } catch (error) {
+      setAuthError(error instanceof CloudError
+        ? error.message
+        : "Something went wrong signing in");
+    } finally {
+      el.authSubmit.disabled = false;
+      el.authSubmit.textContent = submitLabel();
+    }
+  });
+
+  drawAuthMode();
+}
+
+// --- the job library ---------------------------------------------------
+//
+// What replaced Open, New, Save As, Clear and the download. The decisions live
+// in library.js so they can be tested without a DOM; this is the drawing of it,
+// plus the honest refusals: nothing here opens another job while a write is
+// unconfirmed, and nothing that needs the server is offered while there is no
+// connection to it.
+
+// The last list the server sent, so a row's action does not have to re-fetch to
+// know what it is acting on.
+let libraryProjects = [];
+// The row whose name is currently an input, if any. Inline rename, one at a time.
+let renamingProjectId = null;
+
+/**
+ * Why New / Duplicate / Delete / Rename cannot run right now, or null. Geometry
+ * editing offline is step 7 and a merge engine is not being built here, so the
+ * honest thing while the queue is backed up is to disable the commands that
+ * need the server and say which they are.
+ */
+function connectionBlocked() {
+  if (sync.state?.kind === "offline") {
+    return "No connection to the server. New, Duplicate, Delete and Rename need one.";
+  }
+  if (sync.state?.kind === "conflict") {
+    return "This drawing changed somewhere else. Choose which version to keep first.";
+  }
+  return null;
+}
+
+async function openLibrary({ message = "" } = {}) {
+  if (!el.libraryOverlay) return;
+  el.libraryOverlay.hidden = false;
+  setLibraryMessage(message);
+  await refreshLibrary({ keepMessage: Boolean(message) });
+}
+
+function closeLibrary() {
+  if (!el.libraryOverlay) return;
+  // With no job open there is nothing behind this but a canvas that belongs to
+  // no row and cannot be saved, so the way out is New or Open, not Close.
+  if (!openDrawingId) {
+    setLibraryMessage("Open a job or start a new one - there is nothing open behind this.");
+    return;
+  }
+  el.libraryOverlay.hidden = true;
+  renamingProjectId = null;
+}
+
+/**
+ * Deleted jobs are asked for too. A soft delete that disappeared from every
+ * surface would not be undoable from anywhere, and the library is where §5 says
+ * the undo lives.
+ */
+async function refreshLibrary({ keepMessage = false } = {}) {
+  try {
+    libraryProjects = await cloud.listProjects({ includeDeleted: true });
+    if (!keepMessage) setLibraryMessage("");
+  } catch (error) {
+    libraryProjects = [];
+    setLibraryMessage(libraryErrorMessage(error));
+  }
+  renderLibrary();
+}
+
+function setLibraryMessage(text) {
+  if (!el.libraryMessage) return;
+  el.libraryMessage.textContent = text || "";
+  el.libraryMessage.hidden = !text;
+}
+
+function libraryErrorMessage(error) {
+  if (error instanceof NavigationBlocked) return error.message;
+  if (error instanceof CloudError && error.status === 0) {
+    return "No connection to the server. The job list lives there, so it cannot be shown from here.";
+  }
+  if (error instanceof CloudError) return error.message;
+  console.error("library command failed", error);
+  return `This app hit an error: ${error?.message || error}`;
+}
+
+function renderLibrary() {
+  if (!el.libraryList) return;
+  const { jobs, deleted } = splitLibrary(libraryProjects);
+  const blocked = connectionBlocked();
+
+  el.libraryList.innerHTML = "";
+  if (el.libraryNew) {
+    el.libraryNew.disabled = Boolean(blocked);
+    el.libraryNew.title = blocked || "Start a job and open it.";
+  }
+  if (el.libraryClose) {
+    el.libraryClose.disabled = !openDrawingId;
+    el.libraryClose.title = openDrawingId ? "" : "Open a job or start a new one first.";
+  }
+
+  if (!jobs.length && !deleted.length) {
+    const empty = document.createElement("p");
+    empty.className = "library-empty hint";
+    empty.textContent = "No jobs on this account yet.";
+    el.libraryList.appendChild(empty);
+    return;
+  }
+
+  for (const project of jobs) el.libraryList.appendChild(libraryRow(project, blocked));
+
+  if (deleted.length) {
+    const heading = document.createElement("p");
+    heading.className = "library-section";
+    heading.textContent = "Deleted";
+    el.libraryList.appendChild(heading);
+    for (const project of deleted) el.libraryList.appendChild(libraryRow(project, blocked));
+  }
+}
+
+function libraryRow(project, blocked) {
+  const fields = jobRowFields(project);
+  const isOpen = project.id === openProject?.id;
+
+  const row = document.createElement("div");
+  row.className = "library-row";
+  row.classList.toggle("is-open", isOpen);
+  row.classList.toggle("is-deleted", fields.deleted);
+
+  if (renamingProjectId === project.id) {
+    row.appendChild(renameField(project, fields));
+  } else {
+    const main = document.createElement("button");
+    main.type = "button";
+    main.className = "library-row-main";
+    const name = document.createElement("span");
+    name.className = "library-row-name";
+    name.textContent = fields.nameLabel;
+    const meta = document.createElement("span");
+    meta.className = "library-row-meta";
+    meta.textContent = [
+      fields.erfLabel,
+      fields.deleted ? "Deleted" : isOpen ? "Open now" : null,
+      fields.lastOpened ? `Last opened ${fields.lastOpened}` : "Never opened",
+    ].filter(Boolean).join(" · ");
+    main.append(name, meta);
+    main.disabled = fields.deleted || isOpen;
+    main.title = fields.deleted
+      ? "Restore this job before opening it."
+      : isOpen ? "This job is open." : "Open this job.";
+    main.addEventListener("click", () => runOpenJob(project));
+    row.appendChild(main);
+  }
+
+  row.appendChild(rowActions(project, fields, { isOpen, blocked }));
+  return row;
+}
+
+function renameField(project, fields) {
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "library-row-name-input";
+  input.value = fields.name || "";
+  input.placeholder = "Name this job";
+  input.maxLength = 120;
+  // Blur commits and Escape abandons, which is what an inline field in a list
+  // does everywhere else. A rename that needed a separate Save button would be
+  // a second save concept in an app that just removed the first.
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      input.blur();
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      renamingProjectId = null;
+      renderLibrary();
+    }
+  });
+  input.addEventListener("blur", () => {
+    if (renamingProjectId !== project.id) return;
+    runRename(project, input.value);
+  });
+  setTimeout(() => input.focus(), 0);
+  return input;
+}
+
+function rowActions(project, fields, { isOpen, blocked }) {
+  const actions = document.createElement("div");
+  actions.className = "library-row-actions";
+
+  const button = (label, title, disabled, onClick) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = label;
+    btn.title = title;
+    btn.disabled = Boolean(disabled);
+    if (!disabled) btn.addEventListener("click", onClick);
+    actions.appendChild(btn);
+    return btn;
+  };
+
+  if (fields.deleted) {
+    button("Restore", blocked || "Bring this job back into the library.", blocked,
+      () => runRestore(project));
+    return actions;
+  }
+
+  // Offline caching is step 7. A badge that said "available on site" before the
+  // cache exists would be the plausible default this app refuses: it would be
+  // believed on the way to a plot with no signal.
+  button("On site", "Marking a job for offline use lands with the offline step.", true, () => {});
+
+  button("Rename", blocked || "Rename this job. The title block follows.", blocked, () => {
+    renamingProjectId = project.id;
+    renderLibrary();
+  });
+  button("Duplicate", blocked || "Copy this job to a new one, ending in \" (copy)\".", blocked,
+    () => runDuplicate(project));
+  button(
+    "Delete",
+    blocked || (isOpen ? "This job is open. Open another one first." : "Delete this job. Restore brings it back."),
+    blocked || isOpen,
+    () => runDelete(project),
+  );
+  return actions;
+}
+
+// --- the file commands -------------------------------------------------
+
+/** `file-new`. A new row with a new drawing, and a navigation to it. */
+async function runNewJob() {
+  const blocked = connectionBlocked();
+  if (blocked) {
+    setLibraryMessage(blocked);
+    setStatusMessage(blocked, "warn");
+    return;
+  }
+  await runLibraryCommand(async () => {
+    const doc = emptyDoc();
+    doc.packId = pack.id;
+    await createJob({
+      cloud, sync, doc, packId: pack.id, openDrawingId, apply: applyOpenedJob,
+    });
+    closeLibraryAfterNavigation();
+    setStatusMessage("New job started. It saves as you draw.", "ok");
+  });
+}
+
+/** `file-open`. Flush, then attach to the other job - never the other way round. */
+async function runOpenJob(project) {
+  await runLibraryCommand(async () => {
+    await openJob({ cloud, sync, projectId: project.id, apply: applyOpenedJob });
+    closeLibraryAfterNavigation();
+    setStatusMessage(`Opened ${store.doc.name || "an unnamed job"}.`, "ok");
+  });
+}
+
+async function runRename(project, typed) {
+  const name = typed.trim();
+  renamingProjectId = null;
+  const isOpen = project.id === openProject?.id;
+  if (name === (project.name || "")) {
+    renderLibrary();
+    return;
+  }
+  await runLibraryCommand(async () => {
+    const renamed = await renameJob({
+      cloud, sync, projectId: project.id, name, open: isOpen, adopt: adoptRenamedDrawing,
+    });
+    if (isOpen) openProject = renamed;
+    await refreshLibrary();
+  });
+}
+
+/**
+ * The rename came back having written `doc.name` and bumped the revision. Adopt
+ * both, or the next autosave arrives with a stale If-Match and the job conflicts
+ * with its own rename.
+ */
+function adoptRenamedDrawing(drawing) {
+  store.doc.name = drawing.doc?.name ?? null;
+  sync.adopt(drawing.doc, drawing.revision);
+  reconcileNormalisation(drawing.doc);
+  drawJobName();
+  drawActiveSheet();
+}
+
+/** `file-duplicate`, the old Save As. It does not navigate: the copy is a row. */
+async function runDuplicate(project) {
+  await runLibraryCommand(async () => {
+    const copy = await duplicateJob({
+      cloud,
+      projectId: project.id,
+      sourceDrawingId: project.drawingId ?? null,
+    });
+    await refreshLibrary();
+    setLibraryMessage(`Copied to "${copy.name}". Open it when you want it.`);
+  });
+}
+
+async function runDelete(project) {
+  await runLibraryCommand(async () => {
+    await cloud.deleteProject(project.id);
+    await refreshLibrary();
+    // Not gone - moved. Saying so is the difference between a soft delete and a
+    // shredder.
+    setLibraryMessage(`"${project.name || "That job"}" is in Deleted below. Restore brings it back.`);
+  });
+}
+
+async function runRestore(project) {
+  await runLibraryCommand(async () => {
+    await cloud.restoreProject(project.id);
+    await refreshLibrary();
+  });
+}
+
+/**
+ * Demo house is a job of its own now. It used to overwrite whatever was open,
+ * which is precisely the data loss the library exists to stop.
+ */
+async function runDemoHouse() {
+  const blocked = connectionBlocked();
+  if (blocked) {
+    setStatusMessage(blocked, "warn");
+    return;
+  }
+  await runLibraryCommand(async () => {
+    await createJob({
+      cloud,
+      sync,
+      doc: demoDoc(),
+      name: "Demo house",
+      packId: pack.id,
+      openDrawingId,
+      apply: applyOpenedJob,
+    });
+    closeLibraryAfterNavigation();
+    setStatusMessage("Demo house created as its own job. Your other job is untouched.", "ok");
+  });
+}
+
+/**
+ * Sign-out revokes the session, so anything still queued would 401 on its way
+ * out. It is flushed first and the sign-out is abandoned if that fails: losing
+ * the queue here would be indistinguishable from losing the work.
+ */
+async function runSignOut() {
+  try {
+    await sync.flush();
+    if (sync.isDirty()) {
+      setLibraryMessage("This job has changes that have not reached the server. Signing out now would lose them.");
+      return;
+    }
+    await cloud.signOut();
+  } catch (error) {
+    setLibraryMessage(libraryErrorMessage(error));
+    return;
+  }
+  // Nothing to draw into and nowhere to draw it: the document goes back to
+  // empty, and the save path is pointed at a transport that refuses rather than
+  // at a drawing this browser is no longer allowed to write to.
+  openProject = null;
+  openDrawingId = null;
+  libraryProjects = [];
+  clearUnderlay(store.doc);
+  store.doc = emptyDoc();
+  store.doc.packId = pack.id;
+  store.clearSelection();
+  store.undoStack = [];
+  activeSheetId = null;
+  sync.attach({ transport: signedOutTransport(), doc: store.doc, revision: 0 });
+  closeLibraryAfterNavigation();
+  drawJobName();
+  syncPackLevels();
+  drawLevelSwitcher();
+  render();
+  showAuth({ message: "Signed out. Your jobs are on the account, not in this browser." });
+}
+
+function signedOutTransport() {
+  return {
+    read: () => null,
+    put: () => { throw new AuthRequiredError(); },
+  };
+}
+
+/**
+ * Every library command in one wrapper, because they all fail the same three
+ * ways: the app refused (a queue still standing), the server refused, or this
+ * side has a bug. None of them may leave the list looking like it succeeded.
+ */
+async function runLibraryCommand(run) {
+  try {
+    await run();
+  } catch (error) {
+    const message = libraryErrorMessage(error);
+    setLibraryMessage(message);
+    setStatusMessage(message, "warn");
+    if (error instanceof CloudError && error.authRequired) {
+      showAuth({ message: "That session has expired. Sign in again." });
+    }
+    renderLibrary();
+  }
+}
+
+function closeLibraryAfterNavigation() {
+  renamingProjectId = null;
+  if (el.libraryOverlay) el.libraryOverlay.hidden = true;
+}
+
+function wireLibrary() {
+  el.libraryClose?.addEventListener("click", closeLibrary);
+  el.libraryOverlay?.addEventListener("click", (event) => {
+    if (event.target === el.libraryOverlay) closeLibrary();
+  });
+  el.libraryNew?.addEventListener("click", runNewJob);
+  el.librarySignOut?.addEventListener("click", runSignOut);
 }
 
 // --- the job's name and its save state --------------------------------
@@ -476,6 +1166,77 @@ function drawSyncState(state) {
   el.syncState.title = state?.kind === "conflict"
     ? "This drawing changed somewhere else. Reload it to take those changes, or keep editing to overwrite them."
     : "";
+  drawConflictBar(state);
+  // The library's commands are disabled by the same state, so it has to hear
+  // about a dropped connection too - but not mid-rename, where re-rendering
+  // would blur the field and commit whatever had been typed so far.
+  if (el.libraryOverlay && !el.libraryOverlay.hidden && !renamingProjectId) renderLibrary();
+}
+
+/**
+ * A 409 is the one save state the user has to answer, so it gets a bar with two
+ * buttons rather than a word in the chrome. Neither is a default and neither is
+ * pre-selected: choosing for them is the silent merge §4 refuses.
+ */
+function drawConflictBar(state) {
+  if (!el.conflict) return;
+  const conflicted = state?.kind === "conflict";
+  el.conflict.hidden = !conflicted;
+  if (!conflicted) return;
+  el.conflictText.textContent = state.conflict?.doc
+    ? "This drawing changed somewhere else — another tab, or the tablet on site."
+    : "This drawing changed somewhere else, and that version could not be read.";
+  // Nothing to reload if their document did not arrive with the refusal.
+  el.conflictTheirs.disabled = !state.conflict?.doc;
+}
+
+function wireConflict() {
+  el.conflictTheirs?.addEventListener("click", () => {
+    const theirs = sync.state?.conflict?.doc;
+    if (!theirs) return;
+    // Their document becomes the open one and the local queue is dropped, which
+    // is the whole point of choosing this button.
+    applyTheirDocument(theirs);
+    setStatusMessage("Reloaded the version saved elsewhere");
+  });
+
+  el.conflictMine?.addEventListener("click", async () => {
+    // Their revision is adopted only so the next If-Match matches; the queued
+    // documents are still sent, in order.
+    await sync.resolveWithMine();
+    setStatusMessage("Saved your version over the one from elsewhere");
+  });
+}
+
+function applyTheirDocument(theirDoc) {
+  clearUnderlay(store.doc);
+  store.doc = normalizeDoc(theirDoc);
+  if (!store.doc.packId) store.doc.packId = pack.id;
+  store.clearSelection();
+  // The undo stack describes edits to a document that is no longer open.
+  store.undoStack = [];
+  underlaySelected = false;
+
+  // Adopted against what the server actually holds, not against the normalised
+  // copy in the store: those two can differ, and calling the difference saved
+  // would leave a change that never gets written.
+  sync.resolveWithTheirs(theirDoc);
+  reconcileNormalisation(theirDoc);
+
+  syncPackLevels();
+  drawLevelSwitcher();
+  drawJobName();
+  render();
+}
+
+/**
+ * Normalising an incoming document can fill in keys it never had - an id, a
+ * room's default SKUs, a level. That difference is a real change the server has
+ * not seen, so it queues as one rather than being assumed away; if there is no
+ * difference this does nothing, because the signature matches.
+ */
+function reconcileNormalisation(serverDoc) {
+  if (docSignature(store.doc) !== docSignature(serverDoc)) store.persist();
 }
 
 function drawJobName() {
@@ -1806,7 +2567,28 @@ function drawOpeningDraft(walls) {
   if (!hoverPoint || !placeSkuId) return;
   const levelWalls = walls.filter(onActiveLevel);
   const draft = openingDraftAt(store.doc, pack, levelWalls, placeSkuId, hoverPoint.x, hoverPoint.y);
-  if (draft) drawOpening(draft, walls, { preview: true });
+  if (!draft) return;
+  drawOpening(draft, walls, { preview: true });
+  drawOpeningSideGaps(draft, walls);
+}
+
+/** How far the previewed door/window sits from both ends of its host wall. */
+function drawOpeningSideGaps(draft, walls) {
+  const wall = wallForOpening(store.doc, pack, walls, draft);
+  if (!wall) return;
+  const placed = openingOnWall(store.doc, pack, draft, wall);
+  if (!placed) return;
+  const neighbors = [];
+  for (const opening of store.doc.openings || []) {
+    if (!openingOnLevel(opening, walls, activeLevel)) continue;
+    const host = wallForOpening(store.doc, pack, walls, opening);
+    if (!host || host.id !== wall.id) continue;
+    const next = openingOnWall(store.doc, pack, opening, host);
+    if (next) neighbors.push(next);
+  }
+  for (const gap of openingSideGaps(wall, placed, neighbors)) {
+    drawGapDimension(gap.x1, gap.y1, gap.x2, gap.y2);
+  }
 }
 
 function drawOpening(opening, walls, { preview = false } = {}) {
@@ -2207,11 +2989,30 @@ function drawGapDimension(x1, y1, x2, y2, kind) {
   const mm = Math.round(len * 1000);
   const label = `${mm} mm`;
   const off = 20;
-  const ox = kind === "v" ? -off : 0;
-  const oy = kind === "h" ? -off : 0;
+  const dx = bx - ax;
+  const dy = by - ay;
+  const span = Math.hypot(dx, dy) || 1;
+  // Offset towards the top-left of the sheet so a horizontal string sits
+  // above the gap and a vertical one to its left, matching the old axis
+  // kinds, and so an angled wall's strings sit beside the wall rather than
+  // on top of the opening.
+  let nx = -dy / span;
+  let ny = dx / span;
+  if (ny > 1e-6 || (Math.abs(ny) <= 1e-6 && nx > 0)) {
+    nx = -nx;
+    ny = -ny;
+  }
+  if (kind === "v") {
+    nx = -1;
+    ny = 0;
+  } else if (kind === "h") {
+    nx = 0;
+    ny = -1;
+  }
+  const ox = nx * off;
+  const oy = ny * off;
   const p1 = { x: ax + ox, y: ay + oy };
   const p2 = { x: bx + ox, y: by + oy };
-  const span = Math.hypot(p2.x - p1.x, p2.y - p1.y);
   const mx = (p1.x + p2.x) / 2;
   const my = (p1.y + p2.y) / 2;
 
@@ -2239,7 +3040,14 @@ function drawGapDimension(x1, y1, x2, y2, kind) {
   const textW = ctx.measureText(label).width + 8;
   const tight = span < textW + 16;
   ctx.translate(mx, my);
-  if (kind === "v") ctx.rotate(-Math.PI / 2);
+  let angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+  if (kind === "v") angle = -Math.PI / 2;
+  else if (kind === "h") angle = 0;
+  else {
+    if (angle >= Math.PI / 2) angle -= Math.PI;
+    if (angle < -Math.PI / 2) angle += Math.PI;
+  }
+  ctx.rotate(angle);
   // Tight gaps cannot fit the number between the arrows; park it beside
   // the string (further along the same offset) so the arrows still read.
   const shift = tight ? -14 : 0;
@@ -2776,6 +3584,42 @@ const CATEGORY_LABEL = {
   pool: "Pool", carport: "Carport",
 };
 
+/** One word for the Inspector header: what is selected, not which type. */
+const INSPECT_KIND_LABEL = {
+  wall: "Wall",
+  boundarywall: "Boundary wall",
+  foundation: "Foundation",
+  floor: "Floor",
+  ceiling: "Ceiling",
+  roof: "Roof",
+  door: "Door",
+  window: "Window",
+  beam: "Beam",
+  column: "Column",
+  stair: "Stair",
+  sanitary: "Sanitary",
+  waterheater: "Water heater",
+  drainage: "Drainage",
+  electrical: "Electrical",
+  furniture: "Furniture",
+  casework: "Casework",
+  pool: "Pool",
+  carport: "Carport",
+};
+
+function inspectKindLabel(kind, sku) {
+  if (kind === "room") return "Room";
+  const cat = sku?.category;
+  if (cat && INSPECT_KIND_LABEL[cat]) return INSPECT_KIND_LABEL[cat];
+  if (kind === "segment" || kind === "wall") return "Wall";
+  if (kind === "opening") return "Opening";
+  if (kind === "slab") return "Floor";
+  if (kind === "roof") return "Roof";
+  if (kind === "beam") return "Beam";
+  if (kind === "item") return "Item";
+  return "";
+}
+
 function skuDimLabel(sku) {
   const g = sku.geometry || {};
   if (g.width && g.height && (sku.category === "door" || sku.category === "window")) {
@@ -3138,6 +3982,8 @@ function runCommand(name) {
     case "ungroup": store.ungroupSelection(); store.persist(); break;
     case "delete": deleteSelection(); break;
     case "compile": runCompile(); return;
+    case "boq": runBoq(); return;
+    case "bom": runBom(); return;
     case "export-dxf": runExportDxf(); return;
     case "export-ifc": runExportIfc(); return;
     case "gaps": case "check":
@@ -4245,18 +5091,12 @@ function wireToolbar() {
   el.hmRotate?.addEventListener("click", () => runCommand("rotate"));
   el.hmCopy?.addEventListener("click", () => runCommand("copy"));
   el.hmDelete?.addEventListener("click", () => runCommand("delete"));
-  document.getElementById("v2-demo").addEventListener("click", loadDemo);
-  document.getElementById("v2-clear").addEventListener("click", () => {
-    store.pushUndo();
-    clearUnderlay(store.doc);
-    store.doc = emptyDoc();
-    store.doc.packId = pack.id;
-    store.clearSelection();
-    underlaySelected = false;
-    store.persist();
-    drawJobName();
-    render();
-  });
+  // Three navigations, not three ways of replacing what is on screen. Clear
+  // used to blank the open job and keep its id; New mints a row of its own and
+  // leaves the previous one exactly as it was.
+  document.getElementById("v2-new").addEventListener("click", runNewJob);
+  document.getElementById("v2-open").addEventListener("click", () => openLibrary());
+  document.getElementById("v2-demo").addEventListener("click", runDemoHouse);
   document.getElementById("v2-compile").addEventListener("click", runCompile);
   wireLevelWidget();
 }
@@ -5080,12 +5920,10 @@ function syncPlanContext() {
   if (multi) {
     const group = store.groupForRef(refs[0]);
     syncInspectKicker(group ? group.name : `${refs.length} selected`);
-  } else if (room) {
-    syncInspectKicker(obj.name);
-  } else if (obj) {
-    syncInspectKicker(skuById(obj.sku)?.name || "");
   } else if (draft) {
-    syncInspectKicker(skuById(placeSkuId)?.name || "Wall");
+    syncInspectKicker(inspectKindLabel("wall", skuById(placeSkuId)));
+  } else if (obj) {
+    syncInspectKicker(inspectKindLabel(ref.kind, skuById(obj.sku)));
   } else {
     syncInspectKicker("");
   }
@@ -5432,6 +6270,214 @@ function runCompile() {
   console.table(out.instances.map(({ profileLoops, ...rest }) => rest));
 }
 
+// --- BOQ / BOM ----------------------------------------------------------
+//
+// Output > Schedules. Its own overlay (v2-schedule-overlay), not a Check tab:
+// compliance and data-quality gaps are about the pack's SKUs, never about
+// pricing or counting what was drawn, and a customer looking at a quote
+// should not have to scroll past a "cannot check" zoning finding to reach it.
+//
+// Both BOQ and BOM read compile()'s instances - schedule.js only rolls the
+// per-element rows up into one line per SKU and, for BOQ, joins a rate book.
+// Neither re-derives a quantity of its own. See schedule.js's header for what
+// tells the two views apart.
+//
+// Every rolled-up line expands to the individual elements behind it, and
+// every element with a selection kind (schedule.js/compile.js's `row.kind` -
+// null for a room-derived wall or a recipe-implied quantity nobody drew) can
+// be located: switch to its level, select it, and pan the plan to it.
+
+let scheduleRowsCache = [];
+
+/** shared money formatter for the priced BOQ view - ZAR unless the loaded
+ *  rate book states otherwise. */
+function money(rate, symbol) {
+  const n = Number(rate) || 0;
+  return `${symbol}${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+}
+
+function fmtQty(qty, unit) {
+  if (unit === "ea") return String(Math.round(qty));
+  return `${(Number(qty) || 0).toFixed(2)} ${unit}`;
+}
+
+function levelName(levelId) {
+  if (!levelId) return "—";
+  return (pack?.levels || []).find((l) => l.id === levelId)?.name || levelId;
+}
+
+function elementRowHtml(groupIndex, element, elementIndex) {
+  const label = `${element.id}${element.status ? ` · ${element.status}` : ""}`;
+  const locatable = Boolean(element.kind);
+  return `
+    <div class="schedule-element">
+      <span class="schedule-element-id">${escapeHtml(label)}</span>
+      <span>${escapeHtml(levelName(element.level))}</span>
+      <button type="button" class="schedule-locate" data-group="${groupIndex}" data-element="${elementIndex}"
+        ${locatable ? "" : "disabled"} title="${locatable ? "Select this element and pan the plan to it" : "Not a drawn element - nothing to select"}">
+        Show on plan
+      </button>
+    </div>`;
+}
+
+function scheduleRowsHtml(rows, { priced }) {
+  const symbol = rateBook?.symbol || "R";
+  const colspan = priced ? 7 : 5;
+  const head = priced
+    ? `<tr><th></th><th>Model</th><th class="wrap">Description</th><th>Category</th><th class="num">Qty</th><th>Unit</th><th class="num">Rate</th><th class="num">Amount</th></tr>`
+    : `<tr><th></th><th>Model</th><th class="wrap">Description</th><th>Category</th><th class="num">Qty</th><th>Unit</th></tr>`;
+  const body = rows.map((row, i) => {
+    const first = `
+      <td class="schedule-caret">▸</td>
+      <td>${escapeHtml(row.model || "")}</td>
+      <td class="wrap">${escapeHtml(row.description || "")}</td>
+      <td>${escapeHtml(row.category || "")}</td>
+      <td class="num">${fmtQty(row.qty, row.unit)}</td>
+      <td>${escapeHtml(row.unit || "")}</td>`;
+    const priceCells = priced
+      ? `
+      <td class="num">${row.priced ? money(row.rate, symbol) : "—"}</td>
+      <td class="num">${row.priced ? money(row.amount, symbol) : "—"}</td>`
+      : "";
+    const elements = (row.elements || [])
+      .map((el, j) => elementRowHtml(i, el, j))
+      .join("");
+    return `
+      <tr class="schedule-group-row" data-group="${i}">${first}${priceCells}</tr>
+      <tr class="schedule-elements-row" data-group="${i}" hidden>
+        <td colspan="${colspan}"><div class="schedule-elements">${elements || '<p class="hint">Nothing drawn against this line yet.</p>'}</div></td>
+      </tr>`;
+  }).join("");
+  const foot = priced
+    ? `<tr class="total"><td colspan="${colspan - 1}">Total (priced lines only)</td><td class="num">${money(scheduleTotal(rows), symbol)}</td></tr>`
+    : "";
+  return `<table class="cost-table"><thead>${head}</thead><tbody>${body}${foot}</tbody></table>`;
+}
+
+function openSchedule(title, rows, { priced }) {
+  scheduleRowsCache = rows;
+  if (el.scheduleOverlay) el.scheduleOverlay.hidden = false;
+  if (el.scheduleTitle) el.scheduleTitle.textContent = title;
+  if (el.scheduleKicker) el.scheduleKicker.textContent = `${rows.length} lines`;
+  if (el.scheduleBody) {
+    el.scheduleBody.innerHTML = `<div class="table-wrap">${scheduleRowsHtml(rows, { priced })}</div>`;
+  }
+}
+
+function closeSchedule() {
+  if (el.scheduleOverlay) el.scheduleOverlay.hidden = true;
+}
+
+function runBoq() {
+  const out = compile(store.doc, pack);
+  if (!out) return;
+  const rows = boqRows(out, rateBook);
+  const unpriced = rows.filter((r) => !r.priced).length;
+  openSchedule("BOQ — bill of quantities", rows, { priced: true });
+  const warnings = [
+    !rateBook ? 'No rate book loaded — every line prices at "—".' : null,
+    rateBook && unpriced ? `${unpriced} of ${rows.length} lines have no rate on file and price at "—".` : null,
+  ].filter(Boolean);
+  if (warnings.length && el.scheduleBody) {
+    el.scheduleBody.insertAdjacentHTML("afterbegin",
+      `<div class="compile-warnings">${warnings.map((w) => `<p class="warn">⚠ ${escapeHtml(w)}</p>`).join("")}</div>`);
+  }
+  window.__boq = rows;
+  // eslint-disable-next-line no-console
+  console.log("v2 BOQ:", rows);
+}
+
+function runBom() {
+  const out = compile(store.doc, pack);
+  if (!out) return;
+  const rows = bomRows(out);
+  openSchedule("BOM — bill of materials", rows, { priced: false });
+  window.__bom = rows;
+  // eslint-disable-next-line no-console
+  console.log("v2 BOM:", rows);
+}
+
+/** Centre of a doc entity in plan coordinates, or null when its kind has no
+ *  plan geometry of its own to pan to (should not happen for a `kind` that
+ *  passed the `locatable` check, but a stale reference is still possible). */
+function elementCenter(ref, obj) {
+  switch (ref.kind) {
+    case "room": return roomCentroid(obj);
+    case "slab": case "roof": {
+      const poly = shapePolygon(obj.shape);
+      if (poly.length < 3) return null;
+      const sum = poly.reduce((s, p) => ({ x: s.x + p[0], y: s.y + p[1] }), { x: 0, y: 0 });
+      return { x: sum.x / poly.length, y: sum.y / poly.length };
+    }
+    case "segment": case "beam":
+      return { x: (obj.x1 + obj.x2) / 2, y: (obj.y1 + obj.y2) / 2 };
+    case "item": case "stair":
+      return Number.isFinite(obj.x) && Number.isFinite(obj.y) ? { x: obj.x, y: obj.y } : null;
+    case "opening": {
+      const walls = deriveWalls(store.doc, pack);
+      const wall = wallForOpening(store.doc, pack, walls, obj);
+      if (!wall) return null;
+      const placed = openingOnWall(store.doc, pack, obj, wall);
+      return { x: (placed.a.x + placed.b.x) / 2, y: (placed.a.y + placed.b.y) / 2 };
+    }
+    default: return null;
+  }
+}
+
+/** Output > Schedules > (expand a line) > Show on plan. Switches to the
+ *  element's level if needed, selects it, pans the canvas to it, and closes
+ *  the schedule overlay so the result is what the click was for. */
+function locateScheduleElement(ref) {
+  const obj = objectByRef(store.doc, ref);
+  if (!obj) {
+    setStatusMessage("That element is no longer in the drawing.", "warn");
+    return;
+  }
+  const objLevel = ref.kind === "opening"
+    ? wallForOpening(store.doc, pack, deriveWalls(store.doc, pack), obj)?.level
+    : effectiveLevel(obj, pack);
+  if (objLevel && objLevel !== activeLevel) {
+    activeLevel = objLevel;
+    drawLevelSwitcher();
+  }
+  const center = elementCenter(ref, obj);
+  if (center && el.canvas) {
+    const rect = el.canvas.getBoundingClientRect();
+    cam.scale = Math.max(cam.scale, 90);
+    cam.ox = rect.width / 2 - center.x * cam.scale;
+    cam.oy = rect.height / 2 - center.y * cam.scale;
+  }
+  store.setSelection([ref], ref);
+  closeSchedule();
+  drawRibbon();
+  render();
+}
+
+function wireSchedule() {
+  el.scheduleClose?.addEventListener("click", closeSchedule);
+  el.scheduleOverlay?.addEventListener("click", (event) => {
+    if (event.target === el.scheduleOverlay) closeSchedule();
+  });
+  el.scheduleBody?.addEventListener("click", (event) => {
+    const locateBtn = event.target.closest(".schedule-locate");
+    if (locateBtn) {
+      if (locateBtn.disabled) return;
+      const row = scheduleRowsCache[Number(locateBtn.dataset.group)];
+      const element = row?.elements?.[Number(locateBtn.dataset.element)];
+      if (element?.kind) locateScheduleElement({ kind: element.kind, id: element.id });
+      return;
+    }
+    const groupRow = event.target.closest(".schedule-group-row");
+    if (groupRow) {
+      const elementsRow = el.scheduleBody.querySelector(
+        `.schedule-elements-row[data-group="${groupRow.dataset.group}"]`,
+      );
+      if (elementsRow) elementsRow.hidden = !elementsRow.hidden;
+      groupRow.classList.toggle("open", elementsRow && !elementsRow.hidden);
+    }
+  });
+}
+
 function downloadText(fileName, text, mime) {
   const url = URL.createObjectURL(new Blob([text], { type: mime }));
   const link = document.createElement("a");
@@ -5516,20 +6562,25 @@ function runExportIfc() {
 
 // --- demo doc ------------------------------------------------------------
 
-function loadDemo() {
-  store.pushUndo();
+/**
+ * The demo geometry as a document, built and returned rather than installed.
+ *
+ * It used to be written straight into `store.doc`, keeping the open job's
+ * drawing id so it replaced that job's contents - which is the data loss §5 was
+ * written about. Now runDemoHouse() hands this to createJob() and the demo lands
+ * in a row of its own, with the id `emptyDoc()` minted for it.
+ */
+function demoDoc() {
   const wallSku = pack.system.defaultWallSku;
   const floorSku = pack.system.defaultFloorSku;
   const roofSku = pack.system.defaultRoofSku;
   const level = pack.system.defaultLevel;
   const upperLevel = lookUpLevelId(pack.levels, level);
-  activeLevel = level;
-  drawLevelSwitcher();
 
-  store.doc = {
+  const doc = {
     ...emptyDoc(),
-    // Named, so the title block prints something real. This still replaces the
-    // open plan in place; making it a project of its own is the library's job.
+    // Named, so the title block prints something real - and because the job's
+    // own name follows the document's, this names the row too.
     name: "Demo house",
     packId: pack.id,
     rooms: [
@@ -5570,7 +6621,7 @@ function loadDemo() {
   // sharing a footprint would merge into one "shared" wall spanning two
   // storeys instead of drawing as two separate levels.
   if (upperLevel) {
-    store.doc.rooms.push({
+    doc.rooms.push({
       id: nid("r"), name: "Landing", use: "other", level: upperLevel, wallSku, floorSku,
       status: "planned", shape: rectShape(0, 0, 4, 3),
     });
@@ -5579,22 +6630,19 @@ function loadDemo() {
   // Anchor the door on the shared wall between the two rooms, and the window
   // on the bedroom's south external wall - resolved live from the geometry
   // rather than hardcoded, so it survives the L-shape's exact edge indices.
-  const walls = deriveWalls(store.doc, pack);
+  const walls = deriveWalls(doc, pack);
   const shared = walls.find((w) => w.shared);
-  const bedroom = store.doc.rooms[1];
+  const bedroom = doc.rooms[1];
   if (shared) {
-    store.doc.openings[0].wallId = shared.id;
-    store.doc.openings[0].t = wallT(shared, shared.x1 + (shared.x2 - shared.x1) * 0.5, shared.y1 + (shared.y2 - shared.y1) * 0.5);
+    doc.openings[0].wallId = shared.id;
+    doc.openings[0].t = wallT(shared, shared.x1 + (shared.x2 - shared.x1) * 0.5, shared.y1 + (shared.y2 - shared.y1) * 0.5);
   }
   const southEdgeIndex = southMostEdgeIndex(bedroom);
-  store.doc.openings[1].roomId = bedroom.id;
-  store.doc.openings[1].edgeIndex = southEdgeIndex;
-  store.doc.openings[1].t = 0.5;
+  doc.openings[1].roomId = bedroom.id;
+  doc.openings[1].edgeIndex = southEdgeIndex;
+  doc.openings[1].t = 0.5;
 
-  store.clearSelection();
-  store.persist();
-  drawJobName();
-  render();
+  return doc;
 }
 
 function southMostEdgeIndex(room) {

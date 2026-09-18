@@ -78,6 +78,13 @@ function clipBetween(pts, origin, n, min, max) {
   return next;
 }
 
+// A poche hatch is the solid the plane slices, not every face that merely
+// touches the plane on its way into the look volume. Receding wall sides and
+// roof slopes do touch the cut, then run metres beyond it; flattening them
+// (dropping depth) makes a sliver, and hatching that sliver sprays 45° lines
+// across the elevation.
+const CUT_BAND_M = 0.45;
+
 function faceOnCut(pts, origin, look) {
   let minD = Infinity;
   let maxD = -Infinity;
@@ -86,7 +93,7 @@ function faceOnCut(pts, origin, look) {
     minD = Math.min(minD, d);
     maxD = Math.max(maxD, d);
   }
-  return minD < 0.02 && maxD > -0.02;
+  return minD < 0.02 && maxD > -0.02 && (maxD - minD) < CUT_BAND_M;
 }
 
 /**

@@ -79,6 +79,110 @@ export function localTransport(storage, { key = DOC_STORE_KEY } = {}) {
 }
 
 /**
+ * The real transport: `GET`/`PUT /api/drawings/:id` with an `If-Match`
+ * revision, against the server that is now the system of record.
+ *
+ * The three outcomes the scheduler distinguishes map onto HTTP exactly, which
+ * is why the contract was written this way before a network existed:
+ *
+ *   200  the write landed; adopt the revision it returns.
+ *   409  the row moved under us. Their revision and their document come back
+ *        with the refusal, because the user is about to choose between two
+ *        documents and cannot choose blind. Never merged.
+ *   else the write did not happen - a dropped connection, a 500, a 502 from
+ *        something in front of the server - so it throws and the scheduler
+ *        queues, reporting "Offline - N changes queued" rather than "Saved".
+ *
+ * A 401 is deliberately not a queued write: the session expired, the document
+ * is not going to land however long the queue waits, and saying so is the only
+ * honest option. It surfaces as `authRequired` so the chrome can ask for a
+ * sign-in rather than showing a save state that will never resolve.
+ */
+export function httpTransport({
+  drawingId,
+  baseUrl = "",
+  fetch: fetchImpl = globalThis.fetch?.bind(globalThis),
+  onAuthRequired = () => {},
+} = {}) {
+  if (!drawingId) throw new Error("httpTransport needs a drawingId");
+  const url = `${baseUrl}/api/drawings/${encodeURIComponent(drawingId)}`;
+
+  async function request(method, { body, headers = {}, keepalive = false } = {}) {
+    const res = await fetchImpl(url, {
+      method,
+      // The session is an httpOnly cookie, so it has to be asked for by name.
+      credentials: "include",
+      keepalive,
+      headers: {
+        ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+        ...headers,
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    return res;
+  }
+
+  return {
+    drawingId,
+
+    async read() {
+      const res = await request("GET");
+      if (res.status === 404) return null;
+      if (res.status === 401) {
+        onAuthRequired();
+        throw new AuthRequiredError();
+      }
+      if (!res.ok) throw new Error(`GET drawing failed: ${res.status}`);
+      const body = await res.json();
+      return body?.drawing ?? null;
+    },
+
+    /**
+     * `keepalive` is set for the visibilitychange and beforeunload flush, which
+     * is the one path where the page may be gone before the response arrives.
+     */
+    async put({ doc, revision, keepalive = false }) {
+      const res = await request("PUT", {
+        body: { doc },
+        headers: { "If-Match": String(revision ?? 0) },
+        keepalive,
+      });
+
+      if (res.status === 401) {
+        onAuthRequired();
+        throw new AuthRequiredError();
+      }
+      if (res.status === 409) {
+        const body = await res.json().catch(() => ({}));
+        return {
+          ok: false,
+          conflict: true,
+          revision: body?.revision ?? null,
+          doc: body?.drawing?.doc ?? null,
+        };
+      }
+      if (!res.ok) {
+        // Includes 428 (no If-Match) and 400 (the document's id is not this
+        // drawing's). Both are bugs on this side rather than conditions to wait
+        // out, but the honest report to the user is still "not saved".
+        throw new Error(`PUT drawing failed: ${res.status}`);
+      }
+
+      const body = await res.json();
+      return { ok: true, revision: body?.drawing?.revision ?? null };
+    },
+  };
+}
+
+export class AuthRequiredError extends Error {
+  constructor() {
+    super("Sign in to keep saving");
+    this.name = "AuthRequiredError";
+    this.authRequired = true;
+  }
+}
+
+/**
  * A transport returns `{ ok: true, revision }`, or `{ ok: false, conflict:
  * true, revision, doc }` when the row moved, or throws for anything that
  * amounts to "the write did not happen" - no network, quota, a 500.
@@ -141,6 +245,22 @@ export class DocSync {
     this.queue = [];
     this.conflict = null;
     this.#setState("saved");
+  }
+
+  /**
+   * Point this sync at a different drawing, which the transport already holds.
+   * The navigation primitive: opening another job swaps the transport and
+   * adopts that job's document and revision in one step.
+   *
+   * It refuses while anything is unconfirmed, because adopting would drop the
+   * queue and those queued documents belong to the job being left. The caller
+   * flushes first and handles the failure; turning that into a silent discard
+   * is exactly the data loss this whole plan exists to stop.
+   */
+  attach({ transport, doc, revision }) {
+    if (this.isDirty()) throw new Error("attach() while a write is unconfirmed");
+    this.transport = transport;
+    this.adopt(doc, revision);
   }
 
   /** True when the editor holds something the transport has not confirmed. */

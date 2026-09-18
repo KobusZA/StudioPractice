@@ -205,8 +205,8 @@ export const RIBBON = [
       {
         label: "Schedules",
         items: [
-          { id: "boq", label: "BOQ", command: "compile" },
-          { id: "bom", label: "BOM", command: "compile" },
+          { id: "boq", label: "BOQ", command: "boq" },
+          { id: "bom", label: "BOM", command: "bom" },
         ],
       },
       {
@@ -299,6 +299,8 @@ export const HINTS = {
   "view-camera": "Click where you stand, then click what you look at.",
   section: "Click two points to cut. Look is to the left of the line; draw the other way to flip.",
   compile: "Build the bill of quantities from what you have drawn.",
+  boq: "Bill of quantities: priced schedule of what you have drawn, one line per SKU.",
+  bom: "Bill of materials: unpriced takeoff of what you have drawn, one line per SKU.",
   gaps: "List facts the template still needs before compliance can run.",
   sheets: "Manage print sheets (A0–A4) and their title blocks.",
   "export-dxf": "Download a DXF. In Revit: open the template, then Insert → Link CAD (not File → Open).",

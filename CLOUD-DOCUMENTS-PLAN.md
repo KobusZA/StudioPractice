@@ -1,13 +1,28 @@
 # Plan: cloud documents — the job is a row, not a file
 
-Status: **steps 1 and 2 of the implementation order are built; there is still no
-server.** Document identity (`doc.id`, `doc.name`), `hasJobContent()`, the title
-block reading `doc.name`, and `web/v2/sync.js` — the coalescing save path with an
-honest save state — all exist and are tested. `PlanStore` no longer touches
-`localStorage`: it writes to a sink, and today's sink is a `localStorage`
-transport in the key and format it always used. Everything from step 3 on
-(accounts, `project`/`drawing` rows, the library, offline, notes) is unbuilt, so
-the app still has exactly one job in exactly one browser slot.
+Status: **steps 1 to 5 of the implementation order are built. A firm has a
+library of jobs, and opening one cannot touch another.** Document identity,
+`hasJobContent()`, the title block reading `doc.name`, and `web/v2/sync.js` are
+from steps 1–2. `server/` is step 3: Node and Postgres, accounts resolved through
+`membership`, `project` and `drawing` rows, `GET`/`PUT /api/drawings/:id` with
+`If-Match`, and an org-scoped data access layer no handler can bypass. Step 4
+points the planner at it — a sign-in veil, `httpTransport`, a conflict bar with
+the two choices, and the one-time import of the old `localStorage` key. Step 5 is
+the library: New, Open, Rename, Duplicate, Delete and Restore, with Demo house
+and the old Clear rewired as navigations.
+
+A drawing survives having its browser wiped: sign in, draw, clear all local
+storage, reload, and the job comes back from the server. Save, Save As, Clear and
+the file picker are gone, because nothing is replaced in place any more. Steps
+6–8 (underlay assets, offline, notes) are unbuilt, and the library says so where
+it would otherwise have to pretend: the per-row *On site* control is disabled
+with the reason, rather than claiming a job is cached when nothing caches it yet.
+
+Not deployed, and deliberately. The image, a two-container compose stack, the
+`.env` contract and a runbook with a smoke checklist are written
+(`server/README.md`), and **nothing is hosted**: that needs a hosting target and
+secrets, and guessing either would put a half-configured server in front of real
+work.
 
 This supersedes the earlier file-based Save/Open spec. That spec's goal is kept
 verbatim — *a builder can have more than one job and not lose work when he hits
@@ -180,7 +195,7 @@ a site-only or openings-only job is not shown as empty.
 | Command | Behaviour |
 |---|---|
 | `file-new` | `POST /api/projects` creates the job and its first drawing from `emptyDoc()` + `packId` → navigate. Requires a connection |
-| `file-open` | The project library: name, erf, thumbnail, last opened, offline badge. No file input |
+| `file-open` | The project library: name, erf, last opened. No file input, and **no thumbnail** — see the note below |
 | `file-rename` | Inline in the library and in the chrome. Sets `doc.name` and `project.name` together |
 | `file-duplicate` | Server-side copy with a **new id** and " (copy)" appended. This is what the old Save As was; against a row, keeping the same id would just overwrite it |
 | `file-delete` | Soft delete, undoable from the library |
@@ -189,13 +204,26 @@ Save and Save As do not exist. The chrome shows the job name, the sync state,
 and the offline lease when one is active.
 
 Demo house stops replacing the open plan: it creates a real project named
-"Demo house" from the existing `loadDemo()` geometry and navigates to it. Clear
-disappears — the `v2-clear` handler in `ui.js` becomes `file-new`. Both of
-today's buttons mutate `store.doc` in place, which is exactly the data loss the
-original spec was written to stop.
+"Demo house" from the existing demo geometry and navigates to it. Clear
+disappears — its handler became `file-new`. Both of those buttons used to mutate
+`store.doc` in place, which is exactly the data loss the original spec was
+written to stop.
 
 After any navigation: `syncPackLevels()`, level switcher, `render()`, undo stack
 reset, `clearUnderlay(store.doc)` before the incoming job's underlay loads.
+
+**No thumbnail, and no fake one.** A picture of the job would have to come from
+the geometry; a placeholder image is the plausible default `PHILOSOPHY.md`'s third
+principle refuses, and it would be believed. Name, erf and dates are facts the
+server already sends, and they are enough to pick a job out of a list. Rendering
+a real one from `compile()` output is a later, additive change.
+
+**Two rules the UI must hold, both about refusing rather than guessing.** Every
+switch of job flushes first and does not navigate while anything is unconfirmed —
+`DocSync.attach()` throws, and the caller turns that into a sentence, never a
+dropped queue. And New, Duplicate, Delete, Rename and the library itself need the
+server, so while the save path reports `offline` those commands are disabled with
+that as the reason, instead of failing after the click.
 
 ## 6. Offline
 
@@ -299,6 +327,15 @@ transport so its scheduler is testable without a network.
   `membership`; `If-Match` mismatch returns 409; soft delete hides from the
   library and is restorable; no code path issues a `DELETE FROM`.
 - The `localStorage` import runs once, creates one project, and clears the key.
+- Library: a queue that survived the flush blocks the navigation and is still
+  queued afterwards; an unanswered conflict blocks it too; a blocked open asks
+  the server for nothing at all. `file-new` refuses a document carrying the open
+  drawing's id. Duplicate returns a different drawing id and leaves the open
+  job's transport and queue untouched. Renaming the open job hands back a
+  revision to adopt; renaming another job adopts nothing. A row with no name
+  shows `—`, and a job never opened shows no date rather than today's.
+- Cookies: `Secure` follows `COOKIE_SECURE`, falls back to `NODE_ENV` when it is
+  unset, and falls back rather than reading a non-boolean value as truthy.
 
 ## 13. Docs to update
 
@@ -306,8 +343,16 @@ transport so its scheduler is testable without a network.
 identity keys; underlay is now stored; notes are rows, not a doc key.
 `PHILOSOPHY.md`: one sentence, if any — a job library is a behaviour, not a new
 engine — plus the round-trip-versus-one-way distinction, which is the reasoning
-future features will need to reuse. Ribbon hints: File items are commands, not
-todos.
+future features will need to reuse. Both are already there: "a library of jobs to
+open one from" sits in the behaviours list, and §"What leaves the app" carries the
+round-trip line.
+
+Ribbon hints: File items are commands, not todos — and in the built UI there are
+no File items on the ribbon at all. `ribbon.js` transcribes the customer's four
+toolbars plus Check, none of which is a File tab, so New, Open and Demo house are
+buttons in the chrome and Rename, Duplicate, Delete and Restore are per-row
+actions in the library. Adding a fifth-and-a-half tab would have changed what
+`ribbon.js` claims to be a transcription of, for no gain.
 
 ## 14. Room left for what comes after
 
@@ -347,18 +392,80 @@ statement — resolved before that work is scheduled, not while it is being buil
    right before a network is involved. What is *not* here: the chrome shows the
    job name and the save state, but New/Open/Rename/Duplicate/Delete are still
    step 5, so there is still one job in one slot and Clear still replaces it.
-3. Server: auth and `membership`, `project` + `drawing`, `PUT`/`GET` with
-   `If-Match`, deployment.
-4. Point `sync.js` at the server. Conflict handling. The `localStorage` import.
-5. Library UI: New, Open, Rename, Duplicate, Delete. Demo house and Clear
-   rewired as navigations.
+3. **Done, except deployment.** `server/`: auth and `membership`, `project` +
+   `drawing`, `PUT`/`GET` with `If-Match`, and the org scope living in
+   `src/store.js` rather than in each handler — `openStore()` demands an org and
+   a user, so a handler cannot ask for "project X", only for "project X in my
+   org". One dependency (`pg`); passwords are `node:crypto` scrypt and the
+   HTTP layer is `node:http`. Tables for `project_note` and `asset` exist with
+   no routes, because they are free now and a migration later. Tested against a
+   real Postgres, including that no source file contains a `DELETE FROM`.
+
+   **Deployment: the artefacts are done, the hosting is not, and the second half
+   is waiting on a decision rather than on work.** What exists: `server/Dockerfile`
+   (built from the repository root, because the image serves `web/` from the same
+   origin as the API), a compose stack with *both* services — Postgres and the
+   app, the app reaching the db by service name inside the network while 5440
+   stays published for `npm test` and a host-side `npm start` — the `.env`
+   contract, and `server/README.md` as the runbook plus a smoke checklist.
+
+   One thing changed in the server for this rather than being left as a trap:
+   the session cookie's `Secure` flag is now `COOKIE_SECURE`, defaulting to
+   `NODE_ENV`. `Secure` is a property of the connection and not of the build, and
+   a production image reached over plain HTTP sets a cookie the browser silently
+   drops — sign-in then appears to succeed and not have happened, with nothing in
+   any log. It is tested, including that an unreadable value falls back instead of
+   reading as truthy.
+
+   What is **not** done, and what it is waiting for: a named host. The deploy
+   shape — managed Postgres versus a container, where TLS terminates, how secrets
+   are stored — follows from that choice and cannot be written first. Guessing a
+   URL, a provider or a secret would be worse than being undeployed.
+4. **Done.** `sync.js` gained `httpTransport`; `web/v2/cloud.js` is the
+   accounts-and-library client, kept out of `sync.js` on purpose so a record
+   never inherits the drawing's scheduler. `DocSync.attach()` is the navigation
+   primitive step 5 needs, and it refuses while a write is unconfirmed rather
+   than dropping the queue. Conflict resolution is a bar with two buttons and no
+   default. The `localStorage` import runs once on sign-in, clears the key only
+   after the upload is confirmed, and leaves an unparseable document alone.
+   One design decision not in the plan: **`project.name` follows `doc.name` on
+   every accepted save**, so the library and the printed title block cannot
+   disagree within a keystroke of each other.
+5. **Done.** The library: New, Open, Rename, Duplicate, Delete and Restore, with
+   Demo house and Clear rewired as navigations. The endpoints already existed, so
+   this was the client half — `web/v2/library.js` for the behaviour (DOM-free and
+   tested against a real `DocSync` with a scripted transport) and an overlay in
+   `ui.js` for the rows.
+
+   Four decisions worth recording, because each one is a refusal:
+
+   - **A blocked navigation is a sentence, not a discard.** `flushForNavigation()`
+     writes what is pending and then checks; a queue that survived means the write
+     did not land, so the job stays open and says why. An unanswered `409` blocks
+     the same way, with its own wording.
+   - **`file-new` refuses a document wearing the open drawing's id** before it is
+     sent. Clear used to keep that id deliberately, because it was replacing that
+     row's contents; a *new row* carrying it would collide with the job it was
+     meant to leave alone.
+   - **Duplicate does not navigate.** It is something done to a row in the list,
+     and the open job has no reason to close. The copy is checked for having come
+     back with a different drawing id.
+   - **Delete is disabled on the open job** rather than deleting the row the
+     editor is attached to and then writing into it.
+
+   Renaming the open job adopts the revision the server's rewrite produced —
+   without that, the next autosave arrives with a stale `If-Match` and the job
+   conflicts with its own rename. `openMostRecentProject()` is gone: boot reopens
+   the last-opened job, and a firm with no jobs lands in the library with New,
+   which is the case that used to silently create a row.
 6. Underlay assets.
 7. Offline: pinning, the IndexedDB cache, the pending queue, the lease, and the
    disabled-tool states.
 8. Site notes.
 
-Steps 1–5 are the slice that stops data loss. 6–8 are what make it usable on a
-site with no signal, and are worth their own review before starting.
+Steps 1–5 are the slice that stops data loss, and they are built. 6–8 are what
+make it usable on a site with no signal, and are worth their own review before
+starting.
 
 ## Done when
 

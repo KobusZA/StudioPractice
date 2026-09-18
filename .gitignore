@@ -3,3 +3,9 @@ obj/
 .vs/
 *.user
 output/
+
+# The server's one dependency, and its secrets. .env.example is committed and
+# is the contract; .env never is.
+node_modules/
+.env
+*.log

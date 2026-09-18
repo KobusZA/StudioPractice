@@ -112,9 +112,99 @@
   font-weight: 600;
 }
 
+/* The row moved under us. Deliberately loud, deliberately two buttons, and
+   deliberately no default: picking one for the user is the silent merge the
+   plan refuses. */
+.conflict-bar {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--copper) 16%, transparent);
+  border: 1px solid var(--copper);
+  font-size: 0.76rem;
+}
+
+.conflict-bar[hidden] {
+  display: none;
+}
+
 .chrome .topbar button {
   padding: 3px 9px;
   font-size: 0.8rem;
+}
+
+/* Sign-in. A veil rather than a panel in the layout: there is nothing useful
+   to do behind it, because a drawing has nowhere to be saved until an account
+   owns it. */
+.auth-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: color-mix(in srgb, var(--ink, #1c1a17) 55%, transparent);
+  backdrop-filter: blur(2px);
+}
+
+.auth-veil[hidden] {
+  display: none;
+}
+
+.auth-card {
+  width: min(380px, 100%);
+  display: grid;
+  gap: 6px;
+  padding: 20px;
+}
+
+.auth-card h2 {
+  margin: 0;
+}
+
+.auth-card .auth-kicker {
+  margin: 0 0 8px;
+  font-size: 0.78rem;
+  opacity: 0.75;
+}
+
+.auth-card label {
+  font-size: 0.74rem;
+  font-weight: 600;
+  opacity: 0.8;
+}
+
+.auth-card input {
+  width: 100%;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 0.85rem;
+}
+
+.auth-card .auth-error {
+  margin: 4px 0 0;
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--copper);
+}
+
+.auth-card .auth-error[hidden] {
+  display: none;
+}
+
+.auth-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.auth-actions button {
+  flex: 1;
+  padding: 6px 10px;
+  font-size: 0.82rem;
 }
 
 @media (max-width: 960px) {
@@ -717,6 +807,13 @@
   overflow: auto;
 }
 
+.planner-inspector > .panel header span {
+  font-family: Fraunces, Georgia, serif;
+  font-size: 1.05rem;
+  font-weight: 500;
+  color: var(--ink);
+}
+
 #v2-inspect-empty {
   padding: 12px 16px 16px;
 }
@@ -1041,6 +1138,118 @@
 
 #v2-mass-close {
   margin-left: auto;
+}
+
+/* BOQ / BOM: Output > Schedules. Its own overlay for the same reason as the
+   HTML comment above it - a priced schedule and a compliance report answer
+   different questions and should not share a screen. */
+.schedule-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(20, 18, 15, 0.55);
+  padding: 24px;
+}
+
+.schedule-overlay[hidden] {
+  display: none !important;
+}
+
+.schedule-panel {
+  width: min(960px, 100%);
+  height: min(760px, 100%);
+  display: flex;
+  flex-direction: column;
+}
+
+.schedule-panel > header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.schedule-panel > header h2 {
+  margin: 0;
+  margin-right: auto;
+}
+
+.schedule-panel > header button {
+  font: inherit;
+  padding: 5px 10px;
+  border: 1px solid var(--ink);
+  background: #fff;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.schedule-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  margin-top: 10px;
+}
+
+/* One row per SKU, expandable to the individual elements behind it. */
+.schedule-group-row {
+  cursor: pointer;
+}
+
+.schedule-group-row .schedule-caret {
+  display: inline-block;
+  width: 1em;
+  transition: transform 0.1s ease;
+}
+
+.schedule-group-row.open .schedule-caret {
+  transform: rotate(90deg);
+}
+
+.schedule-elements-row > td {
+  padding: 0;
+  border-bottom: none;
+}
+
+.schedule-elements-row[hidden] {
+  display: none;
+}
+
+.schedule-elements {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 8px 10px 28px;
+  background: rgba(20, 18, 15, 0.03);
+}
+
+.schedule-element {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 3px 0;
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+}
+
+.schedule-element-id {
+  flex: 1;
+  font-family: monospace;
+}
+
+.schedule-locate {
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 2px 8px;
+  border: 1px solid var(--ink);
+  background: #fff;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.schedule-locate:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 /* Sheets: Output > Print > Sheets. A0-A4 title blocks; see sheets.js for the
@@ -1530,4 +1739,166 @@
     animation: none;
     transform: none;
   }
+}
+
+/* The job library. Modelled on the sheet overlay because it is the same kind of
+   surface: a list of things the document (here, the account) owns. */
+.library-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(20, 18, 15, 0.55);
+  padding: 24px;
+}
+
+.library-overlay[hidden] {
+  display: none !important;
+}
+
+.library-panel {
+  width: min(760px, 100%);
+  height: min(680px, 100%);
+  display: flex;
+  flex-direction: column;
+}
+
+.library-panel > header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.library-panel > header h2 {
+  margin: 0;
+  margin-right: auto;
+}
+
+.library-panel > header button {
+  font: inherit;
+  padding: 5px 10px;
+  border: 1px solid var(--ink);
+  background: #fff;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.library-message {
+  margin: 10px 0 0;
+  padding: 6px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--copper);
+  background: color-mix(in srgb, var(--copper) 14%, transparent);
+  font-size: 0.78rem;
+}
+
+.library-message[hidden] {
+  display: none;
+}
+
+.library-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.library-section {
+  margin: 10px 0 2px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.library-empty {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.library-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #fff;
+}
+
+.library-row.is-open {
+  border-color: var(--ink);
+  background: rgba(178, 69, 30, 0.08);
+}
+
+.library-row.is-deleted {
+  opacity: 0.65;
+}
+
+.library-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  text-align: left;
+  font: inherit;
+  border: 0;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.library-row-main:disabled {
+  cursor: default;
+}
+
+.library-row-name {
+  font-weight: 600;
+}
+
+.library-row-meta {
+  font-size: 0.74rem;
+  color: #6b5f52;
+}
+
+.library-row-name-input {
+  font: inherit;
+  font-weight: 600;
+  padding: 3px 6px;
+  border: 1px solid var(--ink);
+  border-radius: 3px;
+  width: min(22rem, 100%);
+}
+
+.library-row-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.library-row-actions button {
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.library-row-actions button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.library-foot {
+  margin: 12px 0 0;
 }

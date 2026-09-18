@@ -435,15 +435,75 @@ calls `store.persist()`; `persist()` now hands the document to
 the last one, and reports a state the chrome shows verbatim: `saved`, `pending`,
 `saving`, `offline` with a queue count, or `conflict`. An unconfirmed write is
 never rendered as "Saved" - the same "unknown is never a plausible default" rule
-this document applies to a SKU, applied to a save indicator. The transport behind
-it is still `localStorage`, in the same key and the same bare-document format it
-has always used; what exists is the seam, not a server. See
-[../../CLOUD-DOCUMENTS-PLAN.md](../../CLOUD-DOCUMENTS-PLAN.md).
+this document applies to a SKU, applied to a save indicator.
 
 `sync.js` is for the drawing only. Its contract - coalesce, then overwrite
 against an `If-Match` revision - suits a canvas someone is dragging walls around
 in, and is wrong for a quote or a legal document, which are records that need an
 audit trail rather than a scheduler.
+
+## There is no job file. The drawing is a row under a job
+
+The document's home is a `drawing` row in Postgres, beneath a `project` row that
+is the job; the server in [../../server/](../../server/) is the system of
+record, and the plan behind it is
+[../../CLOUD-DOCUMENTS-PLAN.md](../../CLOUD-DOCUMENTS-PLAN.md). Three
+consequences worth stating here rather than leaving to be discovered:
+
+- **A job is not a drawing.** The drawing is the first artefact a job owns.
+  Quotes, legal documents, supplier correspondence and a timeline become
+  siblings hanging off `project` later, not keys inside `doc`.
+- **There is no native file format, and no round trip.** Nothing downloads a
+  re-openable job. DXF and IFC are unchanged and remain one-way deliverables -
+  the distinction that matters is round-trip versus one-way, not open versus
+  closed.
+- **Nothing is hard-deleted**, and every row carries `created_by` and
+  `created_at`. A quote or a legal document without an author and a date is not
+  a record, and that cannot be reconstructed after the fact.
+
+The save path is [sync.js](sync.js)'s `httpTransport`: `PUT /api/drawings/:id`
+carrying an `If-Match` revision. `200` is adopted, a `409` stops writing and
+asks the user to choose between their version and the stored one - never a
+merge - and anything else queues and reports "Offline", never "Saved". A `401`
+is not queued: the session expired, the write is not going to land however long
+it waits, so the chrome asks for a sign-in instead.
+
+[cloud.js](cloud.js) is the other half - accounts and the job library - and is
+deliberately a separate file for the same reason `sync.js` is drawing-only.
+[library.js](library.js) is the behaviour on top of it, with no DOM in it: the
+five commands that replaced Save and Open, and the rule in front of all of them.
+
+`doc.name` is the single source of truth for the job's name: the server copies
+it onto `project.name` on every accepted save, so the library and the printed
+title block cannot disagree.
+
+**The commands are New, Open, Rename, Duplicate and Delete.** There is no Save,
+no Save As, no Clear and no file picker, because none of them replaces anything
+in place: each one navigates to a different row and the open job is already
+saved. Two of the consequences are visible in the UI and are deliberate:
+
+- **Every switch of job flushes first, and refuses to navigate while a write is
+  unconfirmed.** `DocSync.attach()` throws rather than adopting another job's
+  document over a standing queue, and the library says so in a sentence. Those
+  queued documents belong to the job being left; a silent discard is the data
+  loss this whole design exists to prevent.
+- **A library row shows a name, an erf and dates, and no thumbnail.** Rendering
+  one needs the geometry; a placeholder image would be a picture of a job nobody
+  drew, which is the plausible default this document refuses for a SKU. A job
+  with no name shows `—`, exactly as the title block prints it.
+
+New, Duplicate, Delete, Rename and the library itself need the server. While the
+save path reports `offline` those commands are disabled with that as the reason,
+rather than failing after the click. Offline *editing* is step 7 of the plan and
+is not a merge engine.
+
+**The underlay is no longer session-only.** It becomes an `asset` row with
+`doc.underlay` keeping placement plus an `assetId`, so a job opens on a second
+device with its scan and its scale intact. The table exists; the route is step 6.
+
+**Site notes are rows, not a document key** (`project_note`). Two devices' notes
+both arrive and cannot conflict, which is precisely why note-taking is allowed
+offline when geometry editing is not. The table exists; the route is step 8.
 
 ## Open decisions carried into week 2
 
@@ -488,10 +548,14 @@ audit trail rather than a scheduler.
 | [schema.js](schema.js) | Enums, required keys, `validatePack()`, `complianceGaps()` |
 | [geom.js](geom.js) | Polygon and segment maths, rectangle union |
 | [model.js](model.js) | Document model, shapes, room measures, store, v1 migration |
-| [sync.js](sync.js) | The drawing's save path: coalescing writes, an honest save state |
+| [sync.js](sync.js) | The drawing's save path: coalescing writes, an honest save state, the `If-Match` transport |
+| [cloud.js](cloud.js) | Accounts and the job library's requests, plus the one-time import of the old browser slot |
+| [library.js](library.js) | New, Open, Rename, Duplicate: flush-before-navigate, and what a row shows |
+| [../../server/](../../server/) | The system of record: accounts, `project` and `drawing` rows |
 | [walls.js](walls.js) | Wall derivation from polygons |
 | [openings.js](openings.js) | Host validation, opening placement, Part O areas |
 | [compile.js](compile.js) | Extract payload, recipes, quantities, base-attach resolution |
+| [schedule.js](schedule.js) | BOQ (priced) and BOM (unpriced) rollups of `compile()`'s instances, one line per SKU |
 | [ifc.js](ifc.js) | IFC 2x3 export: a model file Revit can Open → IFC, then Save As |
 | [dxf.js](dxf.js) | DXF export: 2D CAD Revit inserts with Link CAD, no add-in |
 | [migrate-pack.js](migrate-pack.js) | v1 to v2 pack migration plus gap report |
@@ -503,4 +567,4 @@ audit trail rather than a scheduler.
 | [sheets.js](sheets.js) | Week 3: A0-A4 title blocks, scale, revisions |
 | [modify.js](modify.js) | Rotate, mirror, copy, align, merge, split, cut, join, attach/detach base |
 | [underlay.js](underlay.js) | PDF and image underlay with two-point calibration |
-| [tests/](tests/) | 361 tests over all of the above |
+| [tests/](tests/) | 409 tests over all of the above |

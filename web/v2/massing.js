@@ -643,6 +643,15 @@ export function createMassingView({ canvas, emptyEl, captionEl, titleEl, onDraw 
   }
 
   function hatchCut(pts, stroke) {
+    let area = 0;
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[i];
+      const b = pts[(i + 1) % pts.length];
+      area += a[0] * b[1] - b[0] * a[1];
+    }
+    // A flattened receding face is a line. Clipping to that path does not
+    // contain the hatch, so the 45° strokes run across the bounding box.
+    if (Math.abs(area) / 2 < 12) return;
     ctx.save();
     ctx.beginPath();
     pts.forEach((p, i) => (i === 0 ? ctx.moveTo(p[0], p[1]) : ctx.lineTo(p[0], p[1])));

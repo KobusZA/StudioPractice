@@ -30,13 +30,24 @@
                autocomplete="off" spellcheck="false" maxlength="120" />
         <span class="sync-state" id="v2-sync-state" data-kind="saved">Saved</span>
       </div>
+      <!-- The row moved under us. Both choices are the user's; nothing is
+           merged, and nothing is picked by default. -->
+      <div class="conflict-bar" id="v2-conflict" hidden>
+        <span id="v2-conflict-text">This drawing changed somewhere else.</span>
+        <button type="button" id="v2-conflict-theirs">Reload theirs</button>
+        <button type="button" id="v2-conflict-mine">Overwrite with mine</button>
+      </div>
       <div class="actions">
         <div class="seg" role="group" aria-label="Ribbon density">
           <button type="button" data-density="simple" class="active">Simple</button>
           <button type="button" data-density="full">Full</button>
         </div>
+        <!-- File commands. There is no Save and no Save As: the open job is
+             already saved, and each of these navigates to a different row
+             rather than replacing what is on screen. -->
+        <button type="button" id="v2-new">New</button>
+        <button type="button" id="v2-open">Open</button>
         <button type="button" id="v2-demo">Demo house</button>
-        <button type="button" id="v2-clear">Clear</button>
         <button type="button" class="primary" id="v2-compile">Compile</button>
       </div>
     </header>
@@ -327,6 +338,21 @@
     </div>
   </div>
 
+  <!-- Output > Schedules. Its own overlay rather than a Check tab: compliance
+       and data-quality gaps are about the pack's SKUs, not about pricing or
+       counting what was drawn, and a customer looking at a quote should not
+       have to scroll past "cannot check" zoning findings to get to it. -->
+  <div class="schedule-overlay" id="v2-schedule-overlay" hidden>
+    <div class="panel schedule-panel">
+      <header>
+        <h2 id="v2-schedule-title">Schedule</h2>
+        <span id="v2-schedule-kicker">—</span>
+        <button type="button" id="v2-schedule-close">Close</button>
+      </header>
+      <div class="schedule-body" id="v2-schedule-body"></div>
+    </div>
+  </div>
+
   <div class="mass-overlay" id="v2-mass-overlay" hidden>
     <div class="panel mass-panel">
       <header>
@@ -405,6 +431,25 @@
           </div>
         </section>
       </div>
+    </div>
+  </div>
+
+  <!-- The job library: what replaced Open, and the only place a soft-deleted
+       job can be brought back from. Rows carry a name, an erf and dates -
+       facts the server sent - and no thumbnail, because a placeholder image
+       would be a picture of a job nobody drew. -->
+  <div class="library-overlay" id="v2-library-overlay" hidden>
+    <div class="panel library-panel" role="dialog" aria-modal="true" aria-labelledby="v2-library-title">
+      <header>
+        <h2 id="v2-library-title">Jobs</h2>
+        <button type="button" id="v2-library-new">New job</button>
+        <button type="button" id="v2-library-signout">Sign out</button>
+        <button type="button" id="v2-library-close">Close</button>
+      </header>
+      <p class="library-message" id="v2-library-message" hidden></p>
+      <div class="library-list" id="v2-library-list"></div>
+      <p class="hint library-foot">Jobs live on your firm's account and save as you draw. There is no job
+        file to keep track of, and nothing here is ever really deleted.</p>
     </div>
   </div>
 
@@ -520,6 +565,35 @@
     </div>
   </div>
 
-  <script type="module" src="./ui.js?v=20260917-about"></script>
+  <!-- Sign-in. The server is the system of record, so there is no useful
+       anonymous state to fall into: a drawing has nowhere to be saved until
+       there is an account to own it. -->
+  <div class="auth-veil" id="v2-auth" hidden>
+    <form class="auth-card panel" id="v2-auth-form">
+      <h2 id="v2-auth-title">Sign in</h2>
+      <p class="auth-kicker" id="v2-auth-kicker">Your jobs are saved to your firm's account.</p>
+
+      <label for="v2-auth-email">Email</label>
+      <input id="v2-auth-email" type="email" autocomplete="email" required />
+
+      <label for="v2-auth-password">Password</label>
+      <input id="v2-auth-password" type="password" autocomplete="current-password"
+             required minlength="10" />
+
+      <div id="v2-auth-org-wrap" hidden>
+        <label for="v2-auth-org">Firm name</label>
+        <input id="v2-auth-org" type="text" autocomplete="organization" />
+      </div>
+
+      <p class="auth-error" id="v2-auth-error" role="alert" hidden></p>
+
+      <div class="auth-actions">
+        <button type="submit" class="primary" id="v2-auth-submit">Sign in</button>
+        <button type="button" id="v2-auth-toggle">Create an account</button>
+      </div>
+    </form>
+  </div>
+
+  <script type="module" src="./ui.js?v=20260918-library"></script>
 </body>
 </html>

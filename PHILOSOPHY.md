@@ -25,9 +25,10 @@ it is to keep the *behaviours* and drop the *engines*.
 
 A **behaviour** is something a Revit-trained person already knows: levels and a
 storey cut, look-down underlay, attach base/top, snapping, groups, mirror and
-align, sheets with a title block, one storey at a time. These are cheap to
-build, they are the accumulated result of other people thinking hard about the
-problem, and copying one costs a user nothing to learn. Copy them freely.
+align, sheets with a title block, one storey at a time, a library of jobs to
+open one from. These are cheap to build, they are the accumulated result of
+other people thinking hard about the problem, and copying one costs a user
+nothing to learn. Copy them freely.
 
 An **engine** is family authoring, MEP routing, a general constraint solver,
 solid geometry booleans, structural analysis, photoreal rendering, and true
@@ -63,6 +64,23 @@ to say "pass," the C# connector emits facts while `build-pack.js` owns every
 judgement, and every gap surfaces in a report instead of defaulting to
 something believable. This is the rule the whole product's credibility rests
 on, and it is not negotiable under schedule pressure.
+
+## What leaves the app: round-trip versus one-way
+
+The line that decides whether a format may be written is **round-trip versus
+one-way**, not open versus closed.
+
+A DXF or an IFC is a **deliverable**: nobody re-opens one here as the same
+editable job, and the purpose statement above names a permit set and a Revit
+handoff, so both stay exactly as they are. A re-openable job document is a
+different thing - it is a second editor's input and the copy a customer takes
+with them - and it is not written. The job lives on the server as a row, and the
+only ways data leaves are the existing one-way exports. See
+[CLOUD-DOCUMENTS-PLAN.md](CLOUD-DOCUMENTS-PLAN.md).
+
+Two limits are recorded there rather than designed against: a browser cannot
+prevent local copies, and offline access without an expiry is a permanent free
+licence.
 
 ## Which blocks are allowed to refuse a feature
 

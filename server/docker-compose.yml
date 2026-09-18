@@ -1,0 +1,71 @@
+# The whole system of record on one machine: Postgres, and the app that serves
+# both the API and the planner from one origin.
+#
+# Nothing here is a deployment. It is the same two containers a host would run,
+# with the values a laptop needs, so that "it works in compose" and "it works on
+# a host" differ by the environment block and not by the architecture.
+#
+#   cd server
+#   docker compose up -d --build      # both services
+#   docker compose up -d db           # just Postgres, which is what npm test wants
+#
+# See README.md for the rest of the runbook.
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: studiopractice
+      POSTGRES_PASSWORD: studiopractice
+      POSTGRES_DB: studiopractice
+    # Not 5432, and not the next two either: a machine with Revit on it tends to
+    # have collected a few Postgres installs, and binding a port one of them
+    # already owns fails as "password authentication failed" against somebody
+    # else's database rather than as an honest refusal to start. Not a 5xxxx
+    # port either - Windows reserves large blocks up there for Hyper-V, and
+    # Docker reports those as already allocated.
+    #
+    # This publish is for the host: `npm test` and `npm start` outside Docker.
+    # The app service below does not use it - it reaches the db by service name
+    # on 5432, inside the compose network.
+    ports:
+      - "5440:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U studiopractice -d studiopractice"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  app:
+    # The build context is the repository root, not server/: the image serves
+    # web/ from the same origin as the API (src/static.js), so it needs both
+    # directories. Equivalent by hand:
+    #   docker build -f server/Dockerfile -t studiopractice-server ..
+    build:
+      context: ..
+      dockerfile: server/Dockerfile
+    environment:
+      # Inside the network, not the published 5440. `db` is the service name.
+      DATABASE_URL: postgres://studiopractice:studiopractice@db:5432/studiopractice
+      NODE_ENV: production
+      PORT: 8080
+      # Plain HTTP on localhost. A Secure cookie here is dropped by the browser
+      # and sign-in fails silently, so this is 0 until there is HTTPS in front -
+      # at which point it is 1, and so is TRUST_PROXY.
+      COOKIE_SECURE: "0"
+      TRUST_PROXY: "0"
+      # Same origin serves the planner, so no cross-origin request is expected
+      # and none is allowed.
+      ALLOWED_ORIGINS: ""
+    ports:
+      - "8080:8080"
+    # The schema is applied on boot (server.js) and is idempotent, so the only
+    # ordering requirement is that Postgres is actually accepting connections.
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  db-data:
