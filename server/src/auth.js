@@ -113,7 +113,15 @@ export async function signUp(pool, { email, password, orgName }) {
     // The role travels with the account rather than being looked up again: the
     // caller is about to render chrome that depends on it, and the membership
     // row it would re-read was written two statements ago.
-    return { userId, orgId, email: clean, role: "owner", ...session };
+    return {
+      userId,
+      orgId,
+      email: clean,
+      orgName: String(orgName || "").trim() || clean,
+      role: "owner",
+      memberSince: new Date().toISOString(),
+      ...session,
+    };
   });
 }
 
@@ -139,9 +147,10 @@ export async function signIn(pool, { email, password }) {
   // a user whose firm was deleted has a correct password and no org, and
   // "email or password is incorrect" would be a lie about which thing is wrong.
   const { rows: memberships } = await pool.query(
-    `select m.org_id, m.role
+    `select m.org_id, m.role, o.name as org_name, u.created_at as member_since
        from membership m
        join org o on o.id = m.org_id and o.deleted_at is null
+       join app_user u on u.id = m.user_id
       where m.user_id = $1 and m.deleted_at is null
       limit 1`,
     [user.id],
@@ -153,7 +162,9 @@ export async function signIn(pool, { email, password }) {
     userId: user.id,
     email: clean,
     orgId: memberships[0].org_id,
+    orgName: memberships[0].org_name,
     role: memberships[0].role,
+    memberSince: memberships[0].member_since,
     ...session,
   };
 }
@@ -192,8 +203,10 @@ export async function resolveSession(pool, token) {
             s.offline_until,
             u.id        as user_id,
             u.email,
+            u.created_at as member_since,
             m.org_id,
-            m.role
+            m.role,
+            o.name     as org_name
        from session s
        join app_user u on u.id = s.user_id and u.deleted_at is null
        join membership m on m.user_id = u.id and m.deleted_at is null
@@ -211,7 +224,9 @@ export async function resolveSession(pool, token) {
     userId: row.user_id,
     email: row.email,
     orgId: row.org_id,
+    orgName: row.org_name,
     role: row.role,
+    memberSince: row.member_since,
     expiresAt: row.expires_at,
     offlineUntil: row.offline_until,
   };

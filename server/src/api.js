@@ -11,6 +11,7 @@ import { withTransaction } from "./db.js";
 import {
   HttpError, clearedCookie, createRouter, parseCookies, readJsonBody, sendJson, sessionCookie,
 } from "./http.js";
+import { generateVisualization } from "./visualize.js";
 
 /**
  * `env` is a parameter rather than a read of `process.env` inside so that the
@@ -28,6 +29,8 @@ export function createApi(pool, options = {}, env = process.env) {
   const allowedOrigins = options.allowedOrigins
     ?? String(env.ALLOWED_ORIGINS || "").split(",").filter(Boolean);
   const rateLimiter = options.rateLimiter ?? new RateLimiter();
+  const openaiApiKey = options.openaiApiKey ?? env.OPENAI_API_KEY;
+  const openaiFetch = options.openaiFetch ?? globalThis.fetch.bind(globalThis);
 
   const match = createRouter([
     ["POST", "/api/auth/sign-up", handleSignUp],
@@ -45,9 +48,13 @@ export function createApi(pool, options = {}, env = process.env) {
 
     ["GET", "/api/drawings/:id", handleGetDrawing],
     ["PUT", "/api/drawings/:id", handlePutDrawing],
+
+    ["POST", "/api/visualize", handleVisualize],
   ]);
 
-  const context = { pool, secureCookies, allowedOrigins, rateLimiter };
+  const context = {
+    pool, secureCookies, allowedOrigins, rateLimiter, openaiApiKey, openaiFetch,
+  };
 
   /** Returns true when it handled the request, so a static handler can follow. */
   return async function api(req, res) {
@@ -250,6 +257,33 @@ async function handlePutDrawing({ req, res, pool, params }) {
   sendJson(res, 200, { drawing: saved }, { ETag: revisionTag(saved.revision) });
 }
 
+// --- visualization ---------------------------------------------------------
+
+async function handleVisualize({ req, res, pool, rateLimiter, openaiApiKey, openaiFetch }) {
+  const session = await requireSession(pool, req);
+  if (!String(openaiApiKey || "").trim()) {
+    throw new HttpError(503, "Visualization is not configured");
+  }
+  if (!rateLimiter.check(`visualize|${session.userId}`)) {
+    throw new AuthError(429, "Too many visualization requests. Try again shortly.");
+  }
+  const body = (await readJsonBody(req)) || {};
+  try {
+    const image = await generateVisualization({
+      apiKey: openaiApiKey,
+      image: body.image,
+      fetch: openaiFetch,
+    });
+    sendJson(res, 200, { image });
+  } catch (error) {
+    if (error.status === 400) throw new HttpError(400, "A drawing image is required");
+    if (error.status === 503) throw new HttpError(503, "Visualization is not configured");
+    if (error.status === 402) throw new HttpError(402, error.message);
+    console.error("visualize failed", error.status || 502, error.code || "");
+    throw new HttpError(502, "The visualization could not be generated");
+  }
+}
+
 // --- shared ----------------------------------------------------------------
 
 /** `1`/`true` on, `0`/`false` off, unset falls back - never a truthy string. */
@@ -266,7 +300,9 @@ function sessionPayload(session) {
     userId: session.userId,
     email: session.email,
     orgId: session.orgId ?? null,
+    orgName: session.orgName ?? null,
     role: session.role ?? null,
+    memberSince: session.memberSince ? new Date(session.memberSince).toISOString() : null,
     offlineUntil: session.offlineUntil ?? null,
   };
 }

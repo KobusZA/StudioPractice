@@ -107,6 +107,12 @@ export function createCloud({
     restoreProject(projectId) {
       return call("POST", `/api/projects/${encodeURIComponent(projectId)}/restore`);
     },
+
+    /** Snapshot in, photorealistic visualization out. The key stays on the server. */
+    async visualize({ image }) {
+      const body = await call("POST", "/api/visualize", { image });
+      return body?.image ?? null;
+    },
   };
 }
 

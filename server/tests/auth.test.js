@@ -41,6 +41,8 @@ test("sign-up creates a firm, signs the owner in, and reports the org", async ()
   const session = await client.get("/api/auth/session");
   assert.equal(session.body.signedIn, true);
   assert.equal(session.body.orgId, account.orgId);
+  assert.equal(session.body.orgName, "Acme Builders");
+  assert.ok(session.body.memberSince);
 });
 
 test("the session cookie is httpOnly and SameSite=Lax", async () => {

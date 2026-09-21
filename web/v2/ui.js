@@ -129,6 +129,8 @@ import { CloudError, createCloud, importLocalDocument } from "./cloud.js";
 import {
   NavigationBlocked, createJob, duplicateJob, jobRowFields, openJob, renameJob, splitLibrary,
 } from "./library.js";
+import { SAMPLE_JOBS, drawingBounds, sampleJobById } from "./samples.js";
+import { accountCard, formatDate } from "./profile.js";
 
 const GRID = 0.1;
 const MIN_ROOM = 1;
@@ -166,6 +168,8 @@ const el = {
   libraryOverlay: document.getElementById("v2-library-overlay"),
   libraryList: document.getElementById("v2-library-list"),
   libraryMessage: document.getElementById("v2-library-message"),
+  libraryTitle: document.getElementById("v2-library-title"),
+  libraryKicker: document.getElementById("v2-library-kicker"),
   libraryNew: document.getElementById("v2-library-new"),
   librarySignOut: document.getElementById("v2-library-signout"),
   libraryClose: document.getElementById("v2-library-close"),
@@ -237,12 +241,38 @@ const el = {
   inspectKicker: document.getElementById("v2-inspect-kicker"),
   inspectEmpty: document.getElementById("v2-inspect-empty"),
   inspectFields: document.getElementById("v2-inspect-fields"),
+  dockContext: document.getElementById("v2-dock-context"),
+  ctxTypePicker: document.getElementById("v2-ctx-type-picker"),
+  typeCurrent: document.getElementById("v2-type-current"),
+  typeCurrentName: document.getElementById("v2-type-current-name"),
+  typeCurrentMeta: document.getElementById("v2-type-current-meta"),
+  typeFlyout: document.getElementById("v2-type-flyout"),
   checkOverlay: document.getElementById("v2-check-overlay"),
   checkClose: document.getElementById("v2-check-close"),
   aboutOverlay: document.getElementById("v2-about-overlay"),
   aboutOpen: document.getElementById("v2-about-open"),
   aboutClose: document.getElementById("v2-about-close"),
   aboutOk: document.getElementById("v2-about-ok"),
+  account: document.getElementById("v2-account"),
+  accountOpen: document.getElementById("v2-account-open"),
+  accountOverlay: document.getElementById("v2-account-overlay"),
+  accountClose: document.getElementById("v2-account-close"),
+  accountAvatar: document.getElementById("v2-account-avatar"),
+  accountAvatarLg: document.getElementById("v2-account-avatar-lg"),
+  accountName: document.getElementById("v2-account-name"),
+  accountEmail: document.getElementById("v2-account-email"),
+  accountPlan: document.getElementById("v2-account-plan"),
+  accountRole: document.getElementById("v2-account-role"),
+  accountLicenseLeft: document.getElementById("v2-account-license-left"),
+  accountMeter: document.getElementById("v2-account-meter"),
+  accountLicenseRenews: document.getElementById("v2-account-license-renews"),
+  accountSeats: document.getElementById("v2-account-seats"),
+  accountFirm: document.getElementById("v2-account-firm"),
+  accountAddress: document.getElementById("v2-account-address"),
+  accountMember: document.getElementById("v2-account-member"),
+  accountJobs: document.getElementById("v2-account-jobs"),
+  accountJobsBtn: document.getElementById("v2-account-jobs-btn"),
+  accountSignOut: document.getElementById("v2-account-signout"),
   ctxName: document.getElementById("v2-ctx-name"),
   ctxNameWrap: document.getElementById("v2-ctx-name-wrap"),
   ctxUse: document.getElementById("v2-ctx-use"),
@@ -274,6 +304,11 @@ const el = {
   massCanvas: document.getElementById("v2-mass-canvas"),
   massEmpty: document.getElementById("v2-mass-empty"),
   massCaption: document.getElementById("v2-mass-caption"),
+  massGenerate: document.getElementById("v2-mass-generate"),
+  massShow3d: document.getElementById("v2-mass-show-3d"),
+  massRender: document.getElementById("v2-mass-render"),
+  massRenderImg: document.getElementById("v2-mass-render-img"),
+  massRenderStatus: document.getElementById("v2-mass-render-status"),
   massClose: document.getElementById("v2-mass-close"),
   massPanel: document.querySelector("#v2-mass-overlay .mass-panel"),
   massPlanWrap: document.getElementById("v2-mass-plan-wrap"),
@@ -443,6 +478,7 @@ function syncLookPlan(cam, payload) {
   if (el.massPanel) el.massPanel.classList.toggle("mass-panel--look", isLook);
   if (el.massPlanWrap) el.massPlanWrap.hidden = !isLook;
   if (el.massViewLabel) el.massViewLabel.textContent = isLook ? "What you will see" : cam?.mode === "section" ? "Section" : "3D";
+  syncGenerateEnabled();
   if (!isLook || !el.massPlanCanvas) return;
   drawLookPlan(el.massPlanCanvas, payload, cam);
   if (el.massCaption) {
@@ -505,6 +541,7 @@ async function boot() {
   wireCheck();
   wireSchedule();
   wireAbout();
+  wireAccount();
   wireSheets();
   wireJobName();
   wireAuth();
@@ -539,21 +576,20 @@ async function restoreSession() {
     return;
   }
   if (!session) {
+    currentSession = null;
+    drawAccount();
     showAuth();
     return;
   }
+  currentSession = session;
   await enterApp();
 }
 
 /**
- * Signed in: recover anything left in the old browser slot, then land somewhere.
- * The import runs first so that the recovered work is a candidate for being the
- * job we land in, rather than appearing behind it.
- *
- * Landing is the last job this account opened - the server's `opened_at`, which
- * `GET /api/projects/:id` maintains - because that is the job the person was in
- * when they closed the tab. A firm with no jobs at all gets the library and its
- * New button, not a canvas that looks like a drawing but belongs to no row.
+ * Signed in: recover anything left in the old browser slot, then land on the
+ * job list. The canvas is a drawing that already has a row; opening one is a
+ * choice, not the default. Reconnects that already have a job attached stay
+ * there — the retry after a dropped connection must not yank the work away.
  */
 async function enterApp() {
   try {
@@ -564,14 +600,20 @@ async function enterApp() {
       setStatusMessage("A drawing in this browser could not be read, and was left alone", "warn");
     }
     const projects = await cloud.listProjects();
-    hideAuth();
-    const mostRecent = projects.find((p) => p.openedAt) || projects[0];
-    if (mostRecent) {
-      await openJob({ cloud, sync, projectId: mostRecent.id, apply: applyOpenedJob });
-      return;
+    const jobs = splitLibrary(projects).jobs;
+    setAccountJobCount(jobs.length);
+    // Cover the editor before the login veil lifts, unless this is a reconnect
+    // that already has a job on screen.
+    if (!openDrawingId && el.libraryOverlay) {
+      el.libraryOverlay.hidden = false;
+      document.body.classList.add("library-home");
     }
+    hideAuth();
+    if (openDrawingId) return;
     await openLibrary({
-      message: "No jobs yet. New job starts one - it saves to your firm's account as you draw.",
+      message: jobs.length
+        ? ""
+        : "No drawings yet. New drawing starts one — it saves to your firm's account as you draw.",
     });
   } catch (error) {
     if (error instanceof CloudError && error.authRequired) {
@@ -635,7 +677,24 @@ function applyOpenedJob({ project, drawing }) {
   syncPackLevels();
   drawLevelSwitcher();
   drawJobName();
+  frameDrawing(store.doc);
   render();
+}
+
+/** After Open / Create, put the whole drawing on screen. New empty jobs stay put. */
+function frameDrawing(doc) {
+  const b = drawingBounds(doc);
+  if (!b || !el.canvas) return;
+  const rect = el.canvas.getBoundingClientRect();
+  if (rect.width < 8 || rect.height < 8) return;
+  const pad = 1.4;
+  const w = Math.max(1, b.maxX - b.minX + pad * 2);
+  const h = Math.max(1, b.maxY - b.minY + pad * 2);
+  cam.scale = Math.min(90, Math.max(18, Math.min((rect.width - 48) / w, (rect.height - 48) / h)));
+  const cx = (b.minX + b.maxX) / 2;
+  const cy = (b.minY + b.maxY) / 2;
+  cam.ox = rect.width / 2 - cx * cam.scale;
+  cam.oy = rect.height / 2 - cy * cam.scale;
 }
 
 function offlineMessage(error) {
@@ -651,8 +710,16 @@ function offlineMessage(error) {
 let authMode = "sign-in";
 
 function showAuth({ message = "", signedOut = true } = {}) {
+  if (signedOut) {
+    currentSession = null;
+    setAccountOpen(false);
+    drawAccount();
+  }
+  if (el.libraryOverlay) el.libraryOverlay.hidden = true;
+  document.body.classList.remove("library-home");
   if (!el.auth) return;
   el.auth.hidden = false;
+  document.body.classList.add("login-active", "auth-pending");
   setAuthError(message);
   // A dropped connection is not a credentials problem, so do not invite a
   // password that has nowhere to go; offer the retry instead.
@@ -665,7 +732,10 @@ function showAuth({ message = "", signedOut = true } = {}) {
 function hideAuth() {
   if (!el.auth) return;
   el.auth.hidden = true;
+  document.body.classList.remove("login-active", "auth-pending");
   setAuthError("");
+  syncLibrarySurface();
+  resizeCanvas();
 }
 
 function setAuthError(message) {
@@ -691,8 +761,77 @@ function drawAuthMode() {
   setAuthError("");
 }
 
+function initAuthGlint(card) {
+  if (!card || card.dataset.glintInit) return;
+  card.dataset.glintInit = "1";
+
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (reducedMotion) return;
+
+  const GLINT_DUR = 0.48;
+  const PAIR_GAP = 120;
+  const IDLE_MIN = 1800;
+  const IDLE_MAX = 4500;
+
+  const glints = {
+    top: card.querySelector(".auth-glint-top"),
+    bottom: card.querySelector(".auth-glint-bottom"),
+    left: card.querySelector(".auth-glint-left"),
+    right: card.querySelector(".auth-glint-right"),
+  };
+  if (!glints.top) return;
+
+  let glintTimer = null;
+
+  function rand(min, max) {
+    return min + Math.random() * (max - min);
+  }
+
+  function sizeCard() {
+    card.style.setProperty("--login-card-w", `${card.offsetWidth}px`);
+    card.style.setProperty("--login-card-h", `${card.offsetHeight}px`);
+  }
+
+  sizeCard();
+  new ResizeObserver(sizeCard).observe(card);
+
+  function runGlint(node, animClass) {
+    node.classList.remove("run-h-ltr", "run-h-rtl", "run-v-ttb", "run-v-btt");
+    void node.offsetWidth;
+    node.style.setProperty("--login-glint-dur", `${GLINT_DUR}s`);
+    node.classList.add(animClass);
+    node.addEventListener("animationend", () => node.classList.remove(animClass), { once: true });
+  }
+
+  function burstGlint() {
+    const horizontal = Math.random() < 0.62;
+    const ltr = Math.random() < 0.5;
+    const hAnim = ltr ? "run-h-ltr" : "run-h-rtl";
+    const vAnim = Math.random() < 0.5 ? "run-v-ttb" : "run-v-btt";
+    const side = Math.random() < 0.5 ? glints.left : glints.right;
+
+    if (horizontal) {
+      runGlint(glints.top, hAnim);
+      setTimeout(() => runGlint(glints.bottom, hAnim), PAIR_GAP);
+    } else {
+      runGlint(side, vAnim);
+    }
+
+    const sweepMs = horizontal ? GLINT_DUR * 1000 + PAIR_GAP + 80 : GLINT_DUR * 1000 + 80;
+    glintTimer = setTimeout(scheduleGlint, sweepMs + rand(IDLE_MIN, IDLE_MAX));
+  }
+
+  function scheduleGlint() {
+    if (glintTimer) clearTimeout(glintTimer);
+    glintTimer = setTimeout(burstGlint, rand(600, 1400));
+  }
+
+  scheduleGlint();
+}
+
 function wireAuth() {
   if (!el.authForm) return;
+  initAuthGlint(el.authForm);
 
   el.authToggle.addEventListener("click", () => {
     authMode = authMode === "sign-in" ? "sign-up" : "sign-in";
@@ -719,8 +858,9 @@ function wireAuth() {
     el.authSubmit.textContent = authMode === "sign-in" ? "Signing in…" : "Creating…";
     setAuthError("");
     try {
-      if (authMode === "sign-in") await cloud.signIn({ email, password });
-      else await cloud.signUp({ email, password, orgName });
+      currentSession = authMode === "sign-in"
+        ? await cloud.signIn({ email, password })
+        : await cloud.signUp({ email, password, orgName });
       // Not kept anywhere: the session is an httpOnly cookie, and this field
       // is the only place the password ever existed.
       el.authPassword.value = "";
@@ -736,6 +876,90 @@ function wireAuth() {
   });
 
   drawAuthMode();
+}
+
+// --- the account menu --------------------------------------------------
+//
+// Who is signed in, what the firm is paying for, and how many jobs sit on
+// the account. Session facts come from the server; the licence meter is
+// preview chrome (see profile.js) so the same account always looks the same.
+
+let currentSession = null;
+let accountJobCount = 0;
+
+function setAccountJobCount(count) {
+  accountJobCount = Number(count) || 0;
+  drawAccount();
+}
+
+function setAccountOpen(open) {
+  if (!el.accountOverlay || !el.accountOpen) return;
+  el.accountOverlay.hidden = !open;
+  el.accountOpen.setAttribute("aria-expanded", open ? "true" : "false");
+}
+
+function accountIsOpen() {
+  return Boolean(el.accountOverlay && !el.accountOverlay.hidden);
+}
+
+function drawAccount() {
+  if (!el.account) return;
+  if (!currentSession) {
+    setAccountOpen(false);
+    el.account.hidden = true;
+    return;
+  }
+  el.account.hidden = false;
+  const card = accountCard(currentSession, { jobCount: accountJobCount });
+  const setText = (node, value) => { if (node) node.textContent = value; };
+  setText(el.accountAvatar, card.initials);
+  setText(el.accountAvatarLg, card.initials);
+  setText(el.accountName, card.name);
+  setText(el.accountEmail, card.email);
+  setText(el.accountPlan, card.license.level);
+  setText(el.accountRole, card.role);
+  setText(el.accountLicenseLeft, `${card.licenseLeft} left`);
+  setText(el.accountLicenseRenews, `Renews ${card.licenseRenews}`);
+  setText(el.accountSeats, `${card.license.seatsUsed} of ${card.license.seatsIncluded} seats`);
+  setText(el.accountFirm, card.orgName);
+  setText(el.accountAddress, card.address.lines.join("\n"));
+  setText(el.accountMember, card.memberSince
+    ? `${card.memberFor} · since ${formatDate(card.memberSince)}`
+    : "—");
+  setText(el.accountJobs, card.jobCount === 1 ? "1 live job" : `${card.jobCount} live jobs`);
+  if (el.accountMeter) el.accountMeter.style.width = `${Math.round(card.license.yearProgress * 100)}%`;
+  if (el.accountOpen) {
+    el.accountOpen.title = `${card.name} · ${card.license.level}`;
+  }
+}
+
+function wireAccount() {
+  if (!el.accountOpen) return;
+
+  el.accountOpen.addEventListener("click", async () => {
+    if (accountIsOpen()) {
+      setAccountOpen(false);
+      return;
+    }
+    drawAccount();
+    setAccountOpen(true);
+    try {
+      const projects = await cloud.listProjects();
+      setAccountJobCount(splitLibrary(projects).jobs.length);
+    } catch {
+      // Stale count is still a count; the page stays up.
+    }
+  });
+
+  el.accountClose?.addEventListener("click", () => setAccountOpen(false));
+  el.accountJobsBtn?.addEventListener("click", () => {
+    setAccountOpen(false);
+    openLibrary();
+  });
+  el.accountSignOut?.addEventListener("click", () => {
+    setAccountOpen(false);
+    runSignOut();
+  });
 }
 
 // --- the job library ---------------------------------------------------
@@ -771,6 +995,7 @@ function connectionBlocked() {
 async function openLibrary({ message = "" } = {}) {
   if (!el.libraryOverlay) return;
   el.libraryOverlay.hidden = false;
+  syncLibrarySurface();
   setLibraryMessage(message);
   await refreshLibrary({ keepMessage: Boolean(message) });
 }
@@ -780,11 +1005,34 @@ function closeLibrary() {
   // With no job open there is nothing behind this but a canvas that belongs to
   // no row and cannot be saved, so the way out is New or Open, not Close.
   if (!openDrawingId) {
-    setLibraryMessage("Open a job or start a new one - there is nothing open behind this.");
+    setLibraryMessage("Open a drawing or start a new one — there is nothing open behind this.");
     return;
   }
   el.libraryOverlay.hidden = true;
   renamingProjectId = null;
+  syncLibrarySurface();
+}
+
+/**
+ * The same overlay is the post-login landing and the in-editor Open dialog.
+ * With no drawing attached it is a page, not a veil over a canvas that cannot
+ * be saved.
+ */
+function syncLibrarySurface() {
+  const visible = Boolean(el.libraryOverlay && !el.libraryOverlay.hidden);
+  const home = visible && !openDrawingId;
+  document.body.classList.toggle("library-home", home);
+  if (el.libraryTitle) el.libraryTitle.textContent = home ? "Your drawings" : "Jobs";
+  if (el.libraryKicker) {
+    el.libraryKicker.hidden = !home;
+    el.libraryKicker.textContent = "Open a drawing, or start a new one.";
+  }
+  if (el.libraryClose) {
+    el.libraryClose.hidden = !openDrawingId;
+    el.libraryClose.disabled = !openDrawingId;
+    el.libraryClose.title = openDrawingId ? "" : "Open a drawing or start a new one first.";
+  }
+  if (el.libraryNew) el.libraryNew.textContent = home ? "New drawing" : "New job";
 }
 
 /**
@@ -800,6 +1048,7 @@ async function refreshLibrary({ keepMessage = false } = {}) {
     libraryProjects = [];
     setLibraryMessage(libraryErrorMessage(error));
   }
+  setAccountJobCount(splitLibrary(libraryProjects).jobs.length);
   renderLibrary();
 }
 
@@ -830,16 +1079,16 @@ function renderLibrary() {
     el.libraryNew.title = blocked || "Start a job and open it.";
   }
   if (el.libraryClose) {
+    el.libraryClose.hidden = !openDrawingId;
     el.libraryClose.disabled = !openDrawingId;
-    el.libraryClose.title = openDrawingId ? "" : "Open a job or start a new one first.";
+    el.libraryClose.title = openDrawingId ? "" : "Open a drawing or start a new one first.";
   }
 
   if (!jobs.length && !deleted.length) {
     const empty = document.createElement("p");
     empty.className = "library-empty hint";
-    empty.textContent = "No jobs on this account yet.";
+    empty.textContent = "No drawings on this account yet. Create a sample below, or start a new one.";
     el.libraryList.appendChild(empty);
-    return;
   }
 
   for (const project of jobs) el.libraryList.appendChild(libraryRow(project, blocked));
@@ -851,6 +1100,53 @@ function renderLibrary() {
     el.libraryList.appendChild(heading);
     for (const project of deleted) el.libraryList.appendChild(libraryRow(project, blocked));
   }
+
+  el.libraryList.appendChild(sampleJobsSection(blocked));
+}
+
+/**
+ * Sample jobs are traced drawings (wall segments, ceiling fills, doors on those
+ * walls), created the same way Demo house is: a new row, the open job left alone.
+ */
+function sampleJobsSection(blocked) {
+  const wrap = document.createElement("div");
+  wrap.className = "library-samples";
+
+  const heading = document.createElement("p");
+  heading.className = "library-section";
+  heading.textContent = "Sample jobs";
+  wrap.appendChild(heading);
+
+  const hint = document.createElement("p");
+  hint.className = "library-empty hint";
+  hint.textContent = "Traced plans: click a wall, a ceiling or a door. Each Create starts its own job.";
+  wrap.appendChild(hint);
+
+  for (const sample of SAMPLE_JOBS) {
+    const row = document.createElement("div");
+    row.className = "library-row library-sample-row";
+    const main = document.createElement("div");
+    main.className = "library-row-main";
+    const name = document.createElement("span");
+    name.className = "library-row-name";
+    name.textContent = sample.name;
+    const meta = document.createElement("span");
+    meta.className = "library-row-meta";
+    meta.textContent = sample.summary;
+    main.append(name, meta);
+    const actions = document.createElement("div");
+    actions.className = "library-row-actions";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = "Create";
+    btn.disabled = Boolean(blocked);
+    btn.title = blocked || `Create ${sample.name} as its own job.`;
+    if (!blocked) btn.addEventListener("click", () => runSampleJob(sample.id));
+    actions.appendChild(btn);
+    row.append(main, actions);
+    wrap.appendChild(row);
+  }
+  return wrap;
 }
 
 function libraryRow(project, blocked) {
@@ -1075,6 +1371,30 @@ async function runDemoHouse() {
   });
 }
 
+async function runSampleJob(id) {
+  const sample = sampleJobById(id);
+  if (!sample) return;
+  const blocked = connectionBlocked();
+  if (blocked) {
+    setLibraryMessage(blocked);
+    setStatusMessage(blocked, "warn");
+    return;
+  }
+  await runLibraryCommand(async () => {
+    await createJob({
+      cloud,
+      sync,
+      doc: sample.build(pack),
+      name: sample.name,
+      packId: pack.id,
+      openDrawingId,
+      apply: applyOpenedJob,
+    });
+    closeLibraryAfterNavigation();
+    setStatusMessage(`${sample.name} created as its own job. Your other job is untouched.`, "ok");
+  });
+}
+
 /**
  * Sign-out revokes the session, so anything still queued would 401 on its way
  * out. It is flushed first and the sign-out is abandoned if that fails: losing
@@ -1084,12 +1404,16 @@ async function runSignOut() {
   try {
     await sync.flush();
     if (sync.isDirty()) {
-      setLibraryMessage("This job has changes that have not reached the server. Signing out now would lose them.");
+      const message = "This job has changes that have not reached the server. Signing out now would lose them.";
+      setLibraryMessage(message);
+      setStatusMessage(message, "warn");
       return;
     }
     await cloud.signOut();
   } catch (error) {
-    setLibraryMessage(libraryErrorMessage(error));
+    const message = libraryErrorMessage(error);
+    setLibraryMessage(message);
+    setStatusMessage(message, "warn");
     return;
   }
   // Nothing to draw into and nowhere to draw it: the document goes back to
@@ -1097,6 +1421,10 @@ async function runSignOut() {
   // at a drawing this browser is no longer allowed to write to.
   openProject = null;
   openDrawingId = null;
+  currentSession = null;
+  accountJobCount = 0;
+  setAccountOpen(false);
+  drawAccount();
   libraryProjects = [];
   clearUnderlay(store.doc);
   store.doc = emptyDoc();
@@ -1142,6 +1470,7 @@ async function runLibraryCommand(run) {
 function closeLibraryAfterNavigation() {
   renamingProjectId = null;
   if (el.libraryOverlay) el.libraryOverlay.hidden = true;
+  syncLibrarySurface();
 }
 
 function wireLibrary() {
@@ -3633,9 +3962,35 @@ function skuDimLabel(sku) {
   return sku.unit;
 }
 
+function setTypeFlyoutOpen(open) {
+  if (!el.typeFlyout || !el.typeCurrent) return;
+  el.typeFlyout.classList.toggle("is-open", open);
+  el.typeFlyout.setAttribute("aria-hidden", open ? "false" : "true");
+  el.typeCurrent.setAttribute("aria-expanded", open ? "true" : "false");
+}
+
+function contextSku() {
+  if (drag?.kind === "wall-new") return skuById(placeSkuId);
+  const ref = store.selected.length === 1 ? store.primary : null;
+  const obj = ref ? objByRef(ref) : null;
+  if (obj && ref.kind === "room") return skuById(obj.floorSku || obj.wallSku);
+  if (obj?.sku) return skuById(obj.sku);
+  return skuById(placeSkuId);
+}
+
+function syncTypeCurrent() {
+  const sku = contextSku();
+  if (el.typeCurrentName) el.typeCurrentName.textContent = sku?.name || "Pick a type";
+  if (el.typeCurrentMeta) el.typeCurrentMeta.textContent = sku ? skuDimLabel(sku) : "";
+}
+
+function placingToolArmed() {
+  return Boolean(paletteFilter) && tool !== "select" && tool !== "calibrate";
+}
+
 function renderPalette() {
+  if (!el.skuList || !el.search) return;
   const q = (el.search.value || "").trim().toLowerCase();
-  el.paletteTitle.textContent = q || !lastPaletteLabel ? "Types" : lastPaletteLabel;
   if (!q && !paletteFilter) {
     el.skuList.innerHTML = `<p class="hint palette-idle">Pick Walls, Doors or another tool on the ribbon to see types.</p>`;
     return;
@@ -3670,9 +4025,11 @@ function renderPalette() {
     }
     el.skuList.appendChild(wrap);
   }
+  syncTypeCurrent();
 }
 
 function onSkuClick(sku) {
+  setTypeFlyoutOpen(false);
   if (applySkuToSelection(sku)) {
     render();
     return;
@@ -3728,7 +4085,76 @@ function applySkuToSelection(sku) {
   return true;
 }
 
-el.search.addEventListener("input", renderPalette);
+el.search?.addEventListener("input", renderPalette);
+
+el.typeCurrent?.addEventListener("click", () => {
+  const open = !el.typeFlyout?.classList.contains("is-open");
+  setTypeFlyoutOpen(open);
+  if (open) renderPalette();
+});
+
+document.addEventListener("pointerdown", (ev) => {
+  if (!el.typeFlyout?.classList.contains("is-open")) return;
+  if (el.ctxTypePicker?.contains(ev.target)) return;
+  setTypeFlyoutOpen(false);
+});
+
+function bindPanelResize(handle, { get, set, invert }) {
+  if (!handle) return;
+  handle.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    handle.classList.add("is-dragging");
+    handle.setPointerCapture(e.pointerId);
+    const startX = e.clientX;
+    const startW = get();
+    const onMove = (ev) => {
+      const dx = ev.clientX - startX;
+      set(invert ? startW - dx : startW + dx);
+    };
+    const onUp = () => {
+      handle.classList.remove("is-dragging");
+      handle.removeEventListener("pointermove", onMove);
+      handle.removeEventListener("pointerup", onUp);
+      handle.removeEventListener("pointercancel", onUp);
+    };
+    handle.addEventListener("pointermove", onMove);
+    handle.addEventListener("pointerup", onUp);
+    handle.addEventListener("pointercancel", onUp);
+  });
+  handle.addEventListener("keydown", (e) => {
+    let dir = 0;
+    if (e.key === "ArrowRight") dir = invert ? -1 : 1;
+    else if (e.key === "ArrowLeft") dir = invert ? 1 : -1;
+    else return;
+    e.preventDefault();
+    set(get() + dir * 16);
+  });
+}
+
+{
+  const root = document.getElementById("v2-app");
+  const readVar = (name, fallback) => {
+    const n = parseFloat(getComputedStyle(root).getPropertyValue(name));
+    return Number.isFinite(n) ? n : fallback;
+  };
+  const writeVar = (name, px) => {
+    const other = name === "--levels" ? readVar("--dock", 320) : readVar("--levels", 300);
+    const room = (root?.clientWidth || 0) - other - 280;
+    const clamped = Math.min(560, Math.max(220, Math.min(px, Math.max(220, room))));
+    root?.style.setProperty(name, `${Math.round(clamped)}px`);
+  };
+  bindPanelResize(document.getElementById("v2-resize-levels"), {
+    get: () => readVar("--levels", 300),
+    set: (width) => writeVar("--levels", width),
+    invert: false,
+  });
+  bindPanelResize(document.getElementById("v2-resize-dock"), {
+    get: () => readVar("--dock", 320),
+    set: (width) => writeVar("--dock", width),
+    invert: true,
+  });
+}
 
 // --- compliance rule engine -------------------------------------------------
 
@@ -4070,12 +4496,107 @@ function openMassing(view) {
   else if (view?.mode === "section") massView.setSection(view);
   else massView.setOrbit();
   massView.setPayload(compile(store.doc, pack));
+  hideMassRender();
   el.massOverlay.hidden = false;
   requestAnimationFrame(() => requestAnimationFrame(() => massView.resize()));
 }
 
 function closeMassing() {
+  hideMassRender();
   el.massOverlay.hidden = true;
+}
+
+function syncGenerateEnabled() {
+  if (!el.massGenerate || el.massGenerate.dataset.busy === "1") return;
+  el.massGenerate.disabled = Boolean(el.massEmpty && !el.massEmpty.hidden);
+}
+
+function hideMassRender() {
+  if (el.massRender) {
+    el.massRender.hidden = true;
+    el.massRender.classList.remove("is-ready", "is-pending");
+  }
+  if (el.massRenderImg) el.massRenderImg.removeAttribute("src");
+  if (el.massRenderStatus) {
+    el.massRenderStatus.hidden = true;
+    el.massRenderStatus.textContent = "";
+  }
+  if (el.massShow3d) el.massShow3d.hidden = true;
+  if (el.massGenerate) el.massGenerate.textContent = "Generate model";
+}
+
+function massingSnapshot() {
+  const src = el.massCanvas;
+  if (!src?.width || !src.height) return null;
+  const maxW = 1536;
+  if (src.width <= maxW) return src.toDataURL("image/png");
+  const dest = document.createElement("canvas");
+  dest.width = maxW;
+  dest.height = Math.max(1, Math.round(src.height * (maxW / src.width)));
+  dest.getContext("2d").drawImage(src, 0, 0, dest.width, dest.height);
+  return dest.toDataURL("image/png");
+}
+
+async function generateModel() {
+  if (el.massEmpty && !el.massEmpty.hidden) {
+    setStatusMessage("Draw a room, wall or roof, then generate a model.", "warn");
+    return;
+  }
+  const image = massingSnapshot();
+  if (!image) {
+    setStatusMessage("The 3D view is empty.", "warn");
+    return;
+  }
+  if (el.massGenerate) {
+    el.massGenerate.dataset.busy = "1";
+    el.massGenerate.disabled = true;
+    el.massGenerate.textContent = "Generating…";
+  }
+  if (el.massRender) {
+    el.massRender.hidden = false;
+    el.massRender.classList.add("is-pending");
+    el.massRender.classList.remove("is-ready");
+  }
+  if (el.massRenderStatus) {
+    el.massRenderStatus.hidden = false;
+    el.massRenderStatus.textContent = "Generating a photorealistic view…";
+  }
+  try {
+    const rendered = await cloud.visualize({ image });
+    if (!rendered) throw new CloudError(502, "The visualization could not be generated");
+    if (el.massRenderImg) el.massRenderImg.src = rendered;
+    if (el.massRender) {
+      el.massRender.classList.remove("is-pending");
+      el.massRender.classList.add("is-ready");
+    }
+    if (el.massRenderStatus) el.massRenderStatus.hidden = true;
+    if (el.massShow3d) el.massShow3d.hidden = false;
+    if (el.massGenerate) el.massGenerate.textContent = "Generate again";
+    setStatusMessage("Photorealistic model ready.", "ok");
+  } catch (error) {
+    const message = error?.authRequired
+      ? "Sign in to generate a model."
+      : (error?.message || "The visualization could not be generated");
+    if (el.massRender) {
+      el.massRender.hidden = false;
+      el.massRender.classList.add("is-pending");
+      el.massRender.classList.remove("is-ready");
+    }
+    if (el.massRenderStatus) {
+      el.massRenderStatus.hidden = false;
+      el.massRenderStatus.textContent = message;
+    }
+    if (el.massShow3d) el.massShow3d.hidden = false;
+    setStatusMessage(message, "warn");
+  } finally {
+    if (el.massGenerate) {
+      delete el.massGenerate.dataset.busy;
+      syncGenerateEnabled();
+      if (!el.massGenerate.textContent || el.massGenerate.textContent === "Generating…") {
+        el.massGenerate.textContent = "Generate model";
+      }
+    }
+  }
 }
 
 function cameraEyeZ() {
@@ -4176,6 +4697,8 @@ function finishMeasure(target) {
 
 function wireMassing() {
   el.massClose.addEventListener("click", closeMassing);
+  el.massGenerate?.addEventListener("click", () => { generateModel(); });
+  el.massShow3d?.addEventListener("click", hideMassRender);
   el.massOverlay.addEventListener("click", (event) => {
     if (event.target === el.massOverlay) closeMassing();
   });
@@ -5592,6 +6115,10 @@ function wireKeyboard() {
     else if (typing) return;
 
     if (ev.key === "Escape") {
+      if (accountIsOpen()) {
+        setAccountOpen(false);
+        return;
+      }
       if (el.aboutOverlay && !el.aboutOverlay.hidden) {
         closeAbout();
         return;
@@ -5835,6 +6362,11 @@ function escapeHtml(str) {
 
 let planContextKey = "";
 
+// The dock state at the previous sync, so the type chooser auto-opens only on
+// the transition *into* create (arming a draw tool), not on every redraw while
+// a tool stays armed - otherwise picking a type could never collapse the list.
+let prevDockState = "empty";
+
 function setHidden(node, hidden) {
   if (node) node.hidden = hidden;
 }
@@ -5916,28 +6448,55 @@ function syncPlanContext() {
   const showType = linear || slab || roof || opening || item;
   const showGeom = linear || rect;
   const showInspect = Boolean(el.inspectFields) && (linear || room || slab || roof || opening || item);
+  const creating = !showInspect && !multi && placingToolArmed();
+  const dockState = showInspect ? "edit" : creating ? "create" : "empty";
+
+  if (el.dockContext) el.dockContext.dataset.state = dockState;
+  setHidden(el.ctxTypePicker, !(showType || creating || room));
+  syncTypeCurrent();
+  // Arming a draw tool makes picking a type the whole job, so open the chooser
+  // straight away (it fills the inspector). Leaving create - either an empty
+  // dock or selecting an object to edit - collapses it back.
+  if (dockState === "create" && prevDockState !== "create") {
+    setTypeFlyoutOpen(true);
+    renderPalette();
+  } else if (dockState !== "create" && prevDockState === "create") {
+    setTypeFlyoutOpen(false);
+  } else if (dockState === "empty") {
+    setTypeFlyoutOpen(false);
+  }
+  prevDockState = dockState;
+
+  if (el.paletteTitle) {
+    if (dockState === "create") el.paletteTitle.textContent = lastPaletteLabel || "Types";
+    else if (draft) el.paletteTitle.textContent = inspectKindLabel("wall", skuById(placeSkuId)) || "Wall";
+    else if (obj) el.paletteTitle.textContent = inspectKindLabel(ref.kind, skuById(obj.sku)) || "Inspector";
+    else el.paletteTitle.textContent = "Inspector";
+  }
 
   if (multi) {
     const group = store.groupForRef(refs[0]);
     syncInspectKicker(group ? group.name : `${refs.length} selected`);
+  } else if (creating) {
+    syncInspectKicker(pack.name || "—");
   } else if (draft) {
-    syncInspectKicker(inspectKindLabel("wall", skuById(placeSkuId)));
+    syncInspectKicker(skuById(placeSkuId)?.name || "—");
   } else if (obj) {
-    syncInspectKicker(inspectKindLabel(ref.kind, skuById(obj.sku)));
+    syncInspectKicker(obj.name || obj.id || "—");
   } else {
     syncInspectKicker("");
   }
 
   setHidden(el.planOptions, !showGeom);
-  setHidden(el.inspectFields, !showInspect);
-  setHidden(el.inspectEmpty, showInspect);
-  if (el.inspectEmpty && !showInspect) {
+  setHidden(el.inspectFields, !showInspect && !creating);
+  setHidden(el.inspectEmpty, dockState !== "empty");
+  if (el.inspectEmpty && dockState === "empty") {
     el.inspectEmpty.textContent = multi
       ? "Type and identity apply to one object at a time."
-      : "Select a wall, room, roof or opening to edit its type and identity.";
+      : "Select a wall, room, roof or opening to edit its type and identity, or pick a tool on the ribbon to start drawing.";
   }
 
-  if (!showInspect && !showGeom) {
+  if (!showInspect && !showGeom && !creating) {
     planContextKey = "";
     return;
   }
@@ -5952,8 +6511,8 @@ function syncPlanContext() {
   const pitched = Boolean(roof && obj && obj.form !== "flat");
   setHidden(el.ctxPitchWrap, !pitched);
   setHidden(el.ctxRidgeWrap, !pitched);
-  setHidden(el.ctxTypeWrap, !showType);
-  syncInspectStatus(showInspect && !multi ? obj : null, draft);
+  setHidden(el.ctxTypeWrap, true);
+  syncInspectStatus((showInspect || creating) && !multi ? obj : null, draft || creating);
   setHidden(el.ctxFlip, !(opening && skuById(obj.sku)?.category === "door"));
   const attachable = Boolean(obj && ATTACHABLE_KINDS.has(ref.kind));
   setHidden(el.ctxAttachWrap, !attachable);

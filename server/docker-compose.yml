@@ -58,6 +58,8 @@ services:
       # Same origin serves the planner, so no cross-origin request is expected
       # and none is allowed.
       ALLOWED_ORIGINS: ""
+      # Substituted from server/.env when you `docker compose up` from here.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     ports:
       - "8080:8080"
     # The schema is applied on boot (server.js) and is idempotent, so the only

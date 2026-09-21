@@ -346,3 +346,13 @@ test("the deleted jobs a restore needs are asked for explicitly", async () => {
   await cloud.listProjects({ includeDeleted: true });
   assert.deepEqual(fetch.calls.map((c) => c.url), ["/api/projects", "/api/projects?deleted=1"]);
 });
+
+test("visualize posts the massing snapshot and returns the rendered image", async () => {
+  const fetch = fakeFetch(() => response(200, { image: "data:image/png;base64,abc" }));
+  const cloud = createCloud({ fetch });
+  const image = await cloud.visualize({ image: "data:image/png;base64,src" });
+  assert.equal(image, "data:image/png;base64,abc");
+  assert.equal(fetch.calls[0].method, "POST");
+  assert.equal(fetch.calls[0].url, "/api/visualize");
+  assert.deepEqual(fetch.calls[0].body, { image: "data:image/png;base64,src" });
+});

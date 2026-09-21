@@ -9,6 +9,7 @@
   gap: 8px 14px;
   padding: 4px 14px;
   min-height: 36px;
+  overflow: visible;
 }
 
 .chrome .brand {
@@ -66,6 +67,315 @@
 .chrome .actions {
   flex-wrap: nowrap;
   gap: 6px;
+  align-items: center;
+}
+
+/* Account: avatar in the chrome opens a full-screen page over the drawing. */
+.chrome .account {
+  position: relative;
+}
+
+.chrome .account[hidden] {
+  display: none;
+}
+
+.chrome .topbar button.account-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.chrome .topbar button.account-btn:hover {
+  background: transparent;
+}
+
+.chrome .topbar button.account-btn[aria-expanded="true"] .account-avatar,
+.chrome .topbar button.account-btn:hover .account-avatar {
+  transform: scale(1.06);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--copper) 55%, transparent);
+}
+
+.account-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--navy);
+  color: #f3eee4;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.account-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  display: flex;
+  flex-direction: column;
+  background:
+    radial-gradient(1200px 500px at 10% -10%, #fff8ee 0%, transparent 55%),
+    var(--paper);
+  color: var(--ink);
+}
+
+.account-overlay[hidden] {
+  display: none !important;
+}
+
+.account-page {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+
+.account-page-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 28px;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
+.account-kicker {
+  margin: 0 0 2px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.account-page-bar h2 {
+  margin: 0;
+  font-family: Fraunces, Georgia, serif;
+  font-size: 1.35rem;
+  font-weight: 560;
+}
+
+.account-page-bar button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid var(--line);
+  background: transparent;
+  cursor: pointer;
+}
+
+.account-page-bar button svg {
+  width: 18px;
+  height: 18px;
+}
+
+.account-page-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  padding: 36px 28px 40px;
+  width: min(920px, 100%);
+  margin: 0 auto;
+}
+
+.account-avatar-lg {
+  width: 72px;
+  height: 72px;
+  font-size: 1.35rem;
+  flex-shrink: 0;
+}
+
+.account-head {
+  display: flex;
+  gap: 20px;
+  align-items: center;
+}
+
+.account-who {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.account-who strong {
+  font-family: Fraunces, Georgia, serif;
+  font-size: 1.7rem;
+  font-weight: 560;
+  line-height: 1.15;
+}
+
+.account-who > span {
+  font-size: 0.95rem;
+  color: var(--ink-soft);
+}
+
+.account-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.account-chips em {
+  font-style: normal;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  background: #fffdf8;
+}
+
+.account-chips em:first-child {
+  border-color: color-mix(in srgb, var(--copper) 45%, var(--line));
+  color: var(--copper-dark);
+  background: color-mix(in srgb, var(--copper) 10%, #fffdf8);
+}
+
+.account-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  gap: 20px;
+}
+
+.account-license,
+.account-facts {
+  background: #fbf7f0;
+  border: 1px solid var(--line);
+}
+
+.account-license {
+  padding: 22px 22px 18px;
+}
+
+.account-license-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 0.8rem;
+}
+
+.account-license-row span {
+  color: var(--ink-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+}
+
+.account-license-row strong {
+  font-size: 1.15rem;
+  font-family: Fraunces, Georgia, serif;
+  font-weight: 560;
+}
+
+.account-meter {
+  height: 6px;
+  margin: 14px 0 10px;
+  background: color-mix(in srgb, var(--ink) 10%, transparent);
+  overflow: hidden;
+}
+
+.account-meter i {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--copper);
+}
+
+.account-license-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+
+.account-facts {
+  margin: 0;
+  padding: 22px;
+  display: grid;
+  gap: 16px;
+}
+
+.account-facts > div {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.account-facts dt {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  padding-top: 3px;
+}
+
+.account-facts dd {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.4;
+  white-space: pre-line;
+}
+
+.account-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: auto;
+}
+
+.account-actions button {
+  min-width: 140px;
+}
+
+@media (max-width: 720px) {
+  .account-page-bar,
+  .account-page-body {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .account-head {
+    align-items: flex-start;
+  }
+
+  .account-who strong {
+    font-size: 1.35rem;
+  }
+
+  .account-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .account-actions {
+    flex-direction: column;
+  }
+
+  .account-actions button {
+    width: 100%;
+  }
 }
 
 /* The job's name and its save state, in the chrome, because the title block
@@ -136,59 +446,268 @@
   font-size: 0.8rem;
 }
 
-/* Sign-in. A veil rather than a panel in the layout: there is nothing useful
-   to do behind it, because a drawing has nowhere to be saved until an account
-   owns it. */
-.auth-veil {
-  position: fixed;
-  inset: 0;
-  z-index: 60;
-  display: grid;
-  place-items: center;
-  padding: 24px;
-  background: color-mix(in srgb, var(--ink, #1c1a17) 55%, transparent);
-  backdrop-filter: blur(2px);
+/* Sign-in is a separate screen, not a veil over the planner. Hide the
+   editor until a session exists so the drawing never sits behind the form. */
+body.auth-pending,
+body.login-active {
+  background: #1a1612;
 }
 
-.auth-veil[hidden] {
+body.auth-pending .chrome,
+body.auth-pending #v2-app,
+body.auth-pending .account-overlay,
+body.auth-pending .library-overlay,
+body.auth-pending .about-overlay,
+body.auth-pending .check-overlay,
+body.auth-pending .schedule-overlay,
+body.auth-pending .mass-overlay,
+body.auth-pending .sheet-overlay,
+body.login-active .chrome,
+body.login-active #v2-app,
+body.login-active .account-overlay,
+body.login-active .library-overlay,
+body.login-active .about-overlay,
+body.login-active .check-overlay,
+body.login-active .schedule-overlay,
+body.login-active .mass-overlay,
+body.login-active .sheet-overlay,
+body.library-home .chrome,
+body.library-home #v2-app,
+body.library-home .account-overlay,
+body.library-home .about-overlay,
+body.library-home .check-overlay,
+body.library-home .schedule-overlay,
+body.library-home .mass-overlay,
+body.library-home .sheet-overlay {
+  display: none !important;
+}
+
+body.library-home {
+  background: #1a1612;
+}
+
+.auth-view {
+  --login-bg: #1a1612;
+  --login-bg-glow: rgba(178, 69, 30, 0.16);
+  --login-card-bg: #f3eee4;
+  --login-input-bg: #fff8ee;
+  --login-border: #cfc4b3;
+  --login-accent: #b2451e;
+  --login-accent-hover: #8d3416;
+  --login-accent-dim: rgba(178, 69, 30, 0.28);
+  --login-accent-glow: rgba(178, 69, 30, 0.22);
+  --login-accent-tint-20: rgba(178, 69, 30, 0.20);
+  --login-accent-tint-30: rgba(178, 69, 30, 0.30);
+  --login-glint-mid: rgba(178, 69, 30, 0.45);
+  --login-glint-bright: rgba(255, 214, 176, 0.95);
+  --login-text: #1a1612;
+  --login-text-secondary: #5c5348;
+  --login-text-muted: #5c5348;
+  --login-on-accent: #f3eee4;
+  --login-error: #9b2c2c;
+
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  color: var(--login-text);
+  background:
+    radial-gradient(ellipse 60% 50% at 50% 42%, var(--login-bg-glow), transparent 70%),
+    var(--login-bg);
+}
+
+.auth-view[hidden] {
   display: none;
 }
 
 .auth-card {
   width: min(380px, 100%);
-  display: grid;
-  gap: 6px;
-  padding: 20px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 32px;
+  border-radius: 12px;
+  border: 1px solid var(--login-accent-dim);
+  background: var(--login-card-bg);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.45);
+  isolation: isolate;
+  animation: auth-breath 5.5s ease-in-out infinite;
+}
+
+.auth-card > :not(.auth-glint-layer) {
+  position: relative;
+  z-index: 1;
+}
+
+@keyframes auth-breath {
+  0%, 100% {
+    border-color: rgba(178, 69, 30, 0.22);
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.45);
+  }
+  50% {
+    border-color: rgba(178, 69, 30, 0.62);
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.45), 0 0 22px var(--login-accent-glow);
+  }
+}
+
+.auth-glint-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+  border-radius: inherit;
+  overflow: hidden;
+}
+
+.auth-glint {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+  will-change: transform, opacity;
+}
+
+.auth-glint-h {
+  top: 0;
+  left: 0;
+  width: 80px;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--login-glint-mid) 22%,
+    var(--login-glint-bright) 50%,
+    var(--login-glint-mid) 78%,
+    transparent 100%
+  );
+  box-shadow: 0 0 10px var(--login-accent-tint-30), 0 0 4px var(--login-glint-bright);
+}
+
+.auth-glint-h.auth-glint-bottom {
+  top: auto;
+  bottom: 0;
+}
+
+.auth-glint-v {
+  top: 0;
+  left: 0;
+  width: 2px;
+  height: 80px;
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    var(--login-glint-mid) 22%,
+    var(--login-glint-bright) 50%,
+    var(--login-glint-mid) 78%,
+    transparent 100%
+  );
+  box-shadow: 0 0 10px var(--login-accent-tint-30), 0 0 4px var(--login-glint-bright);
+}
+
+.auth-glint-v.auth-glint-right {
+  left: auto;
+  right: 0;
+}
+
+.auth-glint.run-h-ltr { animation: auth-glint-h-ltr var(--login-glint-dur, 0.48s) ease-out forwards; }
+.auth-glint.run-h-rtl { animation: auth-glint-h-rtl var(--login-glint-dur, 0.48s) ease-out forwards; }
+.auth-glint.run-v-ttb { animation: auth-glint-v-ttb var(--login-glint-dur, 0.48s) ease-out forwards; }
+.auth-glint.run-v-btt { animation: auth-glint-v-btt var(--login-glint-dur, 0.48s) ease-out forwards; }
+
+@keyframes auth-glint-h-ltr {
+  0%   { opacity: 0; transform: translateX(-80px); }
+  8%   { opacity: 1; }
+  92%  { opacity: 1; }
+  100% { opacity: 0; transform: translateX(var(--login-card-w, 360px)); }
+}
+
+@keyframes auth-glint-h-rtl {
+  0%   { opacity: 0; transform: translateX(var(--login-card-w, 360px)); }
+  8%   { opacity: 1; }
+  92%  { opacity: 1; }
+  100% { opacity: 0; transform: translateX(-80px); }
+}
+
+@keyframes auth-glint-v-ttb {
+  0%   { opacity: 0; transform: translateY(-80px); }
+  8%   { opacity: 1; }
+  92%  { opacity: 1; }
+  100% { opacity: 0; transform: translateY(var(--login-card-h, 420px)); }
+}
+
+@keyframes auth-glint-v-btt {
+  0%   { opacity: 0; transform: translateY(var(--login-card-h, 420px)); }
+  8%   { opacity: 1; }
+  92%  { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-80px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-card {
+    animation: none !important;
+    border-color: rgba(178, 69, 30, 0.4);
+  }
+  .auth-glint {
+    animation: none !important;
+    opacity: 0 !important;
+  }
+}
+
+.auth-logo {
+  width: min(220px, 72%);
+  height: auto;
+  object-fit: contain;
+  margin: 0 auto 20px;
+  display: block;
 }
 
 .auth-card h2 {
   margin: 0;
+  font-family: Fraunces, Georgia, serif;
+  font-size: 1.45rem;
+  font-weight: 560;
+  color: var(--login-text);
 }
 
 .auth-card .auth-kicker {
-  margin: 0 0 8px;
-  font-size: 0.78rem;
-  opacity: 0.75;
+  margin: 0 0 12px;
+  font-size: 0.84rem;
+  color: var(--login-text-secondary);
 }
 
 .auth-card label {
+  margin-top: 10px;
+  margin-bottom: 4px;
   font-size: 0.74rem;
   font-weight: 600;
-  opacity: 0.8;
+  color: var(--login-text-muted);
 }
 
 .auth-card input {
   width: 100%;
-  padding: 6px 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--login-border);
+  background: var(--login-input-bg);
+  color: var(--login-text);
   font: inherit;
-  font-size: 0.85rem;
+  font-size: 0.9rem;
+}
+
+.auth-card input:focus {
+  outline: none;
+  border-color: var(--login-accent);
+  box-shadow: 0 0 0 2px var(--login-accent-tint-20);
 }
 
 .auth-card .auth-error {
-  margin: 4px 0 0;
-  font-size: 0.76rem;
+  margin: 10px 0 0;
+  font-size: 0.78rem;
   font-weight: 600;
-  color: var(--copper);
+  color: var(--login-error);
 }
 
 .auth-card .auth-error[hidden] {
@@ -197,14 +716,33 @@
 
 .auth-actions {
   display: flex;
+  flex-direction: column;
   gap: 8px;
-  margin-top: 12px;
+  margin-top: 18px;
 }
 
 .auth-actions button {
-  flex: 1;
-  padding: 6px 10px;
-  font-size: 0.82rem;
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 0.88rem;
+}
+
+.auth-view .auth-actions button.primary {
+  background: var(--login-accent);
+  border-color: var(--login-accent);
+  color: var(--login-on-accent);
+}
+
+.auth-view .auth-actions button.primary:hover {
+  background: var(--login-accent-hover);
+  border-color: var(--login-accent-hover);
+  box-shadow: 0 0 20px var(--login-accent-tint-20);
+}
+
+.auth-view .auth-actions button:not(.primary) {
+  background: transparent;
+  border-color: var(--login-border);
+  color: var(--login-text-secondary);
 }
 
 @media (max-width: 960px) {
@@ -229,6 +767,22 @@
    accurate rail) rather than the flat evenly-spaced-tick rail this replaces.
    Storeys have a physical top-to-bottom order and a real spacing in metres;
    a dropdown or an index-only rail both throw that away. */
+/* Flush two-column workspace: plan + one context dock. Types and Inspector
+   share that dock (create / edit / empty), so the left SKU column is gone. */
+#v2-app.layout.layout-planner {
+  --levels: 300px;
+  --dock: 320px;
+  grid-template-columns: minmax(0, 1fr) var(--dock);
+  gap: 0;
+  padding: 0;
+}
+
+#v2-app .planner-stage {
+  border: none;
+  box-shadow: none;
+  border-radius: 0;
+}
+
 .stage-row {
   display: flex;
   flex: 1;
@@ -242,21 +796,14 @@
 }
 
 .level-widget {
-  width: 220px;
+  position: relative;
+  width: var(--levels, 300px);
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  /* A real four-storey template (00 FOUNDATION, 01 GFL, 02 L1, 03 L2) puts
-     roof + two stations per occupied storey in the list below the house -
-     taller than the placeholder two-level pack this was built against, and
-     taller than the widget's stretched height on a modest window. Without
-     this floor the whole widget (house cutaway included) used to be the
-     thing that scrolled, so a short window hid the house behind a scrollbar
-     before showing a single station - a scroll stub, not a level switcher.
-     The floor covers the pinned house/name/meta/isolate/hint; only the
-     station list scrolls internally now (see .level-stations below), so the
-     house stays visible even where the list itself does not fully fit. */
-  min-height: 360px;
+  /* House drawing shrinks in .level-house-frame so the station list stays
+     fully visible after the 300px widen. */
+  min-height: 0;
   overflow: hidden;
   padding: 12px 12px 14px;
   border-right: 1px solid var(--line);
@@ -327,14 +874,20 @@
   flex-shrink: 0;
 }
 
+.level-house-frame {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+}
+
 .level-house {
   display: block;
   width: 100%;
-  height: auto;
+  height: 100%;
+  min-height: 0;
   cursor: pointer;
   touch-action: none;
   user-select: none;
-  flex-shrink: 0;
   overflow: visible;
 }
 .level-house:focus { outline: none; }
@@ -350,14 +903,8 @@
 }
 
 .level-stations {
-  /* The one part of this widget that is allowed to scroll - see the
-     .level-widget comment above. flex:1 lets it take whatever height is
-     left after the pinned house/name/meta/isolate/hint above it, and min-height:0
-     is required for a flex child to shrink below its content size instead
-     of forcing the column taller than the widget's own min-height. */
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
+  flex: 0 0 auto;
+  overflow: visible;
   list-style: none;
   margin: 0;
   padding: 0;
@@ -398,8 +945,38 @@
 }
 .level-stations button[aria-current="true"] .level-station-elev { color: var(--copper); }
 
-.plan-header .planner-tools {
-  flex-shrink: 0;
+/* Floated onto the sketch instead of a Plan header row, so the canvas
+   keeps the strip that used to sit above the level widget + drawing. */
+.plan-float-tools {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 3;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  max-width: calc(100% - 16px);
+  padding: 3px;
+  background: rgba(243, 238, 228, 0.94);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+}
+
+.plan-float-tools button {
+  padding: 4px 8px;
+  font-size: 0.74rem;
+}
+
+.plan-float-tools .seg {
+  margin-left: 0;
+}
+
+.plan-float-tools .seg button {
+  padding: 4px 8px;
+  font-size: 0.74rem;
 }
 
 /* Ribbon: the customer's four toolbars plus Check. */
@@ -434,6 +1011,8 @@
   flex-direction: column;
   flex-shrink: 0;
   min-width: 0;
+  align-items: stretch;
+  justify-content: flex-end;
   gap: 4px;
   padding: 0 12px;
   border-right: 1px solid var(--line);
@@ -447,7 +1026,9 @@
   display: flex;
   gap: 4px;
   flex: 1;
-  align-items: flex-start;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  min-height: 0;
 }
 
 .ribbon-group-label {
@@ -456,6 +1037,9 @@
   text-transform: uppercase;
   color: var(--ink-soft);
   text-align: center;
+  white-space: nowrap;
+  flex-shrink: 0;
+  line-height: 1.2;
 }
 
 /* "large" (default): icon above caption, Office-ribbon style. */
@@ -464,11 +1048,11 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
+  gap: 4px;
   min-width: 52px;
   border: 1px solid transparent;
   background: transparent;
-  padding: 4px 8px;
+  padding: 6px 8px;
   font-size: 0.72rem;
   line-height: 1.1;
 }
@@ -512,8 +1096,8 @@
 
 .ribbon-item .glyph,
 .ribbon-overflow-btn .glyph {
-  width: 22px;
-  height: 22px;
+  width: 30px;
+  height: 30px;
   flex-shrink: 0;
 }
 
@@ -620,10 +1204,11 @@
 
 /* Overlay on the canvas, not in page flow: showing a hint or length/angle
    fields must not resize the sketch (a click on a type or the first wall
-   click used to shove the canvas and the rubber-band jumped). */
+   click used to shove the canvas and the rubber-band jumped). Offset under
+   the floated plan tools so the two never sit on top of each other. */
 .canvas-status {
   position: absolute;
-  top: 8px;
+  top: 48px;
   left: 8px;
   right: 8px;
   z-index: 2;
@@ -803,25 +1388,247 @@
   color: var(--ink-soft);
 }
 
-.planner-inspector > .panel {
+/* Merged Types + Inspector dock: one panel, three states
+   (create / edit / empty) rather than two permanently-open columns. */
+.dock-context {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: var(--dock, 320px);
+  min-width: 0;
+  min-height: 0;
+  background: var(--paper-2, #f7f3ea);
+  border: none;
+  border-left: 1px solid var(--line);
+  box-shadow: none;
+  border-radius: 0;
+}
+
+.dock-context > header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 10px 12px 8px;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
+.dock-context > header h2 {
+  margin: 0;
+  font-family: Fraunces, Georgia, serif;
+  font-size: 1rem;
+  font-weight: 500;
+}
+
+.dock-context > header span,
+.planner-inspector > header span {
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--ink-soft);
+}
+
+.ctx-empty {
+  display: none;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 20px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--ink-soft);
+  line-height: 1.5;
+}
+
+.dock-context[data-state="empty"] .ctx-empty { display: flex; }
+.dock-context[data-state="empty"] .ctx-body { display: none; }
+
+.ctx-body {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   overflow: auto;
 }
 
-.planner-inspector > .panel header span {
-  font-family: Fraunces, Georgia, serif;
-  font-size: 1.05rem;
-  font-weight: 500;
-  color: var(--ink);
+.ctx-type-picker {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
 }
 
+.ctx-type-picker-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--ink-soft);
+  margin: 0 0 6px;
+}
+
+.ctx-type-current {
+  display: grid;
+  grid-template-columns: 10px 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  padding: 7px 8px;
+  border: 1px solid color-mix(in srgb, var(--ink) 18%, transparent);
+  border-radius: 3px;
+  background: #fffdf8;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.ctx-type-current:hover { border-color: var(--copper); }
+.ctx-type-current[aria-expanded="true"] .chev { transform: rotate(180deg); }
+.ctx-type-current i {
+  width: 10px;
+  height: 10px;
+  background: var(--ink);
+}
+.ctx-type-current-name {
+  font-weight: 600;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ctx-type-current em {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+.ctx-type-current .chev {
+  width: 14px;
+  height: 14px;
+  color: var(--ink-soft);
+  transition: transform 120ms ease-out;
+}
+
+/* Open type chooser: an overlay of the whole inspector body, not a small
+   dropdown under the trigger. Picking a type is the drawing decision, so it
+   takes over name/status/attach until a type is chosen (then it collapses). */
+.ctx-type-flyout {
+  display: none;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  flex-direction: column;
+  background: #fffdf8;
+  overflow: hidden;
+}
+
+.ctx-type-flyout.is-open { display: flex; }
+
+.dock-search {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.dock-search input {
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: #fff;
+  font: inherit;
+}
+
+.dock-context .planner-sku-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 6px;
+}
+
+.dock-context .sku-item {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  padding: 10px 10px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+}
+
+.dock-context .sku-item .sku-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.dock-context .sku-item.active {
+  background: rgba(178, 69, 30, 0.08);
+  border-color: rgba(178, 69, 30, 0.16);
+}
+
+.dock-context #v2-ctx-type-wrap {
+  display: none !important;
+}
+
+.panel-resize {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  z-index: 6;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+.panel-resize::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+  background: transparent;
+}
+
+.panel-resize:hover::after,
+.panel-resize:focus-visible::after,
+.panel-resize.is-dragging::after {
+  background: var(--copper);
+}
+
+.panel-resize:focus-visible { outline: none; }
+.panel-resize-levels { right: 0; }
+.panel-resize-dock { left: 0; }
+
 #v2-inspect-empty {
-  padding: 12px 16px 16px;
+  padding: 24px 20px;
 }
 
 #v2-inspect-empty[hidden],
 #v2-inspect-fields[hidden],
+#v2-ctx-type-picker[hidden],
 #v2-ctx-flip[hidden] {
   display: none !important;
+}
+
+@media (max-width: 1100px) {
+  #v2-app.layout.layout-planner {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+  .dock-context {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+    max-height: 320px;
+    width: auto;
+  }
+  .planner-stage { order: -1; min-height: 50vh; }
+  .panel-resize { display: none; }
 }
 
 .planner-fields .plan-context-field span {
@@ -993,15 +1800,24 @@
 
 .planner-status-opts {
   display: flex;
-  gap: 14px;
+  gap: 8px;
 }
 
 .planner-status-opts label {
+  flex: 1;
   display: flex;
   align-items: center;
   gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
   font-size: 0.82rem;
   cursor: pointer;
+}
+
+.planner-status-opts label:has(input:checked) {
+  border-color: var(--copper);
+  background: rgba(178, 69, 30, 0.08);
 }
 
 /* Attach base: a read-only Inspector row, so a selected wall states what its
@@ -1136,8 +1952,70 @@
   flex: 1;
 }
 
+#v2-mass-generate,
+#v2-mass-show-3d,
 #v2-mass-close {
+  font: inherit;
+  padding: 5px 10px;
+  border: 1px solid var(--ink);
+  background: #fff;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+#v2-mass-generate {
   margin-left: auto;
+  background: var(--ink);
+  color: #fff;
+}
+
+#v2-mass-generate:disabled,
+#v2-mass-show-3d:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+#v2-mass-show-3d[hidden] {
+  display: none !important;
+}
+
+.mass-render {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(28, 25, 21, 0.92);
+}
+
+.mass-render[hidden] {
+  display: none !important;
+}
+
+.mass-render img {
+  display: none;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.mass-render.is-ready img {
+  display: block;
+}
+
+.mass-render-status {
+  position: absolute;
+  margin: 0;
+  padding: 8px 14px;
+  border-radius: 6px;
+  background: rgba(244, 237, 225, 0.94);
+  color: #3d3428;
+  font-size: 0.9rem;
+}
+
+.mass-render-status[hidden] {
+  display: none !important;
 }
 
 /* BOQ / BOM: Output > Schedules. Its own overlay for the same reason as the
@@ -1742,7 +2620,8 @@
 }
 
 /* The job library. Modelled on the sheet overlay because it is the same kind of
-   surface: a list of things the document (here, the account) owns. */
+   surface: a list of things the document (here, the account) owns. After sign-in
+   it is also the landing page — same list, without a canvas behind it. */
 .library-overlay {
   position: fixed;
   inset: 0;
@@ -1756,6 +2635,25 @@
 
 .library-overlay[hidden] {
   display: none !important;
+}
+
+.library-logo {
+  display: none;
+}
+
+.library-heading {
+  margin-right: auto;
+  min-width: 0;
+}
+
+.library-kicker {
+  margin: 4px 0 0;
+  font-size: 0.84rem;
+  color: #5c5348;
+}
+
+.library-kicker[hidden] {
+  display: none;
 }
 
 .library-panel {
@@ -1773,7 +2671,6 @@
 
 .library-panel > header h2 {
   margin: 0;
-  margin-right: auto;
 }
 
 .library-panel > header button {
@@ -1781,8 +2678,45 @@
   padding: 5px 10px;
   border: 1px solid var(--ink);
   background: #fff;
+  color: var(--ink);
   border-radius: 3px;
   cursor: pointer;
+}
+
+.library-panel > header button.primary {
+  background: var(--copper);
+  border-color: var(--copper);
+  color: #fff;
+}
+
+body.library-home .library-overlay {
+  background:
+    radial-gradient(ellipse 60% 50% at 50% 42%, rgba(178, 69, 30, 0.16), transparent 70%),
+    #1a1612;
+}
+
+body.library-home .library-panel {
+  width: min(820px, 100%);
+  height: auto;
+  max-height: min(740px, 100%);
+  padding: 8px 8px 16px;
+  border-radius: 12px;
+  border: 1px solid rgba(178, 69, 30, 0.28);
+  background: #f3eee4;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.45);
+}
+
+body.library-home .library-logo {
+  display: block;
+  width: min(200px, 56%);
+  height: auto;
+  margin: 16px auto 4px;
+}
+
+body.library-home .library-panel > header {
+  background: transparent;
+  border-bottom-color: rgba(178, 69, 30, 0.16);
+  align-items: flex-end;
 }
 
 .library-message {
@@ -1806,6 +2740,13 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+body.library-home .library-list,
+body.library-home .library-message,
+body.library-home .library-foot {
+  margin-left: 16px;
+  margin-right: 16px;
 }
 
 .library-section {
@@ -1897,6 +2838,17 @@
 .library-row-actions button:disabled {
   cursor: default;
   opacity: 0.5;
+}
+
+.library-samples {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.library-sample-row .library-row-main {
+  cursor: default;
 }
 
 .library-foot {

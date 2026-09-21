@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>StudioPractice — vision &amp; mission</title>
+  <link rel="icon" href="logo.png" type="image/png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,560&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --paper: #f3eee4;
+      --ink: #1a1612;
+      --ink-soft: #5c5348;
+      --line: #cfc4b3;
+      --copper: #b2451e;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: "Source Sans 3", "Segoe UI", sans-serif;
+      font-size: 17px;
+      line-height: 1.5;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      padding: 16px 24px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    header img {
+      display: block;
+      height: 36px;
+      width: auto;
+    }
+
+    main {
+      max-width: 40rem;
+      margin: 0 auto;
+      padding: 32px 24px 64px;
+    }
+
+    h1 {
+      font-family: Fraunces, Georgia, serif;
+      font-size: 1.75rem;
+      font-weight: 560;
+      margin: 0 0 8px;
+    }
+
+    h2 {
+      font-family: Fraunces, Georgia, serif;
+      font-size: 1.2rem;
+      font-weight: 560;
+      margin: 2rem 0 0.5rem;
+    }
+
+    .lead {
+      color: var(--ink-soft);
+      margin: 0 0 2rem;
+    }
+
+    p { margin: 0 0 0.75rem; }
+
+    ul, ol {
+      margin: 0 0 0.75rem;
+      padding-left: 1.2em;
+    }
+
+    li { margin: 0.25rem 0; }
+
+    .outcomes {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px 20px;
+      margin: 1rem 0;
+    }
+
+    .outcomes h3 {
+      margin: 0 0 4px;
+      font-size: 1rem;
+    }
+
+    .outcomes p {
+      margin: 0;
+      color: var(--ink-soft);
+      font-size: 0.95rem;
+    }
+
+    @media (max-width: 560px) {
+      .outcomes { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <img src="logo-full.png" width="200" height="43" alt="The Studio Practice" />
+  </header>
+
+  <main>
+    <h1>Vision &amp; mission</h1>
+    <p class="lead">What we build, why, and what you should expect.</p>
+
+    <h2>Vision</h2>
+    <p>Every residential builder should be able to <strong>plan, price, picture, and permit</strong> a job in one place — without software built for every discipline on earth.</p>
+    <p>Revit’s workflows are worth keeping. Revit’s full cost and complexity are not what we sell. The tool should feel familiar on day one, use your firm’s standards, and never invent a fact it does not know.</p>
+
+    <h2>Mission</h2>
+    <p>Draw the job, price it, show the client what it will look like, and produce the compliance documents the municipality asks for — from <strong>your Revit template</strong>, not a generic CAD palette.</p>
+    <p>If a feature moves a builder toward one of those four outcomes, it belongs in the product. The only question is when, not whether.</p>
+
+    <h2>What you get</h2>
+    <div class="outcomes">
+      <div>
+        <h3>Plan</h3>
+        <p>Storey-based drawing that staff already trained on Revit can pick up.</p>
+      </div>
+      <div>
+        <h3>Price</h3>
+        <p>Quantities and cost from the same job — not a spreadsheet that drifts.</p>
+      </div>
+      <div>
+        <h3>Picture</h3>
+        <p>A client-facing view. Schematic or AI-assisted; if AI, it is marked as such.</p>
+      </div>
+      <div>
+        <h3>Permit</h3>
+        <p>A submission-ready set for a registered professional to check and sign. Direct submit only where registration is not required.</p>
+      </div>
+    </div>
+    <p>Exports (DXF, IFC, permit set) go out one way. The live job stays on the server.</p>
+
+    <h2>How we work</h2>
+    <ol>
+      <li><strong>Familiar behaviour, not a second Revit.</strong> Levels, sheets, libraries, snap, groups — the interactions you already know. Not family authoring, MEP routing, or photoreal rendering.</li>
+      <li><strong>Your template is the default.</strong> Wall types, doors, and the rest come from your template. Where it runs out, we ask. We do not invent.</li>
+      <li><strong>Unknown stays unknown.</strong> Gaps show up in the report. We never fill them with a plausible number.</li>
+    </ol>
+
+    <h2>What we don’t pretend to be</h2>
+    <ul>
+      <li>Family authoring or parametric family internals</li>
+      <li>MEP routing (we place symbols and price PC sums)</li>
+      <li>Structural calculations or engineer sign-off</li>
+      <li>Photoreal “as-built” images</li>
+      <li>Automatic municipal approval, or submission without a registered professional where SACAP requires one</li>
+    </ul>
+    <p>If something is on the roadmap, we say when it lands — not that it is out of scope forever.</p>
+
+    <h2>The promise</h2>
+    <p>We respect how you already build, we surface gaps instead of hiding them, and we stay on mission: plan, price, picture, permit. Nothing more, nothing less.</p>
+  </main>
+</body>
+</html>

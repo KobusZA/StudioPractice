@@ -6,8 +6,8 @@
 // Camera (Output > Views > Camera) is the same extrusion from a standing
 // eye, not a second model. Section (Document > Views > Section) is the same
 // extrusion on a vertical cut. No Revit mesh ingestion (that lives in
-// web/extras.js against the old planner) and no AI render (Week 4, and a
-// separate step that would consume this view's output rather than replace it).
+// web/extras.js against the old planner). Generate model is a separate step
+// that consumes a snapshot of this view rather than replacing the extrusion.
 //
 // Ported from web/extras.js's massing renderer, trimmed of what v1 needed
 // and v2 does not:

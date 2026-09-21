@@ -11,7 +11,7 @@
   <link rel="stylesheet" href="../styles.css" />
   <link rel="stylesheet" href="./v2.css" />
 </head>
-<body>
+<body class="auth-pending">
   <div class="chrome">
     <header class="topbar" title="Part 3 — v2 core preview">
       <button type="button" class="brand" id="v2-about-open" title="About StudioPractice">
@@ -49,6 +49,13 @@
         <button type="button" id="v2-open">Open</button>
         <button type="button" id="v2-demo">Demo house</button>
         <button type="button" class="primary" id="v2-compile">Compile</button>
+        <div class="account" id="v2-account" hidden>
+          <button type="button" class="account-btn" id="v2-account-open"
+                  aria-haspopup="dialog" aria-expanded="false" aria-controls="v2-account-overlay"
+                  title="Account">
+            <span class="account-avatar" id="v2-account-avatar">?</span>
+          </button>
+        </div>
       </div>
     </header>
     <nav class="ribbon" aria-label="Toolbars">
@@ -58,22 +65,32 @@
   </div>
 
   <main class="layout layout-planner view-page" id="v2-app">
-    <aside class="planner-palette panel">
-      <header>
-        <h2 id="v2-palette-title">Types</h2>
-        <span id="v2-pack-name">Pack</span>
-      </header>
-      <div class="planner-search">
-        <label class="visually-hidden" for="v2-search">Search types</label>
-        <input id="v2-search" type="search" placeholder="Search types" />
-      </div>
-      <div class="planner-sku-list" id="v2-sku-list"></div>
-    </aside>
-
     <section class="panel planner-stage">
-      <header class="plan-header planner-header">
-        <h2>Plan</h2>
-        <div class="planner-tools" role="toolbar" aria-label="Tools">
+      <div class="stage-row" id="v2-stage-row">
+        <aside class="level-widget panel" id="v2-level-widget" hidden>
+          <h2>Active cut</h2>
+          <p class="level-cut-name" id="v2-cut-name">—</p>
+          <p class="level-cut-meta">
+            <span id="v2-cut-elev">—</span>
+            <span class="level-kind-chip" id="v2-cut-kind">—</span>
+          </p>
+          <label class="level-isolate" title="Show only what sits on this level. Off ghosts the neighbouring level.">
+            <input type="checkbox" id="v2-level-isolate" />
+            Show only this level
+          </label>
+          <div class="level-house-frame">
+          <svg class="level-house" id="v2-level-house" viewBox="0 0 248 318" role="slider"
+               aria-label="Building cut" aria-orientation="vertical"
+               aria-valuemin="0" tabindex="0"></svg>
+          </div>
+          <p class="hint">Drag the rail, or click the section to jump. <kbd>↑</kbd> <kbd>↓</kbd> step;
+            <kbd>PgUp</kbd> <kbd>PgDn</kbd> skip a storey.</p>
+          <ul class="level-stations" id="v2-level-stations"></ul>
+          <button type="button" class="panel-resize panel-resize-levels" id="v2-resize-levels"
+                  aria-label="Resize levels panel" title="Drag to resize" tabindex="0"></button>
+        </aside>
+        <div class="canvas-wrap planner-canvas-wrap" id="v2-canvas-wrap">
+        <div class="planner-tools plan-float-tools" role="toolbar" aria-label="Plan tools">
           <button type="button" data-tool="select" class="active">Select</button>
           <button type="button" id="v2-undo">Undo</button>
           <div class="seg" role="group" aria-label="Show on plan">
@@ -87,27 +104,6 @@
             <button type="button" id="v2-hm-delete">Delete</button>
           </span>
         </div>
-      </header>
-      <div class="stage-row" id="v2-stage-row">
-        <aside class="level-widget panel" id="v2-level-widget" hidden>
-          <h2>Active cut</h2>
-          <p class="level-cut-name" id="v2-cut-name">—</p>
-          <p class="level-cut-meta">
-            <span id="v2-cut-elev">—</span>
-            <span class="level-kind-chip" id="v2-cut-kind">—</span>
-          </p>
-          <label class="level-isolate" title="Show only what sits on this level. Off ghosts the neighbouring level.">
-            <input type="checkbox" id="v2-level-isolate" />
-            Show only this level
-          </label>
-          <svg class="level-house" id="v2-level-house" viewBox="0 0 248 318" role="slider"
-               aria-label="Building cut" aria-orientation="vertical"
-               aria-valuemin="0" tabindex="0"></svg>
-          <p class="hint">Drag the rail, or click the section to jump. <kbd>↑</kbd> <kbd>↓</kbd> step;
-            <kbd>PgUp</kbd> <kbd>PgDn</kbd> skip a storey.</p>
-          <ul class="level-stations" id="v2-level-stations"></ul>
-        </aside>
-        <div class="canvas-wrap planner-canvas-wrap" id="v2-canvas-wrap">
         <canvas id="v2-canvas"></canvas>
         <div class="canvas-status">
           <p class="ribbon-hint" id="v2-ribbon-hint" hidden></p>
@@ -140,7 +136,7 @@
         </div>
         <div class="empty" id="v2-empty">
           <h3>Nothing drawn</h3>
-          <p>Pick Walls, Doors or another tool on the ribbon, then a type from the list, or click Demo house to see a shared wall, an L-shaped room, a door, a window and a slab in one go.</p>
+          <p>Pick Walls, Doors or another tool on the ribbon, then a type from the list. Open → Sample jobs creates a traced plan you can click — walls, ceilings and doors — or use Demo house for the small two-room seed.</p>
         </div>
         <div class="legend" id="v2-legend" hidden>
           <span class="existing"><i></i>Existing</span>
@@ -235,13 +231,34 @@
       </div>
     </section>
 
-    <aside class="side planner-side planner-inspector">
-      <section class="panel">
-        <header>
-          <h2>Inspector</h2>
-          <span id="v2-inspect-kicker">—</span>
-        </header>
-        <p class="hint" id="v2-inspect-empty">Select a wall, room, roof or opening to edit its type and identity.</p>
+    <aside class="dock dock-context planner-side planner-inspector" id="v2-dock-context" data-state="empty">
+      <button type="button" class="panel-resize panel-resize-dock" id="v2-resize-dock"
+              aria-label="Resize context panel" title="Drag to resize" tabindex="0"></button>
+      <header>
+        <h2 id="v2-palette-title">Inspector</h2>
+        <span id="v2-inspect-kicker">—</span>
+      </header>
+      <p class="hint ctx-empty" id="v2-inspect-empty">Select a wall, room, roof or opening to edit its type and identity, or pick a tool on the ribbon to start drawing.</p>
+      <div class="ctx-body" id="v2-ctx-body">
+        <div class="ctx-type-picker" id="v2-ctx-type-picker" hidden>
+          <div class="ctx-type-picker-label">
+            <span>Type</span>
+            <span id="v2-pack-name">Pack</span>
+          </div>
+          <button type="button" class="ctx-type-current" id="v2-type-current" aria-haspopup="listbox" aria-expanded="false" aria-controls="v2-type-flyout">
+            <i></i>
+            <span class="ctx-type-current-name" id="v2-type-current-name">Pick a type</span>
+            <em id="v2-type-current-meta"></em>
+            <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+          </button>
+          <div class="ctx-type-flyout" id="v2-type-flyout" aria-hidden="true">
+            <div class="dock-search planner-search">
+              <label class="visually-hidden" for="v2-search">Search types</label>
+              <input id="v2-search" type="search" placeholder="Search types" />
+            </div>
+            <div class="planner-sku-list" id="v2-sku-list"></div>
+          </div>
+        </div>
         <div class="planner-fields" id="v2-inspect-fields" hidden>
           <label id="v2-ctx-name-wrap" hidden>Name
             <input id="v2-ctx-name" type="text" autocomplete="off" />
@@ -291,7 +308,7 @@
           </div>
           <button type="button" id="v2-ctx-flip" hidden>Flip swing</button>
         </div>
-      </section>
+      </div>
     </aside>
   </main>
 
@@ -363,6 +380,8 @@
           <button type="button" data-mass-status="planned">Planned</button>
         </div>
         <span id="v2-mass-caption">Drag to orbit · scroll to zoom</span>
+        <button type="button" id="v2-mass-generate">Generate model</button>
+        <button type="button" id="v2-mass-show-3d" hidden>Show 3D</button>
         <button type="button" id="v2-mass-close">Close</button>
       </header>
       <div class="mass-split" id="v2-mass-split">
@@ -376,6 +395,10 @@
           <div class="empty" id="v2-mass-empty">
             <h3>Nothing to show</h3>
             <p>Draw a room, wall, roof, floor, door or window, then open 3D again.</p>
+          </div>
+          <div class="mass-render" id="v2-mass-render" hidden>
+            <img id="v2-mass-render-img" alt="Photorealistic visualization of the building" />
+            <p class="mass-render-status" id="v2-mass-render-status" hidden></p>
           </div>
         </div>
       </div>
@@ -434,15 +457,85 @@
     </div>
   </div>
 
+  <div class="account-overlay" id="v2-account-overlay" hidden>
+    <section class="account-page" role="dialog" aria-modal="true" aria-labelledby="v2-account-title">
+      <header class="account-page-bar">
+        <div>
+          <p class="account-kicker">Your account</p>
+          <h2 id="v2-account-title">Account</h2>
+        </div>
+        <button type="button" id="v2-account-close" aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </header>
+      <div class="account-page-body">
+        <div class="account-head">
+          <span class="account-avatar account-avatar-lg" id="v2-account-avatar-lg">?</span>
+          <div class="account-who">
+            <strong id="v2-account-name">—</strong>
+            <span id="v2-account-email">—</span>
+            <span class="account-chips">
+              <em id="v2-account-plan">Studio</em>
+              <em id="v2-account-role">Owner</em>
+            </span>
+          </div>
+        </div>
+        <div class="account-grid">
+          <div class="account-license">
+            <div class="account-license-row">
+              <span>Licence</span>
+              <strong id="v2-account-license-left">—</strong>
+            </div>
+            <div class="account-meter" aria-hidden="true">
+              <i id="v2-account-meter"></i>
+            </div>
+            <p class="account-license-meta">
+              <span id="v2-account-license-renews">—</span>
+              <span id="v2-account-seats">—</span>
+            </p>
+          </div>
+          <dl class="account-facts">
+            <div>
+              <dt>Firm</dt>
+              <dd id="v2-account-firm">—</dd>
+            </div>
+            <div>
+              <dt>Address</dt>
+              <dd id="v2-account-address">—</dd>
+            </div>
+            <div>
+              <dt>Member</dt>
+              <dd id="v2-account-member">—</dd>
+            </div>
+            <div>
+              <dt>Jobs</dt>
+              <dd id="v2-account-jobs">—</dd>
+            </div>
+          </dl>
+        </div>
+        <div class="account-actions">
+          <button type="button" id="v2-account-jobs-btn">Open jobs</button>
+          <button type="button" id="v2-account-signout">Sign out</button>
+        </div>
+      </div>
+    </section>
+  </div>
+
   <!-- The job library: what replaced Open, and the only place a soft-deleted
        job can be brought back from. Rows carry a name, an erf and dates -
        facts the server sent - and no thumbnail, because a placeholder image
        would be a picture of a job nobody drew. -->
   <div class="library-overlay" id="v2-library-overlay" hidden>
     <div class="panel library-panel" role="dialog" aria-modal="true" aria-labelledby="v2-library-title">
+      <img class="library-logo" src="../logo-full.png" alt="" />
       <header>
-        <h2 id="v2-library-title">Jobs</h2>
-        <button type="button" id="v2-library-new">New job</button>
+        <div class="library-heading">
+          <h2 id="v2-library-title">Jobs</h2>
+          <p class="library-kicker" id="v2-library-kicker">Open a drawing, or start a new one.</p>
+        </div>
+        <button type="button" class="primary" id="v2-library-new">New drawing</button>
         <button type="button" id="v2-library-signout">Sign out</button>
         <button type="button" id="v2-library-close">Close</button>
       </header>
@@ -565,11 +658,18 @@
     </div>
   </div>
 
-  <!-- Sign-in. The server is the system of record, so there is no useful
-       anonymous state to fall into: a drawing has nowhere to be saved until
-       there is an account to own it. -->
-  <div class="auth-veil" id="v2-auth" hidden>
-    <form class="auth-card panel" id="v2-auth-form">
+  <!-- Sign-in is its own screen, not a veil over the planner. A drawing has
+       nowhere to be saved until an account owns it, so the editor stays
+       hidden until then. -->
+  <div class="auth-view" id="v2-auth" hidden>
+    <form class="auth-card" id="v2-auth-form">
+      <div class="auth-glint-layer" aria-hidden="true">
+        <span class="auth-glint auth-glint-h auth-glint-top"></span>
+        <span class="auth-glint auth-glint-h auth-glint-bottom"></span>
+        <span class="auth-glint auth-glint-v auth-glint-left"></span>
+        <span class="auth-glint auth-glint-v auth-glint-right"></span>
+      </div>
+      <img class="auth-logo" src="../logo-full.png" alt="" />
       <h2 id="v2-auth-title">Sign in</h2>
       <p class="auth-kicker" id="v2-auth-kicker">Your jobs are saved to your firm's account.</p>
 
@@ -594,6 +694,6 @@
     </form>
   </div>
 
-  <script type="module" src="./ui.js?v=20260918-library"></script>
+  <script type="module" src="./ui.js?v=20260919-generate-error"></script>
 </body>
 </html>
