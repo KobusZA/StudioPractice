@@ -167,6 +167,33 @@ table.grid tr.flagged { background: var(--copper-tint-8); }
 .scroller table.grid { border: 0; }
 .scroller table.grid thead th { position: sticky; top: 0; }
 
+/* --- tasks -------------------------------------------------------------- */
+
+table.grid tr.phase-row td {
+  background: var(--bg-tertiary); font-weight: 700; font-size: 11px;
+  text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-soft);
+  padding-top: 6px; padding-bottom: 6px;
+}
+/* Struck, not hidden: legible as a decision somebody made, and still readable
+   months later when the fee is queried. */
+table.grid tr.struck td:first-child { text-decoration: line-through; color: var(--ink-muted); }
+table.grid tr.struck { opacity: 0.72; }
+table.grid td select { height: 24px; padding: 0 4px; font-size: 11.5px; border: 1px solid var(--hairline-strong); background: var(--bg-primary); border-radius: var(--radius-sm); }
+.task-note { font-size: 11px; color: var(--ink-muted); margin-top: 2px; }
+
+.task-picker { display: grid; gap: 4px; max-height: 260px; overflow-y: auto; }
+.task-pick {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) 110px; gap: 8px;
+  align-items: center; padding: 5px 7px; border-radius: var(--radius-sm);
+  font-size: 12.5px;
+}
+.task-pick:hover { background: var(--bg-hover); }
+.task-pick em { display: block; font-style: normal; font-size: 11px; color: var(--ink-muted); }
+.task-pick input[type="number"] {
+  height: 26px; padding: 0 6px; border: 1px solid var(--hairline-strong);
+  background: var(--bg-primary); border-radius: var(--radius-sm); min-width: 0;
+}
+
 /* --- warnings ----------------------------------------------------------- */
 
 .warn-list { display: grid; gap: 8px; }

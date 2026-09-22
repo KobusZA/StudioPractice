@@ -36,18 +36,29 @@ Build in this order. Do not skip ahead to templates unless the user asks.
 | 1 | **Project register** — built | Type-agnostic spine. Codes, client, property, type, budget estimate. |
 | 2 | **Timesheet** — built | Daily use. Immutable captured value, activity types, optional phase/task. |
 | 3 | **Write-down + certificate generation** — built | Realisation (billed ÷ captured) and cash. |
-| 4 | **Project master view** | Status, assumptions, warnings, forecast. Spec is the live mock. |
-| 5 | **Fee templates** | Seed from Shape B (`REZONING` / `CONSENT USE`); treat A and C as degenerate. Placeholders for empty types. |
+| 4 | **Project master view** — built | Status, warnings, fee schedule. Assumptions and forecast deferred. |
+| 5 | **Fee templates** — built | Seeded from the workbook's five sheets with content; the four empty ones stay placeholders. |
 
-Steps 1–3 live in `server/src/store.js` (a `// --- the register ---` section onward),
-`server/src/pricing.js`, `server/src/defaults.js` and `web/practice/`. Read those before
-adding to them; the decisions below are already expressed in code.
+All five live in `server/src/store.js` (a `// --- the register ---` section onward),
+`server/src/pricing.js`, `server/src/defaults.js`, `server/src/fee-templates.js` and
+`web/practice/`. Read those before adding to them; the decisions below are already
+expressed in code.
+
+**Still to build**, and deliberately not guessed at: `AssumptionTemplate` /
+`ProjectAssumption` (holding / at risk / breached) and the forecast at completion.
+Both need real jobs to have run through the phases before their rules can be
+written honestly.
 
 Time entry should show **live burn** against the current phase fee while logging. That warning is worth more than the overview page.
 
 ## Source of truth (read, do not reverse-engineer from memory)
 
 - Workbook: `TSP_TEAM TIME Tdummy.xlsm` (repo root). Dummy data; treat figures as real structure.
+  The fee-template figures already ported out of it are in `server/src/fee-templates.js`,
+  each with the sheet and cell it came from. Two of its own totals are wrong and are
+  **not** corrected: `STRATAREPORT`'s `=SUM(J6:J7)` drops its third line item, and the
+  `CONSENT USE` / `REMOVAL OF RESTRICTIONS` sheet totals fold disbursement allowances in
+  with the professional fee. The seed carries professional fees only.
 - Pricing rules, already ported: `server/src/pricing.js`. The linear column and the quarter-hour ladder are the same R1 920/hr and differ only in rounding up; do not "reconcile" them.
 - Type list, tariff bands, activity types, write-down reasons: `server/src/defaults.js`, seeded per org at sign-up.
 - Extracted sample: `web/v2/project-master-data.json`

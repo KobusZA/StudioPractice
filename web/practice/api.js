@@ -53,6 +53,11 @@ export const api = {
     call("PUT", `/api/projects/${encodeURIComponent(id)}/fee-schedule`, { lines })
   ),
 
+  listTasks: (id) => call("GET", `/api/projects/${encodeURIComponent(id)}/tasks`),
+  addTask: (id, body) => call("POST", `/api/projects/${encodeURIComponent(id)}/tasks`, body),
+  // Striking is `status: "not_required"`. There is no delete.
+  updateTask: (id, body) => call("PATCH", `/api/tasks/${encodeURIComponent(id)}`, body),
+
   listTimeEntries: (filters = {}) => call("GET", `/api/time-entries${query(filters)}`),
   createTimeEntry: (body) => call("POST", "/api/time-entries", body),
   deleteTimeEntry: (id) => call("DELETE", `/api/time-entries/${encodeURIComponent(id)}`),
@@ -67,6 +72,9 @@ export const api = {
   addScheduleLine: (id, body) => call("POST", `/api/certificates/${encodeURIComponent(id)}/lines`, body),
   addLinesFromTime: (id, body) => (
     call("POST", `/api/certificates/${encodeURIComponent(id)}/lines-from-time`, body)
+  ),
+  addLinesFromTasks: (id, tasks) => (
+    call("POST", `/api/certificates/${encodeURIComponent(id)}/lines-from-tasks`, { tasks })
   ),
   addWriteDown: (id, body) => (
     call("POST", `/api/certificates/${encodeURIComponent(id)}/write-downs`, body)

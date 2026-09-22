@@ -19,6 +19,7 @@ const state = {
   certificates: [],
   openCertificate: null,
   feeSchedule: null,
+  tasks: [],
   monthEntries: [],
   signUpMode: false,
 };
@@ -518,8 +519,113 @@ function overviewHtml(project) {
     <h3 class="sec">Warnings <small>derived from the numbers, not typed by anyone</small></h3>
     ${warningsHtml(warningsFor(project))}
 
+    ${tasksHtml(project)}
+
     <h3 class="sec">Register</h3>
     ${registerFormHtml(project)}`;
+}
+
+const TASK_STATUS_LABELS = {
+  not_started: "Not started",
+  in_progress: "In progress",
+  done: "Done",
+  not_required: "Struck",
+};
+
+/**
+ * The job's own copy of its type's task list, cloned when it was registered.
+ *
+ * A struck task is shown, not hidden. "We looked at this and it was not
+ * needed" is the answer to a query about the fee months later, and a list that
+ * quietly dropped it cannot give that answer - which is why there is no delete
+ * here, only `not_required`.
+ */
+function tasksHtml(project) {
+  const tasks = state.tasks;
+  const type = state.reference?.projectTypes.find((t) => t.code === project.typeCode);
+  const done = tasks.filter((t) => t.status === "done").length;
+  const struck = tasks.filter((t) => t.status === "not_required").length;
+
+  const addForm = `
+    <form class="form" data-form="add-task" data-project="${esc(project.id)}" style="margin-top:10px">
+      <div class="fields">
+        <div class="field wide">
+          <label for="nt-description">Add a task</label>
+          <input id="nt-description" name="description" required
+                 placeholder="Respond to the environmental department complaint" />
+        </div>
+        <div class="field">
+          <label for="nt-phase">Phase</label>
+          <input id="nt-phase" name="phaseLabel" list="task-phases" placeholder="Optional" />
+          <datalist id="task-phases">
+            ${[...new Set(tasks.map((t) => t.phaseLabel).filter(Boolean))]
+    .map((label) => `<option value="${esc(label)}"></option>`).join("")}
+          </datalist>
+        </div>
+        <div class="field">
+          <label for="nt-fee">Fee</label>
+          <input id="nt-fee" name="defaultFee" type="number" step="0.01" placeholder="Optional" />
+        </div>
+      </div>
+      <div class="actions"><button class="btn" type="submit">Add task</button></div>
+    </form>`;
+
+  if (!tasks.length) {
+    return `
+      <h3 class="sec">Tasks</h3>
+      <div class="empty">${type?.isPlaceholder
+    ? `${esc(type.name)} is a registered type with no fee template behind it, so this job
+         started with an empty list. That is the finished state for it, not a gap &mdash;
+         add the tasks this particular job needs.`
+    : "No task list on this job. Tasks are cloned from the project type's fee template when "
+      + "the job is registered; this one had no type, or none with a template."}</div>
+      ${addForm}`;
+  }
+
+  let currentPhase = null;
+  const rows = tasks.map((task) => {
+    const header = task.phaseLabel !== currentPhase
+      ? `<tr class="phase-row"><td colspan="5">${esc(task.phaseLabel || "No phase")}</td></tr>`
+      : "";
+    currentPhase = task.phaseLabel;
+    const struckRow = task.status === "not_required";
+    return `${header}
+      <tr${struckRow ? ' class="struck"' : ""}>
+        <td>${esc(task.description)}
+          ${task.templateTaskId === null ? ' <span class="pill flat">added</span>' : ""}
+          ${task.note ? `<div class="task-note">${esc(task.note)}</div>` : ""}</td>
+        <td class="num">${task.defaultFee === null ? "&mdash;" : money(task.defaultFee)}</td>
+        <td>${task.certificateId
+    ? `<span class="pill ${task.certificateStatus === "issued" ? "ok" : "flat"}">${
+      task.certificateStatus === "issued" ? "billed" : "on a draft"}</span>`
+    : '<span class="pill flat">not billed</span>'}</td>
+        <td>
+          <select data-action="task-status" data-task="${esc(task.id)}">
+            ${Object.entries(TASK_STATUS_LABELS).map(([value, label]) => `
+              <option value="${esc(value)}"${task.status === value ? " selected" : ""}>${label}</option>`).join("")}
+          </select>
+        </td>
+        <td class="num">${struckRow
+    ? `<button class="btn btn-sm" data-action="unstrike-task" data-task="${esc(task.id)}">Restore</button>`
+    : `<button class="btn btn-sm" data-action="strike-task" data-task="${esc(task.id)}">Strike</button>`}</td>
+      </tr>`;
+  }).join("");
+
+  return `
+    <h3 class="sec">Tasks
+      <small>${tasks.length} from the ${esc(type?.name || project.typeCode || "job's")} template
+        &middot; ${done} done${struck ? ` &middot; ${struck} struck` : ""}</small>
+    </h3>
+    <div class="scroller"><table class="grid">
+      <thead><tr>
+        <th>Task</th><th class="num">Fee</th><th>Billed</th><th>Status</th><th></th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>
+    <p class="note-line">A struck task stays on the list. Deleting it would lose the only record
+      that somebody looked at it and decided it was not needed &mdash; which is the question
+      asked when the fee is queried.</p>
+    ${addForm}`;
 }
 
 function registerFormHtml(project) {
@@ -793,6 +899,8 @@ function certificateHtml(certificate) {
             overlapping range is a no-op rather than a second charge.</p>
         </form>
 
+        ${billableTasksHtml(certificate)}
+
         <form class="form" data-form="schedule-line" data-certificate="${esc(certificate.id)}">
           <div class="fields">
             <div class="field wide">
@@ -839,6 +947,45 @@ function certificateHtml(certificate) {
         different numbers, and both are still here.</p>`}`;
 }
 
+/**
+ * The third source of a certificate line, beside pulled time and a typed one.
+ *
+ * Each task is billed at its own fee where the template priced it that way
+ * (`TOWNSHIP establishment`) and at a typed amount where the template prices
+ * the phase instead (`REZONING`, `CONSENT USE`) - which is why the amount box
+ * is always there, pre-filled when there is something to pre-fill with.
+ */
+function billableTasksHtml(certificate) {
+  const billable = state.tasks.filter((task) => !task.certificateId
+    && task.status !== "not_required");
+  if (!state.tasks.length) return "";
+
+  return `
+    <form class="form" data-form="lines-from-tasks" data-certificate="${esc(certificate.id)}">
+      <h4 style="margin:0 0 8px;font-family:var(--font-display);font-weight:560;font-size:0.9rem">
+        Bill phase tasks</h4>
+      ${billable.length ? `
+        <div class="task-picker">
+          ${billable.map((task) => `
+            <label class="task-pick">
+              <input type="checkbox" name="task" value="${esc(task.id)}" />
+              <span>${esc(task.description)}
+                <em>${esc(task.phaseLabel || "no phase")}${
+  task.status === "done" ? " &middot; done" : ""}</em></span>
+              <input type="number" step="0.01" name="amount" aria-label="Amount"
+                     value="${task.defaultFee ?? ""}"
+                     placeholder="${task.defaultFee === null ? "Amount" : ""}" />
+            </label>`).join("")}
+        </div>
+        <div class="actions"><button class="btn btn-primary" type="submit">Bill the ticked tasks</button></div>
+        <p class="note-line">Each line is tagged with the phase it was quoted under, so the fee
+          schedule can show it against that phase rather than only in the total. A task is
+          billable once.</p>`
+    : `<div class="empty" style="padding:18px 12px">Every task on this job is either billed
+        already or struck. A task is billable once.</div>`}
+    </form>`;
+}
+
 // --- loading ----------------------------------------------------------------
 
 async function loadProjects({ keepSelection = true } = {}) {
@@ -864,11 +1011,15 @@ async function loadTab() {
       : [];
     return;
   }
-  if (state.tab === "schedule") {
+  if (state.tab === "overview") {
+    state.tasks = (await api.listTasks(project.id)).tasks;
+  } else if (state.tab === "schedule") {
     state.feeSchedule = (await api.feeSchedule(project.id)).feeSchedule;
   } else if (state.tab === "time") {
     state.entries = (await api.listTimeEntries({ project: project.id })).entries;
   } else if (state.tab === "certificates") {
+    // The certificate builder offers unbilled tasks as a third line source.
+    state.tasks = (await api.listTasks(project.id)).tasks;
     state.certificates = (await api.listCertificates(project.id)).certificates;
     if (state.openCertificate
       && !state.certificates.some((c) => c.id === state.openCertificate.id)) {
@@ -1007,6 +1158,12 @@ function wireApp() {
       state.selectedId = state.projects[0]?.id ?? null;
       renderRail();
       renderMain();
+    } else if (action.action === "strike-task" || action.action === "unstrike-task") {
+      const status = action.action === "strike-task" ? "not_required" : "not_started";
+      const result = await attempt(() => api.updateTask(action.task, { status }));
+      if (!result) return;
+      state.tasks = result.tasks;
+      renderMain();
     } else if (action.action === "withdraw-entry") {
       if (await attempt(() => api.deleteTimeEntry(action.entry))) await refresh();
     } else if (action.action === "new-certificate") {
@@ -1033,6 +1190,17 @@ function wireApp() {
   main.addEventListener("input", (event) => {
     const form = event.target.closest('[data-form="time"]');
     if (form) updatePreview(form);
+  });
+
+  main.addEventListener("change", async (event) => {
+    const select = event.target.closest('[data-action="task-status"]');
+    if (!select) return;
+    const result = await attempt(() => api.updateTask(select.dataset.task, {
+      status: select.value,
+    }));
+    if (!result) return;
+    state.tasks = result.tasks;
+    renderMain();
   });
 
   main.addEventListener("submit", async (event) => {
@@ -1088,6 +1256,31 @@ function wireApp() {
       if (!result) return;
       state.openCertificate = result.certificate;
       toast(`${result.certificate.lines.length} line(s) on the certificate`);
+      await refresh();
+    } else if (kind === "add-task") {
+      const result = await attempt(() => api.addTask(form.dataset.project, {
+        description: values.description,
+        phaseLabel: values.phaseLabel || null,
+        defaultFee: values.defaultFee || null,
+      }));
+      if (!result) return;
+      state.tasks = result.tasks;
+      toast("Task added");
+      renderMain();
+    } else if (kind === "lines-from-tasks") {
+      // Paired by row, not by FormData: every row shares the same two field
+      // names and only the ticked ones are being billed.
+      const picked = [...form.querySelectorAll(".task-pick")]
+        .filter((row) => row.querySelector('[name="task"]').checked)
+        .map((row) => ({
+          taskId: row.querySelector('[name="task"]').value,
+          amount: row.querySelector('[name="amount"]').value || null,
+        }));
+      if (!picked.length) return toast("Tick a task to bill first", true);
+      const result = await attempt(() => api.addLinesFromTasks(form.dataset.certificate, picked));
+      if (!result) return;
+      state.openCertificate = result.certificate;
+      toast(`${picked.length} task${picked.length === 1 ? "" : "s"} billed`);
       await refresh();
     } else if (kind === "schedule-line") {
       const result = await attempt(() => api.addScheduleLine(form.dataset.certificate, values));

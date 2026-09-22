@@ -15,6 +15,7 @@
 // every predicate below, and no statement here is a DELETE.
 
 import { DEFAULT_PROJECT_TYPES, DEFAULT_RATE_BANDS } from "./defaults.js";
+import { FEE_TEMPLATES, pctSplit, templateTotal } from "./fee-templates.js";
 import { certificateUnits, priceEntry, toCents } from "./pricing.js";
 import { sid } from "./ids.js";
 
@@ -429,6 +430,92 @@ export function openStore(queryable, { orgId, userId }) {
           [sid("rb"), orgId, band.code, band.label, band.hourlyRate, userId],
         );
       }
+      await this.seedFeeTemplates();
+    },
+
+    /**
+     * The five templates that arrived with content. Guarded on
+     * `template_version = 0` rather than on a unique index, because a phase
+     * list has no natural key to conflict on and re-running this against a
+     * firm that has since edited its own templates would quietly restore the
+     * seeded ones over their work.
+     *
+     * The four empty sheets get nothing, and that is the finished state for
+     * them: a placeholder type is selectable, a job of that type registers
+     * normally, and its fee schedule is entered freehand.
+     */
+    async seedFeeTemplates() {
+      const { rows: types } = await q(
+        `select id, code from project_type
+          where org_id = $1 and deleted_at is null and template_version = 0`,
+        [orgId],
+      );
+      for (const type of types) {
+        const template = FEE_TEMPLATES[type.code];
+        if (!template) continue;
+        const total = templateTotal(template);
+        for (const [phaseIndex, phase] of template.phases.entries()) {
+          const phaseId = sid("ftp");
+          await q(
+            `insert into fee_template_phase (
+               id, project_type_id, seq, name, default_pct_split, default_fee, created_by
+             ) values ($1, $2, $3, $4, $5, $6, $7)`,
+            [phaseId, type.id, phaseIndex + 1, phase.name, pctSplit(phase, total), phase.fee, userId],
+          );
+          for (const [taskIndex, task] of phase.tasks.entries()) {
+            await q(
+              `insert into fee_template_task (
+                 id, phase_id, seq, description, default_fee, created_by
+               ) values ($1, $2, $3, $4, $5, $6)`,
+              [sid("ftt"), phaseId, taskIndex + 1, task.description, task.fee ?? null, userId],
+            );
+          }
+        }
+        await q(
+          `update project_type set template_version = 1 where id = $1`,
+          [type.id],
+        );
+      }
+    },
+
+    /** A type's phases and tasks, for showing what a job would be built from. */
+    async getFeeTemplate(typeCode) {
+      const { rows: phases } = await q(
+        `select ftp.id, ftp.seq, ftp.name, ftp.default_pct_split, ftp.default_fee
+           from fee_template_phase ftp
+           join project_type pt on pt.id = ftp.project_type_id
+          where pt.org_id = $1 and upper(btrim(pt.code)) = upper(btrim($2))
+            and pt.deleted_at is null and ftp.deleted_at is null
+          order by ftp.seq`,
+        [orgId, typeCode],
+      );
+      if (!phases.length) return { typeCode, phases: [], quoted: 0 };
+      const { rows: tasks } = await q(
+        `select id, phase_id, seq, description, rate_band_code, default_hours, default_fee
+           from fee_template_task
+          where phase_id = any($1) and deleted_at is null
+          order by seq`,
+        [phases.map((phase) => phase.id)],
+      );
+      return {
+        typeCode,
+        quoted: toCents(phases.reduce((sum, phase) => sum + (num(phase.default_fee) ?? 0), 0)),
+        phases: phases.map((phase) => ({
+          id: phase.id,
+          seq: Number(phase.seq),
+          name: phase.name,
+          defaultPctSplit: num(phase.default_pct_split),
+          defaultFee: num(phase.default_fee),
+          tasks: tasks.filter((task) => task.phase_id === phase.id).map((task) => ({
+            id: task.id,
+            seq: Number(task.seq),
+            description: task.description,
+            rateBandCode: task.rate_band_code ?? null,
+            defaultHours: num(task.default_hours),
+            defaultFee: num(task.default_fee),
+          })),
+        })),
+      };
     },
 
     async listProjectTypes() {
@@ -522,6 +609,11 @@ export function openStore(queryable, { orgId, userId }) {
             clean.status || "open",
           ],
         );
+        // The task list and the fee schedule are cloned from the same template
+        // in the same transaction, so the two cannot disagree on day one -
+        // which is exactly what happened in the workbook, where the register
+        // recorded R120 000 against a template totalling R54 445.80.
+        if (clean.typeCode) await this.instantiateTemplate(rows[0].id, clean.typeCode);
         return this.getRegisterProject(rows[0].id);
       } catch (error) {
         if (error.code === "23505") throw new DuplicateCodeError(clean.code);
@@ -565,6 +657,146 @@ export function openStore(queryable, { orgId, userId }) {
         if (error.code === "23505") throw new DuplicateCodeError(clean.code);
         throw error;
       }
+    },
+
+    // --- a job's task list --------------------------------------------------
+
+    /**
+     * Clone a type's template onto a job: every task becomes a `project_task`,
+     * and every phase becomes a `fee_schedule_line`. One step, because a task
+     * list and a fee schedule built from the same template at different times
+     * is two chances to get a different answer.
+     *
+     * A placeholder type has no phases and this does nothing, which is the
+     * settled decision rather than a gap: the job registers, the task list is
+     * empty, and the fee schedule is entered by hand.
+     *
+     * Refuses to run twice. Re-instantiating would duplicate the task list and
+     * silently double the quoted fee.
+     */
+    async instantiateTemplate(projectId, typeCode) {
+      const template = await this.getFeeTemplate(typeCode);
+      if (!template.phases.length) return { tasks: 0, scheduleLines: 0 };
+      const { rows: existing } = await q(
+        `select 1 from project_task where project_id = $1 and deleted_at is null limit 1`,
+        [projectId],
+      );
+      if (existing[0]) return { tasks: 0, scheduleLines: 0 };
+
+      let seq = 0;
+      for (const phase of template.phases) {
+        for (const task of phase.tasks) {
+          seq += 1;
+          await q(
+            `insert into project_task (
+               id, project_id, template_task_id, seq, phase_label, description,
+               default_fee, created_by
+             ) values ($1, $2, $3, $4, $5, $6, $7, $8)`,
+            [
+              sid("ptk"), projectId, task.id, seq, phase.name,
+              task.description, task.defaultFee, userId,
+            ],
+          );
+        }
+      }
+      await this.setFeeSchedule(projectId, template.phases.map((phase) => ({
+        label: phase.name,
+        quoted: phase.defaultFee ?? 0,
+      })));
+      return { tasks: seq, scheduleLines: template.phases.length };
+    },
+
+    async listProjectTasks(projectId) {
+      const { rows } = await q(
+        `select pt.id, pt.template_task_id, pt.seq, pt.phase_label, pt.description,
+                pt.default_fee, pt.status, pt.assignee_id, pt.note,
+                u.email as assignee_email,
+                cl.id as certificate_line_id, cl.certificate_id, pc.status as certificate_status
+           from project_task pt
+           join project p on p.id = pt.project_id
+           left join app_user u on u.id = pt.assignee_id
+           left join lateral (
+             select cl.id, cl.certificate_id
+               from certificate_line cl
+               join payment_certificate pc2 on pc2.id = cl.certificate_id and pc2.deleted_at is null
+              where cl.project_task_id = pt.id and cl.deleted_at is null
+              order by cl.created_at limit 1
+           ) cl on true
+           left join payment_certificate pc on pc.id = cl.certificate_id
+          where pt.project_id = $2 and pt.deleted_at is null
+            and p.org_id = $1 and p.deleted_at is null
+          order by pt.seq`,
+        [orgId, projectId],
+      );
+      return rows.map((row) => ({
+        id: row.id,
+        templateTaskId: row.template_task_id ?? null,
+        seq: Number(row.seq),
+        phaseLabel: row.phase_label ?? null,
+        description: row.description,
+        defaultFee: num(row.default_fee),
+        status: row.status,
+        assigneeId: row.assignee_id ?? null,
+        assigneeEmail: row.assignee_email ?? null,
+        note: row.note ?? null,
+        certificateId: row.certificate_id ?? null,
+        certificateStatus: row.certificate_status ?? null,
+      }));
+    },
+
+    /** A task somebody added that the template did not know about. */
+    async addProjectTask(projectId, { description, phaseLabel = null, defaultFee = null }) {
+      const project = await this.getProject(projectId);
+      if (!project) return null;
+      const text = trimmed(description);
+      if (!text) throw new ValidationError("a task needs a description");
+      await q(
+        `insert into project_task (
+           id, project_id, seq, phase_label, description, default_fee, created_by
+         ) select $1, $2, coalesce(max(seq), 0) + 1, $3, $4, $5, $6
+             from project_task where project_id = $2 and deleted_at is null`,
+        [
+          sid("ptk"), projectId, trimmed(phaseLabel) ?? null, text,
+          defaultFee === null || defaultFee === "" ? null : toCents(Number(defaultFee)), userId,
+        ],
+      );
+      return this.listProjectTasks(projectId);
+    },
+
+    /**
+     * Status, assignee and note. Striking a task is `status = 'not_required'`,
+     * which is why there is no deleteProjectTask: a struck task stays on the
+     * list as the record of a decision, and "we looked at this and it was not
+     * needed" is the answer when the fee is queried.
+     */
+    async updateProjectTask(taskId, fields) {
+      const columns = {
+        status: "status" in fields ? trimmed(fields.status) : undefined,
+        assignee_id: "assigneeId" in fields ? trimmed(fields.assigneeId) : undefined,
+        note: "note" in fields ? trimmed(fields.note) : undefined,
+      };
+      if (columns.status !== undefined && !TASK_STATUSES.includes(columns.status)) {
+        throw new ValidationError(`a task status is one of ${TASK_STATUSES.join(", ")}`);
+      }
+      const sets = [];
+      const params = [taskId, orgId];
+      for (const [column, value] of Object.entries(columns)) {
+        if (value === undefined) continue;
+        params.push(value);
+        sets.push(`${column} = $${params.length}`);
+      }
+      if (!sets.length) return null;
+      const { rows } = await q(
+        `update project_task pt set ${sets.join(", ")}
+          where pt.id = $1 and pt.deleted_at is null
+            and exists (select 1 from project p
+                         where p.id = pt.project_id and p.org_id = $2
+                           and p.deleted_at is null)
+        returning pt.project_id`,
+        params,
+      );
+      if (!rows[0]) return null;
+      return this.listProjectTasks(rows[0].project_id);
     },
 
     // --- the fee schedule ---------------------------------------------------
@@ -901,7 +1133,8 @@ export function openStore(queryable, { orgId, userId }) {
       );
       if (!rows[0]) return null;
       const { rows: lines } = await q(
-        `select id, seq, source, description, phase_ref, pct, units, amount, time_entry_id
+        `select id, seq, source, description, phase_ref, pct, units, amount,
+                time_entry_id, project_task_id
            from certificate_line
           where certificate_id = $1 and deleted_at is null
           order by seq`,
@@ -949,6 +1182,80 @@ export function openStore(queryable, { orgId, userId }) {
              from certificate_line where certificate_id = $2 and deleted_at is null`,
         [sid("cl"), certificateId, text, trimmed(phaseRef) ?? null, pct, toCents(value), userId],
       );
+      return this.getCertificate(certificateId);
+    },
+
+    /**
+     * Bill phase tasks. The templated replacement for typing a schedule line
+     * by hand, and the reason `certificate_line.source` now has a fourth
+     * value: a line that came off a task can be reconciled against the fee
+     * schedule and marked as claimed, where a typed one can only be read.
+     *
+     * Each selection is `{ taskId, amount?, pct? }`. A task's own
+     * `default_fee` is the default, and one of the two overrides is required
+     * when it has none - the spatial-planning templates price the phase rather
+     * than each task, so "bill task 7" has no amount of its own. A phase can
+     * also be part-billed, which is what `pct` is for.
+     *
+     * The line carries `phase_ref = task.phase_label`, which is what lets the
+     * fee schedule show it against the phase that was quoted.
+     */
+    async addScheduleLinesFromTasks(certificateId, selections) {
+      const certificate = await requireDraft(this, certificateId);
+      if (!certificate) return null;
+      if (!Array.isArray(selections) || !selections.length) {
+        throw new ValidationError("select at least one task to bill");
+      }
+      const tasks = await this.listProjectTasks(certificate.projectId);
+      const { rows: seqRows } = await q(
+        `select coalesce(max(seq), 0) as seq from certificate_line
+          where certificate_id = $1 and deleted_at is null`,
+        [certificateId],
+      );
+      let seq = Number(seqRows[0].seq);
+
+      for (const selection of selections) {
+        const id = typeof selection === "string" ? selection : selection.taskId;
+        const task = tasks.find((candidate) => candidate.id === id);
+        // Null rather than an error for an unknown id: it is another firm's
+        // task or a stale page, and both are the 404 every other read gives.
+        if (!task) return null;
+        if (task.certificateId) throw new ValidationError(`"${task.description}" is already billed`);
+
+        const override = typeof selection === "object" ? selection : {};
+        let amount = override.amount === undefined || override.amount === null || override.amount === ""
+          ? null
+          : Number(override.amount);
+        if (amount === null && override.pct !== undefined && override.pct !== null && override.pct !== "") {
+          const fraction = Number(override.pct);
+          if (!Number.isFinite(fraction) || fraction <= 0) {
+            throw new ValidationError("a percentage must be greater than zero");
+          }
+          if (task.defaultFee === null) {
+            throw new ValidationError(`"${task.description}" has no fee to take a percentage of`);
+          }
+          amount = task.defaultFee * fraction;
+        }
+        if (amount === null) amount = task.defaultFee;
+        if (amount === null || !Number.isFinite(amount)) {
+          // The phase-priced templates carry no task fee, so this is a real
+          // and common answer rather than a corrupt row. Say which task.
+          throw new ValidationError(
+            `"${task.description}" carries no fee of its own - enter an amount for it`,
+          );
+        }
+        seq += 1;
+        await q(
+          `insert into certificate_line (
+             id, certificate_id, seq, source, description, phase_ref,
+             pct, amount, project_task_id, created_by
+           ) values ($1, $2, $3, 'phase', $4, $5, $6, $7, $8, $9)`,
+          [
+            sid("cl"), certificateId, seq, task.description, task.phaseLabel,
+            override.pct ? Number(override.pct) : null, toCents(amount), task.id, userId,
+          ],
+        );
+      }
       return this.getCertificate(certificateId);
     },
 
@@ -1076,6 +1383,9 @@ async function requireDraft(store, certificateId) {
   if (certificate.status !== "draft") throw new IssuedError(certificateId);
   return certificate;
 }
+
+/** domain.md's phase/task vocabulary. `not_required` is a struck task. */
+const TASK_STATUSES = ["not_started", "in_progress", "done", "not_required"];
 
 // --- practice-ops SQL fragments ---------------------------------------------
 
@@ -1329,6 +1639,7 @@ function certificateDocument(row, lines, downs) {
     units: num(line.units),
     amount: num(line.amount) ?? 0,
     timeEntryId: line.time_entry_id ?? null,
+    projectTaskId: line.project_task_id ?? null,
   }));
   const writeDowns = downs.map((down) => ({
     id: down.id,

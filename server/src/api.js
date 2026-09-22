@@ -67,6 +67,10 @@ export function createApi(pool, options = {}, env = process.env) {
     ["GET", "/api/projects/:id/financials", handleFinancials],
     ["GET", "/api/projects/:id/fee-schedule", handleGetFeeSchedule],
     ["PUT", "/api/projects/:id/fee-schedule", handleSetFeeSchedule],
+    ["GET", "/api/projects/:id/tasks", handleListProjectTasks],
+    ["POST", "/api/projects/:id/tasks", handleAddProjectTask],
+    ["PATCH", "/api/tasks/:id", handleUpdateProjectTask],
+    ["GET", "/api/fee-templates/:code", handleGetFeeTemplate],
 
     ["GET", "/api/time-entries", handleListTimeEntries],
     ["POST", "/api/time-entries", handleCreateTimeEntry],
@@ -77,6 +81,7 @@ export function createApi(pool, options = {}, env = process.env) {
     ["GET", "/api/certificates/:id", handleGetCertificate],
     ["POST", "/api/certificates/:id/lines", handleAddScheduleLine],
     ["POST", "/api/certificates/:id/lines-from-time", handleAddLinesFromTime],
+    ["POST", "/api/certificates/:id/lines-from-tasks", handleAddLinesFromTasks],
     ["POST", "/api/certificates/:id/write-downs", handleAddWriteDown],
     ["POST", "/api/certificates/:id/issue", handleIssueCertificate],
 
@@ -402,6 +407,43 @@ async function handleSetFeeSchedule({ req, res, pool, params }) {
   sendJson(res, 200, { feeSchedule });
 }
 
+async function handleListProjectTasks({ req, res, pool, params }) {
+  const store = await requireStore(pool, req);
+  const project = await store.getProject(params.id);
+  if (!project) throw new HttpError(404, "No such job");
+  sendJson(res, 200, { tasks: await store.listProjectTasks(params.id) });
+}
+
+async function handleAddProjectTask({ req, res, pool, params }) {
+  const session = await requireSession(pool, req);
+  const body = (await readJsonBody(req)) || {};
+  const tasks = await withTransaction(pool, (client) => (
+    openStore(client, session).addProjectTask(params.id, body)
+  ));
+  if (!tasks) throw new HttpError(404, "No such job");
+  sendJson(res, 201, { tasks });
+}
+
+/**
+ * Status, assignee, note. There is no DELETE: striking a task is a status, so
+ * that the list still shows somebody looked at it and decided it was not
+ * needed - which is the question asked when the fee is queried.
+ */
+async function handleUpdateProjectTask({ req, res, pool, params }) {
+  const session = await requireSession(pool, req);
+  const body = (await readJsonBody(req)) || {};
+  const tasks = await withTransaction(pool, (client) => (
+    openStore(client, session).updateProjectTask(params.id, body)
+  ));
+  if (!tasks) throw new HttpError(404, "No such task");
+  sendJson(res, 200, { tasks });
+}
+
+async function handleGetFeeTemplate({ req, res, pool, params }) {
+  const store = await requireStore(pool, req);
+  sendJson(res, 200, { template: await store.getFeeTemplate(params.code) });
+}
+
 // --- the timesheet ---------------------------------------------------------
 
 async function handleListTimeEntries({ req, res, pool, url }) {
@@ -491,6 +533,16 @@ async function handleAddLinesFromTime({ req, res, pool, params }) {
       from: blankToNull(body.from),
       to: blankToNull(body.to),
     })
+  ));
+  if (!certificate) throw new HttpError(404, "No such certificate");
+  sendJson(res, 200, { certificate });
+}
+
+async function handleAddLinesFromTasks({ req, res, pool, params }) {
+  const session = await requireSession(pool, req);
+  const body = (await readJsonBody(req)) || {};
+  const certificate = await withTransaction(pool, (client) => (
+    openStore(client, session).addScheduleLinesFromTasks(params.id, body.tasks)
   ));
   if (!certificate) throw new HttpError(404, "No such certificate");
   sendJson(res, 200, { certificate });

@@ -25,13 +25,23 @@ const put = (client, projectId, lines) => (
   client.put(`/api/projects/${projectId}/fee-schedule`, { lines })
 );
 
+/**
+ * A job with no fee template behind it, so the schedule under test is the only
+ * one that has ever existed on it. Registering a templated type clones a
+ * schedule at creation - that path is `fee-templates.test.js`, and mixing the
+ * two here would test the seed rather than the schedule.
+ */
+const firmWithFreehandProject = (baseUrl, fields = {}) => (
+  firmWithRegisterProject(baseUrl, { typeCode: null, ...fields })
+);
+
 const financials = async (client, projectId) => (
   (await client.get(`/api/projects/${projectId}/financials`)).body.financials
 );
 
 test("a schedule is stored as a whole document and read back in order", async () => {
   const { baseUrl } = await testServer();
-  const { client, project } = await firmWithRegisterProject(baseUrl);
+  const { client, project } = await firmWithFreehandProject(baseUrl);
 
   const saved = await put(client, project.id, REZONING);
   assert.equal(saved.status, 200);
@@ -46,7 +56,7 @@ test("a schedule is stored as a whole document and read back in order", async ()
 
 test("saving a schedule replaces the prior one rather than appending to it", async () => {
   const { baseUrl } = await testServer();
-  const { client, project } = await firmWithRegisterProject(baseUrl);
+  const { client, project } = await firmWithFreehandProject(baseUrl);
   await put(client, project.id, REZONING);
 
   // A fee proposal is reissued whole. Five phases revised down to two is two
@@ -73,7 +83,7 @@ test("the schedule sum outranks the register's budget estimate", async () => {
   const { baseUrl } = await testServer();
   // D063's real numbers: the register says R120 000 and the template says
   // R54 445.80. Somebody quoted one of them, and burn has to pick.
-  const { client, project } = await firmWithRegisterProject(baseUrl, { budgetEstimate: 120000 });
+  const { client, project } = await firmWithFreehandProject(baseUrl, { budgetEstimate: 120000 });
 
   const before = await financials(client, project.id);
   assert.equal(before.quoted, 120000);
@@ -100,7 +110,7 @@ test("the schedule sum outranks the register's budget estimate", async () => {
 
 test("an emptied schedule falls back to the budget estimate rather than to zero", async () => {
   const { baseUrl } = await testServer();
-  const { client, project } = await firmWithRegisterProject(baseUrl, { budgetEstimate: 120000 });
+  const { client, project } = await firmWithFreehandProject(baseUrl, { budgetEstimate: 120000 });
   await put(client, project.id, REZONING);
   await put(client, project.id, []);
 
@@ -113,7 +123,7 @@ test("an emptied schedule falls back to the budget estimate rather than to zero"
 
 test("burn is measured against the schedule once one exists", async () => {
   const { baseUrl } = await testServer();
-  const { client, project } = await firmWithRegisterProject(baseUrl, { budgetEstimate: 120000 });
+  const { client, project } = await firmWithFreehandProject(baseUrl, { budgetEstimate: 120000 });
   for (let i = 0; i < 4; i += 1) await logHour(client, project.id);
 
   assert.equal((await financials(client, project.id)).burn, 7680 / 120000);
@@ -125,7 +135,7 @@ test("burn is measured against the schedule once one exists", async () => {
 
 test("a phase shows what was certified under it, and by how much it overran", async () => {
   const { baseUrl } = await testServer();
-  const { client, project } = await firmWithRegisterProject(baseUrl);
+  const { client, project } = await firmWithFreehandProject(baseUrl);
   await put(client, project.id, REZONING);
 
   const draft = (await client.post(`/api/projects/${project.id}/certificates`, {}))
@@ -153,7 +163,7 @@ test("a phase shows what was certified under it, and by how much it overran", as
 
 test("money certified against no phase is reported rather than absorbed", async () => {
   const { baseUrl } = await testServer();
-  const { client, project } = await firmWithRegisterProject(baseUrl);
+  const { client, project } = await firmWithFreehandProject(baseUrl);
   await put(client, project.id, REZONING);
   await logHour(client, project.id);
 
@@ -176,7 +186,7 @@ test("money certified against no phase is reported rather than absorbed", async 
 
 test("a schedule line needs a label and a number", async () => {
   const { baseUrl } = await testServer();
-  const { client, project } = await firmWithRegisterProject(baseUrl);
+  const { client, project } = await firmWithFreehandProject(baseUrl);
 
   const noLabel = await put(client, project.id, [{ label: "  ", quoted: 100 }]);
   assert.equal(noLabel.status, 400);

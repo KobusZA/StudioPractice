@@ -132,7 +132,13 @@ test("the register carries each job's money, and says nothing where there is non
   const [job] = body.projects;
   assert.equal(job.financials.captured, 0);
   assert.equal(job.financials.billed, 0);
-  assert.equal(job.financials.quoted, 120000);
+  // D063's real disagreement: the register records R120 000 and the township
+  // template it was registered against totals R54 445.80. The schedule wins,
+  // because it is the breakdown somebody built, and the estimate is still
+  // reported so the master view can flag that the two do not match.
+  assert.equal(job.financials.quoted, 54445.8);
+  assert.equal(job.financials.quotedSource, "fee_schedule");
+  assert.equal(job.financials.budgetEstimate, 120000);
   // Null, not zero. "Nobody has billed this yet" and "this realised nothing"
   // are different sentences, and a rail that prints 0% for the first is
   // lying about a job that is simply new.
@@ -144,6 +150,9 @@ test("a job with no budget reports no burn rather than a fabricated one", async 
   const { baseUrl } = await testServer();
   const { client, project } = await firmWithRegisterProject(baseUrl, {
     code: "P074", name: "Pretorius dispute",
+    // A dispute, which is not one of the nine registered types and has no
+    // template to clone a fee from. Nothing quotes this job at all.
+    typeCode: null,
     billingBasis: "time_and_materials", budgetEstimate: null,
   });
   await client.post("/api/time-entries", {

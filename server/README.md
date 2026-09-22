@@ -126,6 +126,16 @@ is a rule nobody notices breaking in the image.
     corrected by a credit, not by a deletion.
 14. Back on the rail, the job's badge shows realisation rather than a recency
     order, and the Overview KPIs agree with what was just certified.
+15. Register a job of type **Rezoning**. Its Overview shows 21 tasks in five
+    phases and its Fee schedule tab shows R 74 500 — both cloned from the
+    workbook's own `REZONING` sheet in the same transaction, so they cannot
+    disagree. Strike a task: it stays on the list, struck through.
+16. Register one of type **Bill of quantities**. No tasks and no schedule, and
+    the job still works — a placeholder type is a finished state, not an
+    unfinished one.
+17. On a templated job, start a certificate and use **Bill phase tasks**. The
+    line lands tagged with its phase, and the Fee schedule tab then shows it
+    against that phase's quoted figure rather than only in the total.
 
 ## Going live
 

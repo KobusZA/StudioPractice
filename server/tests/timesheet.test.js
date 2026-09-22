@@ -93,7 +93,9 @@ test("a wrong entry is withdrawn, not edited, and the sum drops it", async () =>
 test("logging time answers with the burn it just caused", async () => {
   const { baseUrl } = await testServer();
   const { client, project } = await firmWithRegisterProject(baseUrl, {
-    budgetEstimate: 5000,
+    // No template, so the register's own estimate is the fee being burnt
+    // against and this test measures the warning rather than the seed.
+    typeCode: null, budgetEstimate: 5000,
   });
 
   // The warning that matters is the one at the keyboard, while the row is

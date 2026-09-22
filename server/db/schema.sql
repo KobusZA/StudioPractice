@@ -222,6 +222,89 @@ create table if not exists project_type (
 create unique index if not exists project_type_code_live
   on project_type (org_id, upper(btrim(code))) where deleted_at is null;
 
+-- 0 means "no template behind this type", which is a real and permanent state
+-- for the four sheets that arrived empty, not an unfinished migration. The
+-- number is bumped when a firm edits its own template, so a job instantiated
+-- last year can say which version of the phase list it was built from.
+alter table project_type add column if not exists template_version integer not null default 0;
+
+-- The fee template: what this discipline charges for, in the order it happens.
+--
+-- Three shapes came out of the workbook and this is the one schema for all
+-- three. `REZONING` and `CONSENT USE` are phases with numbered tasks and a fee
+-- on the phase; `TOWNSHIP establishment` is stages with a fee on each task and
+-- the stage total as their sum; `STRATAREPORT` is a single phase. The
+-- degenerate cases are not special-cased - a one-phase template is a template
+-- with one phase.
+create table if not exists fee_template_phase (
+  id                text primary key,
+  project_type_id   text not null references project_type (id),
+  seq               integer not null,
+  name              text not null,
+  -- This phase's share of the template's professional fee, as a fraction.
+  -- Stored rather than recomputed so that editing one phase's fee does not
+  -- silently restate what every other phase is worth.
+  default_pct_split numeric(7, 4),
+  default_fee       numeric(14, 2),
+  created_by        text not null,
+  created_at        timestamptz not null default now(),
+  deleted_at        timestamptz
+);
+
+create index if not exists fee_template_phase_type_live
+  on fee_template_phase (project_type_id, seq) where deleted_at is null;
+
+-- `rate_band_code` and `default_hours` are nullable and, for now, null on every
+-- seeded row. The workbook's hour columns disagree with their own phase
+-- subtotals - task 1 of CONSENT USE reads "4 hours @ R3 600" beside cells
+-- holding 2 and 1 - and transcribing them would put a number nobody can source
+-- behind an estimate. The columns exist because the firm will author them.
+create table if not exists fee_template_task (
+  id             text primary key,
+  phase_id       text not null references fee_template_phase (id),
+  seq            integer not null,
+  description    text not null,
+  rate_band_code text,
+  default_hours  numeric(8, 2),
+  default_fee    numeric(14, 2),
+  created_by     text not null,
+  created_at     timestamptz not null default now(),
+  deleted_at     timestamptz
+);
+
+create index if not exists fee_template_task_phase_live
+  on fee_template_task (phase_id, seq) where deleted_at is null;
+
+-- A job's own copy of the task list, cloned at registration.
+--
+-- A copy rather than a reference: the template is the firm's current thinking
+-- and jobs run for years, so a job that pointed at the live template would
+-- silently acquire phases nobody quoted it for. `template_task_id` is null for
+-- a task somebody added by hand.
+--
+-- Striking a task is `status = 'not_required'`, kept and displayed. Deleting it
+-- would lose the only record that somebody looked at it and decided it was not
+-- needed, which is the question asked when the fee is queried.
+create table if not exists project_task (
+  id               text primary key,
+  project_id       text not null references project (id),
+  template_task_id text references fee_template_task (id),
+  seq              integer not null,
+  phase_label      text,
+  description      text not null,
+  default_fee      numeric(14, 2),
+  status           text not null default 'not_started'
+                   check (status in ('not_started', 'in_progress', 'done', 'not_required')),
+  assignee_id      text references app_user (id),
+  note             text,
+  created_by       text not null,
+  created_at       timestamptz not null default now(),
+  deleted_at       timestamptz
+);
+
+create index if not exists project_task_project_live
+  on project_task (project_id, seq) where deleted_at is null;
+
 -- Rates are versioned, never corrected. The workbook prices the same minute at
 -- R32/min in one column and off a R1 920/hr ladder in another, and the four
 -- fee-template bands disagree with both. Those are the firm's numbers; a table
@@ -329,13 +412,17 @@ create table if not exists certificate_line (
   id              text primary key,
   certificate_id  text not null references payment_certificate (id),
   seq             integer not null,
-  source          text not null check (source in ('schedule', 'time', 'disbursement')),
+  -- 'schedule' is hand-typed, 'phase' is billed off a project_task cloned from
+  -- a template. Distinguishable on purpose: one of the two can be reconciled
+  -- against the fee schedule and the other can only be read.
+  source          text not null check (source in ('schedule', 'time', 'disbursement', 'phase')),
   description     text not null,
   phase_ref       text,
   pct             numeric(7, 4),
   units           numeric(12, 4),
   amount          numeric(14, 2) not null,
   time_entry_id   text references time_entry (id),
+  project_task_id text references project_task (id),
   created_by      text not null,
   created_at      timestamptz not null default now(),
   deleted_at      timestamptz
@@ -343,6 +430,28 @@ create table if not exists certificate_line (
 
 create index if not exists certificate_line_cert_live
   on certificate_line (certificate_id, seq) where deleted_at is null;
+
+-- `create table if not exists` above leaves an older database with the older
+-- three-value constraint, so the widened one is restated here. Dropped by name
+-- and re-added rather than altered, because a check constraint cannot be
+-- changed in place; both statements are idempotent, which is what lets
+-- migrate.js run on every boot.
+alter table certificate_line drop constraint if exists certificate_line_source_check;
+alter table certificate_line add constraint certificate_line_source_check
+  check (source in ('schedule', 'time', 'disbursement', 'phase'));
+
+alter table certificate_line add column if not exists project_task_id text
+  references project_task (id);
+
+-- A phase is billed once, for the same reason an hour is: billing the same
+-- task on two certificates is invisible in a total, and the converse - a task
+-- marked done that nobody ever charged for - is only answerable if the link
+-- is a column rather than a matched description.
+--
+-- Not partial on `source`, because a task can only ever be reached one way.
+create unique index if not exists certificate_line_project_task_live
+  on certificate_line (project_task_id)
+  where deleted_at is null and project_task_id is not null;
 
 -- An hour is billed once. Without this, re-running a date range that overlaps
 -- a certificate already issued bills the overlap again, and the error is
