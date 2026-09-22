@@ -15,6 +15,13 @@ That sentence is the scope test. If a feature moves a builder closer to one of
 those four, it is in scope, and the only remaining question is *when* it is
 built - not *whether*.
 
+The spine underneath those four is the practice, not the drawing: a job
+register, a timesheet, fees, certificates, and the master view that ties them
+together (see the `practice-ops` skill). A job is a row before it is a
+drawing, and most job types never acquire one - the register does not require
+a document, and the drawing app in `web/v2` is one activity a job can carry,
+not the thing that makes a job real.
+
 ## The three principles
 
 ### 1. We copy Revit's behaviours. We do not rebuild Revit's engines.
@@ -41,12 +48,14 @@ not a reason to refuse an interaction a builder expects.
 
 ### 2. The template defines the defaults, not the limits.
 
-The firm's Revit template is the source of truth for *what this firm builds
-with*: its wall types, doors, windows, fittings, levels, sheets and title
-blocks. The app ships that template's content, not a generic CAD palette, and
-over time it should consume more of the template rather than reinventing
-equivalents beside it. If the template already states a fact, read it - do not
-re-derive it, and do not build a parallel version of it.
+The firm's own template - not a generic CAD palette - is the source of truth
+for *what this firm builds with*: its wall types, doors, windows, fittings,
+levels, sheets and title blocks. It was extracted from Revit once; the app
+does not read Revit again. What it ships and reads is the pack that
+extraction produced (`web/samples/tsp-pack.json`, built by `build-pack.js`),
+and that pack is what should absorb more of the template over time, not a
+live connection back to Revit. If the pack already states a fact, read it -
+do not re-derive it, and do not build a parallel version of it.
 
 But a template is a starting point, which is what it is for a Revit user too.
 Where the template's content runs out, the user may supply more: a third storey,
@@ -65,15 +74,14 @@ every judgement, and every gap surfaces in a report instead of defaulting to
 something believable. This is the rule the whole product's credibility rests
 on, and it is not negotiable under schedule pressure.
 
-The product is the planner in `web/v2` and the Node/Postgres system of record
-in `server/`. A builder draws and prices the job in the browser; the server
-holds the row. That is not a viewer of a Revit model. The C# add-in and
-`LocalConnectorHost` on `127.0.0.1:17300` were the first attempt at getting
-facts onto a page; they are not how the product works, and they are not a
-path to restore. `build-pack.js` still turns a firm's catalog dump into a
-SKU pack so judgements stay testable without Autodesk software. DXF and IFC
-remain one-way deliverables a registered professional can open in Revit
-without this add-in.
+The product is the practice-ops system and the drawing app in `web/v2`, both
+served by the Node/Postgres system of record in `server/`. A builder draws
+and prices the job in the browser; the server holds the row. There is no
+Revit add-in and no live Revit connection: `build-pack.js` turns a one-time
+catalog extraction into the SKU pack the app ships, so judgements stay
+testable without Autodesk software ever being open. DXF and IFC remain
+one-way deliverables a registered professional can open in Revit on their
+own, with nothing on this app's side listening for a reply.
 
 ## What leaves the app: round-trip versus one-way
 
