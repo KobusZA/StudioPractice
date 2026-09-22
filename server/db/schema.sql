@@ -282,6 +282,29 @@ create index if not exists time_entry_project_live
 create index if not exists time_entry_user_live
   on time_entry (user_id, entry_date) where deleted_at is null;
 
+-- The agreed quote, broken down. Not the same thing as a certificate: a
+-- certificate says what is being claimed this month, and until this table
+-- existed there was no stored record of what was promised in the first place,
+-- so an overrun was only ever visible as one total against another.
+--
+-- A schedule is revised as a whole document rather than line by line, which is
+-- how a fee proposal is actually reissued, so `setFeeSchedule` soft-deletes the
+-- previous set and inserts the new one. The superseded rows stay: what was
+-- quoted in March is the answer to a question somebody will ask in September.
+create table if not exists fee_schedule_line (
+  id          text primary key,
+  project_id  text not null references project (id),
+  seq         integer not null,
+  label       text not null,
+  quoted      numeric(14, 2) not null,
+  created_by  text not null,
+  created_at  timestamptz not null default now(),
+  deleted_at  timestamptz
+);
+
+create index if not exists fee_schedule_line_project_live
+  on fee_schedule_line (project_id, seq) where deleted_at is null;
+
 create table if not exists payment_certificate (
   id            text primary key,
   project_id    text not null references project (id),

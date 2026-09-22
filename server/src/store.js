@@ -567,6 +567,121 @@ export function openStore(queryable, { orgId, userId }) {
       }
     },
 
+    // --- the fee schedule ---------------------------------------------------
+
+    /**
+     * The quote, phase by phase, against what has actually been claimed under
+     * each one. Certificate lines are matched to a schedule line by `phase_ref`
+     * against `label`, trimmed and case-folded, because the two are typed on
+     * different days by different people.
+     *
+     * `unallocated` is the rest: certified money carrying a phase nobody
+     * quoted, or none at all. That is the figure that makes the per-phase
+     * variance trustworthy - without it, a schedule can add up to less than the
+     * certificate total and read as if the job were under quote.
+     */
+    async listFeeSchedule(projectId) {
+      const { rows } = await q(
+        `select fsl.id, fsl.seq, fsl.label, fsl.quoted,
+                coalesce(claimed.certified, 0) as certified,
+                coalesce(claimed.draft, 0)     as draft
+           from fee_schedule_line fsl
+           join project p on p.id = fsl.project_id
+           left join lateral (
+             select coalesce(sum(cl.amount) filter (where pc.status = 'issued'), 0) as certified,
+                    coalesce(sum(cl.amount) filter (where pc.status = 'draft'), 0)  as draft
+               from certificate_line cl
+               join payment_certificate pc
+                 on pc.id = cl.certificate_id and pc.deleted_at is null
+              where pc.project_id = fsl.project_id
+                and cl.deleted_at is null
+                and upper(btrim(cl.phase_ref)) = upper(btrim(fsl.label))
+           ) claimed on true
+          where fsl.project_id = $2 and fsl.deleted_at is null
+            and p.org_id = $1 and p.deleted_at is null
+          order by fsl.seq`,
+        [orgId, projectId],
+      );
+      const { rows: loose } = await q(
+        `select coalesce(sum(cl.amount) filter (where pc.status = 'issued'), 0) as certified,
+                coalesce(sum(cl.amount) filter (where pc.status = 'draft'), 0)  as draft
+           from certificate_line cl
+           join payment_certificate pc
+             on pc.id = cl.certificate_id and pc.deleted_at is null
+           join project p on p.id = pc.project_id
+          where pc.project_id = $2 and cl.deleted_at is null
+            and p.org_id = $1 and p.deleted_at is null
+            and not exists (
+              select 1 from fee_schedule_line fsl
+               where fsl.project_id = pc.project_id and fsl.deleted_at is null
+                 and upper(btrim(fsl.label)) = upper(btrim(cl.phase_ref))
+            )`,
+        [orgId, projectId],
+      );
+      const lines = rows.map((row) => {
+        const quoted = num(row.quoted) ?? 0;
+        const certified = num(row.certified) ?? 0;
+        return {
+          id: row.id,
+          seq: Number(row.seq),
+          label: row.label,
+          quoted,
+          certified,
+          draft: num(row.draft) ?? 0,
+          // Positive is money still to claim, negative is an overrun on this
+          // phase. Signed rather than absolute, because which way it points is
+          // the entire content of the number.
+          variance: toCents(quoted - certified),
+        };
+      });
+      return {
+        lines,
+        quoted: toCents(lines.reduce((total, line) => total + line.quoted, 0)),
+        certified: toCents(lines.reduce((total, line) => total + line.certified, 0)),
+        unallocated: {
+          certified: num(loose[0]?.certified) ?? 0,
+          draft: num(loose[0]?.draft) ?? 0,
+        },
+      };
+    },
+
+    /**
+     * Replace-all, under one call. A fee schedule is revised the way a proposal
+     * is reissued - the whole document, renumbered - rather than by editing one
+     * line at a time, and a per-line PATCH would invite a half-applied revision
+     * where the phases no longer sum to the fee that was agreed.
+     *
+     * The superseded rows are soft-deleted, not overwritten: what the client
+     * was quoted in March is a question somebody asks in September.
+     */
+    async setFeeSchedule(projectId, lines) {
+      const project = await this.getProject(projectId);
+      if (!project) return null;
+      if (!Array.isArray(lines)) throw new ValidationError("a fee schedule is a list of lines");
+      const clean = lines.map((line, index) => {
+        const label = trimmed(line.label);
+        if (!label) throw new ValidationError(`line ${index + 1} needs a label`);
+        const quoted = Number(line.quoted);
+        if (!Number.isFinite(quoted)) {
+          throw new ValidationError(`line ${index + 1} needs a quoted amount`);
+        }
+        return { label, quoted: toCents(quoted) };
+      });
+      await q(
+        `update fee_schedule_line set deleted_at = now()
+          where project_id = $1 and deleted_at is null`,
+        [projectId],
+      );
+      for (const [index, line] of clean.entries()) {
+        await q(
+          `insert into fee_schedule_line (id, project_id, seq, label, quoted, created_by)
+                values ($1, $2, $3, $4, $5, $6)`,
+          [sid("fsl"), projectId, index + 1, line.label, line.quoted, userId],
+        );
+      }
+      return this.listFeeSchedule(projectId);
+    },
+
     // --- the timesheet ----------------------------------------------------
 
     /**
@@ -727,6 +842,8 @@ export function openStore(queryable, { orgId, userId }) {
                 p.budget_estimate,
                 p.billing_basis,
                 p.status,
+                schedule.scheduled,
+                schedule.schedule_lines,
                 lines.certified_gross,
                 lines.draft_gross,
                 wds.written_down,
@@ -1003,6 +1120,12 @@ const FINANCIAL_LATERALS = `
       join payment_certificate pc on pc.id = wd.certificate_id and pc.deleted_at is null
      where pc.project_id = p.id and wd.deleted_at is null
   ) wds on true
+  left join lateral (
+    select coalesce(sum(fsl.quoted), 0) as scheduled,
+           count(*)                     as schedule_lines
+      from fee_schedule_line fsl
+     where fsl.project_id = p.id and fsl.deleted_at is null
+  ) schedule on true
 `;
 
 const REGISTER_COLUMNS = `
@@ -1013,7 +1136,8 @@ const REGISTER_COLUMNS = `
   time_totals.captured, time_totals.captured_minutes,
   time_totals.uncertified_captured, time_totals.broken_rows,
   lines.certified_gross, lines.draft_gross,
-  wds.written_down, wds.unexplained_written_down
+  wds.written_down, wds.unexplained_written_down,
+  schedule.scheduled, schedule.schedule_lines
 `;
 
 // --- practice-ops mapping ---------------------------------------------------
@@ -1104,15 +1228,25 @@ function registerRow(row) {
  * their denominator is, because "no realisation yet" and "realised nothing"
  * are different sentences and a dashboard that prints 0% for the first is
  * lying about a job nobody has billed.
+ *
+ * `quoted` has one source at a time and says which. A fee schedule is the
+ * agreed breakdown and outranks the register's estimate the moment it exists;
+ * showing both as "the fee" would give the firm two numbers that drift, and
+ * burn would mean something different on two screens.
  */
 function financials(row) {
-  const quoted = num(row.budget_estimate);
+  const budgetEstimate = num(row.budget_estimate);
+  const scheduleLines = Number(row.schedule_lines ?? 0);
+  const quoted = scheduleLines ? num(row.scheduled) : budgetEstimate;
   const captured = num(row.captured) ?? 0;
   const certifiedGross = num(row.certified_gross) ?? 0;
   const writtenDown = num(row.written_down) ?? 0;
   const billed = toCents(certifiedGross - writtenDown);
   return {
     quoted,
+    quotedSource: scheduleLines ? "fee_schedule" : "budget_estimate",
+    budgetEstimate,
+    scheduleLines,
     captured,
     capturedMinutes: Number(row.captured_minutes ?? 0),
     certifiedGross,

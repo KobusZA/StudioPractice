@@ -88,6 +88,13 @@ button { cursor: pointer; }
 .real.bad { background: var(--copper-tint-16); color: var(--copper-dark); }
 .real.flat { background: var(--bg-tertiary); color: var(--ink-muted); }
 
+/* The rail is ordered by risk, not recency, and says so. Without this the
+   order reads as arbitrary and somebody re-sorts it back to a date. */
+.rail-note {
+  margin: 0; padding: 8px 12px; font-size: 11px; line-height: 1.45;
+  color: var(--ink-muted); border-bottom: 1px solid var(--hairline);
+}
+
 .main { overflow-y: auto; min-height: 0; }
 .proj-head { padding: 16px 22px 0; }
 .proj-head .code {
@@ -189,7 +196,10 @@ table.grid tr.flagged { background: var(--copper-tint-8); }
 .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px 14px; }
 .field { display: grid; gap: 3px; min-width: 0; }
 .field.wide { grid-column: 1 / -1; }
-.field label {
+/* `label.field > span` is the repeated-row form: the label wraps its own input
+   rather than pointing at an id, because the rows are cloned and an id would
+   have to be uniquified on every clone. */
+.field label, label.field > span {
   font-size: 11px; font-weight: 600; text-transform: uppercase;
   letter-spacing: 0.05em; color: var(--ink-muted);
 }
@@ -203,6 +213,15 @@ table.grid tr.flagged { background: var(--copper-tint-8); }
 }
 .actions { display: flex; align-items: center; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
 .actions .spacer { flex: 1; }
+
+/* Repeated rows of the same two fields. Only the first row is labelled on
+   screen; the rest keep their labels for a screen reader, because every input
+   still needs a name when the column header is forty pixels above it. */
+.schedule-row + .schedule-row { margin-top: 8px; }
+.sr-only {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+}
 
 /* The number that appears while somebody is typing a timesheet row. This is
    the whole point of the screen: the warning arrives at the keyboard, not on

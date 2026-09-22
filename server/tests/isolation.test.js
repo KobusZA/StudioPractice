@@ -47,6 +47,8 @@ test("a firm's practice-ops rows are unreachable from another org", async () => 
     ["GET", `/api/register/${project.id}`],
     ["PATCH", `/api/register/${project.id}`],
     ["GET", `/api/projects/${project.id}/financials`],
+    ["GET", `/api/projects/${project.id}/fee-schedule`],
+    ["PUT", `/api/projects/${project.id}/fee-schedule`],
     ["GET", `/api/projects/${project.id}/certificates`],
     ["POST", `/api/projects/${project.id}/certificates`],
     ["POST", `/api/projects/${project.id}/drawing`],
@@ -59,7 +61,10 @@ test("a firm's practice-ops rows are unreachable from another org", async () => 
   ];
   for (const [method, path] of attempts) {
     const res = await stranger.request(method, path, {
-      body: { name: "mine now", doc: testDoc(), description: "x", amount: 1, reasonCode: "goodwill" },
+      body: {
+        name: "mine now", doc: testDoc(), description: "x", amount: 1,
+        reasonCode: "goodwill", lines: [{ label: "mine now", quoted: 1 }],
+      },
     });
     assert.equal(res.status, 404, `${method} ${path}`);
     // 404 rather than 403, for the same reason as the jobs above: a firm

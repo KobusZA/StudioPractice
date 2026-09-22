@@ -47,6 +47,12 @@ export const api = {
   updateRegisterProject: (id, body) => call("PATCH", `/api/register/${encodeURIComponent(id)}`, body),
   financials: (id) => call("GET", `/api/projects/${encodeURIComponent(id)}/financials`),
 
+  feeSchedule: (id) => call("GET", `/api/projects/${encodeURIComponent(id)}/fee-schedule`),
+  // Replace-all. A schedule is revised the way a proposal is reissued.
+  setFeeSchedule: (id, lines) => (
+    call("PUT", `/api/projects/${encodeURIComponent(id)}/fee-schedule`, { lines })
+  ),
+
   listTimeEntries: (filters = {}) => call("GET", `/api/time-entries${query(filters)}`),
   createTimeEntry: (body) => call("POST", "/api/time-entries", body),
   deleteTimeEntry: (id) => call("DELETE", `/api/time-entries/${encodeURIComponent(id)}`),

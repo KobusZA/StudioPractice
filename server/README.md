@@ -96,6 +96,37 @@ After `docker compose up -d --build`, or after any deploy:
 7. New, then Open the first job again — the first one is unchanged. Two jobs are
    two rows.
 
+### Practice operations
+
+`http://localhost:8080/practice/index.html`, same session cookie as the
+planner. These steps are here rather than left to `tests/` because each one is
+a rule the firm's money depends on, and a rule only enforced in a test process
+is a rule nobody notices breaking in the image.
+
+8. Sign in, then create a job from the register form with a code and nothing
+   else — no type, no fee, no drawing. It appears in the rail. `POST
+   /api/register` is a separate path from `POST /api/projects` precisely
+   because the planner's requires a document and most of these disciplines
+   never produce one.
+9. `curl http://localhost:8080/api/projects/<id>` for that job → `200` with
+   `"drawing": null`, not a `404`. A register job the rest of the application
+   cannot open is a job that does not exist.
+10. Create a second job with the same code in a different case and with a
+    trailing space (`d063 ` against `D063`) → `409`, naming the code. The
+    source workbook carried `P078` twice.
+11. Log an hour on the Time tab. The preview reads its value before the row is
+    saved, and the toast afterwards names the burn if the job is past its fee.
+    An hour on the default ladder is R 1 920.
+12. Certificates tab → **Start a certificate** → **Pull unbilled time** with
+    both dates blank. The hour arrives as a line. Press it again: still one
+    line, because an entry already carrying a line is skipped rather than
+    billed twice.
+13. **Issue this certificate**, then try to withdraw that hour on the Time tab
+    → refused. Issuing is one way, and an hour already sent to a client is
+    corrected by a credit, not by a deletion.
+14. Back on the rail, the job's badge shows realisation rather than a recency
+    order, and the Overview KPIs agree with what was just certified.
+
 ## Going live
 
 Not done, and not to be guessed at. What it needs, in order:

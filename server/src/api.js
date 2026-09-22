@@ -65,6 +65,8 @@ export function createApi(pool, options = {}, env = process.env) {
     ["GET", "/api/register/:id", handleGetRegisterProject],
     ["PATCH", "/api/register/:id", handleUpdateRegisterProject],
     ["GET", "/api/projects/:id/financials", handleFinancials],
+    ["GET", "/api/projects/:id/fee-schedule", handleGetFeeSchedule],
+    ["PUT", "/api/projects/:id/fee-schedule", handleSetFeeSchedule],
 
     ["GET", "/api/time-entries", handleListTimeEntries],
     ["POST", "/api/time-entries", handleCreateTimeEntry],
@@ -375,6 +377,29 @@ async function handleFinancials({ req, res, pool, params }) {
   const financials = await store.projectFinancials(params.id);
   if (!financials) throw new HttpError(404, "No such job");
   sendJson(res, 200, { financials });
+}
+
+async function handleGetFeeSchedule({ req, res, pool, params }) {
+  const store = await requireStore(pool, req);
+  const project = await store.getProject(params.id);
+  if (!project) throw new HttpError(404, "No such job");
+  sendJson(res, 200, { feeSchedule: await store.listFeeSchedule(params.id) });
+}
+
+/**
+ * PUT, not PATCH, and no per-line route. The schedule is the agreed breakdown
+ * of one fee, and a client that could add a phase without restating the rest
+ * would be able to leave a revision half applied - phases that no longer sum
+ * to the number the firm quoted.
+ */
+async function handleSetFeeSchedule({ req, res, pool, params }) {
+  const session = await requireSession(pool, req);
+  const body = (await readJsonBody(req)) || {};
+  const feeSchedule = await withTransaction(pool, (client) => (
+    openStore(client, session).setFeeSchedule(params.id, body.lines)
+  ));
+  if (!feeSchedule) throw new HttpError(404, "No such job");
+  sendJson(res, 200, { feeSchedule });
 }
 
 // --- the timesheet ---------------------------------------------------------

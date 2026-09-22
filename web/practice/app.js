@@ -18,6 +18,8 @@ const state = {
   entries: [],
   certificates: [],
   openCertificate: null,
+  feeSchedule: null,
+  monthEntries: [],
   signUpMode: false,
 };
 
@@ -36,6 +38,9 @@ function money(value) {
   const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, "\u2009");
   return `${value < 0 ? "-" : ""}R\u2009${grouped}.${cents}`;
 }
+
+/** Subtracting two money figures in binary floating point leaves a tail. */
+const cents = (value) => Math.round(value * 100) / 100;
 
 function percent(value) {
   if (value === null || value === undefined) return "&mdash;";
@@ -93,6 +98,7 @@ function minutesBetween(start, end) {
 }
 
 const today = () => new Date().toISOString().slice(0, 10);
+const monthStart = () => `${today().slice(0, 7)}-01`;
 
 function toast(message, bad = false) {
   document.querySelector(".toast")?.remove();
@@ -170,12 +176,26 @@ function warningsFor(project) {
         + "Imported from the workbook; new write-downs require a reason.",
     });
   }
-  if (project.billingBasis === "fixed_fee" && project.budgetEstimate === null) {
+  // D063 is the real example: a register budget of R120 000 against a template
+  // totalling R54 445.80. Whichever is wrong, somebody quoted one of them.
+  if (money_.quotedSource === "fee_schedule" && money_.budgetEstimate !== null
+    && Math.abs(money_.budgetEstimate - money_.quoted) >= 1) {
+    out.push({
+      level: "med",
+      title: "The fee schedule and the register budget disagree",
+      body: `The schedule adds up to ${money(money_.quoted)}; the register records
+        ${money(money_.budgetEstimate)}. Burn is measured against the schedule, because it is
+        the breakdown that was agreed &mdash; but one of these two numbers was quoted to
+        somebody and the other was not.`,
+    });
+  }
+  if (project.billingBasis === "fixed_fee" && money_.quoted === null) {
     out.push({
       level: "med",
       title: "Fixed fee with no quoted figure",
-      body: "Burn cannot be reported against a quote that does not exist, so this job is "
-        + "invisible to every overrun warning until a figure is entered.",
+      body: "Neither a fee schedule nor a budget estimate. Burn cannot be reported against a "
+        + "quote that does not exist, so this job is invisible to every overrun warning "
+        + "until one of the two is entered.",
     });
   }
   if (type?.isPlaceholder) {
@@ -207,6 +227,38 @@ const warningsHtml = (warnings) => (warnings.length
 
 // --- the rail ---------------------------------------------------------------
 
+/**
+ * The rail is ordered by what is going wrong, not by what was touched last.
+ * A list in date order answers "what did I open yesterday", which nobody needs
+ * a register to tell them; the question this screen exists for is which job is
+ * losing money, and that job is rarely the most recent one.
+ *
+ * Four bands, and a job can only be in one:
+ *
+ *   0  past its fee - the loudest thing the numbers can say, worst first
+ *   1  billed something, so realisation is real, worst first
+ *   2  spending against a fee with nothing certified yet, deepest first
+ *   3  nothing to say yet: no time, or no fee to measure it against
+ *
+ * Band 3 is last and stays in date order, because there is no honest way to
+ * rank jobs that have not told us anything.
+ */
+function riskBand(project) {
+  const { realisation, burn } = project.financials;
+  if (burn !== null && burn > 1) return [0, -burn];
+  if (realisation !== null) return [1, realisation];
+  if (burn !== null && burn > 0) return [2, -burn];
+  return [3, 0];
+}
+
+function byRisk(a, b) {
+  const [bandA, scoreA] = riskBand(a);
+  const [bandB, scoreB] = riskBand(b);
+  if (bandA !== bandB) return bandA - bandB;
+  if (scoreA !== scoreB) return scoreA - scoreB;
+  return String(b.openedAt ?? "").localeCompare(String(a.openedAt ?? ""));
+}
+
 function renderRail() {
   const list = el("rail-list");
   if (!state.projects.length) {
@@ -214,7 +266,9 @@ function renderRail() {
       The register is the spine: a job here needs no drawing, no template and no fee.</div>`;
     return;
   }
-  list.innerHTML = state.projects.map((project) => {
+  list.innerHTML = `<p class="rail-note">Worst realisation and deepest burn first.
+    A job in trouble is rarely the one opened most recently.</p>`
+    + state.projects.map((project) => {
     const { realisation, burn } = project.financials;
     const badge = realisation === null && burn === null ? "&mdash;"
       : realisation !== null ? percent(realisation) : percent(burn);
@@ -226,7 +280,7 @@ function renderRail() {
         <span class="real ${cls}" title="${realisation !== null ? "Realisation" : "Burn"}">${badge}</span>
         <em>${esc(project.clientName || "No client recorded")}</em>
       </button>`;
-  }).join("");
+    }).join("");
 }
 
 // --- the main panel ---------------------------------------------------------
@@ -243,9 +297,7 @@ function renderMain() {
   }
   const project = selected();
   if (!project) {
-    main.innerHTML = `<div class="panel"><div class="empty">
-      Select a job, or create one. A job needs only a code to exist; everything else
-      &mdash; client, type, fee, drawing &mdash; can arrive later.</div></div>`;
+    main.innerHTML = `<div class="panel">${firmHtml()}</div>`;
     return;
   }
   const type = state.reference?.projectTypes.find((t) => t.code === project.typeCode);
@@ -261,16 +313,173 @@ function renderMain() {
       </div>
     </div>
     <div class="tabs">
-      ${["overview", "time", "certificates"].map((tab) => `
-        <button data-tab="${tab}" aria-selected="${state.tab === tab}">
-          ${tab === "overview" ? "Overview" : tab === "time" ? "Time" : "Certificates"}
-        </button>`).join("")}
+      ${TABS.map(([tab, label]) => `
+        <button data-tab="${tab}" aria-selected="${state.tab === tab}">${label}</button>`).join("")}
     </div>
     <div class="panel">${
-      state.tab === "overview" ? overviewHtml(project)
+      state.tab === "schedule" ? feeScheduleHtml(project)
         : state.tab === "time" ? timeHtml(project)
-          : certificatesHtml(project)
+          : state.tab === "certificates" ? certificatesHtml(project)
+            : overviewHtml(project)
     }</div>`;
+}
+
+const TABS = [
+  ["overview", "Overview"],
+  ["schedule", "Fee schedule"],
+  ["time", "Time"],
+  ["certificates", "Certificates"],
+];
+
+/**
+ * The practice, not one job. The rail and every tab beside it answer questions
+ * about a single project; this is the only place that can say how the firm is
+ * doing, and it costs nothing because the register already carries each job's
+ * money with it.
+ */
+function firmHtml() {
+  const jobs = state.projects;
+  if (!jobs.length) {
+    return `<div class="empty">No jobs yet.<br />
+      A job needs only a code to exist &mdash; client, type, fee and drawing can all arrive later.
+      Press <b>New job</b> to open the register.</div>`;
+  }
+  const open = jobs.filter((p) => p.status === "open");
+  const overFee = jobs.filter((p) => p.financials.burn !== null && p.financials.burn > 1);
+  const uncertified = jobs.filter((p) => p.financials.captured > 0
+    && p.financials.certifiedGross === 0 && p.financials.draftGross === 0);
+  const capturedThisMonth = state.monthEntries.reduce((sum, e) => sum + e.capturedAmount, 0);
+  const minutesThisMonth = state.monthEntries.reduce((sum, e) => sum + e.minutes, 0);
+
+  const jobList = (list) => (list.length
+    ? `<div class="sub">${list.slice(0, 4).map((p) => esc(p.code || "no code")).join(", ")}${
+      list.length > 4 ? ` and ${list.length - 4} more` : ""}</div>`
+    : '<div class="sub">None.</div>');
+
+  return `
+    <h3 class="sec">The practice <small>every job, not the one you have open</small></h3>
+    <div class="kpis">
+      <div class="kpi">
+        <div class="lbl">Open jobs</div>
+        <div class="val">${open.length}</div>
+        <div class="sub">${jobs.length} in the register altogether</div>
+      </div>
+      <div class="kpi">
+        <div class="lbl">Captured this month</div>
+        <div class="val">${money(capturedThisMonth)}</div>
+        <div class="sub">${duration(minutesThisMonth)} logged since ${esc(monthStart())}</div>
+      </div>
+      <div class="kpi${overFee.length ? " flag" : ""}">
+        <div class="lbl">Past the fee</div>
+        <div class="val">${overFee.length}</div>
+        ${jobList(overFee)}
+      </div>
+      <div class="kpi${uncertified.length ? " flag" : ""}">
+        <div class="lbl">Worked, never billed</div>
+        <div class="val">${uncertified.length}</div>
+        ${jobList(uncertified)}
+      </div>
+    </div>
+    <p class="note-line">Time captured and no certificate at all is the gap the workbook could
+      not show: each invoice was compiled by hand from whichever rows somebody noticed, so an
+      unbilled job looked exactly like a quiet one. Select a job from the rail to open it.</p>`;
+}
+
+/**
+ * The agreed quote against what has actually been claimed under each phase.
+ *
+ * This is the only place an overrun is visible per phase rather than as one
+ * total against another: a job can be comfortably inside its fee overall and
+ * have spent the whole public-participation phase twice over, and the second
+ * sentence is the one that changes what anybody does.
+ */
+function feeScheduleHtml(project) {
+  const schedule = state.feeSchedule;
+  const f = project.financials;
+  if (!schedule) return '<div class="empty">Loading.</div>';
+  const { lines, unallocated } = schedule;
+
+  const rows = lines.map((line) => `
+    <tr${line.variance < 0 ? ' class="flagged"' : ""}>
+      <td>${line.seq}</td>
+      <td>${esc(line.label)}</td>
+      <td class="num">${money(line.quoted)}</td>
+      <td class="num">${money(line.certified)}</td>
+      <td class="num">${line.draft ? money(line.draft) : "&mdash;"}</td>
+      <td class="num">${line.variance < 0
+        ? `<span class="pill err">${money(line.variance)}</span>`
+        : money(line.variance)}</td>
+    </tr>`).join("");
+
+  const loose = unallocated.certified + unallocated.draft;
+
+  return `
+    <h3 class="sec">Fee schedule
+      <small>${lines.length ? "the agreed breakdown, against what has been claimed under it"
+    : "nothing agreed yet"}</small>
+    </h3>
+    ${lines.length ? `
+      <table class="grid">
+        <thead><tr>
+          <th>#</th><th>Phase</th>
+          <th class="num">Quoted</th><th class="num">Certified</th>
+          <th class="num">On draft</th><th class="num">Left to claim</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+        <tfoot>
+          <tr>
+            <td colspan="2">Total</td>
+            <td class="num">${money(schedule.quoted)}</td>
+            <td class="num">${money(schedule.certified)}</td>
+            <td class="num"></td>
+            <td class="num">${money(cents(schedule.quoted - schedule.certified))}</td>
+          </tr>
+        </tfoot>
+      </table>
+      ${loose > 0 ? `<div class="warn-list" style="margin-top:10px"><div class="w med">
+        <span class="sev">Watch</span>
+        <b>${money(loose)} certified against no phase on this schedule</b>
+        <p>Certificate lines whose phase is blank, or names something the schedule does not.
+          Counted separately rather than folded into a phase, because a total that quietly
+          absorbs it would make every variance above read better than it is.</p>
+      </div></div>` : ""}
+      <p class="note-line">A negative figure is an overrun on that phase, and it is not an
+        error &mdash; it is the number the firm needs before the next one is quoted. The
+        quoted total here is what <b>burn</b> is measured against; the register's budget
+        estimate${f.budgetEstimate === null ? " (none entered)"
+    : ` of ${money(f.budgetEstimate)}`} is only used when there is no schedule.</p>`
+    : `<div class="empty">No fee schedule on this job.<br />
+        Burn is measured against the register's budget estimate
+        ${f.budgetEstimate === null ? "&mdash; and there isn't one, so it cannot be measured at all."
+    : `of ${money(f.budgetEstimate)}.`}<br />
+        A schedule replaces that single figure with the phases it was built from.</div>`}
+
+    <h3 class="sec">Revise the schedule <small>the whole document, the way a proposal is reissued</small></h3>
+    <form class="form" data-form="fee-schedule" data-project="${esc(project.id)}">
+      <div id="schedule-rows">
+        ${(lines.length ? lines : [{ label: "", quoted: "" }]).map((line, index) => `
+          <div class="fields schedule-row">
+            <label class="field wide" style="grid-column:span 2">
+              <span${index ? ' class="sr-only"' : ""}>Phase</span>
+              <input name="label" value="${esc(line.label)}" placeholder="Phase 1: inception" />
+            </label>
+            <label class="field">
+              <span${index ? ' class="sr-only"' : ""}>Quoted</span>
+              <input name="quoted" type="number" step="0.01" value="${line.quoted}" />
+            </label>
+            <div class="field" style="align-self:end">
+              <button class="btn btn-sm" type="button" data-action="drop-schedule-row">Remove</button>
+            </div>
+          </div>`).join("")}
+      </div>
+      <div class="actions">
+        <button class="btn btn-primary" type="submit">Save the schedule</button>
+        <button class="btn" type="button" data-action="add-schedule-row">Add a phase</button>
+      </div>
+      <p class="note-line">Saving replaces the schedule outright. The superseded lines are kept,
+        dated and attributed &mdash; what the client was quoted in March is a question somebody
+        asks in September.</p>
+    </form>`;
 }
 
 function overviewHtml(project) {
@@ -282,7 +491,10 @@ function overviewHtml(project) {
       <div class="kpi${f.quoted === null ? " dim" : ""}">
         <div class="lbl">Quoted</div>
         <div class="val">${money(f.quoted)}</div>
-        <div class="sub">${f.quoted === null ? "No figure entered" : "Register budget estimate"}</div>
+        <div class="sub">${f.quoted === null ? "No figure entered"
+    : f.quotedSource === "fee_schedule"
+      ? `Fee schedule, ${f.scheduleLines} phase${f.scheduleLines === 1 ? "" : "s"}`
+      : "Register budget estimate &mdash; no fee schedule yet"}</div>
       </div>
       <div class="kpi${f.burn !== null && f.burn > 1 ? " flag" : ""}">
         <div class="lbl">Captured</div>
@@ -631,7 +843,10 @@ function certificateHtml(certificate) {
 
 async function loadProjects({ keepSelection = true } = {}) {
   const { projects } = await api.listRegister();
-  state.projects = projects;
+  // Sorted here rather than in SQL: the ordering is a reading of four figures
+  // the server already sends, and the day somebody wants it by code instead,
+  // that is a click rather than a migration.
+  state.projects = projects.slice().sort(byRisk);
   if (!keepSelection || (state.selectedId !== "new"
     && !projects.some((p) => p.id === state.selectedId))) {
     state.selectedId = projects[0]?.id ?? null;
@@ -641,8 +856,17 @@ async function loadProjects({ keepSelection = true } = {}) {
 
 async function loadTab() {
   const project = selected();
-  if (!project) return;
-  if (state.tab === "time") {
+  if (!project) {
+    // The landing state is firm-wide, and the one figure the register rows do
+    // not already carry is what was captured this month.
+    state.monthEntries = state.projects.length
+      ? (await api.listTimeEntries({ from: monthStart(), to: today() })).entries
+      : [];
+    return;
+  }
+  if (state.tab === "schedule") {
+    state.feeSchedule = (await api.feeSchedule(project.id)).feeSchedule;
+  } else if (state.tab === "time") {
     state.entries = (await api.listTimeEntries({ project: project.id })).entries;
   } else if (state.tab === "certificates") {
     state.certificates = (await api.listCertificates(project.id)).certificates;
@@ -765,7 +989,21 @@ function wireApp() {
     const action = event.target.closest("[data-action]")?.dataset;
     if (!action) return;
 
-    if (action.action === "cancel-create") {
+    if (action.action === "add-schedule-row") {
+      const rows = el("schedule-rows");
+      const last = rows.lastElementChild;
+      const copy = last.cloneNode(true);
+      for (const input of copy.querySelectorAll("input")) input.value = "";
+      for (const span of copy.querySelectorAll(".field > span")) span.className = "sr-only";
+      rows.appendChild(copy);
+      copy.querySelector("input")?.focus();
+    } else if (action.action === "drop-schedule-row") {
+      const rows = el("schedule-rows");
+      // Never the last one. An empty form with no fields to type in is a dead
+      // end, and "remove every phase" is what saving an empty schedule means.
+      if (rows.children.length > 1) event.target.closest(".schedule-row").remove();
+      else for (const input of rows.querySelectorAll("input")) input.value = "";
+    } else if (action.action === "cancel-create") {
       state.selectedId = state.projects[0]?.id ?? null;
       renderRail();
       renderMain();
@@ -803,7 +1041,22 @@ function wireApp() {
     const kind = form.dataset.form;
     const values = formValues(form);
 
-    if (kind === "create") {
+    if (kind === "fee-schedule") {
+      // Read the rows off the DOM rather than FormData: every row uses the
+      // same two field names, and pairing them by position is the only thing
+      // that keeps a label with its own figure.
+      const lines = [...form.querySelectorAll(".schedule-row")].map((row) => ({
+        label: row.querySelector('[name="label"]').value.trim(),
+        quoted: Number(row.querySelector('[name="quoted"]').value),
+      })).filter((line) => line.label);
+      const saved = await attempt(() => api.setFeeSchedule(form.dataset.project, lines));
+      if (!saved) return;
+      state.feeSchedule = saved.feeSchedule;
+      toast(lines.length
+        ? `Fee schedule saved: ${lines.length} phase${lines.length === 1 ? "" : "s"}, ${money(saved.feeSchedule.quoted)}`
+        : "Fee schedule cleared. Burn falls back to the register budget.");
+      await refresh();
+    } else if (kind === "create") {
       const created = await attempt(() => api.createRegisterProject(values));
       if (!created) return;
       state.selectedId = created.project.id;
