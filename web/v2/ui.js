@@ -5,15 +5,16 @@
 // Scope trims versus v1, called out here rather than left silent:
 //  - Existing rect-shaped objects resize via the plan options strip (length,
 //    angle, width, height), not drag handles. Identity and type live in the
-//    Inspector. New rooms/slabs/roofs still drag-to-size with the HUD.
+//    Inspector. New rooms/slabs/roofs are two-click rectangles with the HUD.
 //  - No modal type picker; clicking a type SKU sets the active tool/SKU
 //    directly, or retypes the current selection if the category matches.
 //  - Marquee selection uses each shape's bounding box, not exact polygon
 //    overlap. Exact for rectangles, which is everything this UI draws.
 //  - Free-angle walls are drawable (a v1 impossibility) but not snapped to
 //    common angles; hold Shift while dragging an end to keep the current
-//    heading. Length is labelled on the visible part of the wall (so zooming
-//    into an end does not hide it), and in the options strip with angle.
+//    heading. Walls are click–click and chain from the last end. Length is
+//    labelled on the visible part of the wall (so zooming into an end does
+//    not hide it), and in the options strip with angle.
 
 import { complianceGaps, normalizePackUnits } from "./schema.js";
 import { RULE_PACK, evaluateCompliance, groupFindingsByPart, summarizeFindings } from "./rules.js";
@@ -64,6 +65,17 @@ import {
   underlayWorldFromPixel,
 } from "./underlay.js?v=20260917-calibrate";
 import { pickedDimension, planDimensionLines } from "./dimensions.js?v=20260917-measure";
+import {
+  MIN_TRACE,
+  canCommitLine,
+  canCommitRect,
+  chainStart,
+  hasClickDraft,
+  lineLength,
+  rectFromCorners,
+  setLineHeading,
+  setLineLength,
+} from "./click-draw.js?v=20260921-click-draw";
 import { area as polyArea, bbox, clipSegToRect, distToSeg, headingDeg, pointInPoly, roundGrid } from "./geom.js?v=20260915-offset";
 import { SNAP_PIXEL_TOL, GAP_MAX_M, NICE_MIN_STEP_M, PROBE_VECTORS, applyNicePoint, bestEndpointSnap, collectSnapEdges, collectSnapTargets, nearestAlignments, resolveProbes, snapLengthFrom, snapPoint } from "./snap.js";
 import { DEFAULT_ROOF_PITCH, roofGuideLines } from "./roof.js";
@@ -133,8 +145,6 @@ import { SAMPLE_JOBS, drawingBounds, sampleJobById } from "./samples.js";
 import { accountCard, formatDate } from "./profile.js";
 
 const GRID = 0.1;
-const MIN_ROOM = 1;
-const MIN_TRACE = 0.3;
 const HANDLE = 8;
 
 const el = {
@@ -371,6 +381,12 @@ let planStatusFilter = "both";
 let placeRotation = 0;
 let cam = { scale: 48, ox: 80, oy: 60 };
 let drag = null;
+// Click–click wall: first click writes the start, the free end follows the
+// pointer with the button up, second click commits and chains from that end.
+let wallDraft = null;
+// Click–click room/slab/roof rectangle: first click is one corner, second
+// click is the opposite. Not a press-and-hold box.
+let shapeDraft = null;
 let beamStart = null;
 // Site > Property line: the vertices clicked so far, while tool === "property".
 // Closed by clicking near the first point again, Enter, or double-click.
@@ -1617,6 +1633,9 @@ window.__debug = {
   get cam() { return cam; },
   get placeSkuId() { return placeSkuId; },
   get hoverPoint() { return hoverPoint; },
+  get wallDraft() { return wallDraft; },
+  get shapeDraft() { return shapeDraft; },
+  get beamStart() { return beamStart; },
 };
 
 // --- geometry helpers ----------------------------------------------------
@@ -1657,9 +1676,9 @@ function activeGrid() {
  * anchored end of a stretch, or the first corner of a room/slab/roof drag.
  */
 function snapFrom() {
-  if (drag?.kind === "wall-new") return { x: drag.x1, y: drag.y1 };
+  if (wallDraft) return { x: wallDraft.x1, y: wallDraft.y1 };
   if (drag?.kind === "segment-end") return { x: drag.fx, y: drag.fy };
-  if (drag?.kind?.endsWith("-new") && drag.x0 != null) return { x: drag.x0, y: drag.y0 };
+  if (shapeDraft?.x0 != null) return { x: shapeDraft.x0, y: shapeDraft.y0 };
   if (beamStart) return beamStart;
   if (measureDraft?.a) return measureDraft.a;
   return null;
@@ -2218,6 +2237,8 @@ function selectStationIndex(idx, { keepSelection = false } = {}) {
   if (levelChanged) {
     activeLevel = level.id;
     beamStart = null;
+    wallDraft = null;
+    shapeDraft = null;
     drag = null;
     if (!keepSelection) store.clearSelection();
     drawRibbon();
@@ -2414,7 +2435,7 @@ function shouldHidePlanEmpty() {
   if (store.hasContent()) return true;
   if (store.selected.length) return true;
   if (underlaySelected || underlayIsVisible()) return true;
-  if (drag || beamStart || siteDraft?.length || sgPick || attachPick || calibration) return true;
+  if (drag || wallDraft || shapeDraft || beamStart || siteDraft?.length || sgPick || attachPick || calibration) return true;
   if (activeFunction) return true;
   if (tool !== "select") return true;
   return false;
@@ -2450,8 +2471,8 @@ function draw() {
   drawSelectionHighlights(levelWalls);
   if (hover && !store.isSelected(hover.kind, hover.id) && tool === "select" && !drag) drawHover(hover);
   if (drag?.kind === "marquee") drawMarquee();
-  if (drag?.kind === "wall-new") drawWallDraft();
-  if (drag?.kind?.endsWith("-new") && drag.kind !== "wall-new") drawShapeDraft();
+  if (wallDraft) drawWallDraft();
+  if (shapeDraft) drawShapeDraft();
   if (beamStart) drawBeamStart();
   if (tool === "property" && siteDraft) drawPropertyDraft();
   if (tool === "sg-ref" && sgPick) drawSgPick();
@@ -3226,17 +3247,17 @@ function drawMarquee() {
   ctx.restore();
 }
 
-/** Rubber-band rectangle while dragging a new room, slab or roof. Roofs
- * also show the ridge/hip/fall that commitRoof() will apply (gable along
+/** Rubber-band rectangle while a room, slab or roof waits on its second click.
+ * Roofs also show the ridge/hip/fall that commitRoof() will apply (gable along
  * the long side), so the eaves you are sizing are not a blank box. */
 function drawShapeDraft() {
-  const r = drag?.rect;
+  const r = shapeDraft?.rect;
   if (!r || r.w < 0.05 || r.h < 0.05) return;
   const [sx, sy] = worldToScreen(r.x, r.y);
   const [ex, ey] = worldToScreen(r.x + r.w, r.y + r.h);
-  const isRoof = drag.kind === "roof-new";
+  const isRoof = shapeDraft.kind === "roof-new";
   ctx.save();
-  ctx.fillStyle = isRoof ? COLOUR.roof : drag.kind === "slab-new" ? COLOUR.slab : "rgba(180, 69, 30, 0.08)";
+  ctx.fillStyle = isRoof ? COLOUR.roof : shapeDraft.kind === "slab-new" ? COLOUR.slab : "rgba(180, 69, 30, 0.08)";
   ctx.strokeStyle = isRoof ? "#3a5f7a" : statusStroke(placementStatus());
   ctx.lineWidth = 1.4;
   ctx.setLineDash([5, 4]);
@@ -3265,8 +3286,8 @@ function drawRoofGuides(rect, form, ridge) {
 }
 
 function drawWallDraft() {
-  const [ax, ay] = worldToScreen(drag.x1, drag.y1);
-  const [bx, by] = worldToScreen(drag.x2 ?? drag.x1, drag.y2 ?? drag.y1);
+  const [ax, ay] = worldToScreen(wallDraft.x1, wallDraft.y1);
+  const [bx, by] = worldToScreen(wallDraft.x2 ?? wallDraft.x1, wallDraft.y2 ?? wallDraft.y1);
   ctx.save();
   ctx.strokeStyle = "#8d3416";
   ctx.lineWidth = 3;
@@ -3276,7 +3297,7 @@ function drawWallDraft() {
   ctx.lineTo(bx, by);
   ctx.stroke();
   ctx.restore();
-  drawLengthLabel(drag.x1, drag.y1, drag.x2 ?? drag.x1, drag.y2 ?? drag.y1);
+  drawLengthLabel(wallDraft.x1, wallDraft.y1, wallDraft.x2 ?? wallDraft.x1, wallDraft.y2 ?? wallDraft.y1);
 }
 
 function segmentLength(x1, y1, x2, y2) {
@@ -3678,13 +3699,25 @@ function drawSgPick() {
 }
 
 function drawBeamStart() {
+  const end = snapGuide ? { x: snapGuide.x, y: snapGuide.y } : hoverPoint;
   const [sx, sy] = worldToScreen(beamStart.x, beamStart.y);
   ctx.save();
   ctx.fillStyle = "#8d3416";
   ctx.beginPath();
   ctx.arc(sx, sy, 4, 0, Math.PI * 2);
   ctx.fill();
+  if (end && lineLength(beamStart, end) >= 0.05) {
+    const [ex, ey] = worldToScreen(end.x, end.y);
+    ctx.strokeStyle = "#8d3416";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 4]);
+    ctx.beginPath();
+    ctx.moveTo(sx, sy);
+    ctx.lineTo(ex, ey);
+    ctx.stroke();
+  }
   ctx.restore();
+  if (end) drawLengthLabel(beamStart.x, beamStart.y, end.x, end.y);
 }
 
 function objByRef(ref) {
@@ -3970,7 +4003,7 @@ function setTypeFlyoutOpen(open) {
 }
 
 function contextSku() {
-  if (drag?.kind === "wall-new") return skuById(placeSkuId);
+  if (wallDraft) return skuById(placeSkuId);
   const ref = store.selected.length === 1 ? store.primary : null;
   const obj = ref ? objByRef(ref) : null;
   if (obj && ref.kind === "room") return skuById(obj.floorSku || obj.wallSku);
@@ -4036,6 +4069,8 @@ function onSkuClick(sku) {
   }
   placeSkuId = sku.id;
   beamStart = null;
+  wallDraft = null;
+  shapeDraft = null;
   if (sku.category === "wall" || sku.category === "foundation" || sku.category === "boundarywall") {
     tool = "wall";
   } else if (sku.category === "floor" || sku.category === "pool") {
@@ -4279,6 +4314,20 @@ function updateRibbonHint() {
       : HINTS.dimensions;
     return;
   }
+  if (wallDraft) {
+    el.ribbonHint.hidden = false;
+    el.ribbonHint.classList.remove("ribbon-hint-warn");
+    el.ribbonHint.textContent = "Click to end, or type a length and press Enter. Esc cancels this wall.";
+    return;
+  }
+  if (shapeDraft) {
+    el.ribbonHint.hidden = false;
+    el.ribbonHint.classList.remove("ribbon-hint-warn");
+    el.ribbonHint.textContent = shapeDraft.kind === "roof-new"
+      ? "Click the opposite corner. Corners snap to walls; draw past them for an overhang."
+      : "Click the opposite corner, or type metres. Tab switches width / height.";
+    return;
+  }
   const cutWarning = placementCutWarning();
   if (cutWarning) {
     el.ribbonHint.hidden = false;
@@ -4387,6 +4436,9 @@ function onRibbonFunction(item) {
   tool = item.tool || "select";
   placeSkuId = pack.skus.find((s) => (item.categories || []).includes(s.category))?.id ?? null;
   beamStart = null;
+  wallDraft = null;
+  shapeDraft = null;
+  sizeDraft = null;
   measureDraft = null;
   userDimensions = [];
   showDimensions = false;
@@ -5307,6 +5359,8 @@ function startAttachPick() {
   activeFunction = "attach";
   underlaySelected = false;
   beamStart = null;
+  wallDraft = null;
+  shapeDraft = null;
   fillAttachList();
   syncToolButtons();
   drawRibbon();
@@ -5515,20 +5569,33 @@ function syncToolButtons() {
 const REVERTIBLE_DRAGS = new Set(["move", "segment-end", "underlay-move", "underlay-scale", "underlay-rotate"]);
 
 /**
- * Escape: throw away whatever is half-drawn and step back to Select, which is
- * what the ribbon hints ("Esc to stop", "Esc to cancel") promise. A draft can
- * live in any of several places - a pointer drag, the beam's first click, the
- * property-line and calibration point lists, an armed target pick - so all of
- * them are dropped here rather than tool by tool.
+ * Drop the in-progress click–click segment (or last property-line vertex)
+ * without leaving the tool. Returns true when there was something to abort,
+ * so Escape can stay in the wall/beam/roof tool the way Revit does.
+ */
+function abortClickDraft() {
+  if (!hasClickDraft({
+    wallDraft, shapeDraft, beamStart, siteDraft, cameraDraft, sectionDraft, measureDraft, calibration,
+  })) return false;
+  if (wallDraft) wallDraft = null;
+  else if (shapeDraft) shapeDraft = null;
+  else if (beamStart) beamStart = null;
+  else if (siteDraft?.length) siteDraft.pop();
+  else if (cameraDraft?.a) cameraDraft = { a: null };
+  else if (sectionDraft?.a) sectionDraft = { a: null };
+  else if (measureDraft?.a) measureDraft = { a: null };
+  else if (calibration?.a && !calibration.b) calibration.a = null;
+  sizeDraft = null;
+  snapGuide = null;
+  return true;
+}
+
+/**
+ * Escape: first drop the live click–click preview (keep the tool armed);
+ * a second press leaves the tool, which is what the ribbon hints
+ * ("Esc to stop") promise once there is no segment in flight.
  */
 function cancelDrawing() {
-  // Nothing mid-flight? Escape is then about the current selection, not the
-  // tool state - deselect whatever is selected instead of being a no-op.
-  const wasDrawing = Boolean(
-    drag || beamStart || siteDraft || calibration || sgPick || attachPick ||     cameraDraft || sectionDraft || measureDraft ||
-    (tool !== "select") || activeFunction
-  );
-
   if (REVERTIBLE_DRAGS.has(drag?.kind)) {
     // undo() clears the selection; the user only cancelled a move, so put the
     // same objects back under the pointer.
@@ -5536,9 +5603,30 @@ function cancelDrawing() {
     const primary = store.primary;
     store.undo();
     store.setSelection(selection, primary);
+    drag = null;
+    drawRibbon();
+    render();
+    return;
   }
+
+  if (abortClickDraft()) {
+    drawRibbon();
+    render();
+    return;
+  }
+
+  // Nothing mid-flight? Escape is then about the current selection, not the
+  // tool state - deselect whatever is selected instead of being a no-op.
+  const wasDrawing = Boolean(
+    drag || siteDraft || calibration || sgPick || attachPick
+    || cameraDraft || sectionDraft || measureDraft
+    || (tool !== "select") || activeFunction
+  );
+
   drag = null;
   beamStart = null;
+  wallDraft = null;
+  shapeDraft = null;
   sizeDraft = null;
   snapGuide = null;
   underlaySelected = false;
@@ -5583,6 +5671,9 @@ function wireToolbar() {
         renderPalette();
       }
       beamStart = null;
+      wallDraft = null;
+      shapeDraft = null;
+      sizeDraft = null;
       siteDraft = null;
       sgPick = null;
       attachPick = null;
@@ -5638,7 +5729,7 @@ function wireCanvas() {
   el.canvas.addEventListener("pointerleave", () => {
     hoverPoint = null;
     hover = null;
-    if (tool === "door" || tool === "window" || (tool === "camera" && cameraDraft?.a) || (tool === "section" && sectionDraft?.a) || (tool === "measure" && measureDraft?.a)) render();
+    if (tool === "door" || tool === "window" || wallDraft || shapeDraft || beamStart || (tool === "camera" && cameraDraft?.a) || (tool === "section" && sectionDraft?.a) || (tool === "measure" && measureDraft?.a)) render();
   });
   window.addEventListener("pointerup", onPointerUp);
   el.canvas.addEventListener("wheel", onWheel, { passive: false });
@@ -5817,15 +5908,12 @@ function onPointerDown(ev) {
   }
   if (tool === "room" || tool === "slab" || tool === "roof") {
     underlaySelected = false;
-    startNewShapeDrag(wx, wy);
+    clickShapeCorner(wx, wy);
     return;
   }
   if (tool === "wall") {
     underlaySelected = false;
-    sizeDraft = { lockW: false, lockH: false, typedW: "", typedH: "", axis: "w" };
-    const p0 = applySnap(wx, wy);
-    drag = { kind: "wall-new", x1: p0.x, y1: p0.y, x2: p0.x, y2: p0.y };
-    render();
+    clickWallPoint(wx, wy);
     return;
   }
   if (tool === "door" || tool === "window") {
@@ -5882,13 +5970,66 @@ function onPointerDown(ev) {
   render();
 }
 
-function startNewShapeDrag(wx, wy) {
-  if (!placeSkuId) placeSkuId = defaultSkuFor(tool);
+function clickWallPoint(wx, wy) {
+  const p = applySnap(wx, wy);
+  if (!wallDraft) {
+    sizeDraft = { lockW: false, lockH: false, typedW: "", typedH: "", axis: "w" };
+    wallDraft = { x1: p.x, y1: p.y, x2: p.x, y2: p.y };
+    updateRibbonHint();
+    render();
+    return;
+  }
+  if (sizeDraft?.lockW) setWallDraftLength(parseMetres(sizeDraft.typedW, wallDraftLength() || 1));
+  else {
+    wallDraft.x2 = p.x;
+    wallDraft.y2 = p.y;
+  }
+  finishWallSegment();
+}
+
+function finishWallSegment() {
+  const start = { x: wallDraft.x1, y: wallDraft.y1 };
+  const end = { x: wallDraft.x2, y: wallDraft.y2 };
+  if (!commitWall(start, end)) {
+    render();
+    return;
+  }
   sizeDraft = { lockW: false, lockH: false, typedW: "", typedH: "", axis: "w" };
-  const p0 = applySnap(wx, wy);
-  drag = { kind: `${tool}-new`, x0: p0.x, y0: p0.y, rect: null };
+  wallDraft = chainStart(end);
+  snapGuide = null;
+  updateRibbonHint();
   render();
 }
+
+function clickShapeCorner(wx, wy) {
+  if (!placeSkuId) placeSkuId = defaultSkuFor(tool);
+  const p = applySnap(wx, wy);
+  if (!shapeDraft) {
+    sizeDraft = { lockW: false, lockH: false, typedW: "", typedH: "", axis: "w" };
+    shapeDraft = { kind: `${tool}-new`, x0: p.x, y0: p.y, rect: null };
+    updateRibbonHint();
+    render();
+    return;
+  }
+  shapeDraft.rect = rectFromDrag(shapeDraft.x0, shapeDraft.y0, p.x, p.y);
+  finishShapeRect();
+}
+
+function finishShapeRect() {
+  const kind = shapeDraft.kind;
+  const rect = shapeDraft.rect;
+  const ok = kind === "room-new" ? commitRoom(rect)
+    : kind === "slab-new" ? commitSlab(rect)
+    : commitRoof(rect);
+  if (ok) {
+    shapeDraft = null;
+    sizeDraft = null;
+    snapGuide = null;
+  }
+  updateRibbonHint();
+  render();
+}
+
 
 function onPointerMove(ev) {
   if (drag?.kind === "pan") {
@@ -6026,21 +6167,21 @@ function onPointerMove(ev) {
       : underlaySelected && hitUnderlay(wx, wy) ? "move"
       : "default";
   }
-  if (drag?.kind === "wall-new") {
+  if (wallDraft && !drag) {
     const p = applySnap(wx, wy);
-    drag.x2 = p.x;
-    drag.y2 = p.y;
+    wallDraft.x2 = p.x;
+    wallDraft.y2 = p.y;
     if (sizeDraft?.lockW) setWallDraftLength(parseMetres(sizeDraft.typedW, wallDraftLength() || 1));
     render();
     return;
   }
-  if (drag?.kind?.endsWith("-new") && drag.kind !== "wall-new") {
+  if (shapeDraft && !drag) {
     const p = applySnap(wx, wy);
-    drag.rect = rectFromDrag(drag.x0, drag.y0, p.x, p.y);
+    shapeDraft.rect = rectFromDrag(shapeDraft.x0, shapeDraft.y0, p.x, p.y);
     render();
     return;
   }
-  if (!drag && (snapPreviewTool() || beamStart)) applySnap(wx, wy);
+  if (!drag && (snapPreviewTool() || beamStart || wallDraft || shapeDraft)) applySnap(wx, wy);
   else if (!drag) snapGuide = null;
   render();
 }
@@ -6049,11 +6190,12 @@ function rectFromDrag(x0, y0, wx, wy) {
   // x0/y0 and wx/wy are already snapped or grid-rounded by applySnap.
   // Rounding again here would pull an exact wall-corner join back onto
   // the grid and undo the snap.
-  const x = Math.min(x0, wx);
-  const y = Math.min(y0, wy);
-  const w = sizeDraft?.lockW ? parseMetres(sizeDraft.typedW, 1) : Math.abs(wx - x0);
-  const h = sizeDraft?.lockH ? parseMetres(sizeDraft.typedH, 1) : Math.abs(wy - y0);
-  return { x, y, w, h };
+  return rectFromCorners(x0, y0, wx, wy, {
+    lockW: sizeDraft?.lockW,
+    lockH: sizeDraft?.lockH,
+    w: sizeDraft?.lockW ? parseMetres(sizeDraft.typedW, 1) : 0,
+    h: sizeDraft?.lockH ? parseMetres(sizeDraft.typedH, 1) : 0,
+  });
 }
 
 function onPointerUp(ev) {
@@ -6071,19 +6213,9 @@ function onPointerUp(ev) {
     if (!drag.moved) store.undoStack.pop(); // no-op click: drop the speculative undo entry
   } else if (drag.kind === "segment-end") {
     store.persist();
-  } else if (drag.kind === "room-new") {
-    commitRoom(drag.rect);
-  } else if (drag.kind === "slab-new") {
-    commitSlab(drag.rect);
-  } else if (drag.kind === "roof-new") {
-    commitRoof(drag.rect);
-  } else if (drag.kind === "wall-new") {
-    commitWall(drag);
   }
 
   drag = null;
-  sizeDraft = null;
-  snapGuide = null;
   if (hoverPoint && snapPreviewTool()) applySnap(hoverPoint.x, hoverPoint.y);
   store.pruneGroups();
   store.persist();
@@ -6109,6 +6241,7 @@ function wireKeyboard() {
     const typing = tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA";
 
     if (handleSizeTyping(ev)) return;
+    if (handleDraftNumericShortcut(ev)) return;
     // Escape still has to get through from a field: the size HUD is part of
     // drawing, so typing a width there must not trap the draft.
     if (typing && ev.key === "Escape") document.activeElement.blur();
@@ -6145,6 +6278,12 @@ function wireKeyboard() {
       // straight away, without waiting for the mouse to twitch.
       if (hoverPoint && (snapPreviewTool() || beamStart)) applySnap(hoverPoint.x, hoverPoint.y);
       render();
+    } else if (ev.key === "Enter" && wallDraft) {
+      ev.preventDefault();
+      finishWallSegment();
+    } else if (ev.key === "Enter" && shapeDraft?.rect) {
+      ev.preventDefault();
+      finishShapeRect();
     } else if (ev.key === "Enter" && tool === "property" && siteDraft?.length >= 3) {
       finishPropertyLine();
     } else if ((ev.key === "Delete" || ev.key === "Backspace") && store.selected.length) {
@@ -6185,7 +6324,7 @@ function wireKeyboard() {
 // --- object creation ------------------------------------------------------
 
 function commitRoom(rect) {
-  if (!rect || rect.w < MIN_ROOM || rect.h < MIN_ROOM) return;
+  if (!canCommitRect(rect, "room-new")) return false;
   store.pushUndo();
   store.doc.rooms.push({
     id: nid("r"),
@@ -6197,10 +6336,12 @@ function commitRoom(rect) {
     status: placementStatus(),
     shape: rectShape(rect.x, rect.y, rect.w, rect.h),
   });
+  store.persist();
+  return true;
 }
 
 function commitSlab(rect) {
-  if (!rect || rect.w < 0.3 || rect.h < 0.3) return;
+  if (!canCommitRect(rect, "slab-new")) return false;
   store.pushUndo();
   store.doc.slabs.push({
     id: nid("sl"),
@@ -6209,10 +6350,12 @@ function commitSlab(rect) {
     status: placementStatus(),
     shape: rectShape(rect.x, rect.y, rect.w, rect.h),
   });
+  store.persist();
+  return true;
 }
 
 function commitRoof(rect) {
-  if (!rect || rect.w < 0.3 || rect.h < 0.3) return;
+  if (!canCommitRect(rect, "roof-new")) return false;
   store.pushUndo();
   store.doc.roofs.push({
     id: nid("rf"),
@@ -6224,20 +6367,26 @@ function commitRoof(rect) {
     status: placementStatus(),
     shape: rectShape(rect.x, rect.y, rect.w, rect.h),
   });
+  store.persist();
+  return true;
 }
 
-function commitWall(d) {
-  const len = Math.hypot(d.x2 - d.x1, d.y2 - d.y1);
-  if (len < MIN_TRACE) return;
+function commitWall(a, b) {
+  if (!canCommitLine(a, b)) return false;
   store.pushUndo();
   const id = nid("s");
-  store.doc.segments.push({ id, sku: placeSkuId, level: activeLevel, x1: d.x1, y1: d.y1, x2: d.x2, y2: d.y2, status: placementStatus() });
+  store.doc.segments.push({
+    id, sku: placeSkuId, level: activeLevel,
+    x1: a.x, y1: a.y, x2: b.x, y2: b.y,
+    status: placementStatus(),
+  });
   store.selectOne({ kind: "segment", id });
+  store.persist();
+  return true;
 }
 
 function commitBeam(a, b) {
-  const len = Math.hypot(b.x - a.x, b.y - a.y);
-  if (len < 0.3) return;
+  if (!canCommitLine(a, b)) return;
   store.pushUndo();
   store.doc.beams.push({ id: nid("b"), sku: placeSkuId, level: activeLevel, x1: a.x, y1: a.y, x2: b.x, y2: b.y, status: placementStatus() });
   store.persist();
@@ -6278,30 +6427,35 @@ function parseMetres(raw, fallback) {
 }
 
 function wallDraftLength() {
-  if (drag?.kind !== "wall-new") return 0;
-  return segmentLength(drag.x1, drag.y1, drag.x2, drag.y2);
+  if (!wallDraft) return 0;
+  return segmentLength(wallDraft.x1, wallDraft.y1, wallDraft.x2, wallDraft.y2);
 }
 
 function setWallDraftLength(length) {
+  if (!wallDraft) return;
   const grid = activeGrid();
-  const next = Math.max(MIN_TRACE, roundGrid(Number(length) || MIN_TRACE, grid));
-  const cur = wallDraftLength();
-  if (cur < 1e-6) {
-    drag.x2 = roundGrid(drag.x1 + next, grid);
-    drag.y2 = drag.y1;
-    return;
-  }
-  const s = next / cur;
-  drag.x2 = roundGrid(drag.x1 + (drag.x2 - drag.x1) * s, grid);
-  drag.y2 = roundGrid(drag.y1 + (drag.y2 - drag.y1) * s, grid);
+  const round = (n) => roundGrid(n, grid);
+  const end = setLineLength(
+    { x: wallDraft.x1, y: wallDraft.y1 },
+    { x: wallDraft.x2, y: wallDraft.y2 },
+    length,
+    round,
+  );
+  wallDraft.x2 = end.x;
+  wallDraft.y2 = end.y;
 }
 
 function setWallDraftHeading(deg) {
-  const len = wallDraftLength() || MIN_TRACE;
-  const rad = (Number(deg) * Math.PI) / 180;
+  if (!wallDraft) return;
   const grid = activeGrid();
-  drag.x2 = roundGrid(drag.x1 + Math.cos(rad) * len, grid);
-  drag.y2 = roundGrid(drag.y1 + Math.sin(rad) * len, grid);
+  const end = setLineHeading(
+    { x: wallDraft.x1, y: wallDraft.y1 },
+    wallDraftLength() || MIN_TRACE,
+    deg,
+    (n) => roundGrid(n, grid),
+  );
+  wallDraft.x2 = end.x;
+  wallDraft.y2 = end.y;
 }
 
 function parseDegrees(raw, fallback) {
@@ -6313,25 +6467,39 @@ function parseDegrees(raw, fallback) {
 }
 
 function syncSizeHud() {
-  const rectDraft = drag && drag.kind?.endsWith("-new") && drag.kind !== "wall-new" && drag.rect;
-  el.sizeHud.hidden = !rectDraft;
-  if (!rectDraft) return;
-  el.sizeHud.classList.remove("length-only");
-  if (el.hudWName) el.hudWName.textContent = "Width";
+  const rectDraft = shapeDraft?.rect;
+  const lineDraft = Boolean(wallDraft);
+  el.sizeHud.hidden = !rectDraft && !lineDraft;
+  if (!rectDraft && !lineDraft) return;
+  el.sizeHud.classList.toggle("length-only", lineDraft);
+  if (el.hudWName) el.hudWName.textContent = lineDraft ? "Length" : "Width";
   if (el.hudHint) {
-    el.hudHint.textContent = drag.kind === "roof-new"
-      ? "Drag the eaves. Corners snap to walls; draw past them for an overhang."
-      : "Drag to size, or type metres. Tab switches width / height.";
+    el.hudHint.textContent = lineDraft
+      ? "Click to end, or type metres and press Enter. Esc cancels this wall."
+      : shapeDraft.kind === "roof-new"
+        ? "Click the opposite corner. Corners snap to walls; draw past them for an overhang."
+        : "Click the opposite corner, or type metres. Tab switches width / height.";
   }
-  if (document.activeElement !== el.hudW) el.hudW.value = sizeDraft?.lockW ? sizeDraft.typedW : drag.rect.w.toFixed(1);
-  if (document.activeElement !== el.hudH) el.hudH.value = sizeDraft?.lockH ? sizeDraft.typedH : drag.rect.h.toFixed(1);
+  if (lineDraft) {
+    const len = wallDraftLength();
+    if (document.activeElement !== el.hudW) el.hudW.value = sizeDraft?.lockW ? sizeDraft.typedW : (len < 0.05 ? "" : len.toFixed(2));
+    return;
+  }
+  if (document.activeElement !== el.hudW) el.hudW.value = sizeDraft?.lockW ? sizeDraft.typedW : shapeDraft.rect.w.toFixed(1);
+  if (document.activeElement !== el.hudH) el.hudH.value = sizeDraft?.lockH ? sizeDraft.typedH : shapeDraft.rect.h.toFixed(1);
 }
 
 function handleSizeTyping(ev) {
-  if (!drag || !drag.kind?.endsWith("-new")) return false;
-  if (ev.target !== el.hudW && ev.target !== el.hudH) return false;
+  if (!wallDraft && !shapeDraft) return false;
+  if (ev.target !== el.hudW && ev.target !== el.hudH && ev.target !== el.ctxLen) return false;
   if (!sizeDraft) sizeDraft = { lockW: false, lockH: false, typedW: "", typedH: "", axis: "w" };
-  if (ev.key === "Tab" && drag.kind !== "wall-new") {
+  if (ev.key === "Enter") {
+    ev.preventDefault();
+    if (wallDraft) finishWallSegment();
+    else if (shapeDraft?.rect) finishShapeRect();
+    return true;
+  }
+  if (ev.key === "Tab" && shapeDraft) {
     ev.preventDefault();
     (ev.target === el.hudW ? el.hudH : el.hudW).focus();
     return true;
@@ -6339,18 +6507,35 @@ function handleSizeTyping(ev) {
   return false;
 }
 
+function handleDraftNumericShortcut(ev) {
+  if (ev.ctrlKey || ev.metaKey || ev.altKey) return false;
+  if (!wallDraft && !shapeDraft) return false;
+  if (ev.key.length !== 1 || !/[0-9.,]/.test(ev.key)) return false;
+  const tag = document.activeElement?.tagName;
+  if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return false;
+  ev.preventDefault();
+  if (!sizeDraft) sizeDraft = { lockW: false, lockH: false, typedW: "", typedH: "", axis: "w" };
+  sizeDraft.lockW = true;
+  sizeDraft.typedW = ev.key === "," ? "." : ev.key;
+  if (wallDraft) setWallDraftLength(parseMetres(sizeDraft.typedW, wallDraftLength() || 1));
+  render();
+  el.hudW?.focus();
+  return true;
+}
+
 el.hudW.addEventListener("input", (ev) => {
   if (!sizeDraft) return;
   sizeDraft.lockW = true;
   sizeDraft.typedW = ev.target.value;
-  if (drag?.rect) drag.rect.w = parseMetres(sizeDraft.typedW, drag.rect.w);
+  if (wallDraft) setWallDraftLength(parseMetres(sizeDraft.typedW, wallDraftLength() || 1));
+  else if (shapeDraft?.rect) shapeDraft.rect.w = parseMetres(sizeDraft.typedW, shapeDraft.rect.w);
   render();
 });
 el.hudH.addEventListener("input", (ev) => {
   if (!sizeDraft) return;
   sizeDraft.lockH = true;
   sizeDraft.typedH = ev.target.value;
-  if (drag?.rect) drag.rect.h = parseMetres(sizeDraft.typedH, drag.rect.h);
+  if (shapeDraft?.rect) shapeDraft.rect.h = parseMetres(sizeDraft.typedH, shapeDraft.rect.h);
   render();
 });
 
@@ -6433,7 +6618,7 @@ function syncObjectLevel(obj) {
 
 function syncPlanContext() {
   syncPlanFilterButtons();
-  const draft = drag?.kind === "wall-new";
+  const draft = Boolean(wallDraft);
   const refs = store.selected;
   const ref = !draft && refs.length === 1 ? store.primary : null;
   const obj = ref ? objByRef(ref) : null;
@@ -6532,10 +6717,10 @@ function syncPlanContext() {
   }
 
   if (linear) {
-    const x1 = draft ? drag.x1 : obj.x1;
-    const y1 = draft ? drag.y1 : obj.y1;
-    const x2 = draft ? (drag.x2 ?? drag.x1) : obj.x2;
-    const y2 = draft ? (drag.y2 ?? drag.y1) : obj.y2;
+    const x1 = draft ? wallDraft.x1 : obj.x1;
+    const y1 = draft ? wallDraft.y1 : obj.y1;
+    const x2 = draft ? (wallDraft.x2 ?? wallDraft.x1) : obj.x2;
+    const y2 = draft ? (wallDraft.y2 ?? wallDraft.y1) : obj.y2;
     const len = segmentLength(x1, y1, x2, y2);
     const ang = headingDeg(x1, y1, x2, y2);
     if (document.activeElement !== el.ctxLen) {
@@ -6559,7 +6744,7 @@ function syncPlanContext() {
 }
 
 el.ctxLen?.addEventListener("input", (ev) => {
-  if (drag?.kind === "wall-new") {
+  if (wallDraft) {
     if (!sizeDraft) sizeDraft = { lockW: false, lockH: false, typedW: "", typedH: "", axis: "w" };
     sizeDraft.lockW = true;
     sizeDraft.typedW = ev.target.value;
@@ -6569,7 +6754,7 @@ el.ctxLen?.addEventListener("input", (ev) => {
 });
 
 el.ctxLen?.addEventListener("change", (ev) => {
-  if (drag?.kind === "wall-new") return;
+  if (wallDraft) return;
   const sel = soleLinearSelection();
   if (!sel) return;
   store.pushUndo();
@@ -6579,8 +6764,8 @@ el.ctxLen?.addEventListener("change", (ev) => {
 });
 
 el.ctxAng?.addEventListener("change", (ev) => {
-  if (drag?.kind === "wall-new") {
-    const cur = headingDeg(drag.x1, drag.y1, drag.x2 ?? drag.x1, drag.y2 ?? drag.y1);
+  if (wallDraft) {
+    const cur = headingDeg(wallDraft.x1, wallDraft.y1, wallDraft.x2 ?? wallDraft.x1, wallDraft.y2 ?? wallDraft.y1);
     setWallDraftHeading(parseDegrees(ev.target.value, cur));
     render();
     return;
@@ -6597,7 +6782,7 @@ el.ctxAng?.addEventListener("change", (ev) => {
 el.ctxType?.addEventListener("change", () => {
   const sku = skuById(el.ctxType.value);
   if (!sku) return;
-  if (drag?.kind === "wall-new") {
+  if (wallDraft) {
     placeSkuId = sku.id;
     renderPalette();
     render();
@@ -6613,7 +6798,7 @@ el.ctxStatusWrap?.addEventListener("change", (e) => {
   const next = e.target?.value;
   if (next !== "existing" && next !== "planned") return;
   placeStatus = next;
-  if (drag?.kind === "wall-new" || drag?.kind?.endsWith("-new")) {
+  if (wallDraft || shapeDraft) {
     render();
     return;
   }
