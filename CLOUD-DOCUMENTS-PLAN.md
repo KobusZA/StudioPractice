@@ -287,16 +287,16 @@ key parses and `hasJobContent()` is true, upload it as a project named
 "Recovered drawing", then remove the key. Deleting the key without this throws
 the work away.
 
-## 10. The Revit connector
+## 10. The Revit connector — withdrawn
 
-`LocalConnectorHost` listens on `http://127.0.0.1:17300` with
-`Access-Control-Allow-Origin: *`, and the page pulls from it. An `https://`
-hosted origin calling plain-HTTP localhost is permitted in Chrome today but is
-subject to private-network-access preflights and is not uniform across
-browsers. Verify before the planner moves to a hosted origin; the likely answer
-is to invert it — the connector POSTs an extract to the cloud against a pairing
-code — which also means the builder's laptop no longer has to be the machine
-running Revit.
+The first architecture was a Revit add-in that extracted a model and a local
+HTTP host (`LocalConnectorHost` on `127.0.0.1:17300`) that the web page pulled
+from. That path is **not valid**. The planner compiles its own document in
+the browser (`compile()`), and the server is the system of record. Do not
+plan a pairing-code invert, a hosted origin calling localhost, or a live
+extract from Revit. The C# project remains in the tree as leftover from that
+attempt; it is not part of the product surface. One-way DXF/IFC exports stay
+as in `PHILOSOPHY.md`.
 
 ## 11. The pack
 

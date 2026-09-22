@@ -60,10 +60,20 @@ The standing list of those asks lives in [TEMPLATE-ASKS.md](TEMPLATE-ASKS.md).
 
 A blank gets queried; a wrong number gets built. So a SKU carries physical
 facts and never a compliance verdict, the rule engine is the only thing allowed
-to say "pass," the C# connector emits facts while `build-pack.js` owns every
-judgement, and every gap surfaces in a report instead of defaulting to
+to say "pass," the pack and the job carry facts while the rule engine owns
+every judgement, and every gap surfaces in a report instead of defaulting to
 something believable. This is the rule the whole product's credibility rests
 on, and it is not negotiable under schedule pressure.
+
+The product is the planner in `web/v2` and the Node/Postgres system of record
+in `server/`. A builder draws and prices the job in the browser; the server
+holds the row. That is not a viewer of a Revit model. The C# add-in and
+`LocalConnectorHost` on `127.0.0.1:17300` were the first attempt at getting
+facts onto a page; they are not how the product works, and they are not a
+path to restore. `build-pack.js` still turns a firm's catalog dump into a
+SKU pack so judgements stay testable without Autodesk software. DXF and IFC
+remain one-way deliverables a registered professional can open in Revit
+without this add-in.
 
 ## What leaves the app: round-trip versus one-way
 

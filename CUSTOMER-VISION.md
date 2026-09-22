@@ -29,7 +29,7 @@ Deliverables such as DXF, IFC, and permit sets leave the app as **exports**. You
 
 **Familiar behaviour, not a second Revit.** We keep the interactions builders expect—levels, sheets, title blocks, libraries of jobs—and leave out family authoring, MEP routing, structural sign-off engines, and photoreal rendering that most residential firms never use.
 
-**Your template defines the defaults.** Wall types, doors, windows, fittings, levels, and sheets come from *your* Revit template. Where the template does not cover something, we ask your firm to supply or confirm it—we do not invent a stand-in.
+**Your template defines the defaults.** Wall types, doors, windows, fittings, levels, and sheets come from *your* firm's catalog, shipped as the pack this app draws with. Where the template does not cover something, we ask your firm to supply or confirm it—we do not invent a stand-in. The job is drawn here; Revit is not a live data source.
 
 **Unknown stays unknown.** Blank fields get filled by facts you provide or by explicit checks in our compliance workflow—not by plausible defaults that look correct until they are built wrong. Gaps show up in reports so you can fix them before they become costly mistakes.
 

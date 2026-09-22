@@ -114,9 +114,6 @@ Not done, and not to be guessed at. What it needs, in order:
 5. `web/v2/index.html` currently cache-busts its module graph with a query
    string and `static.js` serves `Cache-Control: no-cache`. Correct, and slow;
    a real deployment fingerprints instead.
-6. `LocalConnectorHost` on `127.0.0.1:17300` is called *from* the page today.
-   A hosted `https://` origin calling plain-HTTP localhost is permitted in
-   Chrome but is subject to private-network-access preflights and is not uniform
-   across browsers — verify it, or invert it (the connector POSTs an extract
-   against a pairing code) before relying on it. See §10 of
-   `CLOUD-DOCUMENTS-PLAN.md`.
+6. Do not wire a hosted origin to `LocalConnectorHost` on `127.0.0.1:17300`.
+   That extract path is withdrawn; see §10 of `CLOUD-DOCUMENTS-PLAN.md`. The
+   smoke path is sign-in, draw, Saved, reload.
