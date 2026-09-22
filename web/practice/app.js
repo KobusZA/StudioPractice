@@ -22,6 +22,8 @@ const state = {
   tasks: [],
   monthEntries: [],
   signUpMode: false,
+  returnId: null,
+  newJob: null,
 };
 
 const el = (id) => document.getElementById(id);
@@ -291,21 +293,32 @@ function selected() {
 }
 
 function renderMain() {
-  const main = el("main");
-  if (state.selectedId === "new") {
-    main.innerHTML = registerFormHtml(null);
+  const composing = state.selectedId === "new";
+  el("composer").hidden = !composing;
+  el("workspace").inert = composing;
+  if (composing) {
+    renderComposer();
+    syncAddress();
     return;
   }
+  const main = el("main");
   const project = selected();
   if (!project) {
     main.innerHTML = `<div class="panel">${firmHtml()}</div>`;
+    syncAddress();
     return;
   }
   const type = state.reference?.projectTypes.find((t) => t.code === project.typeCode);
+  const drawingLabel = project.drawingId ? "Open drawing" : "Start a drawing";
   main.innerHTML = `
     <div class="proj-head">
-      <div class="code">${esc(project.code || "NO CODE")}</div>
-      <h1>${esc(project.name || "Untitled")}</h1>
+      <div class="proj-head-row">
+        <div>
+          <div class="code">${esc(project.code || "NO CODE")}</div>
+          <h1>${esc(project.name || "Untitled")}</h1>
+        </div>
+        <button class="btn" type="button" data-action="drawing">${drawingLabel}</button>
+      </div>
       <div class="facts">
         <span>Client <b>${esc(project.clientName || "—")}</b></span>
         <span>Type <b>${esc(type?.name || project.typeCode || "—")}</b></span>
@@ -323,6 +336,57 @@ function renderMain() {
           : state.tab === "certificates" ? certificatesHtml(project)
             : overviewHtml(project)
     }</div>`;
+  syncAddress();
+}
+
+/** So a return from the planner lands on this job, and a refresh stays here. */
+function syncAddress() {
+  const url = new URL(location.href);
+  const id = state.selectedId && state.selectedId !== "new" ? state.selectedId : "";
+  if (id) url.searchParams.set("project", id);
+  else url.searchParams.delete("project");
+  const next = `${url.pathname}${url.search}`;
+  if (next !== `${location.pathname}${location.search}`) history.replaceState(null, "", next);
+}
+
+/**
+ * An empty drawing in the same shape the planner mints. The id is the
+ * drawing's identity, chosen here so the row and the document agree before
+ * either has been saved from the canvas.
+ */
+function blankDrawing(name) {
+  const trimmed = typeof name === "string" ? name.trim() : "";
+  return {
+    schema: "sp.doc/2",
+    id: `doc${Math.random().toString(36).slice(2, 8)}`,
+    name: trimmed || null,
+    packId: "tsp-template",
+    site: null,
+    rooms: [],
+    segments: [],
+    slabs: [],
+    roofs: [],
+    openings: [],
+    items: [],
+    beams: [],
+    stairs: [],
+    groups: [],
+    sheets: [],
+    floorsRevealed: 0,
+    levels: [],
+  };
+}
+
+async function goToDrawing(project) {
+  if (!project) return;
+  if (!project.drawingId) {
+    const attached = await attempt(() => api.attachDrawing(project.id, {
+      doc: blankDrawing(project.name),
+      packId: "tsp-template",
+    }));
+    if (!attached?.drawing) return;
+  }
+  location.assign(`/v2/index.html?project=${encodeURIComponent(project.id)}`);
 }
 
 const TABS = [
@@ -343,7 +407,7 @@ function firmHtml() {
   if (!jobs.length) {
     return `<div class="empty">No jobs yet.<br />
       A job needs only a code to exist &mdash; client, type, fee and drawing can all arrive later.
-      Press <b>New job</b> to open the register.</div>`;
+      Press <b>New job</b> and it will walk through each of those choices.</div>`;
   }
   const open = jobs.filter((p) => p.status === "open");
   const overFee = jobs.filter((p) => p.financials.burn !== null && p.financials.burn > 1);
@@ -629,7 +693,6 @@ function tasksHtml(project) {
 }
 
 function registerFormHtml(project) {
-  const creating = !project;
   const types = state.reference?.projectTypes || [];
   const value = (key) => esc(project?.[key] ?? "");
   const option = (list, current) => list.map((item) => {
@@ -639,9 +702,8 @@ function registerFormHtml(project) {
     return `<option value="${esc(code)}"${code === current ? " selected" : ""}>${esc(label)}${placeholder}</option>`;
   }).join("");
 
-  return `${creating ? '<div class="panel"><h3 class="sec">New job</h3>' : ""}
-    <form class="form" data-form="${creating ? "create" : "update"}"
-          ${creating ? "" : `data-project="${esc(project.id)}"`}>
+  return `
+    <form class="form" data-form="update" data-project="${esc(project.id)}">
       <div class="fields">
         <div class="field">
           <label for="f-code">Project code</label>
@@ -703,14 +765,405 @@ function registerFormHtml(project) {
         </div>
       </div>
       <div class="actions">
-        <button class="btn btn-primary" type="submit">${creating ? "Create job" : "Save"}</button>
-        ${creating ? '<button class="btn" type="button" data-action="cancel-create">Cancel</button>' : ""}
+        <button class="btn btn-primary" type="submit">Save</button>
       </div>
       <p class="note-line">A project code is unique within the firm, compared ignoring case and
         surrounding spaces &mdash; the source workbook carried <code>P078</code> twice and
         <code>C036&nbsp;</code> beside <code>CO36.9</code>.</p>
-    </form>
-    ${creating ? "</div>" : ""}`;
+    </form>`;
+}
+
+/**
+ * What choosing a type does on the day the job is opened. Figures are left
+ * out: the template is the firm's, and it can be edited. The sentence that
+ * matters is whether a task list and a fee schedule are copied, and of what.
+ */
+const TYPE_GUIDE = {
+  STRATAREPORT: "Copies one phase and its three tasks — council documents, the title deed, external reports — and a fee schedule of that single line.",
+  "CONSENT USE": "Copies five phases, from inception to promulgation, with their tasks and a fee schedule that matches them.",
+  REZONING: "Copies five phases, from inception to promulgation, with their tasks and a fee schedule that matches them.",
+  "REMOVAL OF RESTRICTIONS": "Copies eight phases, from the briefing through the approval formalities, with their tasks and a matching fee schedule.",
+  "TOWNSHIP establishment": "Copies five stages plus sundries, with their tasks and a fee schedule built from the same lines.",
+};
+
+const NEW_JOB_STEPS = [
+  ["name", "Name"],
+  ["type", "Type"],
+  ["billing", "Billing"],
+  ["client", "Client"],
+];
+
+function blankNewJob() {
+  return {
+    step: 0,
+    error: "",
+    saving: false,
+    code: "",
+    name: "",
+    typeCode: null,
+    billingBasis: null,
+    budgetEstimate: "",
+    clientName: "",
+    clientEmail: "",
+    clientCell: "",
+    clientAddress: "",
+    propertyDescription: "",
+  };
+}
+
+function openNewJob() {
+  if (state.selectedId !== "new") {
+    state.returnId = state.selectedId;
+    state.newJob = blankNewJob();
+  }
+  state.selectedId = "new";
+  renderRail();
+  renderMain();
+}
+
+function closeNewJob() {
+  state.selectedId = state.returnId ?? state.projects[0]?.id ?? null;
+  state.returnId = null;
+  state.newJob = null;
+  renderRail();
+  renderMain();
+}
+
+function readComposerFields() {
+  const job = state.newJob;
+  const root = el("composer-body");
+  for (const input of root.querySelectorAll("[data-field]")) {
+    if (input.type === "radio") {
+      if (input.checked) job[input.dataset.field] = input.value;
+    } else {
+      job[input.dataset.field] = input.value;
+    }
+  }
+}
+
+function composerStepError() {
+  const job = state.newJob;
+  if (job.step === 0 && !String(job.code).trim()) {
+    return "A project code is the one thing a job needs before it can exist.";
+  }
+  if (job.step === 1 && job.typeCode === null) {
+    return "Choose a type, or choose to leave it unclassified. Either is a finished answer.";
+  }
+  if (job.step === 2 && job.billingBasis === null) {
+    return "Choose how this job will be billed, or choose that it is not decided yet.";
+  }
+  return "";
+}
+
+/** Successful template fetches, so stepping back does not load the sequence again. */
+const roadmapCache = new Map();
+let roadmapRequest = 0;
+
+function typeGuide(type) {
+  if (!type) {
+    return "Nothing is copied. Classify it later from the register; until then there is no task list and no fee schedule.";
+  }
+  if (type.isPlaceholder) {
+    return "No pre-built tasks. The job opens with an empty list, and you add the tasks this particular job needs. Time, certificates and burn still work; the fee schedule is entered by hand.";
+  }
+  return TYPE_GUIDE[type.code]
+    || "Copies this type's tasks and a fee schedule built from the same template, so the two agree on the day the job opens.";
+}
+
+function choiceCard(field, value, checked, title, body) {
+  return `<label class="choice">
+    <input type="radio" name="${esc(field)}" data-field="${esc(field)}" value="${esc(value)}"${checked ? " checked" : ""} />
+    <span><b>${title}</b><p>${body}</p></span>
+  </label>`;
+}
+
+function composerNameStep(job) {
+  return `
+    <div class="form">
+      <div class="fields">
+        <div class="field">
+          <label for="nj-code">Project code</label>
+          <input id="nj-code" data-field="code" value="${esc(job.code)}" required
+                 placeholder="D063" autocomplete="off" />
+        </div>
+        <div class="field">
+          <label for="nj-name">Description</label>
+          <input id="nj-name" data-field="name" value="${esc(job.name)}"
+                 placeholder="Bon Accord township" />
+        </div>
+      </div>
+      <p class="note-line">The code is unique in the firm, compared ignoring case and surrounding
+        spaces. The workbook carried <code>P078</code> twice and <code>C036&nbsp;</code> beside
+        <code>CO36.9</code>, and those only surfaced when somebody tried to bill them.
+        The description is the name people see on the rail; it can wait.</p>
+    </div>`;
+}
+
+function composerTypeStep(job) {
+  const types = state.reference?.projectTypes || [];
+  const templated = types.filter((type) => !type.isPlaceholder);
+  const placeholders = types.filter((type) => type.isPlaceholder);
+  const cards = (list) => list.map((type) => choiceCard(
+    "typeCode", type.code, job.typeCode === type.code, esc(type.name), typeGuide(type),
+  )).join("");
+  return `
+    <div class="choice-group">
+      <h2>Copies a task list and a fee schedule</h2>
+      <div class="choices">${cards(templated)}</div>
+    </div>
+    <div class="choice-group">
+      <h2>Registered, with no template yet</h2>
+      <p class="note-line" style="margin-top:0">An empty list is the finished state for these, not a missing file. You write the tasks the job actually has.</p>
+      <div class="choices">${cards(placeholders)}</div>
+    </div>
+    <div class="choice-group">
+      <h2>Or leave it for later</h2>
+      <div class="choices">${choiceCard(
+        "typeCode", "", job.typeCode === "", "Not classified yet", typeGuide(null),
+      )}</div>
+    </div>
+    ${roadmapHtml(job)}`;
+}
+
+/**
+ * Phases of the selected type, in order, with the tasks under each. Fees stay
+ * off this step: the question here is whether the sequence fits the job.
+ * A placeholder and an unclassified job have nothing to preview.
+ */
+function roadmapHtml(job) {
+  const code = job.typeCode || "";
+  const type = (state.reference?.projectTypes || []).find((item) => item.code === code);
+  if (!code || type?.isPlaceholder) {
+    return `<section class="roadmap" id="type-roadmap" hidden></section>`;
+  }
+  const roadmap = job.roadmap?.typeCode === code ? job.roadmap : null;
+  if (!roadmap || roadmap.loading) {
+    return `<section class="roadmap" id="type-roadmap" aria-live="polite">
+      <h2>What this type copies</h2>
+      <p class="note-line">Loading the sequence…</p>
+    </section>`;
+  }
+  if (roadmap.error) {
+    return `<section class="roadmap" id="type-roadmap" aria-live="polite">
+      <h2>What this type copies</h2>
+      <p class="note-line">The sequence could not be loaded. The type can still be chosen;
+        the job is built from it when it is created.</p>
+    </section>`;
+  }
+  const phases = (roadmap.phases || []).map((phase) => {
+    const tasks = phase.tasks || [];
+    const count = tasks.length === 1 ? "1 task" : `${tasks.length} tasks`;
+    if (!tasks.length) return `<li><b>${esc(phase.name)}</b></li>`;
+    return `<li><details>
+      <summary>${esc(phase.name)} <span>${count}</span></summary>
+      <ul>${tasks.map((task) => `<li>${esc(task.description)}</li>`).join("")}</ul>
+    </details></li>`;
+  }).join("");
+  return `<section class="roadmap" id="type-roadmap" aria-live="polite">
+    <h2>What this type copies</h2>
+    <ol class="roadmap-phases">${phases}</ol>
+    <p class="note-line">This sequence is copied onto the job. Tasks can be added or struck
+      afterwards. The firm's template is unchanged.</p>
+  </section>`;
+}
+
+function paintRoadmap() {
+  const node = el("type-roadmap");
+  if (!node || !state.newJob || state.newJob.step !== 1) return;
+  const hadPhases = Boolean(node.querySelector(".roadmap-phases"));
+  node.outerHTML = roadmapHtml(state.newJob);
+  const shown = el("type-roadmap");
+  if (shown && !hadPhases && shown.querySelector(".roadmap-phases")) {
+    shown.scrollIntoView({ block: "nearest" });
+  }
+}
+
+function ensureRoadmap() {
+  const job = state.newJob;
+  if (!job || job.step !== 1) return;
+  const code = job.typeCode || "";
+  const type = (state.reference?.projectTypes || []).find((item) => item.code === code);
+  if (!code || type?.isPlaceholder) {
+    job.roadmap = null;
+    paintRoadmap();
+    return;
+  }
+  if (roadmapCache.has(code)) {
+    job.roadmap = roadmapCache.get(code);
+    paintRoadmap();
+    return;
+  }
+  if (job.roadmap?.typeCode === code && job.roadmap.loading) return;
+  const request = ++roadmapRequest;
+  job.roadmap = { typeCode: code, loading: true };
+  paintRoadmap();
+  api.feeTemplate(code).then(({ template }) => {
+    const entry = { typeCode: code, loading: false, phases: template.phases || [] };
+    roadmapCache.set(code, entry);
+    if (request !== roadmapRequest || state.newJob?.typeCode !== code) return;
+    state.newJob.roadmap = entry;
+    paintRoadmap();
+  }).catch(() => {
+    if (request !== roadmapRequest || state.newJob?.typeCode !== code) return;
+    state.newJob.roadmap = { typeCode: code, loading: false, error: true, phases: [] };
+    paintRoadmap();
+  });
+}
+
+function budgetNote(basis) {
+  if (basis === "fixed_fee") {
+    return "On a fixed fee this is a working figure. The moment a fee schedule exists — including one just copied from the type — burn is measured against the schedule, and a disagreement with this estimate is shown rather than smoothed over.";
+  }
+  if (basis === "time_and_materials") {
+    return "Time and materials often opens with no budget. Leave this blank when there isn't one. Blank is not zero: zero would say the fee is already spent, and every hour after it would read as an overrun.";
+  }
+  return "Until a fee schedule exists, burn is measured against this figure. Leave it blank if there isn't one. Blank is not zero.";
+}
+
+function composerBillingStep(job) {
+  const basis = job.billingBasis;
+  return `
+    <div class="choices">
+      ${choiceCard("billingBasis", "fixed_fee", basis === "fixed_fee", "Fixed fee",
+        "Certificates follow the fee split. Time past a phase stays on the job as variance; it is not added to what the client is asked to pay. That variance is how you see a phase was under-quoted before you quote the next one.")}
+      ${choiceCard("billingBasis", "time_and_materials", basis === "time_and_materials", "Time &amp; materials",
+        "Certificate lines are built from the time logged, at the captured amount. Giving part of that up is a write-down with a reason on the certificate. The timesheet row itself is never reduced.")}
+      ${choiceCard("billingBasis", "", basis === "", "Not decided yet",
+        "The job can open without a basis. Set it on the register before the first certificate. Burn can still be measured against a budget, or against a fee schedule once one exists.")}
+    </div>
+    <div class="form" style="margin-top:14px">
+      <div class="field" style="max-width:280px">
+        <label for="nj-budget">Budget estimate</label>
+        <input id="nj-budget" data-field="budgetEstimate" type="number" step="0.01" min="0"
+               value="${esc(job.budgetEstimate)}" placeholder="Leave blank if none" />
+      </div>
+      <p class="note-line" id="nj-budget-note">${esc(budgetNote(basis))}</p>
+    </div>`;
+}
+
+function composerClientStep(job) {
+  const type = (state.reference?.projectTypes || []).find((item) => item.code === job.typeCode);
+  const basis = job.billingBasis === "fixed_fee" ? "Fixed fee"
+    : job.billingBasis === "time_and_materials" ? "Time & materials"
+      : "Basis not decided";
+  const row = (label, value) => `<div><dt>${label}</dt><dd>${value || "—"}</dd></div>`;
+  return `
+    <dl class="composer-summary">
+      ${row("Code", esc(job.code))}
+      ${row("Description", esc(job.name))}
+      ${row("Type", job.typeCode ? esc(type?.name || job.typeCode) : "Not classified yet")}
+      ${row("Billing", esc(basis))}
+      ${row("Budget", job.budgetEstimate === "" ? "None" : money(Number(job.budgetEstimate)))}
+    </dl>
+    <p class="composer-lead">Status starts as open. Hold, halt and complete are set once the job exists, and a drawing is attached later from the job itself.</p>
+    <div class="form">
+      <div class="fields">
+        <div class="field">
+          <label for="nj-client">Client</label>
+          <input id="nj-client" data-field="clientName" value="${esc(job.clientName)}"
+                 placeholder="The name on the certificate" />
+        </div>
+        <div class="field">
+          <label for="nj-email">Email</label>
+          <input id="nj-email" data-field="clientEmail" type="email" value="${esc(job.clientEmail)}" />
+        </div>
+        <div class="field">
+          <label for="nj-cell">Cell</label>
+          <input id="nj-cell" data-field="clientCell" value="${esc(job.clientCell)}" />
+        </div>
+        <div class="field wide">
+          <label for="nj-address">Client address</label>
+          <input id="nj-address" data-field="clientAddress" value="${esc(job.clientAddress)}"
+                 placeholder="Where the client is, not the site" />
+        </div>
+        <div class="field wide">
+          <label for="nj-property">Property</label>
+          <input id="nj-property" data-field="propertyDescription" value="${esc(job.propertyDescription)}"
+                 placeholder="The site: erf, township, portion" />
+        </div>
+      </div>
+      <p class="note-line">All of this can be blank. The client's address and the property are different
+        places: one is who you bill, the other is the land the work is about.</p>
+    </div>`;
+}
+
+const COMPOSER_COPY = [
+  ["Name the job", "A code is enough to open the register. Everything after this step can be decided now or left for the job itself."],
+  ["What kind of work is it?", "The type decides what lands on the job today: a copied task list and fee schedule, an empty list you write yourself, or nothing until you classify it."],
+  ["How will it be billed?", "The basis decides what a certificate is allowed to claim. The budget is the figure burn uses until a fee schedule replaces it."],
+  ["Who is it for?", "Client and property are the register entry. Neither is required to create the job, and both can be filled in afterwards."],
+];
+
+function renderComposer() {
+  const job = state.newJob;
+  const [title, lead] = COMPOSER_COPY[job.step];
+  const body = job.step === 0 ? composerNameStep(job)
+    : job.step === 1 ? composerTypeStep(job)
+      : job.step === 2 ? composerBillingStep(job)
+        : composerClientStep(job);
+  const last = job.step === NEW_JOB_STEPS.length - 1;
+  el("composer-body").innerHTML = `
+    <p class="composer-kicker">New job</p>
+    <h1 id="composer-title" tabindex="-1">${title}</h1>
+    <p class="composer-lead">${lead}</p>
+    <nav class="composer-steps" aria-label="New job steps">
+      ${NEW_JOB_STEPS.map(([id, label], index) => `
+        <button type="button" data-action="composer-step" data-step="${index}"
+                ${index > job.step ? "disabled" : ""}
+                aria-current="${index === job.step ? "step" : "false"}">${index + 1} ${label}</button>`).join("")}
+    </nav>
+    <form data-form="composer">
+      ${body}
+      ${job.error ? `<p class="composer-error">${esc(job.error)}</p>` : ""}
+      <div class="actions">
+        ${job.step ? '<button class="btn" type="button" data-action="composer-back">Back</button>' : ""}
+        <button class="btn btn-primary" type="submit"${job.saving ? " disabled" : ""}>
+          ${last ? "Create job" : "Continue"}</button>
+        <div class="spacer"></div>
+        <button class="btn" type="button" data-action="composer-cancel">Cancel</button>
+      </div>
+    </form>`;
+  el("composer-title")?.focus();
+}
+
+async function submitNewJob() {
+  const job = state.newJob;
+  job.saving = true;
+  job.error = "";
+  renderComposer();
+  let created = null;
+  try {
+    created = await api.createRegisterProject({
+      code: job.code,
+      name: job.name,
+      typeCode: job.typeCode || "",
+      billingBasis: job.billingBasis || "",
+      budgetEstimate: job.budgetEstimate,
+      clientName: job.clientName,
+      clientEmail: job.clientEmail,
+      clientCell: job.clientCell,
+      clientAddress: job.clientAddress,
+      propertyDescription: job.propertyDescription,
+      status: "open",
+    });
+  } catch (error) {
+    job.saving = false;
+    const message = error instanceof ApiError ? error.message : "Could not create the job";
+    if (/already in use/i.test(message)) {
+      job.step = 0;
+      job.error = message;
+    } else {
+      job.error = message;
+    }
+    renderComposer();
+    return;
+  }
+  state.selectedId = created.project.id;
+  state.returnId = null;
+  state.newJob = null;
+  state.tab = "overview";
+  toast(`${created.project.code} created`);
+  await refresh();
 }
 
 function timeHtml(project) {
@@ -994,8 +1447,12 @@ async function loadProjects({ keepSelection = true } = {}) {
   // the server already sends, and the day somebody wants it by code instead,
   // that is a click rather than a migration.
   state.projects = projects.slice().sort(byRisk);
-  if (!keepSelection || (state.selectedId !== "new"
-    && !projects.some((p) => p.id === state.selectedId))) {
+  if (!keepSelection) {
+    const requested = new URLSearchParams(location.search).get("project");
+    state.selectedId = projects.some((p) => p.id === requested)
+      ? requested
+      : (projects[0]?.id ?? null);
+  } else if (state.selectedId !== "new" && !projects.some((p) => p.id === state.selectedId)) {
     state.selectedId = projects[0]?.id ?? null;
   }
   renderRail();
@@ -1111,10 +1568,62 @@ function wireApp() {
     location.reload();
   });
 
-  el("new-project").addEventListener("click", () => {
-    state.selectedId = "new";
-    renderRail();
-    renderMain();
+  el("new-project").addEventListener("click", () => openNewJob());
+
+  const composer = el("composer");
+  composer.addEventListener("click", (event) => {
+    const action = event.target.closest("[data-action]")?.dataset;
+    if (!action || !state.newJob) return;
+    if (action.action === "composer-cancel") {
+      closeNewJob();
+    } else if (action.action === "composer-back") {
+      readComposerFields();
+      state.newJob.step -= 1;
+      state.newJob.error = "";
+      renderComposer();
+    } else if (action.action === "composer-step") {
+      const index = Number(action.step);
+      if (index >= state.newJob.step) return;
+      readComposerFields();
+      state.newJob.step = index;
+      state.newJob.error = "";
+      renderComposer();
+    }
+  });
+  composer.addEventListener("change", (event) => {
+    if (!state.newJob) return;
+    const field = event.target.dataset.field;
+    if (field === "billingBasis") {
+      readComposerFields();
+      const note = el("nj-budget-note");
+      if (note) note.textContent = budgetNote(state.newJob.billingBasis);
+    } else if (field === "typeCode") {
+      readComposerFields();
+      ensureRoadmap();
+    }
+  });
+  composer.addEventListener("submit", (event) => {
+    event.preventDefault();
+    if (!state.newJob || state.newJob.saving) return;
+    readComposerFields();
+    const error = composerStepError();
+    state.newJob.error = error;
+    if (error) {
+      renderComposer();
+      return;
+    }
+    if (state.newJob.step === NEW_JOB_STEPS.length - 1) {
+      submitNewJob();
+      return;
+    }
+    state.newJob.step += 1;
+    state.newJob.error = "";
+    renderComposer();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && state.selectedId === "new" && !state.newJob?.saving) {
+      closeNewJob();
+    }
   });
 
   el("rail-list").addEventListener("click", async (event) => {
@@ -1140,6 +1649,13 @@ function wireApp() {
     const action = event.target.closest("[data-action]")?.dataset;
     if (!action) return;
 
+    if (action.action === "drawing") {
+      const button = event.target.closest("[data-action='drawing']");
+      if (button) button.disabled = true;
+      await goToDrawing(selected());
+      if (button?.isConnected) button.disabled = false;
+      return;
+    }
     if (action.action === "add-schedule-row") {
       const rows = el("schedule-rows");
       const last = rows.lastElementChild;
@@ -1154,10 +1670,6 @@ function wireApp() {
       // end, and "remove every phase" is what saving an empty schedule means.
       if (rows.children.length > 1) event.target.closest(".schedule-row").remove();
       else for (const input of rows.querySelectorAll("input")) input.value = "";
-    } else if (action.action === "cancel-create") {
-      state.selectedId = state.projects[0]?.id ?? null;
-      renderRail();
-      renderMain();
     } else if (action.action === "strike-task" || action.action === "unstrike-task") {
       const status = action.action === "strike-task" ? "not_required" : "not_started";
       const result = await attempt(() => api.updateTask(action.task, { status }));
@@ -1223,13 +1735,6 @@ function wireApp() {
       toast(lines.length
         ? `Fee schedule saved: ${lines.length} phase${lines.length === 1 ? "" : "s"}, ${money(saved.feeSchedule.quoted)}`
         : "Fee schedule cleared. Burn falls back to the register budget.");
-      await refresh();
-    } else if (kind === "create") {
-      const created = await attempt(() => api.createRegisterProject(values));
-      if (!created) return;
-      state.selectedId = created.project.id;
-      state.tab = "overview";
-      toast(`${created.project.code} created`);
       await refresh();
     } else if (kind === "update") {
       const saved = await attempt(() => api.updateRegisterProject(form.dataset.project, values));

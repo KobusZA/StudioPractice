@@ -105,6 +105,7 @@ export function openStore(queryable, { orgId, userId }) {
       const { rows } = await q(
         `select p.id,
                 p.name,
+                p.code,
                 p.opened_at,
                 p.offline_pinned_at,
                 p.updated_at,
@@ -128,7 +129,7 @@ export function openStore(queryable, { orgId, userId }) {
 
     async getProject(projectId) {
       const { rows } = await q(
-        `select id, name, opened_at, offline_pinned_at, updated_at, created_at, deleted_at
+        `select id, name, code, opened_at, offline_pinned_at, updated_at, created_at, deleted_at
            from project
           where id = $1 and org_id = $2 and deleted_at is null`,
         [projectId, orgId],
@@ -149,7 +150,7 @@ export function openStore(queryable, { orgId, userId }) {
       const { rows: projectRows } = await q(
         `insert into project (id, org_id, name, opened_at, created_by)
               values ($1, $2, $3, now(), $4)
-           returning id, name, opened_at, offline_pinned_at, updated_at, created_at, deleted_at`,
+           returning id, name, code, opened_at, offline_pinned_at, updated_at, created_at, deleted_at`,
         [project, orgId, name, userId],
       );
       const { rows: drawingRows } = await q(
@@ -175,7 +176,7 @@ export function openStore(queryable, { orgId, userId }) {
         `update project
             set name = $3, updated_at = now()
           where id = $1 and org_id = $2 and deleted_at is null
-        returning id, name, opened_at, offline_pinned_at, updated_at, created_at, deleted_at`,
+        returning id, name, code, opened_at, offline_pinned_at, updated_at, created_at, deleted_at`,
         [projectId, orgId, clean],
       );
       if (!projectRows[0]) return null;
@@ -270,7 +271,7 @@ export function openStore(queryable, { orgId, userId }) {
         `update project
             set deleted_at = null, updated_at = now()
           where id = $1 and org_id = $2 and deleted_at is not null
-        returning id, name, opened_at, offline_pinned_at, updated_at, created_at, deleted_at`,
+        returning id, name, code, opened_at, offline_pinned_at, updated_at, created_at, deleted_at`,
         [projectId, orgId],
       );
       if (!rows[0]) return null;
@@ -1701,6 +1702,9 @@ function projectSummary(row) {
   return {
     id: row.id,
     name: row.name ?? null,
+    // The firm's own label (D063), null on a job the planner created before
+    // the register gave it a code. The chrome prints it beside the drawing name.
+    code: row.code ?? null,
     erf: row.erf ?? null,
     openedAt: row.opened_at ?? null,
     offlinePinnedAt: row.offline_pinned_at ?? null,

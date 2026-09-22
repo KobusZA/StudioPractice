@@ -40,11 +40,15 @@ export const api = {
   signOut: () => call("POST", "/api/auth/sign-out", {}),
 
   reference: () => call("GET", "/api/practice/reference"),
+  feeTemplate: (code) => call("GET", `/api/fee-templates/${encodeURIComponent(code)}`),
 
   listRegister: () => call("GET", "/api/register"),
   getRegisterProject: (id) => call("GET", `/api/register/${encodeURIComponent(id)}`),
   createRegisterProject: (body) => call("POST", "/api/register", body),
   updateRegisterProject: (id, body) => call("PATCH", `/api/register/${encodeURIComponent(id)}`, body),
+  // A canvas for a job that was opened without one. The planner still requires
+  // a document; this is how a township job grows one and a rezoning does not.
+  attachDrawing: (id, body) => call("POST", `/api/projects/${encodeURIComponent(id)}/drawing`, body),
   financials: (id) => call("GET", `/api/projects/${encodeURIComponent(id)}/financials`),
 
   feeSchedule: (id) => call("GET", `/api/projects/${encodeURIComponent(id)}/fee-schedule`),

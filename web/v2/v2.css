@@ -1559,6 +1559,33 @@ tbody tr:hover { background: rgba(26, 22, 18, 0.04); }
   opacity: 0.4;
 }
 
+.chrome .job-code {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--copper);
+  white-space: nowrap;
+}
+
+.chrome .job-code[hidden],
+.chrome .practice-link[hidden] {
+  display: none;
+}
+
+.chrome .practice-link {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: inherit;
+  opacity: 0.8;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.chrome .practice-link:hover {
+  opacity: 1;
+  text-decoration: underline;
+}
+
 .chrome .job-name {
   min-width: 8ch;
   max-width: 26ch;

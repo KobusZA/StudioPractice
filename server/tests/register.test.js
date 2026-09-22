@@ -21,6 +21,7 @@ test("a job can exist with no drawing", async () => {
   assert.equal(opened.status, 200);
   assert.equal(opened.body.drawing, null);
   assert.equal(opened.body.project.id, project.id);
+  assert.equal(opened.body.project.code, "D063");
 });
 
 test("a drawing attaches to a register job when the work needs one", async () => {

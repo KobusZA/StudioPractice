@@ -170,6 +170,8 @@ const el = {
   healthDot: document.getElementById("v2-health-dot"),
   healthLabel: document.getElementById("v2-health-label"),
   jobName: document.getElementById("v2-job-name"),
+  jobCode: document.getElementById("v2-job-code"),
+  practiceLink: document.getElementById("v2-practice-link"),
   syncState: document.getElementById("v2-sync-state"),
   conflict: document.getElementById("v2-conflict"),
   conflictText: document.getElementById("v2-conflict-text"),
@@ -618,14 +620,33 @@ async function enterApp() {
     const projects = await cloud.listProjects();
     const jobs = splitLibrary(projects).jobs;
     setAccountJobCount(jobs.length);
+    const requestedId = new URLSearchParams(location.search).get("project");
     // Cover the editor before the login veil lifts, unless this is a reconnect
-    // that already has a job on screen.
-    if (!openDrawingId && el.libraryOverlay) {
+    // that already has a job on screen, or a link that is about to open one.
+    if (!openDrawingId && !requestedId && el.libraryOverlay) {
       el.libraryOverlay.hidden = false;
       document.body.classList.add("library-home");
     }
     hideAuth();
     if (openDrawingId) return;
+    if (requestedId) {
+      try {
+        await openJob({ cloud, sync, projectId: requestedId, apply: applyOpenedJob });
+        closeLibraryAfterNavigation();
+        setStatusMessage(`Opened ${store.doc.name || openProject?.code || "this job"}.`, "ok");
+        return;
+      } catch (error) {
+        // A missing canvas is a register job that has not grown a drawing yet.
+        // The library is the honest landing; the auth screen is for a session
+        // or a server that is actually gone.
+        if (error instanceof NavigationBlocked) throw error;
+        if (error instanceof CloudError && (error.authRequired || error.status === 0)) throw error;
+        await openLibrary({
+          message: error?.message || "That job could not be opened.",
+        });
+        return;
+      }
+    }
     await openLibrary({
       message: jobs.length
         ? ""
@@ -693,6 +714,10 @@ function applyOpenedJob({ project, drawing }) {
   syncPackLevels();
   drawLevelSwitcher();
   drawJobName();
+  const address = new URL(location.href);
+  address.searchParams.set("project", project.id);
+  const next = `${address.pathname}${address.search}`;
+  if (next !== `${location.pathname}${location.search}`) history.replaceState(null, "", next);
   frameDrawing(store.doc);
   render();
 }
@@ -1588,6 +1613,16 @@ function drawJobName() {
   if (!el.jobName) return;
   const name = store.doc.name || "";
   if (el.jobName.value !== name) el.jobName.value = name;
+  if (el.jobCode) {
+    const code = openProject?.code || "";
+    el.jobCode.textContent = code;
+    el.jobCode.hidden = !code;
+  }
+  if (el.practiceLink) {
+    const id = openProject?.id;
+    el.practiceLink.hidden = !id;
+    if (id) el.practiceLink.href = `/practice/index.html?project=${encodeURIComponent(id)}`;
+  }
 }
 
 function wireJobName() {
