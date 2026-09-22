@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>StudioPractice — practice operations</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,560&family=Source+Sans+3:wght@400;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="./practice.css" />
+</head>
+<body>
+
+<!-- Signed out. The register is a firm's book of work; there is no anonymous
+     view of it, so this is a gate rather than a banner. -->
+<div class="gate" id="gate" hidden>
+  <form class="form" id="gate-form">
+    <h1>Practice operations</h1>
+    <p id="gate-blurb">The project register, the timesheet and payment certificates.</p>
+    <div class="fields">
+      <div class="field">
+        <label for="gate-email">Email</label>
+        <input id="gate-email" type="email" autocomplete="username" required />
+      </div>
+      <div class="field">
+        <label for="gate-password">Password</label>
+        <input id="gate-password" type="password" autocomplete="current-password" required />
+      </div>
+      <div class="field" id="gate-org-field" hidden>
+        <label for="gate-org">Firm name</label>
+        <input id="gate-org" type="text" autocomplete="organization" />
+      </div>
+    </div>
+    <div class="actions">
+      <button class="btn btn-primary" type="submit" id="gate-submit">Sign in</button>
+      <button class="btn" type="button" id="gate-toggle">Create a firm</button>
+    </div>
+    <p class="note-line" id="gate-error"></p>
+  </form>
+</div>
+
+<div class="app" id="app" hidden>
+  <div class="topbar">
+    <div class="brand"><div class="brand-mark">S</div><div class="brand-name">StudioPractice</div></div>
+    <span class="pill flat">Practice operations</span>
+    <div class="spacer"></div>
+    <span class="who" id="who"></span>
+    <button class="btn btn-sm" id="sign-out">Sign out</button>
+  </div>
+
+  <div class="workspace">
+    <div class="rail">
+      <header>
+        <h2>Register</h2>
+        <button class="btn btn-sm btn-primary" id="new-project">New job</button>
+      </header>
+      <div id="rail-list"></div>
+    </div>
+    <div class="main" id="main"></div>
+  </div>
+</div>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>

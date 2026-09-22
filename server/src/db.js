@@ -18,6 +18,11 @@ pg.types.setTypeParser(pg.types.builtins.TIMESTAMPTZ, (value) => (
 // If-Match header, so parsing it to a Number that silently loses precision past
 // 2^53 buys nothing. pg returns it as a string already; this is here to say so.
 pg.types.setTypeParser(pg.types.builtins.INT8, (value) => value);
+// date. A calendar date has no time and no zone, and parsing one into a Date
+// gives it both: a timesheet row entered on the 1st in Johannesburg reads as
+// the 28th to anything that renders it as UTC, and a month's billing silently
+// straddles the wrong boundary. The string is the fact.
+pg.types.setTypeParser(pg.types.builtins.DATE, (value) => value);
 
 export function createPool(connectionString = process.env.DATABASE_URL) {
   if (!connectionString) throw new Error("DATABASE_URL is not set");

@@ -9,6 +9,7 @@ import { randomBytes, scrypt as scryptCb, timingSafeEqual, createHash } from "no
 import { promisify } from "node:util";
 import { sid } from "./ids.js";
 import { withTransaction } from "./db.js";
+import { openStore } from "./store.js";
 
 const scrypt = promisify(scryptCb);
 
@@ -109,6 +110,11 @@ export async function signUp(pool, { email, password, orgName }) {
             values ($1, $2, $3, 'owner', $2)`,
       [sid("mem"), userId, orgId],
     );
+    // The firm's type list and tariff bands, in the same transaction as the
+    // firm. A register whose type dropdown is empty on the first screen is not
+    // a working register, and seeding it on first use instead would mean a
+    // read path that writes.
+    await openStore(client, { orgId, userId }).seedPracticeDefaults();
     const session = await issueSession(client, userId);
     // The role travels with the account rather than being looked up again: the
     // caller is about to render chrome that depends on it, and the membership

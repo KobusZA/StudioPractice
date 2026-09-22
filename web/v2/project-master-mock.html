@@ -1,0 +1,1906 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>StudioPractice — project master view (live workbook data)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,560&family=Source+Sans+3:wght@400;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg-primary: #efe8dc; --bg-secondary: #f7f3ea; --bg-tertiary: #e8e0d2; --bg-elevated: #fffdf8;
+      --bg-hover: rgba(26, 22, 18, 0.05); --ink: #1a1612; --ink-soft: #5c5348; --ink-muted: #8a8074;
+      --hairline: rgba(26, 22, 18, 0.10); --hairline-strong: rgba(26, 22, 18, 0.18);
+      --copper: #b2451e; --copper-dark: #8d3416; --copper-tint-8: rgba(178, 69, 30, 0.08); --copper-tint-16: rgba(178, 69, 30, 0.16);
+      --ok: #2f6b4f; --ok-tint: rgba(47, 107, 79, 0.12); --warn: #9a6b1f; --warn-tint: rgba(154, 107, 31, 0.14);
+      --navy: #243044; --radius-sm: 3px; --radius-md: 4px;
+      --font-ui: "Source Sans 3", "Segoe UI", sans-serif; --font-display: Fraunces, Georgia, serif;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; background: var(--bg-primary); color: var(--ink); font-family: var(--font-ui); font-size: 14px; }
+    button, input, select { font: inherit; color: inherit; }
+    button { cursor: pointer; }
+    .app { display: grid; grid-template-rows: auto auto minmax(0, 1fr); height: 100dvh; }
+
+    .note { display: flex; align-items: baseline; gap: 14px; padding: 7px 14px; background: var(--navy); color: #f3eee4; font-size: 12px; line-height: 1.5; }
+    .note strong { font-family: var(--font-display); font-weight: 560; font-size: 13px; }
+    .note span { opacity: 0.9; }
+    .note code { background: rgba(255,255,255,0.12); padding: 0 4px; border-radius: 2px; font-size: 11px; }
+
+    .topbar { height: 40px; display: flex; align-items: center; gap: 12px; padding: 0 12px; background: var(--bg-secondary); border-bottom: 1px solid var(--hairline); }
+    .brand { display: flex; align-items: center; gap: 8px; }
+    .brand-mark { width: 24px; height: 24px; border-radius: 50%; background: var(--ink); color: var(--bg-elevated); display: grid; place-items: center; font-family: var(--font-display); font-size: 12px; }
+    .brand-name { font-family: var(--font-display); font-size: 0.92rem; font-weight: 560; }
+    .topbar .spacer { flex: 1; }
+    .src-toggle { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--ink-muted); }
+    .src-toggle input { accent-color: var(--copper); }
+    .btn { height: 26px; padding: 0 10px; border: 1px solid var(--hairline-strong); background: var(--bg-elevated); border-radius: var(--radius-sm); font-size: 12px; font-weight: 600; }
+    .btn-primary { background: var(--copper); border-color: var(--copper-dark); color: #fff; }
+
+    .workspace { display: grid; grid-template-columns: 272px minmax(0, 1fr); min-height: 0; }
+
+    .rail { background: var(--bg-secondary); border-right: 1px solid var(--hairline); overflow-y: auto; min-height: 0; }
+    .rail header { display: flex; align-items: baseline; justify-content: space-between; padding: 10px 12px 8px; border-bottom: 1px solid var(--hairline); position: sticky; top: 0; background: var(--bg-secondary); z-index: 1; }
+    .rail header h2 { margin: 0; font-family: var(--font-display); font-size: 0.86rem; font-weight: 560; }
+    .rail header span { font-size: 11px; color: var(--ink-muted); }
+    .proj { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px; align-items: center; width: 100%; text-align: left; padding: 8px 12px; border: 0; border-bottom: 1px solid var(--hairline); background: transparent; }
+    .proj:hover { background: var(--bg-hover); }
+    .proj[aria-current="true"] { background: var(--copper-tint-8); box-shadow: inset 3px 0 0 var(--copper); }
+    .proj b { font-weight: 600; font-size: 13px; }
+    .proj em { grid-column: 1; font-style: normal; font-size: 11px; color: var(--ink-muted); }
+    .real { grid-column: 2; grid-row: 1 / span 2; justify-self: end; align-self: center; font-variant-numeric: tabular-nums; font-size: 11.5px; font-weight: 700; padding: 1px 7px; border-radius: 999px; white-space: nowrap; }
+    .real.good { background: var(--ok-tint); color: var(--ok); }
+    .real.mid { background: var(--warn-tint); color: var(--warn); }
+    .real.bad { background: var(--copper-tint-16); color: var(--copper-dark); }
+    .real.flat { background: var(--bg-tertiary); color: var(--ink-muted); }
+
+    .main { overflow-y: auto; min-height: 0; }
+    .proj-head { padding: 14px 20px 0; }
+    .proj-head .code { font-size: 12px; font-weight: 700; color: var(--copper-dark); letter-spacing: 0.04em; }
+    .proj-head h1 { margin: 2px 0 6px; font-family: var(--font-display); font-size: 1.28rem; font-weight: 560; }
+    .facts { display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 12px; color: var(--ink-soft); }
+    .facts b { color: var(--ink); font-weight: 600; }
+
+    .tabs { display: flex; gap: 2px; padding: 12px 20px 0; border-bottom: 1px solid var(--hairline); }
+    .tabs button { border: 0; background: transparent; padding: 6px 11px 7px; font-size: 13px; font-weight: 600; color: var(--ink-soft); border-bottom: 2px solid transparent; border-radius: var(--radius-sm) var(--radius-sm) 0 0; }
+    .tabs button:hover { background: var(--bg-hover); }
+    .tabs button[aria-selected="true"] { color: var(--copper-dark); border-bottom-color: var(--copper); }
+
+    .panel { padding: 18px 20px 40px; }
+    .panel[hidden] { display: none; }
+    h3.sec { margin: 26px 0 10px; font-family: var(--font-display); font-size: 0.95rem; font-weight: 560; }
+    h3.sec:first-child { margin-top: 0; }
+    h3.sec small { font-family: var(--font-ui); font-size: 11px; font-weight: 400; color: var(--ink-muted); margin-left: 8px; }
+
+    .kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+    .kpi { background: var(--bg-elevated); border: 1px solid var(--hairline); border-radius: var(--radius-md); padding: 11px 13px 12px; }
+    .kpi .lbl { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-muted); }
+    .kpi .val { font-family: var(--font-display); font-size: 1.28rem; font-weight: 560; margin-top: 3px; font-variant-numeric: tabular-nums; }
+    .kpi .sub { font-size: 11.5px; color: var(--ink-soft); margin-top: 2px; line-height: 1.4; }
+    .kpi.flag { border-color: var(--copper); background: var(--copper-tint-8); }
+    .kpi.flag .val { color: var(--copper-dark); }
+    .kpi.dim .val { color: var(--ink-muted); }
+    .delta { font-weight: 700; }
+    .delta.up { color: var(--copper-dark); }
+    .delta.down { color: var(--ok); }
+
+    table.grid { width: 100%; border-collapse: collapse; background: var(--bg-elevated); }
+    table.grid th, table.grid td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--hairline); font-size: 12.5px; vertical-align: top; }
+    table.grid thead th { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-muted); background: var(--bg-tertiary); border-bottom: 1px solid var(--hairline-strong); font-weight: 700; position: sticky; top: 0; }
+    table.grid td.num, table.grid th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    table.grid tfoot td { font-weight: 700; background: var(--bg-tertiary); border-bottom: 0; }
+    table.grid tbody tr:hover { background: var(--bg-hover); }
+    table.grid tr.flagged { background: var(--copper-tint-8); }
+    table.grid tr.flagged:hover { background: var(--copper-tint-16); }
+    .scroller { max-height: 420px; overflow-y: auto; border: 1px solid var(--hairline); }
+    .scroller table.grid { border: 0; }
+
+    .bar { position: relative; height: 8px; min-width: 90px; background: var(--bg-tertiary); border-radius: 2px; overflow: hidden; }
+    .bar i { position: absolute; inset: 0 auto 0 0; display: block; border-radius: 2px; }
+    .bar i.ok { background: var(--ok); } .bar i.warn { background: var(--warn); } .bar i.over { background: var(--copper); }
+    .bar u { position: absolute; top: -2px; bottom: -2px; width: 1px; background: var(--ink); opacity: 0.45; }
+
+    .pill { font-size: 10.5px; font-weight: 700; padding: 1px 6px; border-radius: 3px; white-space: nowrap; }
+    .pill.err { background: var(--copper-tint-16); color: var(--copper-dark); }
+    .pill.warn { background: var(--warn-tint); color: var(--warn); }
+    .pill.ok { background: var(--ok-tint); color: var(--ok); }
+
+    .two { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 22px; align-items: start; }
+    .warn-list { display: grid; gap: 8px; }
+    .w { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 10px; background: var(--bg-elevated); border: 1px solid var(--hairline); border-left: 3px solid var(--ink-muted); border-radius: var(--radius-md); padding: 9px 12px; }
+    .w.high { border-left-color: var(--copper); }
+    .w.med { border-left-color: var(--warn); }
+    .w .sev { grid-row: 1 / span 3; align-self: start; margin-top: 2px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; padding: 1px 6px; border-radius: 2px; background: var(--bg-tertiary); color: var(--ink-muted); }
+    .w.high .sev { background: var(--copper-tint-16); color: var(--copper-dark); }
+    .w.med .sev { background: var(--warn-tint); color: var(--warn); }
+    .w b { font-size: 13px; font-weight: 700; }
+    .w p { margin: 1px 0 0; font-size: 12px; line-height: 1.45; color: var(--ink-soft); }
+    .w cite { display: block; margin-top: 5px; font-size: 11px; font-style: normal; color: var(--ink-muted); }
+
+    .src { margin: 8px 0 0; font-size: 11px; color: var(--ink-muted); line-height: 1.5; }
+    .empty { padding: 30px 10px; text-align: center; color: var(--ink-muted); font-size: 12.5px; background: var(--bg-elevated); border: 1px dashed var(--hairline-strong); border-radius: var(--radius-md); }
+    .quote-block { background: var(--bg-tertiary); border-left: 3px solid var(--copper); padding: 8px 12px; font-size: 12.5px; font-style: italic; color: var(--ink-soft); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+  </style>
+</head>
+<body>
+<div class="app">
+  <div class="note">
+    <strong>Live workbook data</strong>
+    <span>Every figure below is extracted directly from <code>TSP_TEAM TIME Tdummy.xlsm</code> — real project codes, real timesheet rows, real fee templates and real certificates. Nothing is invented. Where the source data itself is incomplete or inconsistent, that gap is shown, not smoothed over.</span>
+  </div>
+  <div class="topbar">
+    <div class="brand"><div class="brand-mark">S</div><div class="brand-name">StudioPractice</div></div>
+    <div class="spacer"></div>
+    <button class="btn">Log time</button>
+    <button class="btn">Add disbursement</button>
+    <button class="btn btn-primary">Raise certificate</button>
+  </div>
+  <div class="workspace">
+    <nav class="rail" id="rail">
+      <header><h2>Projects</h2><span>vs fee / captured</span></header>
+    </nav>
+    <main class="main" id="main"></main>
+  </div>
+</div>
+
+<script id="workbook-data" type="application/json">
+{
+  "D063": {
+    "code": "D063",
+    "client": "ALET DE KOKER",
+    "clientRaw": "ALET DE KOKER",
+    "description": "BON ACCORD",
+    "typeLabel": "TOWNSHIPP ESTABLISHMENT",
+    "templateName": "TOWNSHIP establishment",
+    "quoted": 54445.8,
+    "quotedSource": "Sheet 'TOWNSHIP establishment', cell C69 (stage totals summed)",
+    "budgetEstimateField": 120000,
+    "budgetEstimateSource": "Sheet 'PROJECT INFORMATION', row for D063, column I",
+    "captured": 77280.0,
+    "capturedEntries": 36,
+    "capturedFlaggedCount": 2,
+    "certifiedToDate": 0,
+    "staff": {
+      "JEANDRE": 1,
+      "FLORIS": 4,
+      "LIANA": 31
+    },
+    "dateRange": [
+      "2026-03-27",
+      "2026-05-20"
+    ],
+    "halted": true,
+    "haltQuote": "Johan De Koker called and instructed to not submit the township establishment ...",
+    "haltDate": "2026-05-20",
+    "templateRows": [
+      {
+        "label": "Stage 1 - Inception & preparation",
+        "fee": 23415.2
+      },
+      {
+        "label": "Stage 2 - Site measurement & scaling",
+        "fee": 8350
+      },
+      {
+        "label": "Stage 3 - Engineering & SANS forms",
+        "fee": 4350
+      },
+      {
+        "label": "Stage 4 - Runner / council submission",
+        "fee": 4000
+      },
+      {
+        "label": "Stage 5 - Comments & handover",
+        "fee": 900
+      },
+      {
+        "label": "Sundries",
+        "fee": 13430.6
+      }
+    ],
+    "timeEntries": [
+      {
+        "person": "JEANDRE",
+        "row": 20,
+        "client": "ALET DE KOKER",
+        "date": "2026-03-27",
+        "start": "08:58",
+        "end": "10:56",
+        "activity": "Meeting",
+        "desc": null,
+        "K_override": 0,
+        "A4_prints": null,
+        "travel_km": null,
+        "N_linear": 3775.9999999999995,
+        "O_tiered": 3840
+      },
+      {
+        "person": "FLORIS",
+        "row": 36,
+        "client": "ALET DE KOKER",
+        "date": "2026-03-27",
+        "start": "17:15",
+        "end": "18:15",
+        "activity": "File work",
+        "desc": "Invoice and confrimation  of vaklauation",
+        "K_override": 1920,
+        "A4_prints": null,
+        "travel_km": null,
+        "N_linear": 1919.9999999999982,
+        "O_tiered": 1920
+      },
+      {
+        "person": "LIANA",
+        "row": 2,
+        "client": "ALET DE KOKER",
+        "date": "2026-03-30",
+        "start": "07:10",
+        "end": "10:53",
+        "activity": "File work",
+        "desc": "Compilation of Township Establishment and completion of required documents (Checklist printed) ",
+        "K_override": 0,
+        "A4_prints": 2,
+        "travel_km": null,
+        "N_linear": 7136,
+        "O_tiered": 7200
+      },
+      {
+        "person": "LIANA",
+        "row": 4,
+        "client": "ALET DE KOKER",
+        "date": "2026-03-30",
+        "start": "11:05",
+        "end": "12:46",
+        "activity": "Admin",
+        "desc": "Cover letter to Municipality and edits on Memorandum ",
+        "K_override": 0,
+        "A4_prints": null,
+        "travel_km": null,
+        "N_linear": 3231.9999999999986,
+        "O_tiered": 3360
+      },
+      {
+        "person": "LIANA",
+        "row": 5,
+        "client": "ALET DE KOKER",
+        "date": "2026-03-30",
+        "start": "13:10",
+        "end": "13:52",
+        "activity": "Admin ",
+        "desc": "Compiling list of adjoining owners",
+        "K_override": 0,
+        "A4_prints": null,
+        "travel_km": null,
+        "N_linear": 1343.9999999999952,
+        "O_tiered": 1440
+      },
+      {
+        "person": "FLORIS",
+        "row": 56,
+        "client": "ALET DE KOKER",
+        "date": "2026-03-31",
+        "start": "17:29",
+        "end": null,
+        "activity": "Admin",
+        "desc": "proivde detai linformation to valuer",
+        "K_override": 1920,
+        "A4_prints": null,
+        "travel_km": null,
+        "N_linear": 0,
+        "O_tiered": 0
+      },
+      {
+        "person": "FLORIS",
+        "row": 61,
+        "client": "ALET DE KOKER",
+        "date": "2026-04-01",
+        "start": "06:25",
+        "end": "07:00",
+        "activity": "Townplanning",
+        "desc": "calculate  areas and  respond to outstanding informatioin required by valuer",
+        "K_override": 1920,
+        "A4_prints": null,
+        "travel_km": null,
+        "N_linear": 1120.0000000000011,
+        "O_tiered": 1440
+      },
+      {
+        "person": "FLORIS",
+        "row": 71,
+        "client": "ALET DE KOKER",
+        "date": "2026-04-02",
+        "start": "08:10",
+        "end": "09:45",
+        "activity": null,
+        "desc": "Request the valaution report from valuer. Letter to owner request again  bondholder information",
+        "K_override": 1920,
+        "A4_prints": null,
+        "travel_km": null,
+        "N_linear": 3039.9999999999995,
+        "O_tiered": 3360
+      },
+      {
+        "person": "LIANA",
+        "row": 14,
+        "client": "ALET DE KOKER",
+        "date": "2026-04-07",
+        "start": "07:00",
+        "end": "08:00",
+        "activity": "Town planning",
+        "desc": null,
+        "K_override": 0,
+        "A4_prints": null,
+        "travel_km": null,
+        "N_linear": 1919.9999999999982,
+        "O_tiered": 1920
+      },
+      {
+        "person": "LIANA",
+        "row": 19,
+        "client": "ALET DE KOKER",
+        "date": "2026-04-07",
+        "start": "15:00",
+        "end": "16:27",
+        "activity": null,
+        "desc": null,
+        "K_override": 0,
+        "A4_prints": null,
+        "travel_km": null,
+        "N_linear": 2784.0000000000005,
+        "O_tiered": 2880
+      },
+      {
+        "person": "LIANA",
+        "row": 22,
+        "client": "ALET DE KOKER",
+        "date": "2026-04-13",
+        "start": "07:18",
+        "end": "07:45",
+        "activity": "Admin",
+        "desc": "Drafting letter to ABSA for Bondholders Consent and giving to Mr Floris for review",
+        "K_override": 0,
+        "A4_prints": null,
+        "travel_km": 2,
+        "N_linear": 864.000000000002,
+        "O_tiered": 960
+      },
+      {
+        "person": "LIANA",
+        "row": 26,
+        "client": "ALET DE KOKER",
+        "date": "2026-04-13",
+        "start": "12:30",
+        "end": "14:12",
+        "activity": "Admin",
+        "desc": "Final edits and compilation of documents to be sent to be Sent to ABSA and request for valuer documents from Mr Floris ",
+        "K_override": 0,
+        "A4_prints": null,
+        "travel_km": null,
+        "N_linear": 3263.9999999999986,
+        "O_tiered": 3360
+      },
+      {
+        "person": "LIANA",
+        "row": 27,
+        "client": "ALET DE KOKER",
+        "date": "2026-04-13",
+        "start": "14:12",
+        "end": "14:28",
+        "activity": "Admin",
+        "desc": "Drafting email to ABSA ",
+        "K_override": 0,
+        "A4_prints": null,
+        "travel_km": null,
+        "N_linear": 511.9999999999982,
+        "O_tiered": 960
+      },
+      {
+        "person": "LIANA",
+        "row": 28,
+        "client": "ALET DE KOKER",
+        "date": "2026-04-13",
+        "start": "14:28",
+        "end": "14:38",
+        "activity": "Admin",
+        "desc": "Editing Motivating Memorandum ",
+        "K_override": 0,
+        "A4_prints": null,
+        "travel_km": null,
+        "N_linear": 320.000000000004,
+        "O_tiered": 480
+      },
+      {
+        "person": "LIANA",
+        "row": 30,
+        "client": "ALET DE KOKER",
+        "date": "2026-04-13",
+        "start": "15:20",
+        "end": "16:10",
+        "activity": "Admin",
+        "desc": "Prining and Packiging Barend Kruger Documents for appointment ",
+        "K_override": 0,
+        "A4_prints": null,
+        "travel_km": null,
+        "N_linear": 1600.0000000000045,
+        "O_tiered": 1920
+      },
+      {
+        "person": "LIANA",
+        "row": 36,
+        "client": "ALET DE KOKER",
+        "date": "2026-04-14",
+        "start": "16:00",
+        "end": "16:10",
+        "activity": "Admin",
+        "desc": "Follow-up with ABSA regarding bondholders consent ",
+        "K_override": 0,
+        "A4_prints": null,
+        "travel_km": null,
+        "N_linear": 320.000000000004,
+        "O_tiered": 480
+      },
+      {
+        "person": "LIANA",
+        "row": 39,
+        "client": "ALET DE KOKER",
+        "date": "2026-04-15",
+        "start": "08:30",
+        "end": "08:40",
+        "activity": "Phone call",
+        "desc": "Phone call with ABSA to confirm bondholders consent ",
+        "K_override": 0,
+        "A4_prints": null,
+        "travel_km": null,
+        "N_linear": 319.99999999999886,
+        "O_tiered": 480
+      },
+      {
+        "person": "LIANA",
+        "row": 40,
+        "client": "ALET DE KOKER",
+        "date": "2026-04-15",
+        "start": "08:40",
+        "end": "08:55",
+        "activity": "Report",
+        "desc": "Email to ABSA requesting confirmation of receipt of motivating memorandum and supporting documents. ",
+        "K_override": 0,
+        "A4_prints": null,
+        "travel_km": null,
+        "N_linear": 480.00000000000085,
+        "O_tiered": 480
+      },
+      {
+        "person": "LIANA",
+        "row": 45,
+        "client": "ALET DE KOKER",
+        "date": "2026-04-16",
+        "start": "07:00",
+        "end": "08:00",
+        "activity": "Admin",
+        "desc": "Bondholders consent follow-up ",
+        "K_override": 0,
+        "A4_prints": null,
+        "travel_km": null,
+        "N_linear": 1919.9999999999982,
+        "O_tiered": 1920
+      },
+      {
+        "person": "LIANA",
+        "row": 47,
+        "client": "ALET DE KOKER",
+        "date": "2026-04-16",
+        "start": "08:40",
+        "end": "12:00",
+        "activity": "Admin",
+        "desc": "File organisation and preliminary check of documents",
+        "K_override": 0,
+        "A4_prints": null,
+        "travel_km": null,
+        "N_linear": 6400,
+        "O_tiered": 6720
+      },
+      {
+        "person": "LIANA",
+        "row": 48,
+        "client": "ALET DE KOKER",
+        "date": "2026-04-16",
+        "start": "12:30",
+        "end": "14:00",
+        "activity": "Admin",
+        "desc": "List of adjoining owners ",
+        "K_override": 0,
+        "A4_prints": null,
+        "travel_km": null,
+        "N_linear": 2880,
+        "O_tiered": 2880
+      },
+      {
+        "person": "LIANA",
+        "row": 49,
+        "client": "ALET DE KOKER",
+        "date": "2026-04-16",
+        "start": "14:00",
+        "end": "16:30",
+        "activity": "Report",
+        "desc": "Motivatng memorandum update and file organisation also followed up regaridn bondholers consent ",
+        "K_override": 0,
+        "A4_prints": null,
+        "travel_km": null,
+        "N_linear": 4799.999999999998,
+        "O_tiered": 4800
+      },
+      {
+        "person": "LIANA",
+        "row": 50,
+        "client": "ALET DE KOKER",
+        "date": "2026-04-17",
+        "start": "07:00",
+        "end": "08:30",
+        "activity": "Report",
+        "desc": "Motivating memoandum",
+        "K_override": 0,
+        "A4_prints": null,
+        "travel_km": null,
+        "N_linear": 9600,
+        "O_tiered": 10080
+      },
+      {
+        "person": "LIANA",
+        "row": 54,
+        "client": "ALET DE KOKER",
+        "date": "2026-04-20",
+        "start": "07:00",
+        "end": "07:30",
+        "activity": "Admin",
+        "desc": "Follow-up with ABSA regarding bondholders consent ",
+        "K_override": 0,
+        "A4_prints": null,
+        "travel_km": null,
+        "N_linear": "#REF!",
+        "O_tiered": "#REF!"
+      },
+      {
+        "person": "LIANA",
+        "row": 55,
+        "client": "ALET DE KOKER",
+        "date": "2026-04-20",
+        "start": "07:30",
+        "end": "12:30",
+        "activity": "Report",
+        "desc": "Follow up with Municipal officials regarding paymen reference and requirements as well as follow up regarding missing street address on website ",
+        "K_override": 0,
+        "A4_prints": null,
+        "travel_km": null,
+        "N_linear": 0,
+        "O_tiered": 0
+      },
+      {
+        "person": "LIANA",
+        "row": 56,
+        "client": "ALET DE KOKER",
+        "date": "2026-04-20",
+        "start": "08:30",
+        "end": "09:30",
+        "activity": "Report",
+        "desc": "Internal report on status of Bon Accord application",
+        "K_override": 0,
+        "A4_prints": null,
+        "travel_km": null,
+        "N_linear": 1919.9999999999982,
+        "O_tiered": 1920
+      },
+      {
+        "person": "LIANA",
+        "row": 60,
+        "client": "ALET DE KOKER",
+        "date": "2026-04-21",
+        "start": "07:00",
+        "end": "07:30",
+        "activity": "Admin",
+        "desc": "Bondholders consent follow up ",
+        "K_override": 0,
+        "A4_prints": null,
+        "travel_km": null,
+        "N_linear": 959.9999999999991,
+        "O_tiered": 960
+      },
+      {
+        "person": "LIANA",
+        "row": 61,
+        "client": "ALET DE KOKER",
+        "date": "2026-04-21",
+        "start": "07:30",
+        "end": "08:00",
+        "activity": null,
+        "desc": null,
+        "K_override": 0,
+        "A4_prints": null,
+        "travel_km": null,
+        "N_linear": 959.9999999999991,
+        "O_tiered": 960
+      },
+      {
+        "person": "LIANA",
+        "row": 62,
+        "client": "ALET DE KOKER",
+        "date": "2026-04-21",
+        "start": "08:30",
+        "end": "10:00",
+        "activity": "Report",
+        "desc": "Motivating memordanum and advertisements ",
+        "K_override": 0,
+        "A4_prints": null,
+        "travel_km": null,
+        "N_linear": 2880,
+        "O_tiered": 2880
+      },
+      {
+        "person": "LIANA",
+        "row": 83,
+        "client": "ALET DE KOKER",
+        "date": "2026-04-28",
+        "start": "07:00",
+        "end": "08:00",
+        "activity": "Admin",
+        "desc": "Follow up with ABSA regarding bondholders consent ",
+        "K_override": 0,
+        "A4_prints": null,
+        "travel_km": null,
+        "N_linear": 1919.9999999999982,
+        "O_tiered": 1920
+      },
+      {
+        "person": "LIANA",
+        "row": 93,
+        "client": "ALET DE KOKER",
+        "date": "2026-04-29",
+        "start": "10:30",
+        "end": "11:00",
+        "activity": "Admin",
+        "desc": "Follow up on bondholders consent and Tshwane Enquiries ",
+        "K_override": 0,
+        "A4_prints": null,
+        "travel_km": null,
+        "N_linear": 959.9999999999991,
+        "O_tiered": 960
+      },
+      {
+        "person": "LIANA",
+        "row": 95,
+        "client": "ALET DE KOKER",
+        "date": "2026-04-29",
+        "start": "11:30",
+        "end": "12:30",
+        "activity": "Admin",
+        "desc": "Uploading document on Tshwane portal ",
+        "K_override": 0,
+        "A4_prints": null,
+        "travel_km": null,
+        "N_linear": 1920.000000000001,
+        "O_tiered": 1920
+      },
+      {
+        "person": "LIANA",
+        "row": 96,
+        "client": "ALET DE KOKER",
+        "date": "2026-04-29",
+        "start": "13:00",
+        "end": "14:00",
+        "activity": "Admin",
+        "desc": "List of adjoining owners ",
+        "K_override": 0,
+        "A4_prints": null,
+        "travel_km": null,
+        "N_linear": 1920.0000000000034,
+        "O_tiered": 1920
+      },
+      {
+        "person": "LIANA",
+        "row": 102,
+        "client": "ALET DE KOKER",
+        "date": "2026-05-20",
+        "start": "11:10",
+        "end": "11:15",
+        "activity": "Phone call",
+        "desc": "Johan De Koker called and instructed to not submit the township establishment application he first wants to have a meeting with Mr Floris next week.",
+        "K_override": 0,
+        "A4_prints": null,
+        "travel_km": null,
+        "N_linear": 159.99999999999943,
+        "O_tiered": 480
+      },
+      {
+        "person": "LIANA",
+        "row": 103,
+        "client": "ALET DE KOKER",
+        "date": "2026-05-20",
+        "start": "11:15",
+        "end": "11:30",
+        "activity": "Meeting",
+        "desc": "Meeting with Mr Floris with regard to phione call from Johan de Koker  - written response to be sent",
+        "K_override": 0,
+        "A4_prints": null,
+        "travel_km": null,
+        "N_linear": 480.00000000000085,
+        "O_tiered": 480
+      },
+      {
+        "person": "LIANA",
+        "row": 104,
+        "client": "ALET DE KOKER",
+        "date": "2026-05-20",
+        "start": "11:30",
+        "end": null,
+        "activity": "Report",
+        "desc": "Writing response to Johan and Alet de Koker regarding phone call. ",
+        "K_override": 0,
+        "A4_prints": null,
+        "travel_km": null,
+        "N_linear": 0,
+        "O_tiered": 0
+      }
+    ],
+    "haltPerson": "LIANA"
+  },
+  "P074": {
+    "code": "P074",
+    "client": "NOLAN PRETORIUS",
+    "description": "Boundary / neighbour dispute (Erf 490)",
+    "typeLabel": "DISPUTE (time & materials)",
+    "templateName": null,
+    "quoted": null,
+    "captured": 66720,
+    "capturedEntries": 35,
+    "capturedFlaggedCount": 0,
+    "certifiedProfessionalBeforeDiscount": 39008,
+    "certifiedProfessionalAfterDiscount": 32416,
+    "certifiedToDate": 39239.15,
+    "writeDown": {
+      "certificate": "July 2026",
+      "amount": 6592,
+      "pct": 20,
+      "from": 32960,
+      "to": 26368,
+      "reasonRecorded": false
+    },
+    "uncertifiedSince": "2026-07-29",
+    "uncertifiedAmount": 12960,
+    "uncertifiedEntries": 3,
+    "dateRange": [
+      "2026-03-26",
+      "2026-08-08"
+    ],
+    "templateRows": null,
+    "timeEntries": [
+      {
+        "person": "FLORIS",
+        "date": "2026-03-26",
+        "start": "16:30",
+        "end": "17:18",
+        "activity": "File work",
+        "desc": "Respond to Gustav Meyer and discussion with land surveyor",
+        "K": 1920,
+        "O": 1920
+      },
+      {
+        "person": "LIANA",
+        "date": "2026-03-30",
+        "start": "10:53",
+        "end": "11:03",
+        "activity": "Admin",
+        "desc": "Email & Letter to Landmeter",
+        "K": 0,
+        "O": 480
+      },
+      {
+        "person": "FLORIS",
+        "date": "2026-04-01",
+        "start": "13:30",
+        "end": "15:59",
+        "activity": "Admin",
+        "desc": "DISCUSSIOIN WITH LAND SURVEYOR, TWO ATTORNEYS obtain  another opinion",
+        "K": 1920,
+        "O": 4800
+      },
+      {
+        "person": "FLORIS",
+        "date": "2026-04-01",
+        "start": "14:00",
+        "end": "14:45",
+        "activity": null,
+        "desc": "phone calls to swart, tim dutoit, land surveyor etc",
+        "K": 1920,
+        "O": 1440
+      },
+      {
+        "person": "FLORIS",
+        "date": "2026-04-02",
+        "start": "10:30",
+        "end": "12:00",
+        "activity": null,
+        "desc": "Prepare response to Nolan",
+        "K": 1920,
+        "O": 2880
+      },
+      {
+        "person": "FLORIS",
+        "date": "2026-04-07",
+        "start": "10:15",
+        "end": "10:30",
+        "activity": "File work",
+        "desc": "Discission with attorney a swell as rpeort send fo opinion",
+        "K": 0,
+        "O": 480
+      },
+      {
+        "person": "FLORIS",
+        "date": "2026-04-08",
+        "start": "09:10",
+        "end": "09:24",
+        "activity": "File work",
+        "desc": "Discuss with Nolan and adri the way forward on project",
+        "K": 1920,
+        "O": 480
+      },
+      {
+        "person": "FLORIS",
+        "date": "2026-04-09",
+        "start": "06:45",
+        "end": "08:00",
+        "activity": null,
+        "desc": "Inform Gustav of appointment and request meeting",
+        "K": 1920,
+        "O": 2400
+      },
+      {
+        "person": "FLORIS",
+        "date": "2026-04-17",
+        "start": "12:00",
+        "end": "12:20",
+        "activity": "File work",
+        "desc": "Respone to  adri and Nolan on  process",
+        "K": 0,
+        "O": 960
+      },
+      {
+        "person": "FLORIS",
+        "date": "2026-04-20",
+        "start": "17:05",
+        "end": "17:40",
+        "activity": "File work",
+        "desc": "Repond to attorney on way forward",
+        "K": 0,
+        "O": 1440
+      },
+      {
+        "person": "FLORIS",
+        "date": "2026-04-29",
+        "start": "06:15",
+        "end": "06:38",
+        "activity": null,
+        "desc": "emial to client confirm meeting",
+        "K": 0,
+        "O": 960
+      },
+      {
+        "person": "FLORIS",
+        "date": "2026-05-13",
+        "start": "09:00",
+        "end": "09:15",
+        "activity": null,
+        "desc": "Arrraneg for meeting forThurdsday  ebtween pretorius amd stefan swart",
+        "K": 0,
+        "O": 480
+      },
+      {
+        "person": "FLORIS",
+        "date": "2026-05-14",
+        "start": "10:00",
+        "end": "11:00",
+        "activity": null,
+        "desc": "Meeting with attorney  swart on way froward. Mr Pretorus appoint swart",
+        "K": 0,
+        "O": 1920
+      },
+      {
+        "person": "FLORIS",
+        "date": "2026-05-21",
+        "start": "17:20",
+        "end": "17:50",
+        "activity": null,
+        "desc": "Draft declaratory order to attorney for his consideration",
+        "K": 0,
+        "O": 960
+      },
+      {
+        "person": "FLORIS",
+        "date": "2026-05-21",
+        "start": "18:05",
+        "end": "18:34",
+        "activity": null,
+        "desc": "Email to stefan Swart  regarding  efforts  from Pretorius to  resolve these issues with neighbour",
+        "K": 0,
+        "O": 960
+      },
+      {
+        "person": "FLORIS",
+        "date": "2026-05-27",
+        "start": "18:00",
+        "end": "18:30",
+        "activity": null,
+        "desc": "Email to Nolan And Adri on  resposne to Stefan and further instructions given",
+        "K": 0,
+        "O": 960
+      },
+      {
+        "person": "FLORIS",
+        "date": "2026-05-27",
+        "start": "18:30",
+        "end": "18:45",
+        "activity": null,
+        "desc": "Phonecall with Nolan explaing  need for conveyncing certifcate ets.",
+        "K": 0,
+        "O": 480
+      },
+      {
+        "person": "FLORIS",
+        "date": "2026-06-10",
+        "start": "09:00",
+        "end": "09:15",
+        "activity": null,
+        "desc": "Discussion with attorney for support to Swart",
+        "K": 0,
+        "O": 480
+      },
+      {
+        "person": "FLORIS",
+        "date": "2026-06-12",
+        "start": "08:50",
+        "end": "09:00",
+        "activity": null,
+        "desc": "Call gto swart attorensy norepsonse ",
+        "K": 0,
+        "O": 480
+      },
+      {
+        "person": "FLORIS",
+        "date": "2026-06-22",
+        "start": "11:00",
+        "end": "11:30",
+        "activity": null,
+        "desc": "Letter to attorney  placing him on terms",
+        "K": 0,
+        "O": 960
+      },
+      {
+        "person": "FLORIS",
+        "date": "2026-06-22",
+        "start": "11:45",
+        "end": "11:55",
+        "activity": null,
+        "desc": "Disucs with Nolan reminder to attorney",
+        "K": 0,
+        "O": 480
+      },
+      {
+        "person": "FLORIS",
+        "date": "2026-06-24",
+        "start": "07:00",
+        "end": "08:22",
+        "activity": null,
+        "desc": "Prepare response to  letter of attorney",
+        "K": 0,
+        "O": 2880
+      },
+      {
+        "person": "FLORIS",
+        "date": "2026-06-25",
+        "start": "08:00",
+        "end": "09:00",
+        "activity": null,
+        "desc": "Prepare inputs to Stefan",
+        "K": 0,
+        "O": 1920
+      },
+      {
+        "person": "FLORIS",
+        "date": "2026-07-01",
+        "start": "10:00",
+        "end": "10:30",
+        "activity": null,
+        "desc": "Site inspection for  scanning",
+        "K": 0,
+        "O": 960
+      },
+      {
+        "person": "FLORIS",
+        "date": "2026-07-02",
+        "start": "15:00",
+        "end": "15:30",
+        "activity": null,
+        "desc": "Meeting with attirney on  prcess  o ffire engk=neer",
+        "K": 0,
+        "O": 960
+      },
+      {
+        "person": "FLORIS",
+        "date": "2026-07-03",
+        "start": "08:00",
+        "end": "09:00",
+        "activity": null,
+        "desc": "Prepare document for  Fire Engnineer",
+        "K": 0,
+        "O": 1920
+      },
+      {
+        "person": "FLORIS",
+        "date": "2026-07-03",
+        "start": "09:00",
+        "end": "10:30",
+        "activity": null,
+        "desc": "Prepare docuemnnt for quotataion for re surbey",
+        "K": 0,
+        "O": 2880
+      },
+      {
+        "person": "FLORIS",
+        "date": "2026-07-03",
+        "start": "12:30",
+        "end": "13:30",
+        "activity": null,
+        "desc": "Prepare douemnt  suporitng  attorney, broehole, amd others",
+        "K": 0,
+        "O": 1920
+      },
+      {
+        "person": "FLORIS",
+        "date": "2026-07-06",
+        "start": "11:30",
+        "end": "12:00",
+        "activity": null,
+        "desc": "Follow up with Fire  eng. Land surveyor",
+        "K": 0,
+        "O": 960
+      },
+      {
+        "person": "FLORIS",
+        "date": "2026-07-13",
+        "start": "10:00",
+        "end": "11:00",
+        "activity": null,
+        "desc": "Receive  plan from surveyor  overlay with  matterport",
+        "K": 0,
+        "O": 1920
+      },
+      {
+        "person": "FLORIS",
+        "date": "2026-07-14",
+        "start": "07:55",
+        "end": "10:00",
+        "activity": null,
+        "desc": "Receive  fire by laws and prepare report",
+        "K": 0,
+        "O": 4320
+      },
+      {
+        "person": "FLORIS",
+        "date": "2026-07-29",
+        "start": "14:30",
+        "end": "17:53",
+        "activity": null,
+        "desc": "Read  through n05 of docuement provided by Stefan Swart and revise various phone calls between parties",
+        "K": 0,
+        "O": 6720
+      },
+      {
+        "person": "FLORIS",
+        "date": "2026-07-30",
+        "start": "08:00",
+        "end": "12:45",
+        "activity": null,
+        "desc": "Read  th drfat and respond",
+        "K": 0,
+        "O": 9120
+      },
+      {
+        "person": "FLORIS",
+        "date": "2026-08-04",
+        "start": "08:00",
+        "end": "09:15",
+        "activity": null,
+        "desc": "Meeting woith attroneye and advocate to discuss the  documenetation",
+        "K": 0,
+        "O": 2400
+      },
+      {
+        "person": "FLORIS",
+        "date": "2026-08-08",
+        "start": "11:35",
+        "end": "12:15",
+        "activity": null,
+        "desc": "Read throug 6th version of founding affidavit",
+        "K": 0,
+        "O": 1440
+      }
+    ],
+    "certificates": [
+      {
+        "name": "May 2026",
+        "lines": [
+          {
+            "date": "2026-05-13",
+            "desc": "Arrrange for meeting for Thurdsday  between pretorius and stefan swart",
+            "units": 0.15,
+            "amount": 288
+          },
+          {
+            "date": "2026-05-14",
+            "desc": "Meeting with attorney  swart on way froward. Mr Pretorus appoint Swart",
+            "units": 1,
+            "amount": 1920
+          },
+          {
+            "date": "2026-05-21",
+            "desc": "Draft declaratory order to attorney for his consideration",
+            "units": 0,
+            "amount": 0
+          },
+          {
+            "date": "2026-05-21",
+            "desc": "Email to stefan Swart  regarding  efforts  from Pretorius to  resolve these issues with neighbour",
+            "units": 0,
+            "amount": 0
+          },
+          {
+            "date": "2026-05-27",
+            "desc": "Email to Nolan And Adri on  response to Stefan and further instructions given",
+            "units": 0,
+            "amount": 0
+          },
+          {
+            "date": "2026-05-27",
+            "desc": "Phonecall with Nolan explaInng  need for conveyncing certificate ets.",
+            "units": 0.5,
+            "amount": 960
+          }
+        ],
+        "totals": {
+          "subtotal": 3168,
+          "vat": 475.2,
+          "grand_total": 3643.2
+        },
+        "status": "Issued"
+      },
+      {
+        "name": "June 2026",
+        "lines": [
+          {
+            "date": "2026-06-10",
+            "desc": "Discussion with support to Stefan Swart",
+            "units": 0.5,
+            "amount": 960
+          },
+          {
+            "date": "2026-06-12",
+            "desc": null,
+            "units": null,
+            "amount": 0
+          },
+          {
+            "date": "2026-06-22",
+            "desc": "Discuss with Nolan reminder to attorney",
+            "units": 0,
+            "amount": 0
+          },
+          {
+            "date": "2026-06-22",
+            "desc": "Letter to attorney  placing him on terms",
+            "units": 0,
+            "amount": 0
+          },
+          {
+            "date": "2026-06-24",
+            "desc": "Prepare response to  letter of attorney",
+            "units": 0,
+            "amount": 0
+          },
+          {
+            "date": "2026-06-25",
+            "desc": "Prepare inputs to Stefan",
+            "units": 1,
+            "amount": 1920
+          },
+          {
+            "date": null,
+            "desc": "After  discussion with attorney  decided to provide visuals on plan  with scanning ",
+            "units": null,
+            "amount": null
+          }
+        ],
+        "totals": {
+          "subtotal": 2880,
+          "vat": 432,
+          "grand_total": 3312
+        },
+        "status": "Issued"
+      },
+      {
+        "name": "July 2026",
+        "lines": [
+          {
+            "date": "2026-07-01",
+            "desc": "Site inspection for  scanning",
+            "units": 0.5,
+            "amount": 960
+          },
+          {
+            "date": null,
+            "desc": "Scanning of panhandle ( Matterport  cost) @ 50% rate",
+            "units": 7500,
+            "amount": 3750
+          },
+          {
+            "date": null,
+            "desc": "Prepare model (Direct cost to Matteprort)",
+            "units": 2550,
+            "amount": 2550
+          },
+          {
+            "date": null,
+            "desc": "Prepare the following plans:",
+            "units": null,
+            "amount": null
+          },
+          {
+            "date": null,
+            "desc": "3 x A0",
+            "units": 1750,
+            "amount": 5250
+          },
+          {
+            "date": null,
+            "desc": "1xA3 (detail boundary)",
+            "units": 1250,
+            "amount": 1250
+          },
+          {
+            "date": "2026-07-03",
+            "desc": "Prepare document for  Fire Engnineer",
+            "units": 1,
+            "amount": 1920
+          },
+          {
+            "date": "2026-07-03",
+            "desc": "Prepare docuement for quotation for re survey",
+            "units": 0.5,
+            "amount": 960
+          },
+          {
+            "date": "2026-07-02",
+            "desc": "Meeting with attorney on  process  of fire engineer",
+            "units": 0.5,
+            "amount": 960
+          },
+          {
+            "date": "2026-07-03",
+            "desc": "Prepare document  supporting  attorney, borehole, and others",
+            "units": 0.75,
+            "amount": 1440
+          },
+          {
+            "date": "2026-07-06",
+            "desc": "Follow up with  Land surveyor -provide information for re survey",
+            "units": 0.5,
+            "amount": 960
+          },
+          {
+            "date": "2026-07-13",
+            "desc": "Receive  plan from land  surveyor  and overlay  Marezck , Mostert plans with  matterport",
+            "units": 1.5,
+            "amount": 2880
+          },
+          {
+            "date": "2026-07-14",
+            "desc": "Obtain  fire by laws and prepare report discuss with attorney to be included in report",
+            "units": 2.25,
+            "amount": 4320
+          },
+          {
+            "date": "2026-07-29",
+            "desc": "Read  through 5th version of document provided by Stefan Swart and revise various phone calls between parties",
+            "units": 3,
+            "amount": 5760
+          },
+          {
+            "date": null,
+            "desc": "Sub total",
+            "units": null,
+            "amount": 32960
+          },
+          {
+            "date": null,
+            "desc": "Less discount  20%",
+            "units": null,
+            "amount": 6592
+          }
+        ],
+        "totals": {
+          "sub_total_before_discount": 32960,
+          "discount_20pct": 6592,
+          "sub_total_after_discount": 26368,
+          "plan_copies_extra": 760,
+          "plan_copies_extra2": 185,
+          "plan_copies_extra3": 760,
+          "disbursement_subtotal": 1705,
+          "total_before_vat": 28073,
+          "vat": 4210.95,
+          "grand_total": 32283.95
+        },
+        "disbursementLines": [
+          {
+            "label": "Set of Plan copies to attorney for discussion (A1)",
+            "amount": 760
+          },
+          {
+            "label": "Set of A3  for discussion wth client and file",
+            "amount": 185
+          },
+          {
+            "label": "Final set  of A1 to  attorney to be included in  final papers to court",
+            "amount": 760
+          }
+        ],
+        "status": "Issued",
+        "hasDiscount": true
+      }
+    ]
+  },
+  "W076": {
+    "code": "W076",
+    "client": "RENIER WOLFSWINKEL",
+    "description": "Noltrix (Pty) Ltd zoning application",
+    "typeLabel": "REZONING",
+    "templateName": "REZONING",
+    "quoted": 74500,
+    "quotedSource": "Sheet 'REZONING', cell J40",
+    "disbursementsQuoted": 26250,
+    "captured": 0,
+    "capturedEntries": 0,
+    "capturedFlaggedCount": 0,
+    "certifiedToDate": 0,
+    "templateRows": [
+      {
+        "label": "1 - Inception",
+        "fee": 15000
+      },
+      {
+        "label": "2 - Submission to authorities",
+        "fee": 30000
+      },
+      {
+        "label": "3 - Public participation",
+        "fee": 14000
+      },
+      {
+        "label": "4 - Procuring decision",
+        "fee": 7000
+      },
+      {
+        "label": "5 - Promulgation",
+        "fee": 8500
+      }
+    ],
+    "timeEntries": [],
+    "certificates": []
+  },
+  "J065": {
+    "code": "J065",
+    "client": "HENDRIK JANSEN",
+    "description": "Moreletta Park consent use application",
+    "typeLabel": "CONSENT USE",
+    "templateName": "CONSENT USE",
+    "quoted": 51310,
+    "quotedSource": "Sheet 'CONSENT USE', cell H45",
+    "captured": 1920,
+    "capturedEntries": 1,
+    "capturedFlaggedCount": 0,
+    "certifiedToDate": 0,
+    "templateRows": [
+      {
+        "label": "Phase 1 - Inception",
+        "fee": 7500
+      },
+      {
+        "label": "Phase 2 - Submission to authorities",
+        "fee": 20000
+      },
+      {
+        "label": "Phase 3 - Public participation",
+        "fee": 5000
+      },
+      {
+        "label": "Phase 4 - Procuring decision",
+        "fee": 5000
+      },
+      {
+        "label": "Phase 5 - Promulgation",
+        "fee": 1500
+      }
+    ],
+    "timeEntries": [
+      {
+        "person": "FLORIS",
+        "client": "HENDRIK JANSEN",
+        "date": "2026-07-22",
+        "start": "10:00",
+        "end": "11:00",
+        "activity": null,
+        "desc": "Confirmation  for  consent use application, ",
+        "O_tiered": 1920
+      }
+    ],
+    "certificates": []
+  },
+  "P077": {
+    "code": "P077",
+    "client": "ERNA PRETORIUS",
+    "description": "Jabez Retirement Village — removal of restrictions",
+    "typeLabel": "REMOVAL OF RESTRICTIONS",
+    "templateName": "REMOVAL OF RESTRICTIONS",
+    "quoted": 45820,
+    "quotedSource": "Sheet 'REMOVAL OF RESTRICTIONS', J47 (professional) + J58 (other charges)",
+    "captured": 7200,
+    "capturedEntries": 2,
+    "capturedFlaggedCount": 0,
+    "certifiedToDate": 0,
+    "templateRows": [
+      {
+        "label": "Briefing / inception",
+        "fee": 5000
+      },
+      {
+        "label": "Title & planning due diligence",
+        "fee": 5000
+      },
+      {
+        "label": "Pre-application strategy",
+        "fee": 5000
+      },
+      {
+        "label": "Application bundle preparation",
+        "fee": 5000
+      },
+      {
+        "label": "Submission to authority",
+        "fee": 2500
+      },
+      {
+        "label": "Statutory notice / comment",
+        "fee": 2500
+      },
+      {
+        "label": "Municipal process management",
+        "fee": 2500
+      },
+      {
+        "label": "Post-approval formalities",
+        "fee": 2500
+      }
+    ],
+    "timeEntries": [
+      {
+        "person": "FLORIS",
+        "client": "JABEZ",
+        "date": "2026-07-21",
+        "start": "10:00",
+        "end": "12:00",
+        "activity": null,
+        "desc": "Report to andre steyn valuer",
+        "O_tiered": 4320
+      },
+      {
+        "person": "FLORIS",
+        "client": "ERNA PRETORIUS",
+        "date": "2026-08-05",
+        "start": "08:44",
+        "end": "10:00",
+        "activity": null,
+        "desc": "letter to client forappointment",
+        "O_tiered": 2880
+      }
+    ],
+    "certificates": []
+  },
+  "G025": {
+    "code": "G025",
+    "client": "KOBUS GRIESEL",
+    "description": "House Griesel — strata report",
+    "typeLabel": "STRATA REPORT",
+    "templateName": null,
+    "quoted": null,
+    "captured": 3360,
+    "capturedEntries": 1,
+    "capturedFlaggedCount": 0,
+    "certifiedToDate": 0,
+    "templateRows": null,
+    "timeEntries": [
+      {
+        "person": "FLORIS",
+        "client": "KOBUS GRIESEL",
+        "date": "2026-07-22",
+        "start": "07:15",
+        "end": "09:00",
+        "activity": null,
+        "desc": "Prepare strata report",
+        "O_tiered": 3360
+      }
+    ],
+    "certificates": []
+  }
+}
+</script>
+<script>
+const DATA = JSON.parse(document.getElementById('workbook-data').textContent);
+const ORDER = ['D063', 'P074', 'W076', 'J065', 'P077', 'G025'];
+
+const fmt = n => {
+  if (n === null || n === undefined || Number.isNaN(Number(n))) return '—';
+  const num = Number(n);
+  const parts = num.toFixed(Math.abs(num - Math.round(num)) < 0.005 ? 0 : 2).split('.');
+  parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+  return 'R ' + parts.join('.');
+};
+const fmtHrs = (start, end) => {
+  if (!start || !end) return '—';
+  const [sh, sm] = start.split(':').map(Number), [eh, em] = end.split(':').map(Number);
+  let mins = (eh * 60 + em) - (sh * 60 + sm);
+  if (mins < 0) return '—';
+  return (mins / 60).toFixed(2);
+};
+const isBroken = v => v === '#REF!' || v === null || v === undefined;
+const numOr0 = v => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+
+function railBadge(p) {
+  if (p.quoted) {
+    const burn = p.captured / p.quoted;
+    const cls = burn > 1.05 ? 'bad' : burn > 0.85 ? 'mid' : 'good';
+    return { cls, label: Math.round(burn * 100) + '% of fee' };
+  }
+  if (p.certificates && p.certificates.length) {
+    const cert = p.certifiedProfessionalAfterDiscount ?? p.certifiedToDate;
+    const real = p.captured ? cert / p.captured : 0;
+    const cls = real < 0.6 ? 'bad' : real < 0.85 ? 'mid' : 'good';
+    return { cls, label: Math.round(real * 100) + '% realised' };
+  }
+  if (!p.captured) return { cls: 'flat', label: 'not started' };
+  return { cls: 'flat', label: 'no fee quoted' };
+}
+
+function renderRail() {
+  const rail = document.getElementById('rail');
+  ORDER.forEach(code => {
+    const p = DATA[code];
+    const badge = railBadge(p);
+    const btn = document.createElement('button');
+    btn.className = 'proj';
+    btn.dataset.code = code;
+    btn.innerHTML = `
+      <b>${p.code} · ${titleCase(p.client)}</b>
+      <em>${p.typeLabel}${p.halted ? ' · halted' : ''}</em>
+      <span class="real ${badge.cls}">${badge.label}</span>`;
+    btn.addEventListener('click', () => selectProject(code));
+    rail.appendChild(btn);
+  });
+}
+
+function titleCase(s) {
+  if (!s) return '—';
+  return s.toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function selectProject(code) {
+  document.querySelectorAll('.proj').forEach(b => b.toggleAttribute('aria-current', b.dataset.code === code));
+  renderMain(code);
+}
+
+function renderMain(code) {
+  const p = DATA[code];
+  const main = document.getElementById('main');
+
+  const burn = p.quoted ? p.captured / p.quoted : null;
+  const burnPct = burn !== null ? Math.round(burn * 1000) / 10 : null;
+
+  main.innerHTML = `
+    <div class="proj-head">
+      <div class="code">${p.code}</div>
+      <h1>${titleCase(p.client)} — ${p.description}</h1>
+      <div class="facts">
+        <div>Type <b>${p.typeLabel}</b></div>
+        <div>Template <b>${p.templateName ? "'" + p.templateName + "'" : 'none linked in source'}</b></div>
+        <div>Entries logged <b>${p.capturedEntries}</b></div>
+        ${p.dateRange ? `<div>Span <b>${p.dateRange[0]} → ${p.dateRange[1]}</b></div>` : ''}
+        ${p.halted ? `<div><b style="color:var(--copper-dark)">Halted ${p.haltDate}</b></div>` : ''}
+      </div>
+    </div>
+    <div class="tabs" role="tablist">
+      <button role="tab" aria-selected="true" data-tab="overview">Overview</button>
+      <button role="tab" aria-selected="false" data-tab="tasks">Fee schedule</button>
+      <button role="tab" aria-selected="false" data-tab="time">Time</button>
+      <button role="tab" aria-selected="false" data-tab="certs">Certificates</button>
+    </div>
+    <section class="panel" id="panel-overview">${renderOverview(p, burnPct)}</section>
+    <section class="panel" id="panel-tasks" hidden>${renderTasks(p, burnPct)}</section>
+    <section class="panel" id="panel-time" hidden>${renderTime(p)}</section>
+    <section class="panel" id="panel-certs" hidden>${renderCerts(p)}</section>
+  `;
+
+  main.querySelectorAll('.tabs button').forEach(tab => {
+    tab.addEventListener('click', () => {
+      main.querySelectorAll('.tabs button').forEach(t => t.setAttribute('aria-selected', String(t === tab)));
+      ['overview', 'tasks', 'time', 'certs'].forEach(id => {
+        main.querySelector('#panel-' + id).hidden = (id !== tab.dataset.tab);
+      });
+    });
+  });
+}
+
+function renderOverview(p, burnPct) {
+  const warnings = buildWarnings(p, burnPct);
+  const kpis = [];
+
+  if (p.quoted) {
+    kpis.push(kpi('Fee quoted', fmt(p.quoted), p.quotedSource || '', false));
+  } else {
+    kpis.push(kpi('Fee quoted', '—', p.templateName ? '' : 'No fee template linked to this project code in the workbook', true));
+  }
+
+  kpis.push(kpi('Captured at tariff', fmt(p.captured),
+    `${p.capturedEntries} entries` + (p.capturedFlaggedCount ? ` · ${p.capturedFlaggedCount} broken` : ' · never edited'), false));
+
+  if (p.certificates && p.certificates.length) {
+    kpis.push(kpi('Certified to date', fmt(p.certifiedToDate), `${p.certificates.length} certificates issued`, false));
+  } else {
+    kpis.push(kpi('Certified to date', fmt(0), 'No certificate found for this project in the workbook', true));
+  }
+
+  if (p.quoted) {
+    const over = p.captured - p.quoted;
+    kpis.push(kpi('Burn vs fee', burnPct + '%', over > 0
+      ? `<span class="delta up">+${fmt(over)}</span> over the quoted fee` : `${fmt(-over)} of fee remaining`, over > 0));
+  } else if (p.writeDown) {
+    kpis.push(kpi('Realisation', Math.round((p.certifiedProfessionalAfterDiscount / p.captured) * 100) + '%',
+      `${fmt(p.certifiedProfessionalAfterDiscount)} certified of ${fmt(p.captured)} captured`, true));
+  } else {
+    kpis.push(kpi('Burn vs fee', '—', 'Not applicable — no fee quoted', true));
+  }
+
+  let extra = '';
+  if (p.budgetEstimateField) {
+    extra = `
+      <h3 class="sec">A third number nobody reconciles <small>the project register carries its own estimate, independent of the fee template</small></h3>
+      <table class="grid">
+        <thead><tr><th>Source</th><th class="num">Amount</th><th>Where it comes from</th></tr></thead>
+        <tbody>
+          <tr><td>Fee template total</td><td class="num">${fmt(p.quoted)}</td><td>${p.quotedSource}</td></tr>
+          <tr><td>Register "budget estimate" field</td><td class="num">${fmt(p.budgetEstimateField)}</td><td>${p.budgetEstimateSource}</td></tr>
+          <tr><td>Time captured at tariff</td><td class="num">${fmt(p.captured)}</td><td>Sum of ${p.capturedEntries} entries across ${Object.keys(p.staff || {}).length} timesheets</td></tr>
+        </tbody>
+      </table>
+      <p class="src">These three numbers describe the same project and disagree by tens of thousands of rand. Nothing in the workbook links them.</p>`;
+  }
+
+  let staffBlock = '';
+  if (p.staff && Object.keys(p.staff).length) {
+    const rows = Object.entries(p.staff).sort((a, b) => b[1] - a[1])
+      .map(([name, count]) => `<tr><td>${titleCase(name)}</td><td class="num">${count}</td></tr>`).join('');
+    staffBlock = `
+      <h3 class="sec">Who logged this <small>real timesheet rows, by person</small></h3>
+      <table class="grid"><thead><tr><th>Staff member</th><th class="num">Entries</th></tr></thead><tbody>${rows}</tbody></table>`;
+  }
+
+  return `
+    <div class="kpis">${kpis.join('')}</div>
+    ${p.haltQuote ? `
+      <h3 class="sec">Status <small>from the timesheet log itself, verbatim</small></h3>
+      <div class="quote-block">"${p.haltQuote}" — logged by ${titleCase(p.haltPerson || '')} on ${p.haltDate}</div>
+    ` : ''}
+    <h3 class="sec">Warnings <small>${warnings.length} derived from this project's real data</small></h3>
+    <div class="warn-list">${warnings.map(w => `
+      <div class="w ${w.sev}">
+        <span class="sev">${w.sev}</span>
+        <b>${w.title}</b>
+        <p>${w.body}</p>
+        ${w.cite ? `<cite>${w.cite}</cite>` : ''}
+      </div>`).join('')}
+    </div>
+    ${extra}
+    ${staffBlock}
+  `;
+}
+
+function kpi(label, val, sub, flag) {
+  return `<div class="kpi ${flag ? 'flag' : ''}"><div class="lbl">${label}</div><div class="val">${val}</div><div class="sub">${sub}</div></div>`;
+}
+
+function buildWarnings(p, burnPct) {
+  const w = [];
+  if (p.quoted && burnPct > 100) {
+    w.push({
+      sev: 'high',
+      title: `Captured time is ${burnPct}% of the quoted fee`,
+      body: `${fmt(p.captured)} of time has been captured against a ${fmt(p.quoted)} fee template (${p.templateName}). The excess of ${fmt(p.captured - p.quoted)} is unrecoverable unless the fee is renegotiated.`,
+      cite: p.quotedSource,
+    });
+  }
+  if (p.certificates && p.certificates.length === 0 && p.captured > 0) {
+    w.push({
+      sev: p.captured > 20000 ? 'high' : 'med',
+      title: `${fmt(p.captured)} captured, R 0 ever certified`,
+      body: `Real time has been logged against this project across ${p.capturedEntries} entries, but no payment certificate exists anywhere in the workbook for ${p.code}.`,
+    });
+  }
+  if (p.capturedFlaggedCount) {
+    w.push({
+      sev: 'med',
+      title: `${p.capturedFlaggedCount} time entries are broken or incomplete`,
+      body: `These entries have a formula error or a missing end time, so they price at R 0 (or worse, at <code>#REF!</code>) in the source sheet. The captured total above is understated by at least the value of the work actually done in those slots.`,
+    });
+  }
+  if (p.haltQuote) {
+    w.push({
+      sev: 'med',
+      title: 'Client instructed a halt mid-project',
+      body: 'Work stopped on the client\'s instruction before submission. Nobody has recorded what happens to the time already captured on a project that may never be billed.',
+      cite: `"${p.haltQuote}"`,
+    });
+  }
+  if (p.budgetEstimateField && p.quoted && Math.abs(p.budgetEstimateField - p.quoted) > 1000) {
+    w.push({
+      sev: 'low',
+      title: `Register estimate and fee template disagree by ${fmt(Math.abs(p.budgetEstimateField - p.quoted))}`,
+      body: `The project register lists a budget estimate of ${fmt(p.budgetEstimateField)}, but the fee template for ${p.templateName} totals ${fmt(p.quoted)}. Nothing links the two figures.`,
+    });
+  }
+  if (p.writeDown) {
+    w.push({
+      sev: 'med',
+      title: `${p.writeDown.pct}% write-down on the ${p.writeDown.certificate} certificate, no reason recorded`,
+      body: `${fmt(p.writeDown.amount)} was written off (${fmt(p.writeDown.from)} → ${fmt(p.writeDown.to)}) as a flat percentage discount. The source sheet only labels it "Less discount ${p.writeDown.pct}%" — no reason code, no note.`,
+    });
+  }
+  if (p.uncertifiedAmount) {
+    w.push({
+      sev: 'med',
+      title: `${fmt(p.uncertifiedAmount)} captured since the last certificate`,
+      body: `${p.uncertifiedEntries} entries logged since ${p.uncertifiedSince} have not appeared on any certificate yet — it is captured value, not yet cash.`,
+    });
+  }
+  if (p.certificates && p.certificates.length && p.captured) {
+    const certified = p.certifiedProfessionalBeforeDiscount ?? p.certifiedToDate;
+    const gap = p.captured - certified - (p.uncertifiedAmount || 0);
+    if (gap > 1000) {
+      w.push({
+        sev: 'low',
+        title: `${fmt(gap)} of captured time never reached a certificate line at all`,
+        body: `Comparing every raw timesheet row against every certificate line item for ${p.code}, only ${fmt(certified)} of ${fmt(p.captured)} captured value (before any write-down, and excluding time logged after the last certificate) made it onto an invoice. The rest was consolidated, rounded, or simply dropped when the certificate was compiled by hand.`,
+      });
+    }
+  }
+  if (!p.quoted && !p.templateName && p.captured) {
+    w.push({
+      sev: 'low',
+      title: 'No fee template exists for this project type in the source workbook',
+      body: `${p.typeLabel} has real time logged against it but no corresponding cost-breakdown sheet — a placeholder in the new system until this type is built out.`,
+    });
+  }
+  if (!w.length) {
+    w.push({ sev: 'low', title: 'No warnings on this project', body: 'Captured time is within the quoted fee and nothing unusual was found in the source data.' });
+  }
+  return w;
+}
+
+function renderTasks(p, burnPct) {
+  if (!p.templateRows) {
+    return `<div class="empty">No fee template is linked to ${p.code} in the workbook. ${p.typeLabel === 'STRATA REPORT' ? "The 'STRATAREPORT' sheet exists but carries no project reference." : 'This is one of the project types still to be built out.'}</div>`;
+  }
+  const total = p.templateRows.reduce((s, r) => s + r.fee, 0);
+  const rows = p.templateRows.map(r => `<tr><td>${r.label}</td><td class="num">${fmt(r.fee)}</td></tr>`).join('');
+  return `
+    <h3 class="sec">Fee schedule <small>from sheet '${p.templateName}', phase/stage totals</small></h3>
+    <table class="grid">
+      <thead><tr><th>Phase / stage</th><th class="num">Quoted fee</th></tr></thead>
+      <tbody>${rows}</tbody>
+      <tfoot><tr><td>Total professional fee</td><td class="num">${fmt(total)}</td></tr></tfoot>
+    </table>
+    ${p.disbursementsQuoted ? `<p class="src">Plus ${fmt(p.disbursementsQuoted)} of disbursements (council fees, advertising, ancillary) quoted separately on the same sheet.</p>` : ''}
+    <p class="src">Time entries in this workbook are not tagged to a phase or stage — there is no column for it. That linkage does not exist in the source data yet; it is exactly the gap a per-task time entry closes.</p>
+  `;
+}
+
+function renderTime(p) {
+  if (!p.timeEntries || !p.timeEntries.length) {
+    return `<div class="empty">No time has been logged against ${p.code} in any of the seven timesheets in this workbook.</div>`;
+  }
+  const rows = p.timeEntries.map(e => {
+    const raw = e.O_tiered !== undefined ? e.O_tiered : e.O;
+    const broken = isBroken(raw);
+    const zeroButWorked = !broken && Number(raw) === 0 && e.end;
+    const flagged = broken || zeroButWorked;
+    let amtCell = broken ? `<span class="pill err">#REF!</span>` : fmt(raw);
+    if (zeroButWorked) amtCell = `${fmt(0)} <span class="pill warn">priced R0</span>`;
+    return `<tr class="${flagged ? 'flagged' : ''}">
+      <td>${e.date || '—'}</td><td>${titleCase(e.person)}</td>
+      <td>${e.start || '—'}–${e.end || '<em>open</em>'}</td>
+      <td class="num">${fmtHrs(e.start, e.end)}</td>
+      <td>${e.activity || '<em>not set</em>'}</td>
+      <td>${e.desc || '<em>no description</em>'}</td>
+      <td class="num">${amtCell}</td>
+    </tr>`;
+  }).join('');
+  const clean = p.timeEntries.filter(e => !isBroken(e.O_tiered !== undefined ? e.O_tiered : e.O));
+  const total = clean.reduce((s, e) => s + numOr0(e.O_tiered !== undefined ? e.O_tiered : e.O), 0);
+  return `
+    <h3 class="sec">All logged entries <small>${p.timeEntries.length} rows, verbatim from the workbook's timesheets</small></h3>
+    <div class="scroller">
+      <table class="grid">
+        <thead><tr><th>Date</th><th>Who</th><th>Start–End</th><th class="num">Hours</th><th>Activity</th><th>Description</th><th class="num">Tariff estimate</th></tr></thead>
+        <tbody>${rows}</tbody>
+        <tfoot><tr><td colspan="6">Total (excluding broken rows)</td><td class="num">${fmt(total)}</td></tr></tfoot>
+      </table>
+    </div>
+    <p class="src">Rows highlighted in copper have a formula error or a missing end time in the source sheet — real defects in the spreadsheet, not simulated for this mock. Descriptions and typos are reproduced exactly as entered.</p>
+  `;
+}
+
+function renderCerts(p) {
+  if (!p.certificates || !p.certificates.length) {
+    return `<div class="empty">No payment certificate exists for ${p.code} anywhere in the workbook, despite ${fmt(p.captured)} of time captured.</div>`;
+  }
+  const blocks = p.certificates.map(c => {
+    const lineRows = c.lines.map(l => `<tr><td>${l.date || '—'}</td><td>${l.desc || '<em>—</em>'}</td><td class="num">${l.units ?? '—'}</td><td class="num">${l.amount !== null && l.amount !== undefined ? fmt(l.amount) : '—'}</td></tr>`).join('');
+    let discountRow = '';
+    if (c.hasDiscount) {
+      discountRow = `
+        <tr><td colspan="3">Sub total</td><td class="num">${fmt(c.totals.sub_total_before_discount)}</td></tr>
+        <tr style="color:var(--copper-dark); font-weight:700"><td colspan="3">Less discount ${p.writeDown.pct}% — <em style="font-weight:400">reason not recorded in source</em></td><td class="num">−${fmt(c.totals.discount_20pct)}</td></tr>
+        <tr><td colspan="3">Sub total after discount</td><td class="num">${fmt(c.totals.sub_total_after_discount)}</td></tr>
+        ${(c.disbursementLines || []).map(d => `<tr><td colspan="3">${d.label}</td><td class="num">${fmt(d.amount)}</td></tr>`).join('')}
+        <tr><td colspan="3">Total before VAT</td><td class="num">${fmt(c.totals.total_before_vat)}</td></tr>
+        <tr><td colspan="3">VAT</td><td class="num">${fmt(c.totals.vat)}</td></tr>
+      `;
+    } else {
+      discountRow = `
+        <tr><td colspan="3">Subtotal</td><td class="num">${fmt(c.totals.subtotal)}</td></tr>
+        <tr><td colspan="3">15% VAT</td><td class="num">${fmt(c.totals.vat)}</td></tr>
+      `;
+    }
+    return `
+      <h3 class="sec">${c.name} <small>${c.status}</small></h3>
+      <table class="grid">
+        <thead><tr><th>Date</th><th style="width:44%">Description</th><th class="num">Units</th><th class="num">Amount</th></tr></thead>
+        <tbody>${lineRows}</tbody>
+        <tfoot>
+          ${discountRow}
+          <tr><td colspan="3">Grand total</td><td class="num">${fmt(c.totals.grand_total)}</td></tr>
+        </tfoot>
+      </table>
+    `;
+  }).join('');
+  return `
+    <div class="kpis">
+      ${kpi('Certified to date', fmt(p.certifiedToDate), `${p.certificates.length} certificates, ${p.dateRange[0].slice(0,7)} – ${p.dateRange[1].slice(0,7)}`, false)}
+      ${kpi('Captured at tariff', fmt(p.captured), `${p.capturedEntries} raw timesheet entries`, false)}
+      ${p.writeDown ? kpi('Write-down applied', fmt(p.writeDown.amount), `${p.writeDown.pct}% on ${p.writeDown.certificate} — no reason recorded`, true) : ''}
+      ${p.uncertifiedAmount ? kpi('Uncertified since', fmt(p.uncertifiedAmount), `${p.uncertifiedEntries} entries since ${p.uncertifiedSince}`, true) : ''}
+    </div>
+    ${blocks}
+    <p class="src">This is the real May–July certificate history for ${p.code}, reconstructed from sheet 'Sheet2' of the workbook (three side-by-side monthly certificate blocks, all referencing project ${p.code}). The 20% discount on July is applied exactly as in the source — a flat percentage against the professional subtotal, with no reason captured anywhere.</p>
+  `;
+}
+
+renderRail();
+selectProject(ORDER[0]);
+</script>
+</body>
+</html>

@@ -168,3 +168,188 @@ create table if not exists asset (
 
 create index if not exists asset_project_live
   on asset (project_id, kind) where deleted_at is null;
+
+-- ---------------------------------------------------------------------------
+-- Practice operations. See .cursor/skills/practice-ops/SKILL.md.
+--
+-- The register extends `project` rather than sitting beside it, which is what
+-- §14 of CLOUD-DOCUMENTS-PLAN.md left room for: the job is already separate
+-- from the drawing it owns, so a strata report with no drawing at all is the
+-- same row with one fewer child. Time, certificates and write-downs hang off
+-- that one unambiguous target.
+-- ---------------------------------------------------------------------------
+
+alter table project add column if not exists code                 text;
+alter table project add column if not exists client_name          text;
+alter table project add column if not exists client_email         text;
+alter table project add column if not exists client_cell          text;
+alter table project add column if not exists client_address       text;
+alter table project add column if not exists property_description text;
+alter table project add column if not exists type_code            text;
+alter table project add column if not exists budget_estimate      numeric(14, 2);
+alter table project add column if not exists lead_user_id         text references app_user (id);
+
+alter table project add column if not exists billing_basis text
+  check (billing_basis in ('fixed_fee', 'time_and_materials'));
+
+alter table project add column if not exists status text not null default 'open'
+  check (status in ('open', 'on_hold', 'halted', 'complete'));
+
+-- Normalised in the index, not by hoping the caller trimmed. The source
+-- workbook carried `P078` twice and `C036 ` beside `CO36.9`, and a duplicate
+-- code is found during reporting - months later, against real money - unless
+-- the write itself refuses it.
+create unique index if not exists project_code_live
+  on project (org_id, upper(btrim(code)))
+  where deleted_at is null and code is not null;
+
+-- The controlled list behind the register's type field. Twelve disciplines are
+-- claimed; five arrived with content and four as empty sheets, so a type with
+-- no tasks is a first-class state rather than an unfinished one: a placeholder
+-- is selectable, and everything downstream of it still works.
+create table if not exists project_type (
+  id                     text primary key,
+  org_id                 text not null references org (id),
+  code                   text not null,
+  name                   text not null,
+  billing_basis_default  text not null default 'fixed_fee',
+  is_placeholder         boolean not null default false,
+  created_by             text not null,
+  created_at             timestamptz not null default now(),
+  deleted_at             timestamptz
+);
+
+create unique index if not exists project_type_code_live
+  on project_type (org_id, upper(btrim(code))) where deleted_at is null;
+
+-- Rates are versioned, never corrected. The workbook prices the same minute at
+-- R32/min in one column and off a R1 920/hr ladder in another, and the four
+-- fee-template bands disagree with both. Those are the firm's numbers; a table
+-- that can hold all of them is the requirement, not a table that picks one.
+create table if not exists rate_band (
+  id              text primary key,
+  org_id          text not null references org (id),
+  code            text not null,
+  label           text not null,
+  hourly_rate     numeric(12, 2) not null,
+  effective_from  date not null default current_date,
+  created_by      text not null,
+  created_at      timestamptz not null default now(),
+  deleted_at      timestamptz
+);
+
+create unique index if not exists rate_band_code_live
+  on rate_band (org_id, upper(btrim(code)), effective_from) where deleted_at is null;
+
+-- Captured value, and the only place it is ever written.
+--
+-- `captured_amount` is set once, at insert, from the rule named in
+-- `pricing_rule` and the rate in `rate_applied`. No statement in src/ updates
+-- it and a test asserts that. This is the settled decision the spreadsheet got
+-- wrong: there, overspend was handled by typing a smaller number over the
+-- original (column K), which destroys the only evidence that the work took
+-- longer than it was worth. Here the row stands and a write_down says so.
+--
+-- A mistyped entry is soft-deleted and re-entered. That is a different claim
+-- from editing one: the deletion is dated and attributed, and the sum drops it.
+create table if not exists time_entry (
+  id               text primary key,
+  project_id       text not null references project (id),
+  user_id          text not null references app_user (id),
+  entry_date       date not null,
+  started_at       time,
+  ended_at         time,
+  minutes          integer not null check (minutes >= 0),
+  activity_type    text not null,
+  -- What prints on the certificate. The workbook preferred this over the
+  -- activity dropdown, because "Phone call" is not a line a client will pay.
+  description      text not null,
+  phase_ref        text,
+  prints_qty       integer not null default 0,
+  travel_km        numeric(10, 2) not null default 0,
+  rate_band_code   text,
+  rate_applied     numeric(12, 2),
+  pricing_rule     text not null,
+  captured_amount  numeric(14, 2) not null,
+  created_by       text not null,
+  created_at       timestamptz not null default now(),
+  deleted_at       timestamptz
+);
+
+create index if not exists time_entry_project_live
+  on time_entry (project_id, entry_date) where deleted_at is null;
+
+create index if not exists time_entry_user_live
+  on time_entry (user_id, entry_date) where deleted_at is null;
+
+create table if not exists payment_certificate (
+  id            text primary key,
+  project_id    text not null references project (id),
+  seq           integer not null,
+  period_start  date,
+  period_end    date,
+  status        text not null default 'draft' check (status in ('draft', 'issued')),
+  -- Stored per certificate rather than read from a constant at render time. A
+  -- reissued document must show the rate that applied when it was issued.
+  vat_rate      numeric(5, 4) not null default 0.15,
+  issued_at     timestamptz,
+  created_by    text not null,
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now(),
+  deleted_at    timestamptz
+);
+
+create unique index if not exists payment_certificate_seq_live
+  on payment_certificate (project_id, seq) where deleted_at is null;
+
+create table if not exists certificate_line (
+  id              text primary key,
+  certificate_id  text not null references payment_certificate (id),
+  seq             integer not null,
+  source          text not null check (source in ('schedule', 'time', 'disbursement')),
+  description     text not null,
+  phase_ref       text,
+  pct             numeric(7, 4),
+  units           numeric(12, 4),
+  amount          numeric(14, 2) not null,
+  time_entry_id   text references time_entry (id),
+  created_by      text not null,
+  created_at      timestamptz not null default now(),
+  deleted_at      timestamptz
+);
+
+create index if not exists certificate_line_cert_live
+  on certificate_line (certificate_id, seq) where deleted_at is null;
+
+-- An hour is billed once. Without this, re-running a date range that overlaps
+-- a certificate already issued bills the overlap again, and the error is
+-- invisible in a total. It also makes the converse answerable: captured time
+-- carrying no line is time nobody ever charged for.
+create unique index if not exists certificate_line_time_entry_live
+  on certificate_line (time_entry_id)
+  where deleted_at is null and time_entry_id is not null;
+
+-- The write-down. Explicit, attributed, and attached to the certificate it
+-- reduces - not a smaller number typed over an honest one.
+create table if not exists write_down (
+  id              text primary key,
+  certificate_id  text not null references payment_certificate (id),
+  phase_ref       text,
+  amount          numeric(14, 2) not null check (amount > 0),
+  pct             numeric(7, 4),
+  -- `legacy_unspecified` is reserved for rows imported from the workbook,
+  -- where the discount survived but the reason for it did not. It is a value
+  -- rather than a null so the column can stay NOT NULL and so the gap is
+  -- reportable: a write-down nobody can explain is exactly the thing the
+  -- customer asked to be shown.
+  reason_code     text not null check (reason_code in (
+                    'scope_creep', 'under_quoted', 'our_error',
+                    'client_relationship', 'goodwill', 'legacy_unspecified')),
+  note            text,
+  created_by      text not null,
+  created_at      timestamptz not null default now(),
+  deleted_at      timestamptz
+);
+
+create index if not exists write_down_cert_live
+  on write_down (certificate_id) where deleted_at is null;

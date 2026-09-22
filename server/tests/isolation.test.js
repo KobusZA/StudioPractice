@@ -6,7 +6,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { openStore } from "../src/store.js";
-import { firmWithProject, signedUpAgent, testDoc, testServer } from "./helpers.js";
+import {
+  firmWithProject, firmWithRegisterProject, logHour, signedUpAgent, testDoc, testServer,
+} from "./helpers.js";
 
 test("a job is unreachable from another org, on every route that names it", async () => {
   const { baseUrl } = await testServer();
@@ -28,6 +30,46 @@ test("a job is unreachable from another org, on every route that names it", asyn
     // firm's job id exists.
     assert.equal(JSON.stringify(res.body).includes("Erf 412"), false);
   }
+});
+
+test("a firm's practice-ops rows are unreachable from another org", async () => {
+  const { baseUrl } = await testServer();
+  const { client, project } = await firmWithRegisterProject(baseUrl, { name: "Bon Accord" });
+  const { entry } = await logHour(client, project.id);
+  const certificate = (await client.post(`/api/projects/${project.id}/certificates`, {}))
+    .body.certificate;
+  const { client: stranger } = await signedUpAgent(baseUrl, { orgName: "Other Firm" });
+
+  // Money, not geometry, so the same structural claim has to hold on every
+  // route that names one of these ids. The scope is a predicate in store.js
+  // rather than a check each handler remembers, and this is the proof.
+  const attempts = [
+    ["GET", `/api/register/${project.id}`],
+    ["PATCH", `/api/register/${project.id}`],
+    ["GET", `/api/projects/${project.id}/financials`],
+    ["GET", `/api/projects/${project.id}/certificates`],
+    ["POST", `/api/projects/${project.id}/certificates`],
+    ["POST", `/api/projects/${project.id}/drawing`],
+    ["DELETE", `/api/time-entries/${entry.id}`],
+    ["GET", `/api/certificates/${certificate.id}`],
+    ["POST", `/api/certificates/${certificate.id}/lines`],
+    ["POST", `/api/certificates/${certificate.id}/lines-from-time`],
+    ["POST", `/api/certificates/${certificate.id}/write-downs`],
+    ["POST", `/api/certificates/${certificate.id}/issue`],
+  ];
+  for (const [method, path] of attempts) {
+    const res = await stranger.request(method, path, {
+      body: { name: "mine now", doc: testDoc(), description: "x", amount: 1, reasonCode: "goodwill" },
+    });
+    assert.equal(res.status, 404, `${method} ${path}`);
+    // 404 rather than 403, for the same reason as the jobs above: a firm
+    // should not be able to confirm that another firm's id exists.
+    assert.equal(JSON.stringify(res.body).includes("Bon Accord"), false, `${method} ${path}`);
+  }
+
+  // And the listing routes show them nothing rather than someone else's book.
+  assert.deepEqual((await stranger.get("/api/register")).body.projects, []);
+  assert.deepEqual((await stranger.get("/api/time-entries")).body.entries, []);
 });
 
 test("a stranger's save is refused and changes nothing", async () => {

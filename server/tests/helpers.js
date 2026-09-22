@@ -137,3 +137,42 @@ export async function firmWithProject(baseUrl, { name = "Job A", doc = testDoc()
   if (created.status !== 201) throw new Error(`create failed: ${JSON.stringify(created.body)}`);
   return { client, account, project: created.body.project, doc };
 }
+
+/**
+ * A firm with one register job and no drawing, which is the normal shape for
+ * most of the disciplines this practice works in. The defaults are D063 Bon
+ * Accord from the source workbook, including its register budget of R120 000 -
+ * a real figure, and one that disagrees with its own fee template.
+ */
+export async function firmWithRegisterProject(baseUrl, fields = {}) {
+  const { client, account } = await signedUpAgent(baseUrl);
+  const created = await client.post("/api/register", {
+    code: "D063",
+    name: "Bon Accord",
+    clientName: "Bon Accord Trust",
+    typeCode: "TOWNSHIP establishment",
+    billingBasis: "fixed_fee",
+    budgetEstimate: 120000,
+    ...fields,
+  });
+  if (created.status !== 201) {
+    throw new Error(`register create failed: ${JSON.stringify(created.body)}`);
+  }
+  return { client, account, project: created.body.project };
+}
+
+/** An hour of file work on a job, priced by the default ladder: R1 920. */
+export async function logHour(client, projectId, overrides = {}) {
+  const res = await client.post("/api/time-entries", {
+    projectId,
+    date: "2026-03-02",
+    start: "09:00",
+    end: "10:00",
+    minutes: 60,
+    activityType: "File work",
+    description: "Drafting the layout plan",
+    ...overrides,
+  });
+  if (res.status !== 201) throw new Error(`time entry failed: ${JSON.stringify(res.body)}`);
+  return res.body;
+}

@@ -14,6 +14,8 @@
 // auth.js. Soft delete is the only delete: `deleted_at is null` is part of
 // every predicate below, and no statement here is a DELETE.
 
+import { DEFAULT_PROJECT_TYPES, DEFAULT_RATE_BANDS } from "./defaults.js";
+import { certificateUnits, priceEntry, toCents } from "./pricing.js";
 import { sid } from "./ids.js";
 
 /**
@@ -29,6 +31,46 @@ export class ConflictError extends Error {
     super("revision mismatch");
     this.name = "ConflictError";
     this.current = current;
+  }
+}
+
+/**
+ * The caller asked for something that is not a coherent record: a time entry
+ * with no description, a write-down with no reason. Its own class rather than
+ * a RangeError, because the route turns this into a 400 and a RangeError
+ * thrown by an actual bug would then be reported to the user as their mistake.
+ */
+export class ValidationError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "ValidationError";
+  }
+}
+
+/**
+ * A project code already in use in this firm, compared the way the index
+ * compares it: trimmed and case-folded. Its own class because the caller's
+ * answer is a specific one - "P078 is already Bon Accord" - and a generic 500
+ * would send them to look for a bug instead of at the register.
+ */
+export class DuplicateCodeError extends Error {
+  constructor(projectCode) {
+    super(`project code ${projectCode} is already in use`);
+    this.name = "DuplicateCodeError";
+    this.projectCode = projectCode;
+  }
+}
+
+/**
+ * Asked to change a certificate that has gone out. An issued certificate is a
+ * statement made to a client; the correction for one is another certificate,
+ * not a quiet edit to the document they are holding.
+ */
+export class IssuedError extends Error {
+  constructor(certificateId) {
+    super("that certificate has been issued");
+    this.name = "IssuedError";
+    this.certificateId = certificateId;
   }
 }
 
@@ -165,16 +207,34 @@ export function openStore(queryable, { orgId, userId }) {
      */
     async duplicateProject(projectId) {
       const { rows } = await q(
-        `select p.name, d.pack_id, d.doc
+        `select p.name, p.client_name, p.client_email, p.client_cell,
+                p.client_address, p.property_description, p.type_code,
+                p.budget_estimate, p.billing_basis, p.lead_user_id,
+                d.pack_id, d.doc
            from project p
-           join drawing d on d.project_id = p.id and d.deleted_at is null
+           left join drawing d on d.project_id = p.id and d.deleted_at is null
           where p.id = $1 and p.org_id = $2 and p.deleted_at is null`,
         [projectId, orgId],
       );
       if (!rows[0]) return null;
       const source = rows[0];
-      const drawingId = sid("dwg");
       const name = `${source.name || "Untitled"} (copy)`;
+      if (!source.doc) {
+        // A register job with no drawing. Everything copies except the project
+        // code, which is the firm's identifier for this specific instruction
+        // and cannot be shared by two rows - the copy arrives needing one,
+        // which is a visible gap rather than an invented `P078 (copy)`.
+        const created = await this.createRegisterProject({
+          code: null, name,
+          clientName: source.client_name, clientEmail: source.client_email,
+          clientCell: source.client_cell, clientAddress: source.client_address,
+          propertyDescription: source.property_description,
+          typeCode: source.type_code, budgetEstimate: source.budget_estimate,
+          billingBasis: source.billing_basis, leadUserId: source.lead_user_id,
+        }, { allowMissingCode: true });
+        return { ...(await this.getProject(created.id)), drawing: null };
+      }
+      const drawingId = sid("dwg");
       const doc = { ...source.doc, id: drawingId, name };
       return this.createProject({ name, packId: source.pack_id, doc, drawingId });
     },
@@ -318,6 +378,855 @@ export function openStore(queryable, { orgId, userId }) {
       await snapshot(q, rows[0], userId);
       return row;
     },
+
+    /**
+     * A drawing for a job that did not start with one. The register can open a
+     * strata report or a dispute, neither of which has geometry; the day one
+     * of them does, the canvas attaches here rather than the job having had to
+     * pretend it was a drawing all along.
+     */
+    async createDrawingForProject(projectId, { doc, packId = null, drawingId }) {
+      const project = await this.getProject(projectId);
+      if (!project) return null;
+      const existing = await this.getDrawingForProject(projectId);
+      if (existing) return existing;
+      const { rows } = await q(
+        `insert into drawing (id, project_id, pack_id, doc, created_by)
+              values ($1, $2, $3, $4, $5)
+           returning id, project_id, pack_id, revision, doc, updated_at`,
+        [drawingId || sid("dwg"), projectId, packId, doc, userId],
+      );
+      await snapshot(q, rows[0], userId);
+      return drawingRow(rows[0]);
+    },
+
+    // --- the register ---------------------------------------------------
+
+    /**
+     * The type list and the tariff bands a new firm starts with. Called in the
+     * sign-up transaction, and safe to call again: every insert is
+     * ON CONFLICT DO NOTHING against the live-rows unique index, so an org
+     * created before these existed is fixed by running it, not by a migration
+     * that has to guess what the firm has since edited.
+     */
+    async seedPracticeDefaults() {
+      for (const type of DEFAULT_PROJECT_TYPES) {
+        await q(
+          `insert into project_type (id, org_id, code, name, billing_basis_default, is_placeholder, created_by)
+                values ($1, $2, $3, $4, $5, $6, $7)
+             on conflict do nothing`,
+          [
+            sid("pty"), orgId, type.code, type.name,
+            type.billingBasisDefault || "fixed_fee", Boolean(type.isPlaceholder), userId,
+          ],
+        );
+      }
+      for (const band of DEFAULT_RATE_BANDS) {
+        await q(
+          `insert into rate_band (id, org_id, code, label, hourly_rate, created_by)
+                values ($1, $2, $3, $4, $5, $6)
+             on conflict do nothing`,
+          [sid("rb"), orgId, band.code, band.label, band.hourlyRate, userId],
+        );
+      }
+    },
+
+    async listProjectTypes() {
+      const { rows } = await q(
+        `select code, name, billing_basis_default, is_placeholder
+           from project_type
+          where org_id = $1 and deleted_at is null
+          order by is_placeholder, name`,
+        [orgId],
+      );
+      return rows.map((row) => ({
+        code: row.code,
+        name: row.name,
+        billingBasisDefault: row.billing_basis_default,
+        isPlaceholder: row.is_placeholder,
+      }));
+    },
+
+    async listRateBands() {
+      const { rows } = await q(
+        `select code, label, hourly_rate, effective_from
+           from rate_band
+          where org_id = $1 and deleted_at is null
+          order by code, effective_from desc`,
+        [orgId],
+      );
+      return rows.map((row) => ({
+        code: row.code,
+        label: row.label,
+        hourlyRate: num(row.hourly_rate),
+        effectiveFrom: row.effective_from,
+      }));
+    },
+
+    /**
+     * The register. Carries each job's money with it, because a list of jobs
+     * with no realisation on it is the spreadsheet's view - you have to open
+     * each one to find the one that is losing money.
+     */
+    async listRegister({ includeDeleted = false } = {}) {
+      const { rows } = await q(
+        `select ${REGISTER_COLUMNS}
+           from project p
+           left join drawing d on d.project_id = p.id and d.deleted_at is null
+           ${FINANCIAL_LATERALS}
+          where p.org_id = $1
+            and ($2 or p.deleted_at is null)
+          order by coalesce(p.opened_at, p.updated_at) desc`,
+        [orgId, includeDeleted],
+      );
+      return rows.map(registerRow);
+    },
+
+    async getRegisterProject(projectId) {
+      const { rows } = await q(
+        `select ${REGISTER_COLUMNS}
+           from project p
+           left join drawing d on d.project_id = p.id and d.deleted_at is null
+           ${FINANCIAL_LATERALS}
+          where p.id = $2 and p.org_id = $1 and p.deleted_at is null`,
+        [orgId, projectId],
+      );
+      return rows[0] ? registerRow(rows[0]) : null;
+    },
+
+    /**
+     * A job with no drawing. `code` is the firm's own identifier and is
+     * checked against the index rather than trusted: the source workbook had
+     * `P078` twice and `C036 ` beside `CO36.9`, and the cost of finding that
+     * out during billing is what this refusal buys.
+     */
+    async createRegisterProject(fields, { allowMissingCode = false } = {}) {
+      const clean = registerFields(fields);
+      if (!clean.code && !allowMissingCode) throw new ValidationError("a project code is required");
+      const projectId = fields.projectId || sid("prj");
+      try {
+        const { rows } = await q(
+          `insert into project (
+             id, org_id, name, opened_at, created_by,
+             code, client_name, client_email, client_cell, client_address,
+             property_description, type_code, budget_estimate, billing_basis,
+             lead_user_id, status
+           ) values ($1, $2, $3, coalesce($4, now()), $5,
+                     $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+        returning id`,
+          [
+            projectId, orgId, clean.name, clean.openedAt, userId,
+            clean.code, clean.clientName, clean.clientEmail, clean.clientCell,
+            clean.clientAddress, clean.propertyDescription, clean.typeCode,
+            clean.budgetEstimate, clean.billingBasis, clean.leadUserId,
+            clean.status || "open",
+          ],
+        );
+        return this.getRegisterProject(rows[0].id);
+      } catch (error) {
+        if (error.code === "23505") throw new DuplicateCodeError(clean.code);
+        throw error;
+      }
+    },
+
+    /**
+     * Only the keys present in `fields` move. A register form that posts back
+     * every column would otherwise blank whatever it did not render.
+     */
+    async updateRegisterProject(projectId, fields) {
+      const clean = registerFields(fields, { partial: true });
+      const columns = {
+        name: clean.name, code: clean.code, client_name: clean.clientName,
+        client_email: clean.clientEmail, client_cell: clean.clientCell,
+        client_address: clean.clientAddress,
+        property_description: clean.propertyDescription,
+        type_code: clean.typeCode, budget_estimate: clean.budgetEstimate,
+        billing_basis: clean.billingBasis, lead_user_id: clean.leadUserId,
+        status: clean.status, opened_at: clean.openedAt,
+      };
+      const sets = [];
+      const params = [projectId, orgId];
+      for (const [column, value] of Object.entries(columns)) {
+        if (value === undefined) continue;
+        params.push(value);
+        sets.push(`${column} = $${params.length}`);
+      }
+      if (!sets.length) return this.getRegisterProject(projectId);
+      try {
+        const { rows } = await q(
+          `update project set ${sets.join(", ")}, updated_at = now()
+            where id = $1 and org_id = $2 and deleted_at is null
+        returning id`,
+          params,
+        );
+        if (!rows[0]) return null;
+        return this.getRegisterProject(projectId);
+      } catch (error) {
+        if (error.code === "23505") throw new DuplicateCodeError(clean.code);
+        throw error;
+      }
+    },
+
+    // --- the timesheet ----------------------------------------------------
+
+    /**
+     * One log for the practice, filtered - not a hidden sheet per person. The
+     * workbook kept seven, most of them `veryHidden`, which is why nobody
+     * could answer "what did this job cost" without opening all of them.
+     */
+    async listTimeEntries({ projectId = null, personId = null, from = null, to = null } = {}) {
+      const { rows } = await q(
+        `select te.id, te.project_id, te.user_id, u.email as user_email,
+                p.code as project_code, p.name as project_name,
+                te.entry_date, te.started_at, te.ended_at, te.minutes,
+                te.activity_type, te.description, te.phase_ref,
+                te.prints_qty, te.travel_km, te.rate_band_code, te.rate_applied,
+                te.pricing_rule, te.captured_amount, te.created_at,
+                cl.id as certificate_line_id, cl.certificate_id
+           from time_entry te
+           join project p on p.id = te.project_id
+           join app_user u on u.id = te.user_id
+           left join certificate_line cl
+                  on cl.time_entry_id = te.id and cl.deleted_at is null
+          where p.org_id = $1
+            and p.deleted_at is null
+            and te.deleted_at is null
+            and ($2::text is null or te.project_id = $2)
+            and ($3::text is null or te.user_id = $3)
+            and ($4::date is null or te.entry_date >= $4)
+            and ($5::date is null or te.entry_date <= $5)
+          order by te.entry_date desc, te.started_at desc nulls last, te.created_at desc`,
+        [orgId, projectId, personId, from, to],
+      );
+      return rows.map(timeEntryRow);
+    },
+
+    /**
+     * Captured value, written once.
+     *
+     * The amount is computed here from the rule named on the way in and then
+     * never touched again - there is no method on this store that updates it,
+     * and a test asserts no statement in src/ does either. Overspend that
+     * cannot be billed is a write_down against a certificate, which leaves
+     * both numbers standing and answers "how much did this really cost".
+     */
+    async createTimeEntry(fields) {
+      const projectId = String(fields.projectId || "");
+      const project = await this.getProject(projectId);
+      if (!project) return null;
+
+      const minutes = Number(fields.minutes);
+      if (!Number.isInteger(minutes) || minutes < 0) {
+        throw new ValidationError("minutes must be a whole number >= 0");
+      }
+      const rule = fields.pricingRule || "tier_1920";
+      let hourlyRate = fields.hourlyRate ?? null;
+      const bandCode = trimmed(fields.rateBandCode) ?? null;
+      if (rule === "band_hourly" && hourlyRate === null && bandCode) {
+        const { rows } = await q(
+          `select hourly_rate from rate_band
+            where org_id = $1 and upper(btrim(code)) = upper(btrim($2))
+              and deleted_at is null
+            order by effective_from desc limit 1`,
+          [orgId, bandCode],
+        );
+        if (!rows[0]) throw new ValidationError(`no rate band ${bandCode}`);
+        hourlyRate = num(rows[0].hourly_rate);
+      }
+      const { capturedAmount, rateApplied } = priceEntry({ minutes, rule, hourlyRate });
+
+      const description = trimmed(fields.description);
+      const activityType = trimmed(fields.activityType);
+      if (!description) throw new ValidationError("a description is required");
+      if (!activityType) throw new ValidationError("an activity type is required");
+      if (!fields.date) throw new ValidationError("a date is required");
+
+      const { rows } = await q(
+        `insert into time_entry (
+           id, project_id, user_id, entry_date, started_at, ended_at, minutes,
+           activity_type, description, phase_ref, prints_qty, travel_km,
+           rate_band_code, rate_applied, pricing_rule, captured_amount, created_by
+         ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $3)
+      returning id`,
+        [
+          sid("te"), projectId, fields.userId || userId, fields.date,
+          trimmed(fields.start) ?? null, trimmed(fields.end) ?? null, minutes,
+          activityType, description, trimmed(fields.phaseRef) ?? null,
+          Number(fields.printsQty) || 0, Number(fields.travelKm) || 0,
+          bandCode, rateApplied, rule, capturedAmount,
+        ],
+      );
+      return this.getTimeEntry(rows[0].id);
+    },
+
+    async getTimeEntry(entryId) {
+      const { rows } = await q(
+        `select te.id, te.project_id, te.user_id, u.email as user_email,
+                p.code as project_code, p.name as project_name,
+                te.entry_date, te.started_at, te.ended_at, te.minutes,
+                te.activity_type, te.description, te.phase_ref,
+                te.prints_qty, te.travel_km, te.rate_band_code, te.rate_applied,
+                te.pricing_rule, te.captured_amount, te.created_at,
+                cl.id as certificate_line_id, cl.certificate_id
+           from time_entry te
+           join project p on p.id = te.project_id
+           join app_user u on u.id = te.user_id
+           left join certificate_line cl
+                  on cl.time_entry_id = te.id and cl.deleted_at is null
+          where te.id = $2 and te.deleted_at is null
+            and p.org_id = $1 and p.deleted_at is null`,
+        [orgId, entryId],
+      );
+      return rows[0] ? timeEntryRow(rows[0]) : null;
+    },
+
+    /**
+     * Soft delete, which is how a mistyped entry is corrected. Not the same
+     * thing as editing one: the row stays, dated and attributed, and the sum
+     * stops counting it. An entry already on a certificate line stays put -
+     * unpicking a document that has gone out is a credit, not a delete.
+     */
+    async deleteTimeEntry(entryId) {
+      const { rows: billed } = await q(
+        `select cl.certificate_id
+           from certificate_line cl
+           join payment_certificate pc on pc.id = cl.certificate_id
+          where cl.time_entry_id = $1 and cl.deleted_at is null
+            and pc.status = 'issued' and pc.deleted_at is null`,
+        [entryId],
+      );
+      if (billed[0]) throw new IssuedError(billed[0].certificate_id);
+      const { rows } = await q(
+        `update time_entry te
+            set deleted_at = now()
+          where te.id = $1 and te.deleted_at is null
+            and exists (select 1 from project p
+                         where p.id = te.project_id and p.org_id = $2
+                           and p.deleted_at is null)
+        returning te.id`,
+        [entryId, orgId],
+      );
+      if (!rows[0]) return null;
+      await q(
+        `update certificate_line set deleted_at = now()
+          where time_entry_id = $1 and deleted_at is null`,
+        [entryId],
+      );
+      return { id: rows[0].id };
+    },
+
+    /**
+     * Quoted, captured, billed - and the two ratios the customer actually
+     * asked for. Realisation is what the firm kept of what it spent; burn is
+     * how much of the quote the work has eaten. Neither is derived at render
+     * time in three different components.
+     */
+    async projectFinancials(projectId) {
+      const { rows } = await q(
+        `select p.id,
+                p.budget_estimate,
+                p.billing_basis,
+                p.status,
+                lines.certified_gross,
+                lines.draft_gross,
+                wds.written_down,
+                wds.unexplained_written_down,
+                time_totals.captured,
+                time_totals.captured_minutes,
+                time_totals.uncertified_captured,
+                time_totals.broken_rows
+           from project p
+           ${FINANCIAL_LATERALS}
+          where p.id = $2 and p.org_id = $1 and p.deleted_at is null`,
+        [orgId, projectId],
+      );
+      return rows[0] ? financials(rows[0]) : null;
+    },
+
+    // --- certificates -----------------------------------------------------
+
+    async listCertificates(projectId) {
+      const { rows } = await q(
+        `select pc.id, pc.project_id, pc.seq, pc.period_start, pc.period_end,
+                pc.status, pc.vat_rate, pc.issued_at, pc.created_at,
+                coalesce(l.subtotal, 0) as subtotal,
+                coalesce(w.written_down, 0) as written_down
+           from payment_certificate pc
+           join project p on p.id = pc.project_id
+           left join lateral (
+             select coalesce(sum(cl.amount), 0) as subtotal
+               from certificate_line cl
+              where cl.certificate_id = pc.id and cl.deleted_at is null
+           ) l on true
+           left join lateral (
+             select coalesce(sum(wd.amount), 0) as written_down
+               from write_down wd
+              where wd.certificate_id = pc.id and wd.deleted_at is null
+           ) w on true
+          where pc.project_id = $2 and pc.deleted_at is null
+            and p.org_id = $1 and p.deleted_at is null
+          order by pc.seq`,
+        [orgId, projectId],
+      );
+      return rows.map(certificateSummary);
+    },
+
+    /** A certificate with everything on it. The document, not a row. */
+    async getCertificate(certificateId) {
+      const { rows } = await q(
+        `select pc.id, pc.project_id, pc.seq, pc.period_start, pc.period_end,
+                pc.status, pc.vat_rate, pc.issued_at, pc.created_at
+           from payment_certificate pc
+           join project p on p.id = pc.project_id
+          where pc.id = $2 and pc.deleted_at is null
+            and p.org_id = $1 and p.deleted_at is null`,
+        [orgId, certificateId],
+      );
+      if (!rows[0]) return null;
+      const { rows: lines } = await q(
+        `select id, seq, source, description, phase_ref, pct, units, amount, time_entry_id
+           from certificate_line
+          where certificate_id = $1 and deleted_at is null
+          order by seq`,
+        [certificateId],
+      );
+      const { rows: downs } = await q(
+        `select id, phase_ref, amount, pct, reason_code, note, created_at
+           from write_down
+          where certificate_id = $1 and deleted_at is null
+          order by created_at`,
+        [certificateId],
+      );
+      return certificateDocument(rows[0], lines, downs);
+    },
+
+    async createCertificate(projectId, { periodStart = null, periodEnd = null } = {}) {
+      const project = await this.getProject(projectId);
+      if (!project) return null;
+      const { rows } = await q(
+        `insert into payment_certificate (id, project_id, seq, period_start, period_end, created_by)
+         select $1, $2, coalesce(max(seq), 0) + 1, $3, $4, $5
+           from payment_certificate
+          where project_id = $2 and deleted_at is null
+      returning id`,
+        [sid("pc"), projectId, periodStart, periodEnd, userId],
+      );
+      return this.getCertificate(rows[0].id);
+    },
+
+    /**
+     * A fee-schedule line, entered by hand for now. When fee templates land
+     * these come from the phase split; until then a typed percentage and
+     * amount is the honest version, and it is the same row either way.
+     */
+    async addScheduleLine(certificateId, { description, amount, pct = null, phaseRef = null }) {
+      if (!await requireDraft(this, certificateId)) return null;
+      const text = trimmed(description);
+      if (!text) throw new ValidationError("a description is required");
+      const value = Number(amount);
+      if (!Number.isFinite(value)) throw new ValidationError("an amount is required");
+      await q(
+        `insert into certificate_line (
+           id, certificate_id, seq, source, description, phase_ref, pct, amount, created_by
+         ) select $1, $2, coalesce(max(seq), 0) + 1, 'schedule', $3, $4, $5, $6, $7
+             from certificate_line where certificate_id = $2 and deleted_at is null`,
+        [sid("cl"), certificateId, text, trimmed(phaseRef) ?? null, pct, toCents(value), userId],
+      );
+      return this.getCertificate(certificateId);
+    },
+
+    /**
+     * The invoice macro, reimplemented. Pulls every unbilled time entry in the
+     * range onto the certificate, oldest first.
+     *
+     * Two differences from the original, both deliberate. It does not stop at
+     * sixteen lines - the macro did, and the seventeenth hour simply never
+     * reached the client. And an entry already carrying a live line is skipped
+     * rather than duplicated, which the unique index on `time_entry_id` also
+     * enforces underneath; re-running an overlapping range is a no-op instead
+     * of billing the overlap twice.
+     */
+    async addCertificateLinesFromTime(certificateId, { from = null, to = null } = {}) {
+      const certificate = await requireDraft(this, certificateId);
+      if (!certificate) return null;
+      const { rows: entries } = await q(
+        `select te.id, te.entry_date, te.description, te.phase_ref, te.captured_amount
+           from time_entry te
+           join project p on p.id = te.project_id
+          where te.project_id = $1
+            and te.deleted_at is null
+            and p.org_id = $2
+            and ($3::date is null or te.entry_date >= $3)
+            and ($4::date is null or te.entry_date <= $4)
+            and not exists (
+              select 1 from certificate_line cl
+               where cl.time_entry_id = te.id and cl.deleted_at is null
+            )
+          order by te.entry_date, te.created_at`,
+        [certificate.projectId, orgId, from, to],
+      );
+      const { rows: seqRows } = await q(
+        `select coalesce(max(seq), 0) as seq from certificate_line
+          where certificate_id = $1 and deleted_at is null`,
+        [certificateId],
+      );
+      let seq = Number(seqRows[0].seq);
+      for (const entry of entries) {
+        seq += 1;
+        const amount = num(entry.captured_amount);
+        await q(
+          `insert into certificate_line (
+             id, certificate_id, seq, source, description, phase_ref,
+             units, amount, time_entry_id, created_by
+           ) values ($1, $2, $3, 'time', $4, $5, $6, $7, $8, $9)`,
+          [
+            sid("cl"), certificateId, seq, entry.description,
+            entry.phase_ref, certificateUnits(amount), amount, entry.id, userId,
+          ],
+        );
+      }
+      return this.getCertificate(certificateId);
+    },
+
+    /**
+     * Value given up, with a reason. Either an amount or a percentage of the
+     * current subtotal - the workbook's July certificate for P074 took 20% off
+     * the bottom of the page, and that is the shape the firm already thinks in.
+     *
+     * The reason is required. It is the entire point: the customer does not
+     * want the write-down stopped, they want to be told it is happening and
+     * why, and a discount nobody can account for is the gap this exists to
+     * close.
+     */
+    async addWriteDown(certificateId, { amount = null, pct = null, reasonCode, note = null, phaseRef = null }) {
+      if (!await requireDraft(this, certificateId)) return null;
+      const reason = trimmed(reasonCode);
+      if (!reason) throw new ValidationError("a reason is required for a write-down");
+      let value = amount === null ? null : Number(amount);
+      if (value === null) {
+        const fraction = Number(pct);
+        if (!Number.isFinite(fraction) || fraction <= 0) {
+          throw new ValidationError("a write-down needs an amount or a percentage");
+        }
+        const { rows } = await q(
+          `select coalesce(sum(amount), 0) as subtotal from certificate_line
+            where certificate_id = $1 and deleted_at is null`,
+          [certificateId],
+        );
+        value = toCents(num(rows[0].subtotal) * fraction);
+      }
+      if (!Number.isFinite(value) || value <= 0) {
+        throw new ValidationError("a write-down must be greater than zero");
+      }
+      await q(
+        `insert into write_down (id, certificate_id, phase_ref, amount, pct, reason_code, note, created_by)
+              values ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [sid("wd"), certificateId, trimmed(phaseRef) ?? null, toCents(value), pct, reason, trimmed(note) ?? null, userId],
+      );
+      return this.getCertificate(certificateId);
+    },
+
+    /** Issuing is one way. A correction is the next certificate. */
+    async issueCertificate(certificateId) {
+      const { rows } = await q(
+        `update payment_certificate pc
+            set status = 'issued', issued_at = now(), updated_at = now()
+          where pc.id = $1 and pc.status = 'draft' and pc.deleted_at is null
+            and exists (select 1 from project p
+                         where p.id = pc.project_id and p.org_id = $2
+                           and p.deleted_at is null)
+        returning pc.id`,
+        [certificateId, orgId],
+      );
+      if (!rows[0]) {
+        const current = await this.getCertificate(certificateId);
+        if (!current) return null;
+        throw new IssuedError(certificateId);
+      }
+      return this.getCertificate(certificateId);
+    },
+  };
+}
+
+/**
+ * Everything that writes to a certificate goes through here first. Null for
+ * "no such certificate in this org", matching every other read on this store,
+ * so the route answers 404; issued is a different answer and throws.
+ */
+async function requireDraft(store, certificateId) {
+  const certificate = await store.getCertificate(certificateId);
+  if (!certificate) return null;
+  if (certificate.status !== "draft") throw new IssuedError(certificateId);
+  return certificate;
+}
+
+// --- practice-ops SQL fragments ---------------------------------------------
+
+// Shared by the register list, the single register read and the financials, so
+// "captured" cannot come to mean one thing in a list and another on a page.
+const FINANCIAL_LATERALS = `
+  left join lateral (
+    select coalesce(sum(te.captured_amount), 0)                   as captured,
+           coalesce(sum(te.minutes), 0)                           as captured_minutes,
+           coalesce(sum(te.captured_amount) filter (
+             where not exists (select 1 from certificate_line cl
+                                where cl.time_entry_id = te.id and cl.deleted_at is null)
+           ), 0)                                                  as uncertified_captured,
+           -- The workbook's damage, counted rather than hidden: somebody
+           -- clocked on and never clocked off, or hours were logged and
+           -- priced at nothing.
+           --
+           -- Having neither clock time is not damage. The duration can be
+           -- typed straight in, and it is how most of a day gets recorded
+           -- after the fact; flagging that would put a warning on the normal
+           -- case and teach everyone to ignore the warnings.
+           count(*) filter (
+             where (te.started_at is not null and te.ended_at is null)
+                or (te.minutes > 0 and te.captured_amount = 0)
+           )                                                       as broken_rows
+      from time_entry te
+     where te.project_id = p.id and te.deleted_at is null
+  ) time_totals on true
+  left join lateral (
+    select coalesce(sum(cl.amount) filter (where pc.status = 'issued'), 0) as certified_gross,
+           coalesce(sum(cl.amount) filter (where pc.status = 'draft'), 0)  as draft_gross
+      from certificate_line cl
+      join payment_certificate pc on pc.id = cl.certificate_id and pc.deleted_at is null
+     where pc.project_id = p.id and cl.deleted_at is null
+  ) lines on true
+  left join lateral (
+    select coalesce(sum(wd.amount) filter (where pc.status = 'issued'), 0) as written_down,
+           coalesce(sum(wd.amount) filter (
+             where pc.status = 'issued' and wd.reason_code = 'legacy_unspecified'
+           ), 0)                                                          as unexplained_written_down
+      from write_down wd
+      join payment_certificate pc on pc.id = wd.certificate_id and pc.deleted_at is null
+     where pc.project_id = p.id and wd.deleted_at is null
+  ) wds on true
+`;
+
+const REGISTER_COLUMNS = `
+  p.id, p.code, p.name, p.client_name, p.client_email, p.client_cell,
+  p.client_address, p.property_description, p.type_code, p.budget_estimate,
+  p.billing_basis, p.lead_user_id, p.status, p.opened_at, p.updated_at,
+  p.created_at, p.deleted_at, d.id as drawing_id,
+  time_totals.captured, time_totals.captured_minutes,
+  time_totals.uncertified_captured, time_totals.broken_rows,
+  lines.certified_gross, lines.draft_gross,
+  wds.written_down, wds.unexplained_written_down
+`;
+
+// --- practice-ops mapping ---------------------------------------------------
+
+function trimmed(value) {
+  if (value === null || value === undefined) return null;
+  const text = String(value).trim();
+  return text || null;
+}
+
+/** `numeric` arrives as a string, exactly. Money is a Number at the JSON edge. */
+function num(value) {
+  if (value === null || value === undefined) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/**
+ * Only the keys actually present move. A register form posts what it renders,
+ * and a partial update that treated absence as "clear it" would empty the
+ * client's phone number every time someone corrected a project code.
+ */
+function registerFields(fields, { partial = false } = {}) {
+  const absent = partial ? undefined : null;
+  const text = (key) => (key in fields ? trimmed(fields[key]) : absent);
+  const money = (key) => {
+    if (!(key in fields)) return absent;
+    const raw = fields[key];
+    // Explicitly null or blank is "no figure", which is a real answer: plenty
+    // of time-and-materials work is opened with no budget at all. Number(null)
+    // is 0, and a quote of zero would make every such job read as 100% burnt.
+    if (raw === null || raw === undefined || raw === "") return null;
+    const value = Number(raw);
+    // Not silently dropped. "R120 000" typed into a number field is a mistake
+    // worth a message, not a budget that quietly becomes nothing.
+    if (!Number.isFinite(value)) throw new ValidationError(`${key} must be a number`);
+    return toCents(value);
+  };
+  return {
+    name: text("name"),
+    code: text("code"),
+    clientName: text("clientName"),
+    clientEmail: text("clientEmail"),
+    clientCell: text("clientCell"),
+    clientAddress: text("clientAddress"),
+    propertyDescription: text("propertyDescription"),
+    typeCode: text("typeCode"),
+    billingBasis: text("billingBasis"),
+    leadUserId: text("leadUserId"),
+    status: text("status"),
+    openedAt: text("openedAt"),
+    budgetEstimate: money("budgetEstimate"),
+  };
+}
+
+function registerRow(row) {
+  return {
+    id: row.id,
+    code: row.code ?? null,
+    name: row.name ?? null,
+    clientName: row.client_name ?? null,
+    clientEmail: row.client_email ?? null,
+    clientCell: row.client_cell ?? null,
+    clientAddress: row.client_address ?? null,
+    propertyDescription: row.property_description ?? null,
+    typeCode: row.type_code ?? null,
+    budgetEstimate: num(row.budget_estimate),
+    billingBasis: row.billing_basis ?? null,
+    leadUserId: row.lead_user_id ?? null,
+    status: row.status ?? null,
+    openedAt: row.opened_at ?? null,
+    updatedAt: row.updated_at ?? null,
+    createdAt: row.created_at ?? null,
+    deletedAt: row.deleted_at ?? null,
+    // Null, not false: a job with no drawing is the normal case for most of
+    // these disciplines, and the planner uses this to decide whether "open"
+    // means a canvas or a register page.
+    drawingId: row.drawing_id ?? null,
+    financials: financials(row),
+  };
+}
+
+/**
+ * The two ratios, and the evidence behind them.
+ *
+ * `realisation` is what the firm kept of what the work cost it; `burn` is how
+ * much of the quote that work has eaten. Both are null rather than zero when
+ * their denominator is, because "no realisation yet" and "realised nothing"
+ * are different sentences and a dashboard that prints 0% for the first is
+ * lying about a job nobody has billed.
+ */
+function financials(row) {
+  const quoted = num(row.budget_estimate);
+  const captured = num(row.captured) ?? 0;
+  const certifiedGross = num(row.certified_gross) ?? 0;
+  const writtenDown = num(row.written_down) ?? 0;
+  const billed = toCents(certifiedGross - writtenDown);
+  return {
+    quoted,
+    captured,
+    capturedMinutes: Number(row.captured_minutes ?? 0),
+    certifiedGross,
+    draftGross: num(row.draft_gross) ?? 0,
+    writtenDown,
+    unexplainedWrittenDown: num(row.unexplained_written_down) ?? 0,
+    billed,
+    uncertifiedCaptured: num(row.uncertified_captured) ?? 0,
+    brokenRows: Number(row.broken_rows ?? 0),
+    realisation: ratio(billed, captured),
+    burn: ratio(captured, quoted),
+  };
+}
+
+function ratio(top, bottom) {
+  if (!bottom) return null;
+  return Math.round((top / bottom) * 10000) / 10000;
+}
+
+function timeEntryRow(row) {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    projectCode: row.project_code ?? null,
+    projectName: row.project_name ?? null,
+    userId: row.user_id,
+    userEmail: row.user_email ?? null,
+    date: row.entry_date,
+    start: row.started_at ?? null,
+    end: row.ended_at ?? null,
+    minutes: Number(row.minutes),
+    activityType: row.activity_type,
+    description: row.description,
+    phaseRef: row.phase_ref ?? null,
+    printsQty: Number(row.prints_qty ?? 0),
+    travelKm: num(row.travel_km) ?? 0,
+    rateBandCode: row.rate_band_code ?? null,
+    rateApplied: num(row.rate_applied),
+    pricingRule: row.pricing_rule,
+    capturedAmount: num(row.captured_amount) ?? 0,
+    createdAt: row.created_at ?? null,
+    certificateId: row.certificate_id ?? null,
+  };
+}
+
+function certificateSummary(row) {
+  const subtotal = num(row.subtotal) ?? 0;
+  const writtenDown = num(row.written_down) ?? 0;
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    seq: Number(row.seq),
+    periodStart: row.period_start ?? null,
+    periodEnd: row.period_end ?? null,
+    status: row.status,
+    vatRate: num(row.vat_rate) ?? 0,
+    issuedAt: row.issued_at ?? null,
+    createdAt: row.created_at ?? null,
+    subtotal,
+    writtenDown,
+    net: toCents(subtotal - writtenDown),
+  };
+}
+
+/**
+ * The certificate as it reads on paper: lines, then what was given up, then
+ * VAT on what is left. The write-down sits between the subtotal and the net
+ * rather than being folded into the lines, which is both how the firm already
+ * writes it and the only arrangement where the client's discount and the
+ * firm's lost value are both visible on one page.
+ */
+function certificateDocument(row, lines, downs) {
+  const mappedLines = lines.map((line) => ({
+    id: line.id,
+    seq: Number(line.seq),
+    source: line.source,
+    description: line.description,
+    phaseRef: line.phase_ref ?? null,
+    pct: num(line.pct),
+    units: num(line.units),
+    amount: num(line.amount) ?? 0,
+    timeEntryId: line.time_entry_id ?? null,
+  }));
+  const writeDowns = downs.map((down) => ({
+    id: down.id,
+    phaseRef: down.phase_ref ?? null,
+    amount: num(down.amount) ?? 0,
+    pct: num(down.pct),
+    reasonCode: down.reason_code,
+    note: down.note ?? null,
+    createdAt: down.created_at ?? null,
+  }));
+  const subtotal = toCents(mappedLines.reduce((total, line) => total + line.amount, 0));
+  const writtenDown = toCents(writeDowns.reduce((total, down) => total + down.amount, 0));
+  const net = toCents(subtotal - writtenDown);
+  const vatRate = num(row.vat_rate) ?? 0;
+  const vat = toCents(net * vatRate);
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    seq: Number(row.seq),
+    periodStart: row.period_start ?? null,
+    periodEnd: row.period_end ?? null,
+    status: row.status,
+    vatRate,
+    issuedAt: row.issued_at ?? null,
+    createdAt: row.created_at ?? null,
+    lines: mappedLines,
+    writeDowns,
+    subtotal,
+    writtenDown,
+    net,
+    vat,
+    total: toCents(net + vat),
   };
 }
 

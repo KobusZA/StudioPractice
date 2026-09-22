@@ -6,7 +6,12 @@ import {
   AuthError, RateLimiter, SESSION_COOKIE, SESSION_TTL_MS,
   refreshOfflineLease, resolveSession, revokeSession, signIn, signUp,
 } from "./auth.js";
-import { ConflictError, openStore } from "./store.js";
+import {
+  ConflictError, DuplicateCodeError, IssuedError, ValidationError, openStore,
+} from "./store.js";
+import {
+  ACTIVITY_TYPES, BILLING_BASES, PROJECT_STATUSES, WRITE_DOWN_REASONS,
+} from "./defaults.js";
 import { withTransaction } from "./db.js";
 import {
   HttpError, clearedCookie, createRouter, parseCookies, readJsonBody, sendJson, sessionCookie,
@@ -46,8 +51,32 @@ export function createApi(pool, options = {}, env = process.env) {
     ["POST", "/api/projects/:id/duplicate", handleDuplicateProject],
     ["POST", "/api/projects/:id/restore", handleRestoreProject],
 
+    ["POST", "/api/projects/:id/drawing", handleAttachDrawing],
     ["GET", "/api/drawings/:id", handleGetDrawing],
     ["PUT", "/api/drawings/:id", handlePutDrawing],
+
+    // Practice operations. The register is a separate create path from
+    // /api/projects on purpose: that one is the planner's, and it requires a
+    // document because a canvas with no drawing cannot be saved. A strata
+    // report has no geometry and must not have to invent an empty one.
+    ["GET", "/api/practice/reference", handleReference],
+    ["GET", "/api/register", handleListRegister],
+    ["POST", "/api/register", handleCreateRegisterProject],
+    ["GET", "/api/register/:id", handleGetRegisterProject],
+    ["PATCH", "/api/register/:id", handleUpdateRegisterProject],
+    ["GET", "/api/projects/:id/financials", handleFinancials],
+
+    ["GET", "/api/time-entries", handleListTimeEntries],
+    ["POST", "/api/time-entries", handleCreateTimeEntry],
+    ["DELETE", "/api/time-entries/:id", handleDeleteTimeEntry],
+
+    ["GET", "/api/projects/:id/certificates", handleListCertificates],
+    ["POST", "/api/projects/:id/certificates", handleCreateCertificate],
+    ["GET", "/api/certificates/:id", handleGetCertificate],
+    ["POST", "/api/certificates/:id/lines", handleAddScheduleLine],
+    ["POST", "/api/certificates/:id/lines-from-time", handleAddLinesFromTime],
+    ["POST", "/api/certificates/:id/write-downs", handleAddWriteDown],
+    ["POST", "/api/certificates/:id/issue", handleIssueCertificate],
 
     ["POST", "/api/visualize", handleVisualize],
   ]);
@@ -84,6 +113,17 @@ export function createApi(pool, options = {}, env = process.env) {
           revision: error.current.revision,
           drawing: error.current,
         });
+      } else if (error instanceof DuplicateCodeError) {
+        // Named, because "that code is already in use" sends someone to the
+        // register and a bare 409 sends them to look for a bug.
+        sendJson(res, 409, { error: error.message, code: error.projectCode });
+      } else if (error instanceof IssuedError) {
+        sendJson(res, 409, {
+          error: "That certificate has been issued and cannot be changed",
+          certificateId: error.certificateId,
+        });
+      } else if (error instanceof ValidationError) {
+        sendJson(res, 400, { error: error.message });
       } else if (error instanceof HttpError) {
         sendJson(res, error.status, { error: error.message, ...error.extra });
       } else if (error instanceof AuthError) {
@@ -170,10 +210,30 @@ async function handleOpenProject({ req, res, pool, params }) {
   const store = await requireStore(pool, req);
   const project = await store.getProject(params.id);
   if (!project) throw new HttpError(404, "No such job");
+  // `drawing: null` rather than a 404. Most of the disciplines this practice
+  // works in never produce one, and a register job that 404s on open is a job
+  // the rest of the application cannot reach at all. The planner reads this
+  // and asks to attach a drawing; everything else ignores it.
   const drawing = await store.getDrawingForProject(params.id);
-  if (!drawing) throw new HttpError(404, "That job has no drawing");
   await store.touchOpened(params.id);
-  sendJson(res, 200, { project, drawing }, { ETag: revisionTag(drawing.revision) });
+  const headers = drawing ? { ETag: revisionTag(drawing.revision) } : {};
+  sendJson(res, 200, { project, drawing: drawing ?? null }, headers);
+}
+
+/** A canvas for a job that did not start with one. */
+async function handleAttachDrawing({ req, res, pool, params }) {
+  const session = await requireSession(pool, req);
+  const body = (await readJsonBody(req)) || {};
+  const doc = requireDoc(body.doc);
+  const drawing = await withTransaction(pool, (client) => (
+    openStore(client, session).createDrawingForProject(params.id, {
+      doc,
+      packId: body.packId ?? doc.packId ?? null,
+      drawingId: typeof doc.id === "string" && doc.id ? doc.id : undefined,
+    })
+  ));
+  if (!drawing) throw new HttpError(404, "No such job");
+  sendJson(res, 201, { drawing }, { ETag: revisionTag(drawing.revision) });
 }
 
 async function handleRenameProject({ req, res, pool, params }) {
@@ -257,6 +317,179 @@ async function handlePutDrawing({ req, res, pool, params }) {
   sendJson(res, 200, { drawing: saved }, { ETag: revisionTag(saved.revision) });
 }
 
+// --- the register ----------------------------------------------------------
+
+/**
+ * Everything the practice-ops screens need to render a form, in one call: the
+ * firm's own type list and tariff bands from its rows, and the closed
+ * vocabularies from the source module. Sent together because a register form
+ * that arrives before its type dropdown does is a form that offers free text,
+ * which is how the workbook ended up with `DISPUTE`, `Dispute` and `dispute`.
+ */
+async function handleReference({ req, res, pool }) {
+  const store = await requireStore(pool, req);
+  sendJson(res, 200, {
+    projectTypes: await store.listProjectTypes(),
+    rateBands: await store.listRateBands(),
+    activityTypes: ACTIVITY_TYPES,
+    writeDownReasons: WRITE_DOWN_REASONS,
+    billingBases: BILLING_BASES,
+    projectStatuses: PROJECT_STATUSES,
+  });
+}
+
+async function handleListRegister({ req, res, pool, url }) {
+  const store = await requireStore(pool, req);
+  const includeDeleted = url.searchParams.get("deleted") === "1";
+  sendJson(res, 200, { projects: await store.listRegister({ includeDeleted }) });
+}
+
+async function handleGetRegisterProject({ req, res, pool, params }) {
+  const store = await requireStore(pool, req);
+  const project = await store.getRegisterProject(params.id);
+  if (!project) throw new HttpError(404, "No such job");
+  sendJson(res, 200, { project });
+}
+
+async function handleCreateRegisterProject({ req, res, pool }) {
+  const session = await requireSession(pool, req);
+  const body = (await readJsonBody(req)) || {};
+  const project = await withTransaction(pool, (client) => (
+    openStore(client, session).createRegisterProject(body)
+  ));
+  sendJson(res, 201, { project });
+}
+
+async function handleUpdateRegisterProject({ req, res, pool, params }) {
+  const session = await requireSession(pool, req);
+  const body = (await readJsonBody(req)) || {};
+  const project = await withTransaction(pool, (client) => (
+    openStore(client, session).updateRegisterProject(params.id, body)
+  ));
+  if (!project) throw new HttpError(404, "No such job");
+  sendJson(res, 200, { project });
+}
+
+async function handleFinancials({ req, res, pool, params }) {
+  const store = await requireStore(pool, req);
+  const financials = await store.projectFinancials(params.id);
+  if (!financials) throw new HttpError(404, "No such job");
+  sendJson(res, 200, { financials });
+}
+
+// --- the timesheet ---------------------------------------------------------
+
+async function handleListTimeEntries({ req, res, pool, url }) {
+  const store = await requireStore(pool, req);
+  sendJson(res, 200, {
+    entries: await store.listTimeEntries({
+      projectId: blankToNull(url.searchParams.get("project")),
+      personId: blankToNull(url.searchParams.get("person")),
+      from: blankToNull(url.searchParams.get("from")),
+      to: blankToNull(url.searchParams.get("to")),
+    }),
+  });
+}
+
+/**
+ * Logging time. The response carries the project's financials back with the
+ * entry, so the timesheet can show burn against the fee as the row lands
+ * rather than on a page somebody visits once a month. That warning, at that
+ * moment, is worth more than the overview it would otherwise appear on.
+ */
+async function handleCreateTimeEntry({ req, res, pool }) {
+  const session = await requireSession(pool, req);
+  const body = (await readJsonBody(req)) || {};
+  const result = await withTransaction(pool, async (client) => {
+    const store = openStore(client, session);
+    const entry = await store.createTimeEntry(body);
+    if (!entry) return null;
+    return { entry, financials: await store.projectFinancials(entry.projectId) };
+  });
+  if (!result) throw new HttpError(404, "No such job");
+  sendJson(res, 201, result);
+}
+
+async function handleDeleteTimeEntry({ req, res, pool, params }) {
+  const session = await requireSession(pool, req);
+  const deleted = await withTransaction(pool, (client) => (
+    openStore(client, session).deleteTimeEntry(params.id)
+  ));
+  if (!deleted) throw new HttpError(404, "No such time entry");
+  sendJson(res, 200, { deleted: deleted.id });
+}
+
+// --- certificates ----------------------------------------------------------
+
+async function handleListCertificates({ req, res, pool, params }) {
+  const store = await requireStore(pool, req);
+  const project = await store.getProject(params.id);
+  if (!project) throw new HttpError(404, "No such job");
+  sendJson(res, 200, { certificates: await store.listCertificates(params.id) });
+}
+
+async function handleCreateCertificate({ req, res, pool, params }) {
+  const session = await requireSession(pool, req);
+  const body = (await readJsonBody(req)) || {};
+  const certificate = await withTransaction(pool, (client) => (
+    openStore(client, session).createCertificate(params.id, {
+      periodStart: blankToNull(body.periodStart),
+      periodEnd: blankToNull(body.periodEnd),
+    })
+  ));
+  if (!certificate) throw new HttpError(404, "No such job");
+  sendJson(res, 201, { certificate });
+}
+
+async function handleGetCertificate({ req, res, pool, params }) {
+  const store = await requireStore(pool, req);
+  const certificate = await store.getCertificate(params.id);
+  if (!certificate) throw new HttpError(404, "No such certificate");
+  sendJson(res, 200, { certificate });
+}
+
+async function handleAddScheduleLine({ req, res, pool, params }) {
+  const session = await requireSession(pool, req);
+  const body = (await readJsonBody(req)) || {};
+  const certificate = await withTransaction(pool, (client) => (
+    openStore(client, session).addScheduleLine(params.id, body)
+  ));
+  if (!certificate) throw new HttpError(404, "No such certificate");
+  sendJson(res, 200, { certificate });
+}
+
+async function handleAddLinesFromTime({ req, res, pool, params }) {
+  const session = await requireSession(pool, req);
+  const body = (await readJsonBody(req)) || {};
+  const certificate = await withTransaction(pool, (client) => (
+    openStore(client, session).addCertificateLinesFromTime(params.id, {
+      from: blankToNull(body.from),
+      to: blankToNull(body.to),
+    })
+  ));
+  if (!certificate) throw new HttpError(404, "No such certificate");
+  sendJson(res, 200, { certificate });
+}
+
+async function handleAddWriteDown({ req, res, pool, params }) {
+  const session = await requireSession(pool, req);
+  const body = (await readJsonBody(req)) || {};
+  const certificate = await withTransaction(pool, (client) => (
+    openStore(client, session).addWriteDown(params.id, body)
+  ));
+  if (!certificate) throw new HttpError(404, "No such certificate");
+  sendJson(res, 200, { certificate });
+}
+
+async function handleIssueCertificate({ req, res, pool, params }) {
+  const session = await requireSession(pool, req);
+  const certificate = await withTransaction(pool, (client) => (
+    openStore(client, session).issueCertificate(params.id)
+  ));
+  if (!certificate) throw new HttpError(404, "No such certificate");
+  sendJson(res, 200, { certificate });
+}
+
 // --- visualization ---------------------------------------------------------
 
 async function handleVisualize({ req, res, pool, rateLimiter, openaiApiKey, openaiFetch }) {
@@ -285,6 +518,20 @@ async function handleVisualize({ req, res, pool, rateLimiter, openaiApiKey, open
 }
 
 // --- shared ----------------------------------------------------------------
+
+/**
+ * An empty form field is "no filter", not a value.
+ *
+ * A blank date input posts `""`, and `"" ?? null` is still `""`, which reaches
+ * Postgres as `''::date` and fails the whole statement. The visible symptom is
+ * a button that appears to do nothing - which is exactly how "pull unbilled
+ * time" behaved before this existed.
+ */
+function blankToNull(value) {
+  if (value === null || value === undefined) return null;
+  const text = String(value).trim();
+  return text === "" ? null : text;
+}
 
 /** `1`/`true` on, `0`/`false` off, unset falls back - never a truthy string. */
 function envFlag(value, fallback) {
