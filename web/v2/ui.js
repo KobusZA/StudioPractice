@@ -16,7 +16,7 @@
 //    labelled on the visible part of the wall (so zooming into an end does
 //    not hide it), and in the options strip with angle.
 
-import { complianceGaps, normalizePackUnits } from "./schema.js";
+import { complianceGaps, normalizePackUnits, GEOMETRY_LENGTH_KEYS } from "./schema.js";
 import { RULE_PACK, evaluateCompliance, groupFindingsByPart, summarizeFindings } from "./rules.js";
 import { deriveBuildingLine, setBuildingLine, setPropertyLine, setSgReference } from "./site.js?v=20260915-offset";
 import { HINTS, firstTabId, renderRibbon } from "./ribbon.js?v=20260917-measure";
@@ -76,7 +76,7 @@ import {
   setLineHeading,
   setLineLength,
 } from "./click-draw.js?v=20260921-click-draw";
-import { area as polyArea, bbox, clipSegToRect, distToSeg, headingDeg, pointInPoly, roundGrid } from "./geom.js?v=20260915-offset";
+import { area as polyArea, bbox, clipSegToRect, distToSeg, formatLengthMm, headingDeg, parseLengthMm, pointInPoly, roundGrid } from "./geom.js?v=20260915-offset";
 import { SNAP_PIXEL_TOL, GAP_MAX_M, NICE_MIN_STEP_M, PROBE_VECTORS, applyNicePoint, bestEndpointSnap, collectSnapEdges, collectSnapTargets, nearestAlignments, resolveProbes, snapLengthFrom, snapPoint } from "./snap.js";
 import { DEFAULT_ROOF_PITCH, roofGuideLines } from "./roof.js";
 import {
@@ -97,7 +97,7 @@ import {
   roomPolygon,
   shapePolygon,
 } from "./model.js";
-import { deriveWalls, drawnWallThickness, isStripFooting, statusVisible } from "./walls.js";
+import { deriveWalls, drawnWallThickness, isStripFooting, skuDrawnHeight, statusVisible } from "./walls.js";
 import {
   openingDraftAt,
   openingOnWall,
@@ -119,9 +119,19 @@ import {
 import { exportDxf } from "./dxf.js";
 import { exportIfc } from "./ifc.js";
 import { boqRows, bomRows, scheduleTotal } from "./schedule.js";
-import { createMassingView, lookFromClicks, EYE_HEIGHT_M } from "./massing.js";
+import { createMassingView, lookFromClicks, EYE_HEIGHT_M, facesFromPayload, faceStyle, massingLayer, hatchPolygon } from "./massing.js";
 import { drawLookPlan, lookPlanCaption } from "./look-plan.js";
-import { sectionFromClicks } from "./section.js";
+import { sectionFromClicks, createSection, ensureSections, sectionById, clipFacesForSection, sectionUV } from "./section.js";
+import { ELEVATION_DIRECTIONS, elevationDirectionLabel, createElevation, ensureElevations, elevationById } from "./elevation.js";
+import { calloutFromClicks, createCallout, ensureCallouts, calloutById, calloutExtent } from "./callout.js";
+import {
+  revisionCloudFromClicks,
+  createRevisionCloud,
+  ensureRevisionClouds,
+  linkRevisionCloud,
+  revisionCloudsForSheet,
+  cloudArcs,
+} from "./revision.js";
 import {
   SHEET_SIZES,
   STANDARD_SCALES,
@@ -129,8 +139,10 @@ import {
   createSheet,
   ensureSheets,
   removeSheet,
+  setSheetView,
   sheetById,
   sheetScale,
+  sheetView,
   titleBlockFields,
   titleBlockLayout,
 } from "./sheets.js";
@@ -326,12 +338,29 @@ const el = {
   massPlanWrap: document.getElementById("v2-mass-plan-wrap"),
   massPlanCanvas: document.getElementById("v2-mass-plan-canvas"),
   massViewLabel: document.getElementById("v2-mass-view-label"),
+  typeDetailOverlay: document.getElementById("v2-type-detail-overlay"),
+  typeDetailPanel: document.querySelector("#v2-type-detail-overlay .type-detail-panel"),
+  typeDetailName: document.getElementById("v2-type-detail-name"),
+  typeDetailMeta: document.getElementById("v2-type-detail-meta"),
+  typeDetailClose: document.getElementById("v2-type-detail-close"),
+  typeDetailPrev: document.getElementById("v2-type-detail-prev"),
+  typeDetailNext: document.getElementById("v2-type-detail-next"),
+  typeDetailCount: document.getElementById("v2-type-detail-count"),
+  typeDetailNav: document.getElementById("v2-type-detail-nav"),
+  typeDetailMediaFrame: document.getElementById("v2-type-detail-media-frame"),
+  typeDetailPlaceholder: document.getElementById("v2-type-detail-placeholder"),
+  typeDetailPlaceholderIcon: document.getElementById("v2-type-detail-placeholder-icon"),
+  typeDetailImg: document.getElementById("v2-type-detail-img"),
+  typeDetailCategory: document.getElementById("v2-type-detail-category"),
+  typeDetailDims: document.getElementById("v2-type-detail-dims"),
+  typeDetailUse: document.getElementById("v2-type-detail-use"),
   sheetOverlay: document.getElementById("v2-sheet-overlay"),
   sheetClose: document.getElementById("v2-sheet-close"),
   sheetAdd: document.getElementById("v2-sheet-add"),
   sheetList: document.getElementById("v2-sheet-list"),
   sheetFields: document.getElementById("v2-sheet-fields"),
   sheetEmptyFields: document.getElementById("v2-sheet-empty-fields"),
+  sheetView: document.getElementById("v2-sheet-view"),
   sheetSize: document.getElementById("v2-sheet-size"),
   sheetTitle: document.getElementById("v2-sheet-title"),
   sheetScale: document.getElementById("v2-sheet-scale"),
@@ -344,6 +373,14 @@ const el = {
   sheetRevList: document.getElementById("v2-sheet-rev-list"),
   sheetRevDesc: document.getElementById("v2-sheet-rev-desc"),
   sheetRevAdd: document.getElementById("v2-sheet-rev-add"),
+  sheetCloudList: document.getElementById("v2-sheet-cloud-list"),
+  projectInfoOverlay: document.getElementById("v2-project-info-overlay"),
+  projectInfoClose: document.getElementById("v2-project-info-close"),
+  projectInfoJobNumber: document.getElementById("v2-project-info-job-number"),
+  projectInfoClientName: document.getElementById("v2-project-info-client-name"),
+  elevationOverlay: document.getElementById("v2-elevation-overlay"),
+  elevationClose: document.getElementById("v2-elevation-close"),
+  elevationDirections: document.getElementById("v2-elevation-directions"),
 };
 
 const ctx = el.canvas.getContext("2d");
@@ -390,6 +427,10 @@ let wallDraft = null;
 // click is the opposite. Not a press-and-hold box.
 let shapeDraft = null;
 let beamStart = null;
+// Document > Lines > Model / Annotate: the first click of a line, while
+// tool === "model-line" or "annot-line". Same bare-point shape as beamStart -
+// a line is a beam-shaped click-click with no SKU, not a chained wall.
+let lineStart = null;
 // Site > Property line: the vertices clicked so far, while tool === "property".
 // Closed by clicking near the first point again, Enter, or double-click.
 let siteDraft = null;
@@ -401,6 +442,14 @@ let sgPick = null;
 let cameraDraft = null;
 // Document > Views > Section: the first end of the cut while tool === "section".
 let sectionDraft = null;
+// Output > Views > Call out: the first corner of the crop box while
+// tool === "callout". Same click-click shape as Section's cut - a box needs
+// two opposite corners exactly as a cut needs two endpoints.
+let calloutDraft = null;
+// Document > Annotate > Revision cloud: the first corner of the cloud box
+// while tool === "revision". Same click-click shape as callout's crop box -
+// see revision.js's header for why a cloud is not itself a sheet viewport.
+let revisionCloudDraft = null;
 // Document > Annotate > Dimensions: the first click while tool === "measure".
 let measureDraft = null;
 // Completed two-point strings kept while the measure tool stays armed, so a
@@ -479,6 +528,10 @@ let density = window.localStorage.getItem("v2-density") === "full" ? "full" : "s
 let activeTab = firstTabId(density);
 let activeFunction = null;
 let paletteFilter = null;
+// Flat, on-screen order of the palette's current listing, rebuilt by
+// renderPalette(). Backs the type detail overlay's prev/next and side rail
+// so "other options" always matches what the palette shows right now.
+let paletteSkuOrder = [];
 let lastPaletteLabel = null;
 
 // Output > Views > 3D. Independent of the compliance engine and the sheet
@@ -556,11 +609,14 @@ async function boot() {
   wireCanvas();
   wireKeyboard();
   wireMassing();
+  wireTypeDetail();
   wireCheck();
   wireSchedule();
   wireAbout();
   wireAccount();
   wireSheets();
+  wireProjectInfo();
+  wireElevationPicker();
   wireJobName();
   wireAuth();
   wireLibrary();
@@ -1671,6 +1727,7 @@ window.__debug = {
   get wallDraft() { return wallDraft; },
   get shapeDraft() { return shapeDraft; },
   get beamStart() { return beamStart; },
+  get lineStart() { return lineStart; },
 };
 
 // --- geometry helpers ----------------------------------------------------
@@ -1788,6 +1845,7 @@ function buildProbes(point, edges) {
 function snapPreviewTool() {
   return tool === "wall" || tool === "beam" || tool === "room" || tool === "slab"
     || tool === "roof" || tool === "property" || tool === "sg-ref" || tool === "camera" || tool === "section"
+    || tool === "callout" || tool === "revision" || tool === "model-line" || tool === "annot-line"
     || tool === "measure";
 }
 
@@ -1934,7 +1992,20 @@ function syncLevelPanel() {
 
 /** Commit the panel's two fields, or report the one reason they were refused. */
 function commitLevelInsert() {
-  const spec = { name: el.levelName?.value, elevation: el.levelElevation?.value };
+  // Elevation is typed in mm (like every other length in the UI) but stored
+  // internally, and validated by validateLevelInsert, in metres. Levels can
+  // sit below datum (foundations), so this allows zero/negative unlike
+  // parseLengthMm, which is only for strictly-positive object dimensions.
+  const elevationRaw = String(el.levelElevation?.value ?? "").trim();
+  const elevationN = elevationRaw === "" ? NaN : Number(elevationRaw.replace(",", "."));
+  const elevation = Number.isFinite(elevationN) ? elevationN / 1000 : "";
+  const spec = { name: el.levelName?.value, elevation };
+  if (elevationRaw === "") {
+    const message = "Enter the level's elevation in millimetres above the ground floor, e.g. 6000.";
+    if (el.levelHint) el.levelHint.textContent = message;
+    setStatusMessage(message, "warn");
+    return;
+  }
   const check = validateLevelInsert(pack.levels || [], spec);
   if (!check.ok) {
     if (el.levelHint) el.levelHint.textContent = check.message;
@@ -2228,7 +2299,7 @@ function drawLevelSwitcher() {
       <li>
         <button type="button" data-id="${escapeHtml(s.id)}">
           <span>${escapeHtml(s.label)}</span>
-          <span class="level-station-elev">${s.elevation.toFixed(2)}</span>
+          <span class="level-station-elev">${formatLengthMm(s.elevation)}</span>
         </button>
       </li>
     `).join("");
@@ -2250,7 +2321,7 @@ function renderLevelCut() {
   el.levelHouse.setAttribute("aria-valuenow", String(idx));
   el.levelHouse.setAttribute("aria-valuetext", s.label);
   if (el.cutName) el.cutName.textContent = s.label;
-  if (el.cutElev) el.cutElev.textContent = `${s.elevation.toFixed(2)} m`;
+  if (el.cutElev) el.cutElev.textContent = `${formatLengthMm(s.elevation)} mm`;
   if (el.cutKind) el.cutKind.textContent = houseKindPhrase(s.kind);
   for (const btn of el.levelStations?.querySelectorAll("button") || []) {
     if (btn.dataset.id === s.id) btn.setAttribute("aria-current", "true");
@@ -2272,6 +2343,7 @@ function selectStationIndex(idx, { keepSelection = false } = {}) {
   if (levelChanged) {
     activeLevel = level.id;
     beamStart = null;
+    lineStart = null;
     wallDraft = null;
     shapeDraft = null;
     drag = null;
@@ -2509,10 +2581,13 @@ function draw() {
   if (wallDraft) drawWallDraft();
   if (shapeDraft) drawShapeDraft();
   if (beamStart) drawBeamStart();
+  if (lineStart) drawLineDraft();
   if (tool === "property" && siteDraft) drawPropertyDraft();
   if (tool === "sg-ref" && sgPick) drawSgPick();
   if (tool === "camera" && cameraDraft?.a) drawCameraDraft();
   if (tool === "section" && sectionDraft?.a) drawSectionDraft();
+  if (tool === "callout" && calloutDraft?.a) drawCalloutDraft();
+  if (tool === "revision" && revisionCloudDraft?.a) drawRevisionCloudDraft();
   if (tool === "measure" && measureDraft?.a) drawMeasureDraft();
   drawSnapGuide(rect);
   drawEndpointHandles();
@@ -2684,6 +2759,51 @@ function drawSectionDraft() {
   ctx.restore();
 }
 
+/** Rubber-band crop box while the second corner is still being chosen - a
+ * rectangle preview, not a line, because a callout boxes an area rather than
+ * cutting along one. */
+function drawCalloutDraft() {
+  const target = hoverPoint;
+  if (!target) return;
+  const [ax, ay] = worldToScreen(calloutDraft.a.x, calloutDraft.a.y);
+  const [bx, by] = worldToScreen(target.x, target.y);
+  ctx.save();
+  ctx.strokeStyle = COLOUR.hover;
+  ctx.fillStyle = "rgba(180, 69, 30, 0.06)";
+  ctx.lineWidth = 1.6;
+  ctx.setLineDash([6, 4]);
+  const x = Math.min(ax, bx);
+  const y = Math.min(ay, by);
+  ctx.fillRect(x, y, Math.abs(bx - ax), Math.abs(by - ay));
+  ctx.strokeRect(x, y, Math.abs(bx - ax), Math.abs(by - ay));
+  ctx.restore();
+}
+
+/** Rubber-band cloud box while the second corner is still being chosen -
+ * scalloped, via `cloudArcs()`, rather than a plain rectangle, so the draft
+ * already reads as "a revision cloud" and not "a callout crop". */
+function drawRevisionCloudDraft() {
+  const target = hoverPoint;
+  if (!target) return;
+  const rect = {
+    minX: Math.min(revisionCloudDraft.a.x, target.x),
+    minY: Math.min(revisionCloudDraft.a.y, target.y),
+    maxX: Math.max(revisionCloudDraft.a.x, target.x),
+    maxY: Math.max(revisionCloudDraft.a.y, target.y),
+  };
+  ctx.save();
+  ctx.strokeStyle = COLOUR.hover;
+  ctx.lineWidth = 1.4;
+  for (const arc of cloudArcs(rect)) {
+    const [cx, cy] = worldToScreen(arc.cx, arc.cy);
+    const r = arc.r * cam.scale;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, arc.startAngle, arc.endAngle);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 let lastRibbonHasSelection = null;
 
 function render() {
@@ -2747,7 +2867,7 @@ function syncCalibratePanel() {
   }
   if (bSet && !calibration.distanceEdited && el.calibrateDistance && document.activeElement !== el.calibrateDistance) {
     const guess = calibrationDistanceGuess(liveCalibrationPoint(calibration.a), liveCalibrationPoint(calibration.b));
-    if (guess) el.calibrateDistance.value = guess.toFixed(2);
+    if (guess) el.calibrateDistance.value = formatLengthMm(guess);
   }
 }
 
@@ -2843,6 +2963,14 @@ function drawPlanLevel(levelId, walls, { ghost = false, look = "down" } = {}) {
   }
   for (const wall of walls.filter((w) => w.level === levelId && planObjectVisible(w))) drawWall(wall);
   for (const beam of store.doc.beams.filter((b) => onLevel(b, levelId) && planObjectVisible(b))) drawBeam(beam);
+  // A model line ghosts like a wall/beam - it is a modelled fact, even
+  // though it is 2D - but an annotation line does not: it is a note about
+  // *this* level's plan, not context worth showing while looking at another
+  // one, the same reason an item (furniture) is skipped when ghosted below.
+  for (const line of store.doc.lines.filter((l) => onLevel(l, levelId) && planObjectVisible(l))) {
+    if (ghost && line.kind === "annotation") continue;
+    drawLine(line);
+  }
   if (!ghost) {
     for (const item of store.doc.items.filter((i) => onLevel(i, levelId) && planObjectVisible(i))) drawItem(item);
   }
@@ -3155,6 +3283,24 @@ function drawBeam(beam, { marker = false } = {}) {
   ctx.restore();
 }
 
+/** A model line reads as a thin real edge (solid); an annotation line reads
+ * as a drafting note (dashed, lighter) - the same visual distinction Revit
+ * draws between a model line and a detail line. Neither carries a SKU, so
+ * unlike `drawBeam()` there is no width to size the stroke against. */
+function drawLine(line) {
+  const [ax, ay] = worldToScreen(line.x1, line.y1);
+  const [bx, by] = worldToScreen(line.x2, line.y2);
+  ctx.save();
+  ctx.strokeStyle = line.kind === "annotation" ? "#5a5044" : statusStroke(objectStatus(line));
+  ctx.lineWidth = 1;
+  ctx.setLineDash(line.kind === "annotation" ? [6, 4] : []);
+  ctx.beginPath();
+  ctx.moveTo(ax, ay);
+  ctx.lineTo(bx, by);
+  ctx.stroke();
+  ctx.restore();
+}
+
 function drawItem(item) {
   const sku = skuById(item.sku);
   if (!sku) return;
@@ -3188,7 +3334,7 @@ function drawSelectionHighlights(walls) {
     if (ref.kind === "room" || ref.kind === "slab" || ref.kind === "roof") {
       pathForPoly(shapePolygon(obj.shape));
       ctx.stroke();
-    } else if (ref.kind === "segment" || ref.kind === "beam") {
+    } else if (ref.kind === "segment" || ref.kind === "beam" || ref.kind === "line") {
       const [ax, ay] = worldToScreen(obj.x1, obj.y1);
       const [bx, by] = worldToScreen(obj.x2, obj.y2);
       ctx.beginPath();
@@ -3249,7 +3395,7 @@ function drawHover(ref) {
   if (ref.kind === "room" || ref.kind === "slab" || ref.kind === "roof") {
     pathForPoly(shapePolygon(obj.shape));
     ctx.stroke();
-  } else if (ref.kind === "segment" || ref.kind === "beam") {
+  } else if (ref.kind === "segment" || ref.kind === "beam" || ref.kind === "line") {
     const [ax, ay] = worldToScreen(obj.x1, obj.y1);
     const [bx, by] = worldToScreen(obj.x2, obj.y2);
     ctx.beginPath();
@@ -3349,7 +3495,7 @@ function drawLengthLabel(x1, y1, x2, y2) {
   if (!clipped) return;
   const sx = (clipped.x1 + clipped.x2) / 2;
   const sy = (clipped.y1 + clipped.y2) / 2;
-  const label = `${len.toFixed(2)} m`;
+  const label = `${formatLengthMm(len)} mm`;
   ctx.save();
   ctx.font = "600 12px Source Sans 3, sans-serif";
   ctx.textAlign = "center";
@@ -3371,8 +3517,7 @@ function drawGapDimension(x1, y1, x2, y2, kind) {
   if (len < 0.005) return;
   const [ax, ay] = worldToScreen(x1, y1);
   const [bx, by] = worldToScreen(x2, y2);
-  const mm = Math.round(len * 1000);
-  const label = `${mm} mm`;
+  const label = `${formatLengthMm(len)} mm`;
   const off = 20;
   const dx = bx - ax;
   const dy = by - ay;
@@ -3755,6 +3900,30 @@ function drawBeamStart() {
   if (end) drawLengthLabel(beamStart.x, beamStart.y, end.x, end.y);
 }
 
+/** Same shape as `drawBeamStart()` - a line is a beam-shaped click-click with
+ * no SKU - dashed to read as a draft, not yet-placed geometry. */
+function drawLineDraft() {
+  const end = snapGuide ? { x: snapGuide.x, y: snapGuide.y } : hoverPoint;
+  const [sx, sy] = worldToScreen(lineStart.x, lineStart.y);
+  ctx.save();
+  ctx.fillStyle = COLOUR.hover;
+  ctx.beginPath();
+  ctx.arc(sx, sy, 4, 0, Math.PI * 2);
+  ctx.fill();
+  if (end && lineLength(lineStart, end) >= 0.05) {
+    const [ex, ey] = worldToScreen(end.x, end.y);
+    ctx.strokeStyle = COLOUR.hover;
+    ctx.lineWidth = 1.4;
+    ctx.setLineDash(tool === "annot-line" ? [6, 4] : []);
+    ctx.beginPath();
+    ctx.moveTo(sx, sy);
+    ctx.lineTo(ex, ey);
+    ctx.stroke();
+  }
+  ctx.restore();
+  if (end) drawLengthLabel(lineStart.x, lineStart.y, end.x, end.y);
+}
+
 function objByRef(ref) {
   const list = collectionFor(store.doc, ref.kind);
   return list?.find((row) => row.id === ref.id) || null;
@@ -3807,6 +3976,11 @@ function refsInMarquee(box) {
     if (!planObjectVisible(beam)) continue;
     const beamBox = { x: Math.min(beam.x1, beam.x2), y: Math.min(beam.y1, beam.y2), w: Math.max(0.02, Math.abs(beam.x2 - beam.x1)), h: Math.max(0.02, Math.abs(beam.y2 - beam.y1)) };
     if (test(beamBox)) hits.push({ kind: "beam", id: beam.id });
+  }
+  for (const line of store.doc.lines.filter(onActiveLevel)) {
+    if (!planObjectVisible(line)) continue;
+    const lineBox = { x: Math.min(line.x1, line.x2), y: Math.min(line.y1, line.y2), w: Math.max(0.02, Math.abs(line.x2 - line.x1)), h: Math.max(0.02, Math.abs(line.y2 - line.y1)) };
+    if (test(lineBox)) hits.push({ kind: "line", id: line.id });
   }
   for (const item of store.doc.items.filter(onActiveLevel)) {
     if (!planObjectVisible(item)) continue;
@@ -3919,6 +4093,14 @@ function hitTest(wx, wy) {
     const tol = Math.max(0.18, drawnWallThickness(sku) / 2 + 0.08);
     if (distToSeg(seg.x1, seg.y1, seg.x2, seg.y2, wx, wy) < tol) return { kind: "segment", id: seg.id };
   }
+  // No SKU to size a hit tolerance from, unlike a beam/wall - a fixed
+  // pick width close to the drawn stroke is all a line needs.
+  const lines = store.doc.lines.filter(onActiveLevel);
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const line = lines[i];
+    if (!planObjectVisible(line)) continue;
+    if (distToSeg(line.x1, line.y1, line.x2, line.y2, wx, wy) < 0.15) return { kind: "line", id: line.id };
+  }
   const slabs = store.doc.slabs.filter(onActiveLevel);
   for (let i = slabs.length - 1; i >= 0; i -= 1) {
     const slab = slabs[i];
@@ -4014,6 +4196,7 @@ function inspectKindLabel(kind, sku) {
   if (kind === "roof") return "Roof";
   if (kind === "beam") return "Beam";
   if (kind === "item") return "Item";
+  if (kind === "line") return "Line";
   return "";
 }
 
@@ -4028,6 +4211,25 @@ function skuDimLabel(sku) {
   if (g.thickness) return `${Math.round(g.thickness * 1000)} mm`;
   if (g.width) return `${Math.round(g.width * 1000)} mm`;
   return sku.unit;
+}
+
+/**
+ * Width/height a drawn wall or beam carries from its type - fixed by the
+ * SKU, not something the user sets by dragging. Walls/foundations state
+ * plan thickness + height; beams state width + height directly. Shown
+ * read-only in the Length/Angle strip so the fixed cross-section is visible
+ * without pretending it is editable there (change the type instead).
+ */
+function linearWidthHeight(sku) {
+  if (!sku) return { width: null, height: null };
+  if (sku.category === "beam" || sku.category === "column") {
+    const g = sku.geometry || {};
+    return { width: g.width ?? null, height: g.height ?? null };
+  }
+  return {
+    width: drawnWallThickness(sku),
+    height: skuDrawnHeight(sku) ?? pack?.system?.wallHeight ?? null,
+  };
 }
 
 function setTypeFlyoutOpen(open) {
@@ -4076,20 +4278,42 @@ function renderPalette() {
   el.skuList.innerHTML = "";
   if (!groups.size) {
     el.skuList.innerHTML = `<p class="hint palette-idle">No types match.</p>`;
+    paletteSkuOrder = [];
     return;
   }
+  // Flat, category-ordered list mirroring what's on screen right now: the
+  // type detail overlay's prev/next and side rail walk this same order, so
+  // "other options" means exactly what the palette is currently showing.
+  paletteSkuOrder = [];
   for (const [cat, skus] of groups) {
     const wrap = document.createElement("div");
     wrap.className = "planner-sku-group";
     wrap.innerHTML = `<h3>${escapeHtml(CATEGORY_LABEL[cat] || cat)}</h3>`;
     for (const sku of skus) {
+      paletteSkuOrder.push(sku);
+      const row = document.createElement("div");
+      row.className = "sku-row";
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "sku-item";
       if (placeSkuId === sku.id) btn.classList.add("active");
       btn.innerHTML = `<span class="sku-name">${escapeHtml(sku.name)}</span><span class="sku-meta">${escapeHtml(sku.id)} · ${escapeHtml(skuDimLabel(sku))}</span>`;
       btn.addEventListener("click", () => onSkuClick(sku));
-      wrap.appendChild(btn);
+      const expand = document.createElement("button");
+      expand.type = "button";
+      expand.className = "sku-expand";
+      expand.title = "Preview this type";
+      expand.setAttribute("aria-label", `Preview ${sku.name}`);
+      expand.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M1.5 12S5 5 12 5s10.5 7 10.5 7-3.5 7-10.5 7S1.5 12 1.5 12z"/><circle cx="12" cy="12" r="3"/></svg><span class="sku-expand-label">Preview</span>`;
+      // Preview is a deliberate escalation, not part of picking a type: stop
+      // the click from also bubbling into the sku-item's onSkuClick.
+      expand.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        openTypeDetail(sku);
+      });
+      row.appendChild(btn);
+      row.appendChild(expand);
+      wrap.appendChild(row);
     }
     el.skuList.appendChild(wrap);
   }
@@ -4104,6 +4328,7 @@ function onSkuClick(sku) {
   }
   placeSkuId = sku.id;
   beamStart = null;
+  lineStart = null;
   wallDraft = null;
   shapeDraft = null;
   if (sku.category === "wall" || sku.category === "foundation" || sku.category === "boundarywall") {
@@ -4153,6 +4378,145 @@ function applySkuToSelection(sku) {
   }
   store.persist();
   return true;
+}
+
+// --- Type detail overlay -------------------------------------------------
+// A full-screen escalation the user opts into from a palette row's expand
+// icon, not something shown on every draw: picking a type stays a one-click
+// action in the compact Inspector. This is where a photo/3D preview lives
+// today (skeleton only - a placeholder), and later supplier photos, links
+// and pricing for that SKU. See PLAN discussion: "drawing options full
+// screen" - kept opt-in to avoid fatiguing users who already know the type.
+const TYPE_DETAIL_ICON = {
+  wall: "\u25A4", boundarywall: "\u25A4", foundation: "\u2593", floor: "\u25A6",
+  ceiling: "\u25A6", roof: "\u25B2", door: "\u25AB", window: "\u25A2", beam: "\u2500",
+  column: "\u25A0", stair: "\u2261", sanitary: "\u25CE", waterheater: "\u25CE",
+  drainage: "\u2933", electrical: "\u26A1", furniture: "\u25A3", casework: "\u25A3",
+  pool: "\u2248", carport: "\u25B2",
+};
+
+let typeDetailSku = null;
+// The list navigated by prev/next and the side rail. Snapshotted from
+// paletteSkuOrder when opened, so scrolling the palette or a stray re-render
+// while the overlay is open can't yank the list out from under the user.
+let typeDetailList = [];
+
+function openTypeDetail(sku) {
+  if (!sku || !el.typeDetailOverlay) return;
+  typeDetailList = paletteSkuOrder.length ? paletteSkuOrder : [sku];
+  renderTypeDetailNav();
+  selectTypeDetail(sku);
+  el.typeDetailOverlay.hidden = false;
+}
+
+function closeTypeDetail() {
+  if (el.typeDetailOverlay) el.typeDetailOverlay.hidden = true;
+  typeDetailSku = null;
+  typeDetailList = [];
+}
+
+function stepTypeDetail(delta) {
+  if (!typeDetailSku || typeDetailList.length < 2) return;
+  const i = typeDetailList.findIndex((s) => s.id === typeDetailSku.id);
+  if (i < 0) return;
+  const next = typeDetailList[(i + delta + typeDetailList.length) % typeDetailList.length];
+  selectTypeDetail(next);
+}
+
+/** Switch the overlay to another SKU in place - no close/reopen round trip. */
+function selectTypeDetail(sku) {
+  typeDetailSku = sku;
+  renderTypeDetail(sku);
+  if (el.typeDetailNav) {
+    el.typeDetailNav.querySelectorAll("[data-sku-id]").forEach((row) => {
+      const active = row.dataset.skuId === sku.id;
+      row.classList.toggle("active", active);
+      if (active) row.scrollIntoView({ block: "nearest" });
+    });
+  }
+}
+
+/** The side rail: same category grouping as the palette, so "other options"
+ *  here matches what was on screen when the user opened this SKU. */
+function renderTypeDetailNav() {
+  if (!el.typeDetailNav) return;
+  el.typeDetailNav.innerHTML = "";
+  const showGroups = typeDetailList.length > 1;
+  if (el.typeDetailNav.parentElement) el.typeDetailNav.parentElement.classList.toggle("has-nav", showGroups);
+  if (!showGroups) return;
+  let lastCat = null;
+  for (const sku of typeDetailList) {
+    if (sku.category !== lastCat) {
+      lastCat = sku.category;
+      const h = document.createElement("h4");
+      h.textContent = CATEGORY_LABEL[sku.category] || sku.category;
+      el.typeDetailNav.appendChild(h);
+    }
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "type-detail-nav-item";
+    row.dataset.skuId = sku.id;
+    row.innerHTML = `<span class="sku-name">${escapeHtml(sku.name)}</span><span class="sku-meta">${escapeHtml(skuDimLabel(sku))}</span>`;
+    row.addEventListener("click", () => selectTypeDetail(sku));
+    el.typeDetailNav.appendChild(row);
+  }
+}
+
+function renderTypeDetail(sku) {
+  if (el.typeDetailName) el.typeDetailName.textContent = sku.name;
+  if (el.typeDetailMeta) el.typeDetailMeta.textContent = `${sku.id} · ${skuDimLabel(sku)}`;
+  if (el.typeDetailCategory) el.typeDetailCategory.textContent = CATEGORY_LABEL[sku.category] || sku.category;
+  if (el.typeDetailCount) {
+    const i = typeDetailList.findIndex((s) => s.id === sku.id);
+    el.typeDetailCount.textContent = typeDetailList.length > 1 ? `${i + 1} of ${typeDetailList.length}` : "";
+  }
+  const canStep = typeDetailList.length > 1;
+  if (el.typeDetailPrev) el.typeDetailPrev.hidden = !canStep;
+  if (el.typeDetailNext) el.typeDetailNext.hidden = !canStep;
+
+  // No real imagery yet - a cached per-SKU photo/render (or later a
+  // supplier photo) would set el.typeDetailImg.src and hide the
+  // placeholder instead of returning early here.
+  if (el.typeDetailImg) { el.typeDetailImg.hidden = true; el.typeDetailImg.removeAttribute("src"); }
+  if (el.typeDetailPlaceholder) el.typeDetailPlaceholder.hidden = false;
+  if (el.typeDetailPlaceholderIcon) el.typeDetailPlaceholderIcon.textContent = TYPE_DETAIL_ICON[sku.category] || "\u25A1";
+
+  if (el.typeDetailDims) {
+    const g = sku.geometry || {};
+    el.typeDetailDims.innerHTML = "";
+    for (const key of GEOMETRY_LENGTH_KEYS) {
+      if (!(key in g)) continue;
+      const dt = document.createElement("dt");
+      dt.textContent = key;
+      const dd = document.createElement("dd");
+      dd.textContent = `${Math.round(g[key] * 1000)} mm`;
+      el.typeDetailDims.appendChild(dt);
+      el.typeDetailDims.appendChild(dd);
+    }
+    if (!el.typeDetailDims.children.length) {
+      el.typeDetailDims.innerHTML = `<p class="hint">No dimensions recorded for this type.</p>`;
+    }
+  }
+}
+
+function wireTypeDetail() {
+  el.typeDetailClose?.addEventListener("click", closeTypeDetail);
+  el.typeDetailPrev?.addEventListener("click", () => stepTypeDetail(-1));
+  el.typeDetailNext?.addEventListener("click", () => stepTypeDetail(1));
+  el.typeDetailOverlay?.addEventListener("click", (event) => {
+    if (event.target === el.typeDetailOverlay) closeTypeDetail();
+  });
+  document.querySelectorAll("#v2-type-detail-overlay [data-detail-view]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll("#v2-type-detail-overlay [data-detail-view]").forEach((b) => b.classList.toggle("active", b === btn));
+      // Both tabs show the same placeholder for now; once real photo and 3D
+      // sources exist, swap el.typeDetailImg.src / placeholder per tab here.
+    });
+  });
+  el.typeDetailUse?.addEventListener("click", () => {
+    if (typeDetailSku) onSkuClick(typeDetailSku);
+    closeTypeDetail();
+  });
 }
 
 el.search?.addEventListener("input", renderPalette);
@@ -4341,6 +4705,30 @@ function updateRibbonHint() {
       : HINTS.section;
     return;
   }
+  if (tool === "callout") {
+    el.ribbonHint.hidden = false;
+    el.ribbonHint.classList.remove("ribbon-hint-warn");
+    el.ribbonHint.textContent = calloutDraft?.a
+      ? "Click the opposite corner."
+      : HINTS.callout;
+    return;
+  }
+  if (tool === "revision") {
+    el.ribbonHint.hidden = false;
+    el.ribbonHint.classList.remove("ribbon-hint-warn");
+    el.ribbonHint.textContent = revisionCloudDraft?.a
+      ? "Click the opposite corner."
+      : HINTS.revision;
+    return;
+  }
+  if (tool === "model-line" || tool === "annot-line") {
+    el.ribbonHint.hidden = false;
+    el.ribbonHint.classList.remove("ribbon-hint-warn");
+    el.ribbonHint.textContent = lineStart
+      ? "Click the other end."
+      : HINTS[tool === "annot-line" ? "annot-lines" : "model-lines"];
+    return;
+  }
   if (tool === "measure") {
     el.ribbonHint.hidden = false;
     el.ribbonHint.classList.remove("ribbon-hint-warn");
@@ -4360,7 +4748,7 @@ function updateRibbonHint() {
     el.ribbonHint.classList.remove("ribbon-hint-warn");
     el.ribbonHint.textContent = shapeDraft.kind === "roof-new"
       ? "Click the opposite corner. Corners snap to walls; draw past them for an overhang."
-      : "Click the opposite corner, or type metres. Tab switches width / height.";
+      : "Click the opposite corner, or type millimetres. Tab switches width / height.";
     return;
   }
   const cutWarning = placementCutWarning();
@@ -4471,6 +4859,7 @@ function onRibbonFunction(item) {
   tool = item.tool || "select";
   placeSkuId = pack.skus.find((s) => (item.categories || []).includes(s.category))?.id ?? null;
   beamStart = null;
+  lineStart = null;
   wallDraft = null;
   shapeDraft = null;
   sizeDraft = null;
@@ -4507,7 +4896,13 @@ function runCommand(name) {
     case "view-3d": openMassing(); return;
     case "view-camera": startCameraLook(); return;
     case "section": startSectionCut(); return;
-    case "sheets": openSheets(); return;
+    case "elevation": openElevationPicker(); return;
+    case "callout": startCalloutCrop(); return;
+    case "revision": startRevisionCloud(); return;
+    case "model-lines": startLineTool("model"); return;
+    case "annot-lines": startLineTool("annotation"); return;
+    case "sheets": case "view-section": openSheets(); return;
+    case "project-info": openProjectInfo(); return;
     case "underlay": openUnderlayPicker(); return;
     case "underlay-adjust": startUnderlayAdjust(); return;
     case "calibrate": startCalibration(); return;
@@ -4581,6 +4976,7 @@ function openMassing(view) {
   }
   if (view?.mode === "look") massView.setLook(view);
   else if (view?.mode === "section") massView.setSection(view);
+  else if (view?.mode === "elevation") massView.setElevation(view);
   else massView.setOrbit();
   massView.setPayload(compile(store.doc, pack));
   hideMassRender();
@@ -4741,7 +5137,165 @@ function finishSectionCut(target) {
   activeFunction = null;
   syncToolButtons();
   drawRibbon();
+  // Every cut becomes its own saved view, the same as Revit's Section tool -
+  // `view-section` (Output > Views) is what lets a sheet point at one later.
+  createSection(store.doc, cut);
+  store.persist();
   openMassing(cut);
+}
+
+// --- elevation (Output > Views > Elevation) --------------------------------
+//
+// No two clicks the way Section needs them: a whole-building elevation has
+// no line to draw, only a side to pick, so this is a small chooser rather
+// than an armed canvas tool - see elevation.js's header for why the same
+// projection maths still applies. Picking a direction saves it as a named
+// view immediately, the same "every use creates a view" rule `finishSectionCut`
+// follows, then opens the massing view already looking that way.
+
+function openElevationPicker() {
+  if (!el.elevationOverlay) return;
+  el.elevationOverlay.hidden = false;
+}
+
+function closeElevationPicker() {
+  if (el.elevationOverlay) el.elevationOverlay.hidden = true;
+}
+
+function pickElevation(direction) {
+  const { ok, elevation, reason } = createElevation(store.doc, direction);
+  if (!ok) {
+    setStatusMessage(reason || "That is not a compass direction.", "warn");
+    return;
+  }
+  store.persist();
+  closeElevationPicker();
+  openMassing(elevation.cut);
+}
+
+function wireElevationPicker() {
+  el.elevationClose?.addEventListener("click", closeElevationPicker);
+  el.elevationOverlay?.addEventListener("click", (event) => {
+    if (event.target === el.elevationOverlay) closeElevationPicker();
+  });
+  if (el.elevationDirections) {
+    el.elevationDirections.innerHTML = ELEVATION_DIRECTIONS.map((dir) => `
+      <button type="button" class="elevation-direction-btn" data-direction="${dir}">${elevationDirectionLabel(dir)}</button>
+    `).join("");
+    el.elevationDirections.querySelectorAll("[data-direction]").forEach((btn) => {
+      btn.addEventListener("click", () => pickElevation(btn.dataset.direction));
+    });
+  }
+}
+
+// --- callout (Output > Views > Call out) ------------------------------------
+//
+// Click-click, the same shape as Section's cut, because a crop box needs two
+// opposite corners exactly as a cut needs two endpoints - see callout.js's
+// header for why this is not the u/v-projection shape section/elevation
+// share instead. Unlike Section/Elevation there is no massing view to jump
+// into afterwards: a callout is a plan crop, not a new viewing direction, so
+// committing one just saves it and leaves the user on the plan, ready to
+// send it to a sheet via the Sheets panel's view chooser.
+
+function startCalloutCrop() {
+  calloutDraft = { a: null };
+  tool = "callout";
+  activeFunction = "callout";
+  underlaySelected = false;
+  store.clearSelection();
+  syncToolButtons();
+  drawRibbon();
+  setStatusMessage("Click one corner of the detail, then the opposite corner.", "ok");
+  render();
+}
+
+function finishCalloutCrop(target) {
+  const rect = calloutFromClicks(calloutDraft.a, target);
+  if (!rect) {
+    setStatusMessage("The two corners need to be further apart than that.", "warn");
+    return;
+  }
+  calloutDraft = null;
+  tool = "select";
+  activeFunction = null;
+  syncToolButtons();
+  drawRibbon();
+  // Every crop becomes its own saved view immediately, the same permanence
+  // rule `finishSectionCut`/`pickElevation` follow - see callout.js's header.
+  const { callout } = createCallout(store.doc, rect);
+  store.persist();
+  setStatusMessage(`${callout.name} saved. Assign it to a sheet from the Sheets panel.`, "ok");
+  render();
+}
+
+// --- revision cloud (Document > Annotate > Revision cloud) ------------------
+//
+// Same click-click shape as callout's crop box, for the same reason - see
+// revision.js's header. Unlike callout, the cloud saved here is never itself
+// a sheet viewport, so there is nothing to jump into afterwards beyond the
+// Sheets panel's own "link to a revision" step.
+
+function startRevisionCloud() {
+  revisionCloudDraft = { a: null };
+  tool = "revision";
+  activeFunction = "revision";
+  underlaySelected = false;
+  store.clearSelection();
+  syncToolButtons();
+  drawRibbon();
+  setStatusMessage("Click one corner of the changed area, then the opposite corner.", "ok");
+  render();
+}
+
+function finishRevisionCloud(target) {
+  const rect = revisionCloudFromClicks(revisionCloudDraft.a, target);
+  if (!rect) {
+    setStatusMessage("The two corners need to be further apart than that.", "warn");
+    return;
+  }
+  revisionCloudDraft = null;
+  tool = "select";
+  activeFunction = null;
+  syncToolButtons();
+  drawRibbon();
+  // Every cloud is saved immediately, unlinked - the same permanence rule
+  // `finishCalloutCrop` follows - see revision.js's header for why linking
+  // to a revision is a separate, later step rather than asked for here.
+  createRevisionCloud(store.doc, rect, { level: activeLevel });
+  store.persist();
+  setStatusMessage("Revision cloud saved. Link it to a revision from the Sheets panel.", "ok");
+  render();
+}
+
+// --- lines (Document > Lines > Model / Annotate) ----------------------------
+//
+// Click-click, one segment per pair of clicks and staying armed for the next
+// one - the beam tool's shape, not the wall tool's typed-length chain, since
+// a line has no thickness/SKU to size against. `tool` itself carries which
+// of the two ribbon buttons armed it ("model-line" / "annot-line") rather
+// than a second state variable, the same way "section"/"elevation"/"callout"
+// are each their own `tool` value instead of one "view" tool plus a flag.
+
+function startLineTool(kind) {
+  lineStart = null;
+  tool = kind === "annotation" ? "annot-line" : "model-line";
+  activeFunction = kind === "annotation" ? "annot-lines" : "model-lines";
+  underlaySelected = false;
+  store.clearSelection();
+  syncToolButtons();
+  drawRibbon();
+  setStatusMessage(HINTS[activeFunction], "ok");
+  render();
+}
+
+function commitLine(kind, a, b) {
+  if (!canCommitLine(a, b)) return;
+  store.pushUndo();
+  store.doc.lines.push({
+    id: nid("ln"), kind, level: activeLevel, x1: a.x, y1: a.y, x2: b.x, y2: b.y, status: placementStatus(),
+  });
+  store.persist();
 }
 
 function startMeasure() {
@@ -4812,8 +5366,11 @@ function wireMassing() {
 // sheets, edits the active one's fields, and draws it. The drawn plan is a
 // schematic - wall centrelines and room outlines only, no openings, no
 // dimensions, no per-level split - because the point of this panel is the
-// title block, and a full drafted plan view is `view-section`'s and
-// `callout`'s job once they land.
+// title block. A callout view reuses this exact same schematic drawing,
+// just windowed to the crop rectangle and drawn at the callout's own scale
+// (see the "callout" branch below) rather than a separately drafted detail
+// view with openings and dimensions of its own - that stays a scheduling
+// gap, not an integrity one.
 
 function activeSheet() {
   return activeSheetId ? sheetById(store.doc, activeSheetId) : null;
@@ -4864,6 +5421,23 @@ function renderSheetFields() {
       STANDARD_SCALES.map((n) => `<option value="${n}">1:${n}</option>`).join("")
     }`;
   }
+  if (el.sheetView) {
+    const sections = ensureSections(store.doc);
+    const elevations = ensureElevations(store.doc);
+    const callouts = ensureCallouts(store.doc);
+    el.sheetView.innerHTML = `<option value="plan">Plan</option>${
+      sections.map((s) => `<option value="${escapeHtml(s.id)}">${escapeHtml(s.name)}</option>`).join("")
+    }${
+      elevations.map((e) => `<option value="${escapeHtml(e.id)}">${escapeHtml(e.name)}</option>`).join("")
+    }${
+      callouts.map((c) => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`).join("")
+    }`;
+    const view = sheetView(store.doc, sheet);
+    el.sheetView.value = view.kind === "section" ? view.sectionId
+      : view.kind === "elevation" ? view.elevationId
+      : view.kind === "callout" ? view.calloutId
+      : "plan";
+  }
   el.sheetSize.value = sheet.size;
   el.sheetTitle.value = sheet.drawingTitle || "";
   el.sheetScale.value = sheet.scaleOverride || "";
@@ -4882,9 +5456,55 @@ function renderSheetFields() {
     : '<p class="hint">No revisions issued yet.</p>';
 }
 
+/**
+ * Every revision cloud this sheet can offer a link to: one already linked to
+ * it, plus every unlinked one - never a cloud linked to a *different* sheet,
+ * so this list is never the place a firm accidentally steals another
+ * sheet's mark. Selecting "Unlinked" calls `linkRevisionCloud` with a null
+ * `rev`, and picking a letter calls it with one this sheet has actually
+ * issued - the select's own options are only ever `sheet.revisions`, so
+ * there is no path to link a cloud to a revision that does not exist.
+ */
+function renderSheetClouds() {
+  if (!el.sheetCloudList) return;
+  const sheet = activeSheet();
+  if (!sheet) {
+    el.sheetCloudList.innerHTML = '<p class="hint">Select a sheet to link revision clouds.</p>';
+    return;
+  }
+  const clouds = ensureRevisionClouds(store.doc).filter((c) => !c.sheetId || c.sheetId === sheet.id);
+  if (!clouds.length) {
+    el.sheetCloudList.innerHTML = '<p class="hint">No revision clouds drawn yet - use Document &gt; Annotate &gt; Revision cloud.</p>';
+    return;
+  }
+  const revOptions = (sheet.revisions || [])
+    .map((r) => `<option value="${escapeHtml(r.rev)}">${escapeHtml(r.rev)} — ${escapeHtml(r.description || "—")}</option>`)
+    .join("");
+  el.sheetCloudList.innerHTML = clouds.map((c, i) => `
+    <div class="sheet-rev-row">
+      <span>Cloud ${i + 1}${c.note ? `: ${escapeHtml(c.note)}` : ""}</span>
+      <select data-cloud-link="${escapeHtml(c.id)}"${sheet.revisions.length ? "" : " disabled"}>
+        <option value="">Unlinked</option>
+        ${revOptions}
+      </select>
+    </div>
+  `).join("") + (sheet.revisions.length ? "" : '<p class="hint">Add a revision above before a cloud can link to one.</p>');
+  el.sheetCloudList.querySelectorAll("[data-cloud-link]").forEach((select) => {
+    const cloud = clouds.find((c) => c.id === select.dataset.cloudLink);
+    select.value = cloud?.rev || "";
+    select.addEventListener("change", () => {
+      linkRevisionCloud(store.doc, select.dataset.cloudLink, sheet.id, select.value || null);
+      store.persist();
+      renderSheetClouds();
+      drawActiveSheet();
+    });
+  });
+}
+
 function renderSheets() {
   renderSheetList();
   renderSheetFields();
+  renderSheetClouds();
 }
 
 /** Bounding box of every plan point compile() emits, ignoring elevation -
@@ -4946,9 +5566,33 @@ function drawActiveSheet() {
   const tbH = mm(innerH);
   sctx.strokeRect(tbX, tbY, tbW, tbH);
 
-  const payload = compile(store.doc, pack) || { sketchForms: [] };
-  const extent = planExtentFromPayload(payload);
-  const fields = titleBlockFields(store.doc, pack, sheet, extent ? { w: extent.w, h: extent.h } : null);
+  // The chosen view decides what fills the one viewport, and what extent the
+  // scale row is computed from - a section's or elevation's own u/v box, a
+  // callout's own crop rectangle, or the whole plan's.
+  const view = sheetView(store.doc, sheet);
+  const section = view.kind === "section" ? sectionById(store.doc, view.sectionId) : null;
+  const elevation = view.kind === "elevation" ? elevationById(store.doc, view.elevationId) : null;
+  const callout = view.kind === "callout" ? calloutById(store.doc, view.calloutId) : null;
+  // A callout draws the same schematic plan a plain "plan" viewport does
+  // (walls/rooms, no openings, no dimensions) just windowed to its crop
+  // rectangle - see the header comment above - so it needs the same compiled
+  // payload a plan viewport does, not the extruded faces a section/elevation
+  // needs.
+  const payload = (view.kind === "plan" || view.kind === "callout") ? (compile(store.doc, pack) || { sketchForms: [] }) : null;
+  const planExtent = payload && view.kind === "plan" ? planExtentFromPayload(payload) : null;
+  const sectionGeom = section ? sectionCutGeometry(section) : null;
+  const elevationGeom = elevation ? elevationGeometry(elevation) : null;
+  const calloutGeom = callout ? calloutExtent(callout) : null;
+  const extent = view.kind === "plan" ? planExtent
+    : view.kind === "section" ? sectionGeom?.extent
+    : view.kind === "elevation" ? elevationGeom?.extent
+    : calloutGeom;
+  // A callout's own `scale` is its blow-up factor - see callout.js's header -
+  // and wins over the auto-fit recommendation `sheetScale()` would otherwise
+  // compute for its (small) crop extent, though a firm's explicit
+  // `scaleOverride` on the sheet itself still wins over that.
+  const preferredScale = view.kind === "callout" ? callout?.scale : null;
+  const fields = titleBlockFields(store.doc, pack, sheet, extent && extent.w > 0 && extent.h > 0 ? extent : null, preferredScale);
 
   const rowH = tbH / layout.rows.length;
   sctx.textBaseline = "middle";
@@ -4973,48 +5617,167 @@ function drawActiveSheet() {
   const areaY = offY + mm(layout.border);
   const areaW = mm(innerW - layout.titleBlockWidth);
   const areaH = mm(innerH);
-  const scaleN = sheetScale(sheet, { w: extent.w, h: extent.h });
+  const scaleN = sheetScale(sheet, { w: extent.w, h: extent.h }, preferredScale);
   const pxPerM = pxPerMm * (1000 / scaleN);
-  const midX = (extent.minX + extent.maxX) / 2;
-  const midY = (extent.minY + extent.maxY) / 2;
   const cx = areaX + areaW / 2;
   const cy = areaY + areaH / 2;
-  const project = (x, y) => [cx + (x - midX) * pxPerM, cy + (y - midY) * pxPerM];
 
   sctx.save();
   sctx.beginPath();
   sctx.rect(areaX, areaY, areaW, areaH);
   sctx.clip();
-  for (const form of payload.sketchForms || []) {
-    const kind = (form.kind || "").toLowerCase();
-    if (kind === "room") {
-      for (const loop of form.profileLoops || []) {
-        const pts = (loop.curves || []).map((c) => c.start).filter(Boolean).map(([x, y]) => project(x, y));
-        if (pts.length < 3) continue;
-        sctx.beginPath();
-        pts.forEach((p, i) => (i ? sctx.lineTo(p[0], p[1]) : sctx.moveTo(p[0], p[1])));
-        sctx.closePath();
-        sctx.fillStyle = "rgba(178,69,30,0.08)";
-        sctx.fill();
-      }
-    } else if (kind === "wall") {
-      for (const loop of form.profileLoops || []) {
-        for (const curve of loop.curves || []) {
-          if (!curve.start || !curve.end) continue;
-          const a = project(curve.start[0], curve.start[1]);
-          const b = project(curve.end[0], curve.end[1]);
+
+  if (view.kind === "plan" || view.kind === "callout") {
+    const midX = (extent.minX + extent.maxX) / 2;
+    const midY = (extent.minY + extent.maxY) / 2;
+    const project = (x, y) => [cx + (x - midX) * pxPerM, cy + (y - midY) * pxPerM];
+    for (const form of payload.sketchForms || []) {
+      const kind = (form.kind || "").toLowerCase();
+      if (kind === "room") {
+        for (const loop of form.profileLoops || []) {
+          const pts = (loop.curves || []).map((c) => c.start).filter(Boolean).map(([x, y]) => project(x, y));
+          if (pts.length < 3) continue;
           sctx.beginPath();
-          sctx.moveTo(a[0], a[1]);
-          sctx.lineTo(b[0], b[1]);
-          sctx.strokeStyle = "#1a1612";
-          sctx.lineWidth = Math.max(1, (form.thickness || 0.22) * pxPerM);
-          sctx.lineCap = "square";
-          sctx.stroke();
+          pts.forEach((p, i) => (i ? sctx.lineTo(p[0], p[1]) : sctx.moveTo(p[0], p[1])));
+          sctx.closePath();
+          sctx.fillStyle = "rgba(178,69,30,0.08)";
+          sctx.fill();
+        }
+      } else if (kind === "wall") {
+        for (const loop of form.profileLoops || []) {
+          for (const curve of loop.curves || []) {
+            if (!curve.start || !curve.end) continue;
+            const a = project(curve.start[0], curve.start[1]);
+            const b = project(curve.end[0], curve.end[1]);
+            sctx.beginPath();
+            sctx.moveTo(a[0], a[1]);
+            sctx.lineTo(b[0], b[1]);
+            sctx.strokeStyle = "#1a1612";
+            sctx.lineWidth = Math.max(1, (form.thickness || 0.22) * pxPerM);
+            sctx.lineCap = "square";
+            sctx.stroke();
+          }
         }
       }
     }
+    // Document > Lines geometry, drawn straight from `doc.lines` rather than
+    // `payload.sketchForms` - compile() never reads them (see model.js's
+    // `LINE_KINDS` comment: neither kind is a 3D fact). Both kinds print
+    // here, without a per-level split, the same limitation the walls/rooms
+    // loop above already carries.
+    for (const line of store.doc.lines || []) {
+      const a = project(line.x1, line.y1);
+      const b = project(line.x2, line.y2);
+      sctx.beginPath();
+      sctx.moveTo(a[0], a[1]);
+      sctx.lineTo(b[0], b[1]);
+      sctx.strokeStyle = line.kind === "annotation" ? "#5a5044" : "#1a1612";
+      sctx.lineWidth = 1;
+      sctx.setLineDash(line.kind === "annotation" ? [5, 3] : []);
+      sctx.stroke();
+      sctx.setLineDash([]);
+    }
+    // Revision clouds linked to this sheet - drawn over the plan/callout
+    // schematic above, never as a third viewport kind of their own: a cloud
+    // annotates whichever view is already showing (see revision.js's header).
+    // Same no-per-level-split limitation the walls/lines loops above carry.
+    for (const cloud of revisionCloudsForSheet(store.doc, sheet.id)) {
+      sctx.strokeStyle = "#b2451e";
+      sctx.lineWidth = 1.2;
+      for (const arc of cloudArcs(cloud.rect)) {
+        const [ax, ay] = project(arc.cx, arc.cy);
+        sctx.beginPath();
+        sctx.arc(ax, ay, arc.r * pxPerM, arc.startAngle, arc.endAngle);
+        sctx.stroke();
+      }
+      const [tx, ty] = project(cloud.rect.maxX, cloud.rect.minY);
+      sctx.font = `600 ${Math.max(9, pxPerM * 0.12)}px "Source Sans 3", sans-serif`;
+      sctx.fillStyle = "#b2451e";
+      sctx.fillText(cloud.rev || "?", tx + 3, ty - 3);
+    }
+  } else if (sectionGeom || elevationGeom) {
+    // Same faces (and, for a section, the same poché) the interactive
+    // Section/Elevation (massing.js) views draw, projected orthographically
+    // at the sheet's own scale instead of the camera's pan/zoom - a drafted
+    // view, not a screenshot of the 3D one. An elevation's faces never carry
+    // `face.cut` (facesFromPayload() is never clipped for one - see
+    // elevationGeometry()), so the hatch call below stays a no-op for it,
+    // exactly as it already is for every non-cut face of a section.
+    const cut = section ? section.cut : elevation.cut;
+    const geom = sectionGeom || elevationGeom;
+    const midU = (geom.extent.minU + geom.extent.maxU) / 2;
+    const midV = (geom.extent.minV + geom.extent.maxV) / 2;
+    const projected = geom.cutFaces.map((face) => {
+      const pts = face.pts.map((p) => {
+        const [u, v, depth] = sectionUV(p, cut);
+        return [cx + (u - midU) * pxPerM, cy - (v - midV) * pxPerM, depth];
+      });
+      const depth = pts.reduce((sum, p) => sum + p[2], 0) / pts.length;
+      return { face, pts, depth };
+    });
+    projected.sort((a, b) => massingLayer(a.face) - massingLayer(b.face) || b.depth - a.depth);
+    for (const item of projected) {
+      const style = faceStyle(item.face);
+      sctx.beginPath();
+      item.pts.forEach((p, i) => (i === 0 ? sctx.moveTo(p[0], p[1]) : sctx.lineTo(p[0], p[1])));
+      sctx.closePath();
+      sctx.fillStyle = style.fill;
+      sctx.strokeStyle = style.stroke;
+      sctx.lineWidth = item.face.cut ? 1.1 : 0.6;
+      sctx.fill();
+      if (item.face.cut) hatchPolygon(sctx, item.pts, style.stroke);
+      sctx.stroke();
+    }
   }
   sctx.restore();
+}
+
+/**
+ * Everything the section branch of `drawActiveSheet()` needs from one
+ * section: its clipped, extruded faces and their u/v bounding box. Kept as
+ * its own function so the scale-row calculation above and the drawing loop
+ * below read the same numbers rather than deriving the box twice.
+ */
+function sectionCutGeometry(section) {
+  const payload = compile(store.doc, pack) || { sketchForms: [] };
+  const faces = facesFromPayload(payload, "both");
+  const cutFaces = clipFacesForSection(faces, section.cut);
+  if (!cutFaces.length) return null;
+  let minU = Infinity, maxU = -Infinity, minV = Infinity, maxV = -Infinity;
+  for (const face of cutFaces) {
+    for (const p of face.pts) {
+      const [u, v] = sectionUV(p, section.cut);
+      minU = Math.min(minU, u); maxU = Math.max(maxU, u);
+      minV = Math.min(minV, v); maxV = Math.max(maxV, v);
+    }
+  }
+  return {
+    cutFaces,
+    extent: { minU, maxU, minV, maxV, w: Math.max(maxU - minU, 0.5), h: Math.max(maxV - minV, 0.5) },
+  };
+}
+
+/**
+ * The elevation equivalent of `sectionCutGeometry()` above, minus the clip:
+ * an elevation is viewed from outside the whole model, so every extruded
+ * face is in view rather than a subset a cut plane selected.
+ */
+function elevationGeometry(elevation) {
+  const payload = compile(store.doc, pack) || { sketchForms: [] };
+  const cutFaces = facesFromPayload(payload, "both");
+  if (!cutFaces.length) return null;
+  let minU = Infinity, maxU = -Infinity, minV = Infinity, maxV = -Infinity;
+  for (const face of cutFaces) {
+    for (const p of face.pts) {
+      const [u, v] = sectionUV(p, elevation.cut);
+      minU = Math.min(minU, u); maxU = Math.max(maxU, u);
+      minV = Math.min(minV, v); maxV = Math.max(maxV, v);
+    }
+  }
+  return {
+    cutFaces,
+    extent: { minU, maxU, minV, maxV, w: Math.max(maxU - minU, 0.5), h: Math.max(maxV - minV, 0.5) },
+  };
 }
 
 function wireSheets() {
@@ -5048,6 +5811,25 @@ function wireSheets() {
       drawActiveSheet();
     });
   };
+  el.sheetView?.addEventListener("change", () => {
+    const sheet = activeSheet();
+    if (!sheet) return;
+    const value = el.sheetView.value;
+    let view = { kind: "plan" };
+    if (value !== "plan") {
+      // The option's own value is a bare section/elevation/callout id, not
+      // a "kind:id" pair, so which union member it picks is whichever list
+      // actually contains it - the same lookup `sheetView()` already does
+      // to fall back safely when a referenced view has been deleted.
+      if (sectionById(store.doc, value)) view = { kind: "section", sectionId: value };
+      else if (elevationById(store.doc, value)) view = { kind: "elevation", elevationId: value };
+      else if (calloutById(store.doc, value)) view = { kind: "callout", calloutId: value };
+    }
+    setSheetView(sheet, view);
+    store.persist();
+    renderSheetList();
+    drawActiveSheet();
+  });
   field(el.sheetSize, (sheet, value) => { sheet.size = value; });
   field(el.sheetTitle, (sheet, value) => { sheet.drawingTitle = value; });
   field(el.sheetScale, (sheet, value) => { sheet.scaleOverride = value ? Number(value) : null; });
@@ -5066,6 +5848,47 @@ function wireSheets() {
     drawActiveSheet();
   });
   new ResizeObserver(drawActiveSheet).observe(el.sheetCanvas);
+}
+
+// --- project information ---------------------------------------------------
+//
+// Document > Project > Project information. The job number and client name
+// are doc-wide facts (one job has one job number), unlike a sheet's
+// drawn-by/checked-by/date, which vary sheet to sheet - see sheets.js's
+// header comment. This panel is the only place either is edited; every
+// sheet's title block just reads `doc.projectInfo` back through
+// `titleBlockFields()`.
+
+function openProjectInfo() {
+  if (!el.projectInfoOverlay) return;
+  const info = store.doc.projectInfo || { jobNumber: null, clientName: null };
+  el.projectInfoJobNumber.value = info.jobNumber || "";
+  el.projectInfoClientName.value = info.clientName || "";
+  el.projectInfoOverlay.hidden = false;
+}
+
+function closeProjectInfo() {
+  if (el.projectInfoOverlay) el.projectInfoOverlay.hidden = true;
+}
+
+function wireProjectInfo() {
+  el.projectInfoClose?.addEventListener("click", closeProjectInfo);
+  el.projectInfoOverlay?.addEventListener("click", (event) => {
+    if (event.target === el.projectInfoOverlay) closeProjectInfo();
+  });
+  const field = (input, key) => {
+    input?.addEventListener("change", () => {
+      if (!store.doc.projectInfo) store.doc.projectInfo = { jobNumber: null, clientName: null };
+      const value = input.value.trim();
+      store.doc.projectInfo[key] = value || null;
+      store.persist();
+      // The title block is the only other reader of this record; refresh it
+      // only if the Sheets panel happens to be open already.
+      if (el.sheetOverlay && !el.sheetOverlay.hidden) drawActiveSheet();
+    });
+  };
+  field(el.projectInfoJobNumber, "jobNumber");
+  field(el.projectInfoClientName, "clientName");
 }
 
 function openCheck() {
@@ -5186,7 +6009,7 @@ function calibrationDistanceGuess(a, b) {
 /** Second half of calibration: both points are down, so show the real-distance field instead of blocking on window.prompt. */
 function promptCalibrationDistance() {
   const guess = calibrationDistanceGuess(liveCalibrationPoint(calibration.a), liveCalibrationPoint(calibration.b));
-  if (el.calibrateDistance) el.calibrateDistance.value = guess ? guess.toFixed(2) : "";
+  if (el.calibrateDistance) el.calibrateDistance.value = guess ? formatLengthMm(guess) : "";
   render();
 }
 
@@ -5194,7 +6017,7 @@ function confirmCalibration() {
   if (!calibration?.a || !calibration?.b) return;
   const a = liveCalibrationPoint(calibration.a);
   const b = liveCalibrationPoint(calibration.b);
-  const result = calibrate(store.doc, a, b, Number(el.calibrateDistance?.value));
+  const result = calibrate(store.doc, a, b, Number(el.calibrateDistance?.value) / 1000);
   setStatusMessage(result.message, result.ok ? "ok" : "warn");
   if (result.ok) {
     calibration = null;
@@ -5302,7 +6125,7 @@ function runAutoBuildingLine() {
   store.pushUndo();
   setBuildingLine(store.doc, result.points, { derived: true });
   store.persist();
-  setStatusMessage(`Building line set ${result.setback.toFixed(1)} m inside the property line.`, "ok");
+  setStatusMessage(`Building line set ${formatLengthMm(result.setback)} mm inside the property line.`, "ok");
   render();
 }
 
@@ -5394,6 +6217,7 @@ function startAttachPick() {
   activeFunction = "attach";
   underlaySelected = false;
   beamStart = null;
+  lineStart = null;
   wallDraft = null;
   shapeDraft = null;
   fillAttachList();
@@ -5432,7 +6256,7 @@ function attachHoverText(targetRef) {
     const [only] = ok;
     return {
       warn: false,
-      text: `On "${label}": base rises ${only.rise.toFixed(2)} m to ${only.elevation.toFixed(2)} m; height reduces to ${only.height.toFixed(2)} m.`,
+      text: `On "${label}": base rises ${formatLengthMm(only.rise)} mm to ${formatLengthMm(only.elevation)} mm; height reduces to ${formatLengthMm(only.height)} mm.`,
     };
   }
   const skipped = previews.length - ok.length;
@@ -5520,9 +6344,9 @@ function attachStateText(obj) {
   const levelLabel = level?.name || effectiveLevel(obj, pack) || "level";
   if (base.warning) return `Attached, but unresolved — falls back to ${levelLabel}. See Check.`;
   if (base.attachedTo) {
-    return `On "${base.attachedTo.label}" at ${base.elevation.toFixed(2)} m, ${base.height.toFixed(2)} m high`;
+    return `On "${base.attachedTo.label}" at ${formatLengthMm(base.elevation)} mm, ${formatLengthMm(base.height)} mm high`;
   }
-  return `Not attached — ${levelLabel} + ${(obj.baseOffset || 0).toFixed(2)} m`;
+  return `Not attached — ${levelLabel} + ${formatLengthMm(obj.baseOffset || 0)} mm`;
 }
 
 /** Attach state in the Check panel as well as on the object, so a broken
@@ -5543,7 +6367,7 @@ function renderAttachReport() {
       <span>${escapeHtml(row.label)}</span>
       <span>${escapeHtml(row.warning
         ? row.warning
-        : `on "${row.attachedTo.label}" — base ${row.elevation.toFixed(2)} m, ${row.height.toFixed(2)} m high`)}</span>
+        : `on "${row.attachedTo.label}" — base ${formatLengthMm(row.elevation)} mm, ${formatLengthMm(row.height)} mm high`)}</span>
     </div>
   `).join("");
 }
@@ -5610,14 +6434,17 @@ const REVERTIBLE_DRAGS = new Set(["move", "segment-end", "underlay-move", "under
  */
 function abortClickDraft() {
   if (!hasClickDraft({
-    wallDraft, shapeDraft, beamStart, siteDraft, cameraDraft, sectionDraft, measureDraft, calibration,
+    wallDraft, shapeDraft, beamStart, lineStart, siteDraft, cameraDraft, sectionDraft, calloutDraft, revisionCloudDraft, measureDraft, calibration,
   })) return false;
   if (wallDraft) wallDraft = null;
   else if (shapeDraft) shapeDraft = null;
   else if (beamStart) beamStart = null;
+  else if (lineStart) lineStart = null;
   else if (siteDraft?.length) siteDraft.pop();
   else if (cameraDraft?.a) cameraDraft = { a: null };
   else if (sectionDraft?.a) sectionDraft = { a: null };
+  else if (calloutDraft?.a) calloutDraft = { a: null };
+  else if (revisionCloudDraft?.a) revisionCloudDraft = { a: null };
   else if (measureDraft?.a) measureDraft = { a: null };
   else if (calibration?.a && !calibration.b) calibration.a = null;
   sizeDraft = null;
@@ -5654,12 +6481,13 @@ function cancelDrawing() {
   // tool state - deselect whatever is selected instead of being a no-op.
   const wasDrawing = Boolean(
     drag || siteDraft || calibration || sgPick || attachPick
-    || cameraDraft || sectionDraft || measureDraft
+    || cameraDraft || sectionDraft || calloutDraft || revisionCloudDraft || measureDraft
     || (tool !== "select") || activeFunction
   );
 
   drag = null;
   beamStart = null;
+  lineStart = null;
   wallDraft = null;
   shapeDraft = null;
   sizeDraft = null;
@@ -5671,6 +6499,8 @@ function cancelDrawing() {
   attachPick = null;
   cameraDraft = null;
   sectionDraft = null;
+  calloutDraft = null;
+  revisionCloudDraft = null;
   measureDraft = null;
   userDimensions = [];
   showDimensions = false;
@@ -5706,6 +6536,7 @@ function wireToolbar() {
         renderPalette();
       }
       beamStart = null;
+      lineStart = null;
       wallDraft = null;
       shapeDraft = null;
       sizeDraft = null;
@@ -5714,6 +6545,8 @@ function wireToolbar() {
       attachPick = null;
       cameraDraft = null;
       sectionDraft = null;
+      calloutDraft = null;
+      revisionCloudDraft = null;
       measureDraft = null;
       userDimensions = [];
       syncToolButtons();
@@ -5764,7 +6597,7 @@ function wireCanvas() {
   el.canvas.addEventListener("pointerleave", () => {
     hoverPoint = null;
     hover = null;
-    if (tool === "door" || tool === "window" || wallDraft || shapeDraft || beamStart || (tool === "camera" && cameraDraft?.a) || (tool === "section" && sectionDraft?.a) || (tool === "measure" && measureDraft?.a)) render();
+    if (tool === "door" || tool === "window" || wallDraft || shapeDraft || beamStart || lineStart || (tool === "camera" && cameraDraft?.a) || (tool === "section" && sectionDraft?.a) || (tool === "callout" && calloutDraft?.a) || (tool === "revision" && revisionCloudDraft?.a) || (tool === "measure" && measureDraft?.a)) render();
   });
   window.addEventListener("pointerup", onPointerUp);
   el.canvas.addEventListener("wheel", onWheel, { passive: false });
@@ -5915,6 +6748,28 @@ function onPointerDown(ev) {
     finishSectionCut(p);
     return;
   }
+  if (tool === "callout") {
+    const p = applySnap(wx, wy);
+    if (!calloutDraft?.a) {
+      calloutDraft = { a: p };
+      updateRibbonHint();
+      render();
+      return;
+    }
+    finishCalloutCrop(p);
+    return;
+  }
+  if (tool === "revision") {
+    const p = applySnap(wx, wy);
+    if (!revisionCloudDraft?.a) {
+      revisionCloudDraft = { a: p };
+      updateRibbonHint();
+      render();
+      return;
+    }
+    finishRevisionCloud(p);
+    return;
+  }
   if (tool === "measure") {
     const p = applySnap(wx, wy);
     if (!measureDraft?.a) {
@@ -5968,6 +6823,18 @@ function onPointerDown(ev) {
     render();
     return;
   }
+  if (tool === "model-line" || tool === "annot-line") {
+    underlaySelected = false;
+    if (!lineStart) {
+      lineStart = applySnap(wx, wy);
+    } else {
+      commitLine(tool === "annot-line" ? "annotation" : "model", lineStart, applySnap(wx, wy));
+      lineStart = null;
+      snapGuide = null;
+    }
+    render();
+    return;
+  }
   if (tool === "place") {
     underlaySelected = false;
     placeItem(wx, wy);
@@ -6014,7 +6881,7 @@ function clickWallPoint(wx, wy) {
     render();
     return;
   }
-  if (sizeDraft?.lockW) setWallDraftLength(parseMetres(sizeDraft.typedW, wallDraftLength() || 1));
+  if (sizeDraft?.lockW) setWallDraftLength(parseLengthInput(sizeDraft.typedW, wallDraftLength() || 1));
   else {
     wallDraft.x2 = p.x;
     wallDraft.y2 = p.y;
@@ -6119,6 +6986,14 @@ function onPointerMove(ev) {
     if (sectionDraft?.a) render();
     return;
   }
+  if (tool === "callout") {
+    if (calloutDraft?.a) render();
+    return;
+  }
+  if (tool === "revision") {
+    if (revisionCloudDraft?.a) render();
+    return;
+  }
   if (tool === "measure") {
     applySnap(wx, wy);
     el.canvas.style.cursor = "crosshair";
@@ -6206,7 +7081,7 @@ function onPointerMove(ev) {
     const p = applySnap(wx, wy);
     wallDraft.x2 = p.x;
     wallDraft.y2 = p.y;
-    if (sizeDraft?.lockW) setWallDraftLength(parseMetres(sizeDraft.typedW, wallDraftLength() || 1));
+    if (sizeDraft?.lockW) setWallDraftLength(parseLengthInput(sizeDraft.typedW, wallDraftLength() || 1));
     render();
     return;
   }
@@ -6216,7 +7091,7 @@ function onPointerMove(ev) {
     render();
     return;
   }
-  if (!drag && (snapPreviewTool() || beamStart || wallDraft || shapeDraft)) applySnap(wx, wy);
+  if (!drag && (snapPreviewTool() || beamStart || lineStart || wallDraft || shapeDraft)) applySnap(wx, wy);
   else if (!drag) snapGuide = null;
   render();
 }
@@ -6228,8 +7103,8 @@ function rectFromDrag(x0, y0, wx, wy) {
   return rectFromCorners(x0, y0, wx, wy, {
     lockW: sizeDraft?.lockW,
     lockH: sizeDraft?.lockH,
-    w: sizeDraft?.lockW ? parseMetres(sizeDraft.typedW, 1) : 0,
-    h: sizeDraft?.lockH ? parseMetres(sizeDraft.typedH, 1) : 0,
+    w: sizeDraft?.lockW ? parseLengthInput(sizeDraft.typedW, 1) : 0,
+    h: sizeDraft?.lockH ? parseLengthInput(sizeDraft.typedH, 1) : 0,
   });
 }
 
@@ -6295,11 +7170,20 @@ function wireKeyboard() {
         closeMassing();
         return;
       }
+      if (el.typeDetailOverlay && !el.typeDetailOverlay.hidden) {
+        closeTypeDetail();
+        return;
+      }
       if (el.checkOverlay && !el.checkOverlay.hidden) {
         closeCheck();
         return;
       }
       cancelDrawing();
+    } else if (el.typeDetailOverlay && !el.typeDetailOverlay.hidden && (ev.key === "ArrowLeft" || ev.key === "ArrowRight")) {
+      // Overlay is open: arrows page through the other options instead of
+      // nudging the probe sides they'd otherwise control.
+      ev.preventDefault();
+      stepTypeDetail(ev.key === "ArrowLeft" ? -1 : 1);
     } else if (PROBE_KEYS[ev.key]) {
       ev.preventDefault();
       const side = PROBE_KEYS[ev.key];
@@ -6311,7 +7195,7 @@ function wireKeyboard() {
         : "Measuring to the nearest object");
       // Re-resolve from the last pointer position so the new side appears
       // straight away, without waiting for the mouse to twitch.
-      if (hoverPoint && (snapPreviewTool() || beamStart)) applySnap(hoverPoint.x, hoverPoint.y);
+      if (hoverPoint && (snapPreviewTool() || beamStart || lineStart)) applySnap(hoverPoint.x, hoverPoint.y);
       render();
     } else if (ev.key === "Enter" && wallDraft) {
       ev.preventDefault();
@@ -6455,10 +7339,12 @@ function placeItem(wx, wy) {
 
 // --- size HUD --------------------------------------------------------------
 
-function parseMetres(raw, fallback) {
-  const n = Number(String(raw ?? "").trim().replace(",", "."));
-  if (!Number.isFinite(n) || n <= 0) return fallback;
-  return Math.max(0.1, roundGrid(n, activeGrid()));
+// A user-typed millimetre value from a length/width/height input, snapped to
+// the active grid and returned in metres (internal unit). `fallback` is metres.
+function parseLengthInput(raw, fallback) {
+  const metres = parseLengthMm(raw, null);
+  if (metres == null) return fallback;
+  return Math.max(0.1, roundGrid(metres, activeGrid()));
 }
 
 function wallDraftLength() {
@@ -6502,26 +7388,21 @@ function parseDegrees(raw, fallback) {
 }
 
 function syncSizeHud() {
+  // Wall length/angle already lives in the top plan-options strip (el.ctxLen /
+  // el.ctxAng), so the bottom HUD only needs to appear for rectangle drags
+  // (rooms, roofs) where width AND height must be shown together.
   const rectDraft = shapeDraft?.rect;
-  const lineDraft = Boolean(wallDraft);
-  el.sizeHud.hidden = !rectDraft && !lineDraft;
-  if (!rectDraft && !lineDraft) return;
-  el.sizeHud.classList.toggle("length-only", lineDraft);
-  if (el.hudWName) el.hudWName.textContent = lineDraft ? "Length" : "Width";
+  el.sizeHud.hidden = !rectDraft;
+  if (!rectDraft) return;
+  el.sizeHud.classList.remove("length-only");
+  if (el.hudWName) el.hudWName.textContent = "Width";
   if (el.hudHint) {
-    el.hudHint.textContent = lineDraft
-      ? "Click to end, or type metres and press Enter. Esc cancels this wall."
-      : shapeDraft.kind === "roof-new"
-        ? "Click the opposite corner. Corners snap to walls; draw past them for an overhang."
-        : "Click the opposite corner, or type metres. Tab switches width / height.";
+    el.hudHint.textContent = shapeDraft.kind === "roof-new"
+      ? "Click the opposite corner. Corners snap to walls; draw past them for an overhang."
+      : "Click the opposite corner, or type millimetres. Tab switches width / height.";
   }
-  if (lineDraft) {
-    const len = wallDraftLength();
-    if (document.activeElement !== el.hudW) el.hudW.value = sizeDraft?.lockW ? sizeDraft.typedW : (len < 0.05 ? "" : len.toFixed(2));
-    return;
-  }
-  if (document.activeElement !== el.hudW) el.hudW.value = sizeDraft?.lockW ? sizeDraft.typedW : shapeDraft.rect.w.toFixed(1);
-  if (document.activeElement !== el.hudH) el.hudH.value = sizeDraft?.lockH ? sizeDraft.typedH : shapeDraft.rect.h.toFixed(1);
+  if (document.activeElement !== el.hudW) el.hudW.value = sizeDraft?.lockW ? sizeDraft.typedW : formatLengthMm(shapeDraft.rect.w);
+  if (document.activeElement !== el.hudH) el.hudH.value = sizeDraft?.lockH ? sizeDraft.typedH : formatLengthMm(shapeDraft.rect.h);
 }
 
 function handleSizeTyping(ev) {
@@ -6552,9 +7433,9 @@ function handleDraftNumericShortcut(ev) {
   if (!sizeDraft) sizeDraft = { lockW: false, lockH: false, typedW: "", typedH: "", axis: "w" };
   sizeDraft.lockW = true;
   sizeDraft.typedW = ev.key === "," ? "." : ev.key;
-  if (wallDraft) setWallDraftLength(parseMetres(sizeDraft.typedW, wallDraftLength() || 1));
+  if (wallDraft) setWallDraftLength(parseLengthInput(sizeDraft.typedW, wallDraftLength() || 1));
   render();
-  el.hudW?.focus();
+  (wallDraft ? el.ctxLen : el.hudW)?.focus();
   return true;
 }
 
@@ -6562,15 +7443,15 @@ el.hudW.addEventListener("input", (ev) => {
   if (!sizeDraft) return;
   sizeDraft.lockW = true;
   sizeDraft.typedW = ev.target.value;
-  if (wallDraft) setWallDraftLength(parseMetres(sizeDraft.typedW, wallDraftLength() || 1));
-  else if (shapeDraft?.rect) shapeDraft.rect.w = parseMetres(sizeDraft.typedW, shapeDraft.rect.w);
+  if (wallDraft) setWallDraftLength(parseLengthInput(sizeDraft.typedW, wallDraftLength() || 1));
+  else if (shapeDraft?.rect) shapeDraft.rect.w = parseLengthInput(sizeDraft.typedW, shapeDraft.rect.w);
   render();
 });
 el.hudH.addEventListener("input", (ev) => {
   if (!sizeDraft) return;
   sizeDraft.lockH = true;
   sizeDraft.typedH = ev.target.value;
-  if (shapeDraft?.rect) shapeDraft.rect.h = parseMetres(sizeDraft.typedH, shapeDraft.rect.h);
+  if (shapeDraft?.rect) shapeDraft.rect.h = parseLengthInput(sizeDraft.typedH, shapeDraft.rect.h);
   render();
 });
 
@@ -6725,8 +7606,12 @@ function syncPlanContext() {
   setHidden(el.ctxUseWrap, !room);
   setHidden(el.ctxLenWrap, !linear);
   setHidden(el.ctxAngWrap, !linear);
-  setHidden(el.ctxWWrap, !rect);
-  setHidden(el.ctxHWrap, !rect);
+  setHidden(el.ctxWWrap, !(rect || linear));
+  setHidden(el.ctxHWrap, !(rect || linear));
+  if (el.ctxW) el.ctxW.readOnly = linear;
+  if (el.ctxH) el.ctxH.readOnly = linear;
+  if (el.ctxWWrap) el.ctxWWrap.classList.toggle("readonly", linear);
+  if (el.ctxHWrap) el.ctxHWrap.classList.toggle("readonly", linear);
   setHidden(el.ctxFormWrap, !roof);
   const pitched = Boolean(roof && obj && obj.form !== "flat");
   setHidden(el.ctxPitchWrap, !pitched);
@@ -6759,7 +7644,7 @@ function syncPlanContext() {
     const len = segmentLength(x1, y1, x2, y2);
     const ang = headingDeg(x1, y1, x2, y2);
     if (document.activeElement !== el.ctxLen) {
-      el.ctxLen.value = (draft && sizeDraft?.lockW) ? sizeDraft.typedW : (len < 0.05 ? "" : len.toFixed(2));
+      el.ctxLen.value = (draft && sizeDraft?.lockW) ? sizeDraft.typedW : (len < 0.05 ? "" : formatLengthMm(len));
     }
     if (document.activeElement !== el.ctxAng) {
       el.ctxAng.value = len < 0.05 ? "" : ang.toFixed(1);
@@ -6768,8 +7653,13 @@ function syncPlanContext() {
   if (room && document.activeElement !== el.ctxName) el.ctxName.value = obj.name;
   if (room && document.activeElement !== el.ctxUse) el.ctxUse.value = obj.use;
   if (rect) {
-    if (document.activeElement !== el.ctxW) el.ctxW.value = obj.shape.w.toFixed(2);
-    if (document.activeElement !== el.ctxH) el.ctxH.value = obj.shape.h.toFixed(2);
+    if (document.activeElement !== el.ctxW) el.ctxW.value = formatLengthMm(obj.shape.w);
+    if (document.activeElement !== el.ctxH) el.ctxH.value = formatLengthMm(obj.shape.h);
+  } else if (linear) {
+    const sku = skuById(draft ? placeSkuId : obj?.sku);
+    const { width, height } = linearWidthHeight(sku);
+    el.ctxW.value = Number.isFinite(width) ? formatLengthMm(width) : "";
+    el.ctxH.value = Number.isFinite(height) ? formatLengthMm(height) : "";
   }
   if (roof) {
     if (document.activeElement !== el.ctxForm) el.ctxForm.value = obj.form;
@@ -6783,7 +7673,7 @@ el.ctxLen?.addEventListener("input", (ev) => {
     if (!sizeDraft) sizeDraft = { lockW: false, lockH: false, typedW: "", typedH: "", axis: "w" };
     sizeDraft.lockW = true;
     sizeDraft.typedW = ev.target.value;
-    setWallDraftLength(parseMetres(sizeDraft.typedW, wallDraftLength() || 1));
+    setWallDraftLength(parseLengthInput(sizeDraft.typedW, wallDraftLength() || 1));
     render();
   }
 });
@@ -6793,7 +7683,7 @@ el.ctxLen?.addEventListener("change", (ev) => {
   const sel = soleLinearSelection();
   if (!sel) return;
   store.pushUndo();
-  setSegmentLength(sel.obj, parseMetres(ev.target.value, segmentLength(sel.obj.x1, sel.obj.y1, sel.obj.x2, sel.obj.y2)));
+  setSegmentLength(sel.obj, parseLengthInput(ev.target.value, segmentLength(sel.obj.x1, sel.obj.y1, sel.obj.x2, sel.obj.y2)));
   store.persist();
   render();
 });
@@ -6876,7 +7766,7 @@ el.ctxW?.addEventListener("change", (e) => {
   const obj = soleOf("room") || soleOf("slab") || soleOf("roof");
   if (!obj?.shape || obj.shape.kind !== "rect") return;
   store.pushUndo();
-  obj.shape.w = parseMetres(e.target.value, obj.shape.w);
+  obj.shape.w = parseLengthInput(e.target.value, obj.shape.w);
   store.persist();
   render();
 });
@@ -6885,7 +7775,7 @@ el.ctxH?.addEventListener("change", (e) => {
   const obj = soleOf("room") || soleOf("slab") || soleOf("roof");
   if (!obj?.shape || obj.shape.kind !== "rect") return;
   store.pushUndo();
-  obj.shape.h = parseMetres(e.target.value, obj.shape.h);
+  obj.shape.h = parseLengthInput(e.target.value, obj.shape.h);
   store.persist();
   render();
 });
@@ -7188,7 +8078,7 @@ function elementCenter(ref, obj) {
       const sum = poly.reduce((s, p) => ({ x: s.x + p[0], y: s.y + p[1] }), { x: 0, y: 0 });
       return { x: sum.x / poly.length, y: sum.y / poly.length };
     }
-    case "segment": case "beam":
+    case "segment": case "beam": case "line":
       return { x: (obj.x1 + obj.x2) / 2, y: (obj.y1 + obj.y2) / 2 };
     case "item": case "stair":
       return Number.isFinite(obj.x) && Number.isFinite(obj.y) ? { x: obj.x, y: obj.y } : null;

@@ -1,9 +1,12 @@
 // Section view: a vertical cut through compile()'s massing faces.
 //
-// Same extrusion Camera and 3D already use - not a second model, and not
-// a drafted sheet (that is still Output > view-section). The cut is a
-// viewing plane the user placed. Look is to the left of the stroke, so
-// drawing the line the other way flips the view the way Revit does.
+// Same extrusion Camera and 3D already use - not a second model. Every cut
+// is also saved as a named view (below), so `sheets.js` can draft it onto a
+// sheet's viewport later (Output > view-section) without re-deriving it. The
+// cut itself is a viewing plane the user placed; look is to the left of the
+// stroke, so drawing the line the other way flips the view the way Revit does.
+
+import { nid } from "./model.js";
 
 export const SECTION_FAR_M = 20;
 export const SECTION_U_PAD = 0.4;
@@ -130,6 +133,47 @@ export function sectionUV(p, cut) {
 export function projectSectionPoint(x, y, z, cut, originU, originV, scale, cx, cy) {
   const [u, v, depth] = sectionUV([x, y, z], cut);
   return [cx + (u - originU) * scale, cy - (v - originV) * scale, depth];
+}
+
+// --- persisted sections (Document > Views > Section) -----------------------
+//
+// The Section tool always makes a new one, the same as Revit: a cut is its
+// own view from the moment it is drawn, not a scratch value the quick look
+// discards on close. That permanence is what `view-section` (Output > Views,
+// "placing a section view on a sheet, once sheets exist") needed - sheets.js
+// can now point a sheet's one viewport at a named section instead of only
+// ever the plan.
+
+export function ensureSections(doc) {
+  if (!Array.isArray(doc.sections)) doc.sections = [];
+  return doc.sections;
+}
+
+function nextSectionName(sections) {
+  return `Section ${sections.length + 1}`;
+}
+
+/** `cut` must be a `sectionFromClicks()` result; a malformed one is refused
+ * rather than saved half-formed, the same rule `createSheet` applies to an
+ * unknown paper size. */
+export function createSection(doc, cut, { name } = {}) {
+  if (!cut || cut.mode !== "section") return { ok: false, reason: "not a section cut" };
+  const sections = ensureSections(doc);
+  const section = { id: nid("sec"), name: name || nextSectionName(sections), cut };
+  sections.push(section);
+  return { ok: true, section };
+}
+
+export function removeSection(doc, sectionId) {
+  const sections = ensureSections(doc);
+  const idx = sections.findIndex((s) => s.id === sectionId);
+  if (idx < 0) return false;
+  sections.splice(idx, 1);
+  return true;
+}
+
+export function sectionById(doc, sectionId) {
+  return ensureSections(doc).find((s) => s.id === sectionId) || null;
 }
 
 export function sectionFrame(faces, cut) {

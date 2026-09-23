@@ -114,15 +114,15 @@ export const RIBBON = [
       {
         label: "Lines",
         items: [
-          { id: "model-lines", label: "Model", todo: "Week 3, with the sheet system." },
-          { id: "annot-lines", label: "Annotate", todo: "Week 3, with the sheet system." },
+          { id: "model-lines", label: "Model", command: "model-lines" },
+          { id: "annot-lines", label: "Annotate", command: "annot-lines" },
         ],
       },
       {
         label: "Annotate",
         items: [
           { id: "dimensions", label: "Dimensions", command: "dimensions" },
-          { id: "revision", label: "Revision cloud", todo: "Week 3, with the title block revision history." },
+          { id: "revision", label: "Revision cloud", command: "revision" },
           { id: "region", label: "Region", todo: "Week 3, with the filled-region colour conventions." },
         ],
       },
@@ -130,14 +130,14 @@ export const RIBBON = [
         label: "Views",
         items: [
           { id: "section", label: "Section", command: "section" },
-          { id: "elevation", label: "Elevation", todo: "Week 3: one elevation extruded from the plan." },
+          { id: "elevation", label: "Elevation", command: "elevation" },
           { id: "grids", label: "Grids", todo: "Week 3, with the TSP grid head." },
         ],
       },
       {
         label: "Project",
         items: [
-          { id: "project-info", label: "Project information", todo: "Week 3: feeds the title block." },
+          { id: "project-info", label: "Project information", command: "project-info" },
           { id: "finishes", label: "Floor finishes", todo: "Needs a finishes SKU category; none in the template." },
         ],
       },
@@ -198,8 +198,8 @@ export const RIBBON = [
         items: [
           { id: "view-3d", label: "3D", command: "view-3d" },
           { id: "view-camera", label: "Camera", command: "view-camera" },
-          { id: "callout", label: "Call out", todo: "Week 3, with the TSP callout head." },
-          { id: "view-section", label: "Section", todo: "Week 3: placing a section view on a sheet, once sheets exist." },
+          { id: "callout", label: "Call out", command: "callout" },
+          { id: "view-section", label: "Section", command: "view-section" },
         ],
       },
       {
@@ -298,6 +298,11 @@ export const HINTS = {
   "view-3d": "Open a massing view of the current plan.",
   "view-camera": "Click where you stand, then click what you look at.",
   section: "Click two points to cut. Look is to the left of the line; draw the other way to flip.",
+  elevation: "Pick a compass side to extrude an orthographic elevation from the plan.",
+  callout: "Click two opposite corners to box a detail crop of the plan.",
+  revision: "Click two opposite corners to cloud the changed area. Link it to a revision from the Sheets panel.",
+  "model-lines": "Click one end, then the other. A model line is a modelled fact, like a wall with no thickness.",
+  "annot-lines": "Click one end, then the other. An annotation line is a mark on this drawing only, never exported.",
   compile: "Build the bill of quantities from what you have drawn.",
   boq: "Bill of quantities: priced schedule of what you have drawn, one line per SKU.",
   bom: "Bill of materials: unpriced takeoff of what you have drawn, one line per SKU.",
@@ -353,7 +358,7 @@ const SIMPLE_TABS = [
     groups: [
       { label: "Views", items: ["view-3d", "view-camera", "section"] },
       { label: "Quantities", items: ["boq"] },
-      { label: "Print", items: ["sheets"] },
+      { label: "Print", items: ["sheets", "project-info"] },
       { label: "Check", items: ["gaps"] },
     ],
   },

@@ -8,12 +8,28 @@
 // rather than filled in with a plausible zero.
 
 import { ApiError, api } from "./api.js";
+import { drawPreview } from "./preview.js";
 
 const state = {
   session: null,
   reference: null,
   projects: [],
+  // Three destinations, plus the new-job composer. `selectedId` is the job
+  // the workspace is pointed at and survives a trip to Practice or Register,
+  // so coming back lands where you left rather than on whatever sorts first.
+  view: "practice",
   selectedId: null,
+  registerFilter: "all",
+  registerQuery: "",
+  registerSort: "risk",
+  registerAsc: false,
+  switcher: null,
+  recentIds: [],
+  phases: null,
+  phasePicker: false,
+  // Outlines, keyed by project id, for every job that has a drawing. Loaded
+  // once for the practice page and reused by the job header.
+  previews: null,
   tab: "overview",
   entries: [],
   certificates: [],
@@ -22,7 +38,7 @@ const state = {
   tasks: [],
   monthEntries: [],
   signUpMode: false,
-  returnId: null,
+  returnView: null,
   newJob: null,
 };
 
@@ -228,13 +244,13 @@ const warningsHtml = (warnings) => (warnings.length
       </div>`).join("")}</div>`
   : `<div class="empty">Nothing to flag. Quoted, captured and certified all agree.</div>`);
 
-// --- the rail ---------------------------------------------------------------
+// --- the register list ------------------------------------------------------
 
 /**
- * The rail is ordered by what is going wrong, not by what was touched last.
- * A list in date order answers "what did I open yesterday", which nobody needs
- * a register to tell them; the question this screen exists for is which job is
- * losing money, and that job is rarely the most recent one.
+ * Risk order: what is going wrong, not what was touched last. A list in date
+ * order answers "what did I open yesterday", which nobody needs a register to
+ * tell them; the question this screen exists for is which job is losing
+ * money, and that job is rarely the most recent one.
  *
  * Four bands, and a job can only be in one:
  *
@@ -245,6 +261,11 @@ const warningsHtml = (warnings) => (warnings.length
  *
  * Band 3 is last and stays in date order, because there is no honest way to
  * rank jobs that have not told us anything.
+ *
+ * This is the register's default sort and no longer the order of a permanent
+ * navigation element. A list that reorders itself as work happens cannot be
+ * navigated from memory, which is why it belongs on a page whose sort is a
+ * visible, changeable column header.
  */
 function riskBand(project) {
   const { realisation, burn } = project.financials;
@@ -262,28 +283,159 @@ function byRisk(a, b) {
   return String(b.openedAt ?? "").localeCompare(String(a.openedAt ?? ""));
 }
 
-function renderRail() {
-  const list = el("rail-list");
-  if (!state.projects.length) {
-    list.innerHTML = `<div class="empty" style="margin:14px">No jobs yet.<br />
-      The register is the spine: a job here needs no drawing, no template and no fee.</div>`;
-    return;
+/**
+ * The four filters the practice tiles count, expressed once so a tile and the
+ * register it opens can never disagree about what they mean.
+ */
+const REGISTER_FILTERS = {
+  all: { label: "All jobs", match: () => true },
+  over: {
+    label: "Past the fee",
+    match: (p) => p.financials.burn !== null && p.financials.burn > 1,
+  },
+  unbilled: {
+    label: "Worked, never billed",
+    match: (p) => p.financials.captured > 0
+      && p.financials.certifiedGross === 0 && p.financials.draftGross === 0,
+  },
+  stalled: {
+    label: "On hold or halted",
+    match: (p) => p.status === "on_hold" || p.status === "halted",
+  },
+  nofee: {
+    label: "No fee to measure against",
+    match: (p) => p.financials.quoted === null,
+  },
+};
+
+const REGISTER_COLUMNS = [
+  ["code", "Code", false],
+  ["name", "Job", false],
+  ["client", "Client", false],
+  ["type", "Type", false],
+  ["phase", "Phase", false],
+  ["status", "Status", false],
+  ["quoted", "Quoted", true],
+  ["captured", "Captured", true],
+  ["burn", "Burn", true],
+  ["realisation", "Realisation", true],
+];
+
+/**
+ * Burn and realisation are separate columns, deliberately. Folded into one
+ * badge they cannot be told apart: a job at 211% of its fee and never
+ * certified reads 0% realisation, exactly like a job that has logged nothing
+ * at all, and the figure the list was ordered by is not the one on screen.
+ */
+function sortKey(project, column) {
+  const f = project.financials;
+  const type = state.reference?.projectTypes.find((t) => t.code === project.typeCode);
+  switch (column) {
+    case "code": return String(project.code || "").toLowerCase();
+    case "name": return String(project.name || "").toLowerCase();
+    case "client": return String(project.clientName || "").toLowerCase();
+    case "type": return String(type?.name || project.typeCode || "").toLowerCase();
+    // Sorted by how long it has sat there, not alphabetically. The phase name
+    // is what you read; the days are what tells you which one to pick up.
+    case "phase": return project.currentPhase ? -(daysSince(project.phaseSince) ?? 0) : null;
+    case "status": return String(project.status || "");
+    case "quoted": return f.quoted;
+    case "captured": return f.captured;
+    case "burn": return f.burn;
+    case "realisation": return f.realisation;
+    default: return null;
   }
-  list.innerHTML = `<p class="rail-note">Worst realisation and deepest burn first.
-    A job in trouble is rarely the one opened most recently.</p>`
-    + state.projects.map((project) => {
-    const { realisation, burn } = project.financials;
-    const badge = realisation === null && burn === null ? "&mdash;"
-      : realisation !== null ? percent(realisation) : percent(burn);
-    const cls = realisation !== null ? realisationClass(realisation)
-      : burn !== null && burn > 1 ? "bad" : "flat";
-    return `<button class="proj" data-project="${esc(project.id)}"
-              aria-current="${project.id === state.selectedId}">
-        <b>${esc(project.code || "no code")} &middot; ${esc(project.name || "Untitled")}</b>
-        <span class="real ${cls}" title="${realisation !== null ? "Realisation" : "Burn"}">${badge}</span>
-        <em>${esc(project.clientName || "No client recorded")}</em>
-      </button>`;
-    }).join("");
+}
+
+/** Nulls last whichever way the column is pointing: "not known" is not small. */
+function compareBy(column, ascending) {
+  return (a, b) => {
+    const left = sortKey(a, column);
+    const right = sortKey(b, column);
+    if (left === right) return 0;
+    if (left === null || left === undefined) return 1;
+    if (right === null || right === undefined) return -1;
+    const order = left < right ? -1 : 1;
+    return ascending ? order : -order;
+  };
+}
+
+function visibleProjects() {
+  const query = state.registerQuery.trim().toLowerCase();
+  const filter = REGISTER_FILTERS[state.registerFilter] ?? REGISTER_FILTERS.all;
+  const rows = state.projects.filter((project) => {
+    if (!filter.match(project)) return false;
+    if (!query) return true;
+    return [project.code, project.name, project.clientName]
+      .some((field) => String(field || "").toLowerCase().includes(query));
+  });
+  return state.registerSort === "risk"
+    ? rows.sort(byRisk)
+    : rows.sort(compareBy(state.registerSort, state.registerAsc));
+}
+
+function registerHtml() {
+  if (!state.projects.length) {
+    return `<div class="empty">No jobs yet.<br />
+      The register is the spine: a job here needs no drawing, no template and no fee.<br />
+      Press <b>New job</b> and it will walk through each of those choices.</div>`;
+  }
+  const rows = visibleProjects();
+  const chips = Object.entries(REGISTER_FILTERS).map(([key, { label, match }]) => {
+    const count = key === "all" ? state.projects.length : state.projects.filter(match).length;
+    return `<button class="chip" data-filter="${key}"
+              aria-pressed="${state.registerFilter === key}">${esc(label)} <b>${count}</b></button>`;
+  }).join("");
+
+  const head = REGISTER_COLUMNS.map(([key, label, numeric]) => {
+    const sorted = state.registerSort === key;
+    return `<th class="sortable${numeric ? " num" : ""}" data-sort="${key}"
+              ${sorted ? `aria-sort="${state.registerAsc ? "ascending" : "descending"}"` : ""}
+              >${esc(label)}</th>`;
+  }).join("");
+
+  const body = rows.map((project) => {
+    const f = project.financials;
+    const type = state.reference?.projectTypes.find((t) => t.code === project.typeCode);
+    const flagged = f.burn !== null && f.burn > 1;
+    return `<tr class="row-link${flagged ? " flagged" : ""}" data-project="${esc(project.id)}">
+      <td><span class="code-cell">${esc(project.code || "no code")}</span></td>
+      <td>${esc(project.name || "Untitled")}</td>
+      <td>${esc(project.clientName || "—")}</td>
+      <td>${esc(type?.name || project.typeCode || "—")}</td>
+      <td>${project.currentPhase
+    ? `${esc(project.currentPhase)}<em>${dayCount(daysSince(project.phaseSince))}</em>`
+    : '<span class="pill flat">not stated</span>'}</td>
+      <td>${project.status === "open" ? "open"
+    : `<span class="pill warn">${esc(String(project.status || "—").replace(/_/g, " "))}</span>`}</td>
+      <td class="num">${money(f.quoted)}</td>
+      <td class="num">${money(f.captured)}</td>
+      <td class="num">${f.burn === null ? "&mdash;"
+    : `<span class="real ${f.burn > 1 ? "bad" : f.burn >= 0.8 ? "mid" : "flat"}">${percent(f.burn)}</span>`}</td>
+      <td class="num">${f.realisation === null ? "&mdash;"
+    : `<span class="real ${realisationClass(f.realisation)}">${percent(f.realisation)}</span>`}</td>
+    </tr>`;
+  }).join("");
+
+  return `
+    <h3 class="sec">Register <small>${rows.length} of ${state.projects.length} jobs</small></h3>
+    <div class="toolbar">
+      <input type="search" id="register-query" value="${esc(state.registerQuery)}"
+             placeholder="Code, description or client" aria-label="Search the register" />
+      <div class="chips">${chips}</div>
+      <div class="spacer" style="flex:1"></div>
+      <button class="chip" data-sort="risk" aria-pressed="${state.registerSort === "risk"}">Risk order</button>
+    </div>
+    ${rows.length ? `<table class="grid">
+      <thead><tr>${head}</tr></thead>
+      <tbody>${body}</tbody>
+    </table>` : `<div class="empty">No job matches that.</div>`}
+    <p class="note-line">${state.registerSort === "risk"
+    ? `Ordered by risk: past the fee first, worst realisation next, then jobs that have not
+       said anything yet. Burn and realisation are separate columns because they answer
+       different questions &mdash; a job well past its fee and never certified realises
+       nothing, and so does a job nobody has started.`
+    : "Sorted by that column. Click it again to reverse, or pick Risk to go back."}</p>`;
 }
 
 // --- the main panel ---------------------------------------------------------
@@ -292,39 +444,66 @@ function selected() {
   return state.projects.find((project) => project.id === state.selectedId) || null;
 }
 
+function renderChrome() {
+  for (const button of document.querySelectorAll("#nav [data-view]")) {
+    button.setAttribute("aria-current", button.dataset.view === state.view ? "page" : "false");
+  }
+  el("switch-job").hidden = state.projects.length < 2 || state.view === "new";
+}
+
 function renderMain() {
-  const composing = state.selectedId === "new";
+  const composing = state.view === "new";
   el("composer").hidden = !composing;
   el("workspace").inert = composing;
+  renderChrome();
   if (composing) {
     renderComposer();
     syncAddress();
     return;
   }
   const main = el("main");
+  if (state.view === "practice") {
+    main.innerHTML = `<div class="panel wrap">${practiceHtml()}</div>`;
+    paintPreviews();
+    syncAddress();
+    return;
+  }
+  if (state.view === "register") {
+    main.innerHTML = `<div class="panel wrap">${registerHtml()}</div>`;
+    syncAddress();
+    return;
+  }
   const project = selected();
   if (!project) {
-    main.innerHTML = `<div class="panel">${firmHtml()}</div>`;
-    syncAddress();
+    state.view = "register";
+    renderMain();
     return;
   }
   const type = state.reference?.projectTypes.find((t) => t.code === project.typeCode);
   const drawingLabel = project.drawingId ? "Open drawing" : "Start a drawing";
   main.innerHTML = `
     <div class="proj-head">
+      <nav class="crumbs" aria-label="Breadcrumb">
+        <button type="button" data-action="go-register">Register</button>
+        <span>/</span><span>${esc(project.code || "no code")}</span>
+      </nav>
       <div class="proj-head-row">
         <div>
           <div class="code">${esc(project.code || "NO CODE")}</div>
           <h1>${esc(project.name || "Untitled")}</h1>
+          <div class="facts">
+            <span>Client <b>${esc(project.clientName || "—")}</b></span>
+            <span>Type <b>${esc(type?.name || project.typeCode || "—")}</b></span>
+            <span>Basis <b>${project.billingBasis === "time_and_materials" ? "Time &amp; materials" : project.billingBasis === "fixed_fee" ? "Fixed fee" : "—"}</b></span>
+            <span>Status <b>${esc(project.status || "—")}</b></span>
+          </div>
         </div>
-        <button class="btn" type="button" data-action="drawing">${drawingLabel}</button>
+        <div class="proj-head-drawing">
+          ${previewHtml(project, { size: "md", opens: "drawing" })}
+          <button class="btn btn-sm" type="button" data-action="drawing">${drawingLabel}</button>
+        </div>
       </div>
-      <div class="facts">
-        <span>Client <b>${esc(project.clientName || "—")}</b></span>
-        <span>Type <b>${esc(type?.name || project.typeCode || "—")}</b></span>
-        <span>Basis <b>${project.billingBasis === "time_and_materials" ? "Time &amp; materials" : project.billingBasis === "fixed_fee" ? "Fixed fee" : "—"}</b></span>
-        <span>Status <b>${esc(project.status || "—")}</b></span>
-      </div>
+      ${phaseStripHtml(project)}
     </div>
     <div class="tabs">
       ${TABS.map(([tab, label]) => `
@@ -336,17 +515,45 @@ function renderMain() {
           : state.tab === "certificates" ? certificatesHtml(project)
             : overviewHtml(project)
     }</div>`;
+  paintPreviews();
   syncAddress();
 }
 
 /** So a return from the planner lands on this job, and a refresh stays here. */
 function syncAddress() {
   const url = new URL(location.href);
-  const id = state.selectedId && state.selectedId !== "new" ? state.selectedId : "";
-  if (id) url.searchParams.set("project", id);
-  else url.searchParams.delete("project");
+  if (state.view === "job" && state.selectedId) {
+    url.searchParams.set("project", state.selectedId);
+    url.searchParams.delete("view");
+  } else if (state.view === "register") {
+    url.searchParams.delete("project");
+    url.searchParams.set("view", "register");
+  } else if (state.view === "practice") {
+    url.searchParams.delete("project");
+    url.searchParams.delete("view");
+  }
   const next = `${url.pathname}${url.search}`;
   if (next !== `${location.pathname}${location.search}`) history.replaceState(null, "", next);
+}
+
+/** One path into a job, so "recently opened" is always true. */
+async function openJob(id, { tab } = {}) {
+  state.selectedId = id;
+  state.view = "job";
+  if (tab) state.tab = tab;
+  state.openCertificate = null;
+  state.phases = null;
+  state.phasePicker = false;
+  state.recentIds = [id, ...state.recentIds.filter((other) => other !== id)].slice(0, 8);
+  await loadTab();
+  renderMain();
+}
+
+async function goView(view, { filter } = {}) {
+  state.view = view;
+  if (filter) state.registerFilter = filter;
+  await loadTab();
+  renderMain();
 }
 
 /**
@@ -389,6 +596,284 @@ async function goToDrawing(project) {
   location.assign(`/v2/index.html?project=${encodeURIComponent(project.id)}`);
 }
 
+// --- the drawing, at a glance -----------------------------------------------
+
+/**
+ * A document is minted the moment somebody presses "Start a drawing", so
+ * `drawingId` says a drawing exists and says nothing about whether anything
+ * is on it. The picture is what tells those two apart, and it is worth
+ * showing for that alone: a job that has been "drawn" for three months and
+ * is still a blank sheet is a fact no column in the register can report.
+ */
+function previewHtml(project, { size = "sm", opens = "job" } = {}) {
+  if (!project?.drawingId) return "";
+  const who = project.code || project.name || "this job";
+  // From the practice page a thumbnail opens the job, like everything else on
+  // that page. From the job header it opens the planner, because that is what
+  // the button beside it already says and the job is already open.
+  const target = opens === "drawing"
+    ? `data-action="drawing" aria-label="Open the drawing for ${esc(who)}"`
+    : `data-project="${esc(project.id)}" aria-label="Open ${esc(who)}"`;
+  return `
+    <figure class="dwg dwg-${size}">
+      <button type="button" class="dwg-frame" ${target}>
+        <canvas data-preview="${esc(project.id)}"></canvas>
+      </button>
+      <figcaption data-preview-note="${esc(project.id)}"></figcaption>
+    </figure>`;
+}
+
+const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+/**
+ * A canvas cannot be filled by a template string, so every render paints them
+ * afterwards. The caption is written here rather than in the markup for the
+ * same reason the warnings are derived: it reports what the renderer actually
+ * put on the canvas, so it cannot describe a plan that is not there.
+ */
+function paintPreviews() {
+  for (const canvas of document.querySelectorAll("canvas[data-preview]")) {
+    const id = canvas.dataset.preview;
+    const preview = state.previews?.get(id) || null;
+    const drawn = preview ? drawPreview(canvas, preview) : null;
+    canvas.closest(".dwg")?.classList.toggle("blank", !drawn);
+    const note = document.querySelector(`[data-preview-note="${CSS.escape(id)}"]`);
+    if (!note) continue;
+    if (!drawn) {
+      note.textContent = preview
+        ? "Started, nothing drawn on it yet"
+        : "Drawing not loaded";
+      continue;
+    }
+    // What the plan is made of, not an inventory of it. Rooms are the answer
+    // where there are any - a house has a slab and a roof and saying so is
+    // not news. Where there are none, a site layout is its erven and a
+    // boundary job is its walls, and those are worth naming.
+    const parts = [];
+    if (drawn.rooms) parts.push(plural(drawn.rooms, "room"));
+    else if (drawn.slabs) parts.push(plural(drawn.slabs, "slab"));
+    else if (drawn.roofs) parts.push(plural(drawn.roofs, "roof"));
+    if (drawn.walls) parts.push(plural(drawn.walls, "wall"));
+    parts.push(`${drawn.width.toFixed(1)} \u00d7 ${drawn.height.toFixed(1)} m`);
+    note.textContent = parts.join(" \u00b7 ");
+  }
+}
+
+/**
+ * The drawings, together. Only jobs that have one appear - there is no
+ * placeholder tile for a job nobody has drawn, because a grey rectangle
+ * captioned with a job code is a picture of work that does not exist.
+ */
+function drawingsHtml() {
+  if (!state.previews) return "";
+  const drawn = state.projects.filter((project) => state.previews.has(project.id));
+  if (!drawn.length) return "";
+  return `
+    <h3 class="sec">Drawings
+      <small>${drawn.length} of ${plural(state.projects.length, "job")}
+        ${drawn.length === 1 ? "has" : "have"} a document</small>
+    </h3>
+    <div class="dwg-grid">${drawn.map((project) => `
+      <div class="dwg-card">
+        ${previewHtml(project)}
+        <button type="button" class="link-job" data-project="${esc(project.id)}"
+          >${esc(project.code || "no code")} &middot; ${esc(project.name || "Untitled")}</button>
+      </div>`).join("")}</div>`;
+}
+
+// --- where the job has got to -----------------------------------------------
+
+/** Whole days, because "3 days at council" is the sentence people say. */
+function daysSince(iso) {
+  if (!iso) return null;
+  const then = new Date(iso);
+  if (Number.isNaN(then.getTime())) return null;
+  return Math.max(0, Math.floor((Date.now() - then.getTime()) / 86400000));
+}
+
+const dayCount = (days) => (days === null ? "" : days === 0 ? "today"
+  : days === 1 ? "1 day" : `${days} days`);
+
+/**
+ * The job's process, made permanent.
+ *
+ * The composer already showed this sequence once, on the day the job was
+ * registered, and then it was never shown again - phases survived only as
+ * grey separator rows in a forty-row task table. This is the same list, kept,
+ * with the job's position on it.
+ *
+ * The position is stated, never inferred. A phase whose tasks are all ticked
+ * is not made current for you: "the tasks are done" and "we have moved on"
+ * are different claims, and where the two disagree that is reported rather
+ * than resolved.
+ */
+function phaseStripHtml(project) {
+  const data = state.phases;
+  if (!data) return "";
+  const { phases, current, currentSince, currentListed } = data;
+
+  if (!phases.length && !current) {
+    return `<div class="phase-strip empty-strip">
+      <p class="note-line" style="margin:0">No phase list on this job. Phases come from the
+        fee schedule or the type's task list; this one has neither, so where it has got to
+        can still be recorded by hand.</p>
+      ${phasePickerHtml(project, [])}
+    </div>`;
+  }
+
+  const days = daysSince(currentSince);
+  const steps = phases.map((phase) => {
+    const billed = phase.quoted === null ? ""
+      : phase.certified >= phase.quoted && phase.quoted > 0 ? "billed"
+        : phase.certified > 0 ? "part-billed" : "";
+    const tasks = phase.tasksTotal
+      ? `${phase.tasksDone}/${phase.tasksTotal - phase.tasksStruck} done`
+      : "no tasks";
+    return `<li class="step ${esc(phase.position || "unknown")}">
+      <button type="button" data-phase="${esc(phase.ref)}"
+              aria-current="${phase.position === "current"}">
+        <span class="step-seq">${phase.seq}</span>
+        <span class="step-name">${esc(phase.ref)}</span>
+        <span class="step-evi">${tasks}${phase.quoted === null ? ""
+    : ` &middot; ${money(phase.quoted)}${billed ? ` &middot; ${billed}` : ""}`}</span>
+      </button>
+    </li>`;
+  }).join("");
+
+  return `<div class="phase-strip">
+    <div class="phase-head">
+      <h2>Where this job is</h2>
+      ${current
+    ? `<p>In <b>${esc(current)}</b>${days === null ? "" : ` for ${dayCount(days)}`}${
+      currentListed ? "" : ' <span class="pill warn">not on the fee schedule</span>'}</p>`
+    : `<p class="unstated">Nobody has said. A job with no phase recorded is not
+         phase&nbsp;one &mdash; it is a job whose position nobody has stated.</p>`}
+    </div>
+    ${phases.length ? `<ol class="phase-steps">${steps}</ol>` : ""}
+    ${phasePickerHtml(project, phases)}
+    ${phaseWarningsHtml()}
+  </div>`;
+}
+
+function phasePickerHtml(project, phases) {
+  if (!state.phasePicker) {
+    return `<div class="phase-actions">
+      <button class="btn btn-sm" type="button" data-action="phase-picker">
+        ${state.phases?.current ? "Move to another phase" : "Record where this job is"}
+      </button>
+    </div>`;
+  }
+  return `
+    <form class="form phase-form" data-form="phase" data-project="${esc(project.id)}">
+      <div class="fields">
+        <div class="field">
+          <label for="ph-ref">Phase</label>
+          <input id="ph-ref" name="phaseRef" list="phase-options" required autocomplete="off"
+                 value="" placeholder="${esc(phases[0]?.ref || "Submitted to council")}" />
+          <datalist id="phase-options">
+            ${phases.map((phase) => `<option value="${esc(phase.ref)}"></option>`).join("")}
+          </datalist>
+        </div>
+        <div class="field wide">
+          <label for="ph-note">Note</label>
+          <input id="ph-note" name="note" placeholder="Optional — why it moved" />
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn btn-primary" type="submit">Record it</button>
+        <button class="btn" type="button" data-action="phase-cancel">Cancel</button>
+      </div>
+      <p class="note-line">Recorded, not overwritten. Going back to an earlier phase is
+        another entry &mdash; &ldquo;council sent it back in August&rdquo; is the fact a fee
+        query turns on, and a column that only held the latest value would lose it.</p>
+    </form>`;
+}
+
+/**
+ * Where the stated phase and the evidence disagree. Both are facts; neither
+ * is corrected. The disagreement is the whole content of the warning.
+ */
+function phaseWarningsHtml() {
+  const data = state.phases;
+  if (!data?.current) return "";
+  const behind = data.phases.filter((phase) => phase.position === "behind");
+  const unclaimed = behind.filter((phase) => phase.quoted !== null && phase.variance > 0);
+  const undone = behind.filter((phase) => phase.tasksTotal - phase.tasksStruck > phase.tasksDone);
+  if (!unclaimed.length && !undone.length) return "";
+
+  const total = cents(unclaimed.reduce((sum, phase) => sum + phase.variance, 0));
+  return `<div class="warn-list" style="margin-top:12px">
+    ${unclaimed.length ? `<div class="w med">
+      <span class="sev">Watch</span>
+      <b>${money(total)} quoted on phases the job has already passed, not yet certified</b>
+      <p>${unclaimed.map((phase) => esc(phase.ref)).join(", ")}. Work the client has been
+        told is behind them is work that is harder to invoice the longer it waits.</p>
+    </div>` : ""}
+    ${undone.length ? `<div class="w med">
+      <span class="sev">Watch</span>
+      <b>Tasks still open on phases the job has moved past</b>
+      <p>${undone.map((phase) => `${esc(phase.ref)} (${phase.tasksTotal - phase.tasksStruck - phase.tasksDone} left)`).join(", ")}.
+        Either they were not needed &mdash; in which case strike them, and the list will say
+        somebody decided that &mdash; or the job moved on without them.</p>
+    </div>` : ""}
+  </div>`;
+}
+
+// --- switch job -------------------------------------------------------------
+
+/**
+ * The affordance the rail used to be, minus the rail. Switching job is
+ * something people do a handful of times a day, which buys a keystroke rather
+ * than a permanent third of the window - and unlike a risk-ordered list, a
+ * search box does not move the thing you are reaching for between visits.
+ */
+function switcherMatches() {
+  const query = (state.switcher?.query || "").trim().toLowerCase();
+  const recentFirst = [
+    ...state.recentIds.map((id) => state.projects.find((p) => p.id === id)).filter(Boolean),
+    ...state.projects.filter((p) => !state.recentIds.includes(p.id)),
+  ];
+  if (!query) return recentFirst.slice(0, 12);
+  return recentFirst.filter((project) => [project.code, project.name, project.clientName]
+    .some((field) => String(field || "").toLowerCase().includes(query))).slice(0, 12);
+}
+
+function renderSwitcher() {
+  const node = el("switcher");
+  node.hidden = !state.switcher;
+  el("workspace").inert = Boolean(state.switcher) || state.view === "new";
+  if (!state.switcher) return;
+  const rows = switcherMatches();
+  state.switcher.index = Math.min(state.switcher.index, Math.max(rows.length - 1, 0));
+  el("switcher-list").innerHTML = rows.length
+    ? rows.map((project, index) => {
+      const { burn } = project.financials;
+      return `<button class="switcher-row" role="option" data-project="${esc(project.id)}"
+                aria-selected="${index === state.switcher.index}">
+          <b>${esc(project.code || "no code")} &middot; ${esc(project.name || "Untitled")}</b>
+          <em>${esc(project.clientName || "No client recorded")}</em>
+          ${burn === null ? "" : `<span class="real ${burn > 1 ? "bad" : "flat"}"
+            title="Burn">${percent(burn)}</span>`}
+        </button>`;
+    }).join("")
+    : '<div class="switcher-empty">No job matches that.</div>';
+  node.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
+}
+
+function openSwitcher() {
+  if (state.projects.length < 2) return;
+  state.switcher = { query: "", index: 0 };
+  renderSwitcher();
+  const input = el("switcher-query");
+  input.value = "";
+  input.focus();
+}
+
+function closeSwitcher() {
+  state.switcher = null;
+  renderSwitcher();
+}
+
 const TABS = [
   ["overview", "Overview"],
   ["schedule", "Fee schedule"],
@@ -397,12 +882,15 @@ const TABS = [
 ];
 
 /**
- * The practice, not one job. The rail and every tab beside it answer questions
- * about a single project; this is the only place that can say how the firm is
- * doing, and it costs nothing because the register already carries each job's
- * money with it.
+ * The practice, not one job, and the page you land on. Every tab in the job
+ * workspace answers a question about a single project; this is the only place
+ * that can say how the firm is doing, and it costs nothing because the
+ * register already carries each job's money with it.
+ *
+ * It used to render only when nothing was selected, which nothing could
+ * produce - boot always opened the first job - so the firm never saw it.
  */
-function firmHtml() {
+function practiceHtml() {
   const jobs = state.projects;
   if (!jobs.length) {
     return `<div class="empty">No jobs yet.<br />
@@ -410,44 +898,144 @@ function firmHtml() {
       Press <b>New job</b> and it will walk through each of those choices.</div>`;
   }
   const open = jobs.filter((p) => p.status === "open");
-  const overFee = jobs.filter((p) => p.financials.burn !== null && p.financials.burn > 1);
-  const uncertified = jobs.filter((p) => p.financials.captured > 0
-    && p.financials.certifiedGross === 0 && p.financials.draftGross === 0);
+  const overFee = jobs.filter(REGISTER_FILTERS.over.match);
+  const uncertified = jobs.filter(REGISTER_FILTERS.unbilled.match);
   const capturedThisMonth = state.monthEntries.reduce((sum, e) => sum + e.capturedAmount, 0);
   const minutesThisMonth = state.monthEntries.reduce((sum, e) => sum + e.minutes, 0);
 
-  const jobList = (list) => (list.length
-    ? `<div class="sub">${list.slice(0, 4).map((p) => esc(p.code || "no code")).join(", ")}${
-      list.length > 4 ? ` and ${list.length - 4} more` : ""}</div>`
-    : '<div class="sub">None.</div>');
+  // A count with no way through to the jobs it counted is a poster. Each of
+  // these opens the register filtered by the same predicate it was counted
+  // with, so the tile and the list cannot drift apart.
+  const tile = (filter, label, list, sub) => `
+    <button class="kpi${list.length ? " flag" : ""}" type="button"
+            data-goto-filter="${filter}"${list.length ? "" : " disabled"}>
+      <div class="lbl">${esc(label)}</div>
+      <div class="val">${list.length}</div>
+      <div class="sub">${sub}</div>
+      ${list.length ? '<div class="go">Show these &rarr;</div>' : ""}
+    </button>`;
+
+  const codes = (list) => (list.length
+    ? `${list.slice(0, 4).map((p) => esc(p.code || "no code")).join(", ")}${
+      list.length > 4 ? ` and ${list.length - 4} more` : ""}`
+    : "None.");
+
+  const recent = state.recentIds
+    .map((id) => jobs.find((p) => p.id === id))
+    .filter(Boolean);
 
   return `
-    <h3 class="sec">The practice <small>every job, not the one you have open</small></h3>
+    <h3 class="sec">The practice <small>every job, not the one you had open</small></h3>
     <div class="kpis">
-      <div class="kpi">
+      <button class="kpi" type="button" data-goto-filter="all">
         <div class="lbl">Open jobs</div>
         <div class="val">${open.length}</div>
         <div class="sub">${jobs.length} in the register altogether</div>
-      </div>
+        <div class="go">Open the register &rarr;</div>
+      </button>
       <div class="kpi">
         <div class="lbl">Captured this month</div>
         <div class="val">${money(capturedThisMonth)}</div>
         <div class="sub">${duration(minutesThisMonth)} logged since ${esc(monthStart())}</div>
       </div>
-      <div class="kpi${overFee.length ? " flag" : ""}">
-        <div class="lbl">Past the fee</div>
-        <div class="val">${overFee.length}</div>
-        ${jobList(overFee)}
-      </div>
-      <div class="kpi${uncertified.length ? " flag" : ""}">
-        <div class="lbl">Worked, never billed</div>
-        <div class="val">${uncertified.length}</div>
-        ${jobList(uncertified)}
-      </div>
+      ${tile("over", "Past the fee", overFee, codes(overFee))}
+      ${tile("unbilled", "Worked, never billed", uncertified, codes(uncertified))}
     </div>
     <p class="note-line">Time captured and no certificate at all is the gap the workbook could
       not show: each invoice was compiled by hand from whichever rows somebody noticed, so an
-      unbilled job looked exactly like a quiet one. Select a job from the rail to open it.</p>`;
+      unbilled job looked exactly like a quiet one.</p>
+
+    ${attentionHtml()}
+
+    ${whereTheWorkIsHtml()}
+
+    ${drawingsHtml()}
+
+    ${recent.length ? `
+      <h3 class="sec">Recently opened</h3>
+      <table class="grid"><tbody>${recent.map((project) => `
+        <tr class="row-link" data-project="${esc(project.id)}">
+          <td><span class="code-cell">${esc(project.code || "no code")}</span></td>
+          <td>${esc(project.name || "Untitled")}</td>
+          <td>${esc(project.clientName || "—")}</td>
+          <td class="num">${project.financials.burn === null ? "&mdash;"
+    : `<span class="real ${project.financials.burn > 1 ? "bad" : "flat"}">${percent(project.financials.burn)}</span>`}</td>
+        </tr>`).join("")}</tbody></table>` : ""}`;
+}
+
+/**
+ * The executive reading of the process: which jobs are where, longest-sitting
+ * first. A job that has been at the same phase for ninety days is the thing
+ * this section exists to surface, and it is the one fact neither the money
+ * columns nor the warnings can say.
+ *
+ * Phases are not counted across types, because they are not the same phases -
+ * a township establishment has five stages and a strata report has one, and a
+ * histogram of their names would put unrelated work in one bar.
+ */
+function whereTheWorkIsHtml() {
+  const live = state.projects.filter((p) => p.status === "open" || p.status === "on_hold");
+  if (!live.length) return "";
+  const stated = live.filter((p) => p.currentPhase)
+    .sort((a, b) => (daysSince(b.phaseSince) ?? 0) - (daysSince(a.phaseSince) ?? 0));
+  const silent = live.filter((p) => !p.currentPhase);
+
+  return `
+    <h3 class="sec">Where the work is
+      <small>${stated.length ? "longest at the same phase first" : "nothing recorded yet"}</small>
+    </h3>
+    ${stated.length ? `<table class="grid">
+      <thead><tr>
+        <th>Code</th><th>Job</th><th>Phase</th><th class="num">Sitting there</th>
+      </tr></thead>
+      <tbody>${stated.map((project) => {
+    const days = daysSince(project.phaseSince);
+    return `<tr class="row-link${days !== null && days >= 60 ? " flagged" : ""}"
+                data-project="${esc(project.id)}">
+          <td><span class="code-cell">${esc(project.code || "no code")}</span></td>
+          <td>${esc(project.name || "Untitled")}</td>
+          <td>${esc(project.currentPhase)}</td>
+          <td class="num">${dayCount(days)}</td>
+        </tr>`;
+  }).join("")}</tbody>
+    </table>` : `<div class="empty">No open job has a phase recorded.<br />
+      Open one and press <b>Record where this job is</b>; the register will start being able
+      to answer &ldquo;what is at council&rdquo; without anybody opening a file.</div>`}
+    ${stated.length && silent.length ? `<p class="note-line">${silent.length} open
+      job${silent.length === 1 ? " has" : "s have"} no phase recorded
+      (${silent.slice(0, 5).map((p) => esc(p.code || "no code")).join(", ")}${
+  silent.length > 5 ? ` and ${silent.length - 5} more` : ""}). They are missing from the
+      list above rather than counted as if they were at the start.</p>` : ""}`;
+}
+
+/**
+ * The warnings every job already derives, gathered across the register and
+ * ranked. This is the executive reading: not a number per job, but the
+ * sentences the numbers make, worst first. Only `high` appears here - a page
+ * that lists every `med` is a page nobody reads twice.
+ */
+function attentionHtml() {
+  const flagged = state.projects
+    .map((project) => ({ project, warnings: warningsFor(project).filter((w) => w.level === "high") }))
+    .filter((row) => row.warnings.length)
+    .sort((a, b) => b.warnings.length - a.warnings.length);
+
+  if (!flagged.length) {
+    return `<h3 class="sec">Needs attention</h3>
+      <div class="empty">Nothing at the top severity. Quoted, captured and certified agree
+        across the register.</div>`;
+  }
+  return `
+    <h3 class="sec">Needs attention
+      <small>${flagged.length} job${flagged.length === 1 ? "" : "s"} the numbers are arguing about</small>
+    </h3>
+    <div class="warn-list">${flagged.map(({ project, warnings }) => `
+      <div class="w high">
+        <span class="sev">Act</span>
+        <b><button type="button" class="link-job" data-project="${esc(project.id)}"
+           >${esc(project.code || "no code")} &middot; ${esc(project.name || "Untitled")}</button></b>
+        <p>${warnings.map((w) => esc(w.title)).join(". ")}.</p>
+      </div>`).join("")}</div>`;
 }
 
 /**
@@ -812,20 +1400,18 @@ function blankNewJob() {
 }
 
 function openNewJob() {
-  if (state.selectedId !== "new") {
-    state.returnId = state.selectedId;
+  if (state.view !== "new") {
+    state.returnView = state.view;
     state.newJob = blankNewJob();
   }
-  state.selectedId = "new";
-  renderRail();
+  state.view = "new";
   renderMain();
 }
 
 function closeNewJob() {
-  state.selectedId = state.returnId ?? state.projects[0]?.id ?? null;
-  state.returnId = null;
+  state.view = state.returnView ?? "register";
+  state.returnView = null;
   state.newJob = null;
-  renderRail();
   renderMain();
 }
 
@@ -895,7 +1481,7 @@ function composerNameStep(job) {
       <p class="note-line">The code is unique in the firm, compared ignoring case and surrounding
         spaces. The workbook carried <code>P078</code> twice and <code>C036&nbsp;</code> beside
         <code>CO36.9</code>, and those only surfaced when somebody tried to bill them.
-        The description is the name people see on the rail; it can wait.</p>
+        The description is the name people read in the register; it can wait.</p>
     </div>`;
 }
 
@@ -1158,12 +1744,12 @@ async function submitNewJob() {
     renderComposer();
     return;
   }
-  state.selectedId = created.project.id;
-  state.returnId = null;
+  state.returnView = null;
   state.newJob = null;
   state.tab = "overview";
   toast(`${created.project.code} created`);
-  await refresh();
+  await loadProjects();
+  await openJob(created.project.id, { tab: "overview" });
 }
 
 function timeHtml(project) {
@@ -1441,33 +2027,59 @@ function billableTasksHtml(certificate) {
 
 // --- loading ----------------------------------------------------------------
 
-async function loadProjects({ keepSelection = true } = {}) {
+async function loadProjects({ initial = false } = {}) {
   const { projects } = await api.listRegister();
   // Sorted here rather than in SQL: the ordering is a reading of four figures
   // the server already sends, and the day somebody wants it by code instead,
   // that is a click rather than a migration.
   state.projects = projects.slice().sort(byRisk);
-  if (!keepSelection) {
-    const requested = new URLSearchParams(location.search).get("project");
-    state.selectedId = projects.some((p) => p.id === requested)
-      ? requested
-      : (projects[0]?.id ?? null);
-  } else if (state.selectedId !== "new" && !projects.some((p) => p.id === state.selectedId)) {
-    state.selectedId = projects[0]?.id ?? null;
+  if (initial) {
+    // No job is opened for you. The landing page is the practice, because the
+    // question somebody has when they sign in is "what is going on", not
+    // "what happens to sort first today".
+    const params = new URLSearchParams(location.search);
+    const requested = params.get("project");
+    if (projects.some((p) => p.id === requested)) {
+      state.selectedId = requested;
+      state.view = "job";
+      state.recentIds = [requested];
+    } else {
+      state.view = params.get("view") === "register" ? "register" : "practice";
+    }
+  } else if (state.view === "job" && !projects.some((p) => p.id === state.selectedId)) {
+    state.view = "register";
+    state.selectedId = null;
   }
-  renderRail();
+  state.recentIds = state.recentIds.filter((id) => projects.some((p) => p.id === id));
+}
+
+/**
+ * One request for the whole firm rather than one per tile. Held for the
+ * session: a document only changes in the planner, and the way back from the
+ * planner is a fresh page load.
+ */
+async function loadPreviews() {
+  if (state.previews) return;
+  const result = await api.drawingPreviews().catch(() => null);
+  if (result) state.previews = new Map(result.previews.map((p) => [p.projectId, p]));
 }
 
 async function loadTab() {
-  const project = selected();
-  if (!project) {
-    // The landing state is firm-wide, and the one figure the register rows do
-    // not already carry is what was captured this month.
+  if (state.view === "practice") {
+    // The one figure the register rows do not already carry is what was
+    // captured this month.
     state.monthEntries = state.projects.length
       ? (await api.listTimeEntries({ from: monthStart(), to: today() })).entries
       : [];
+    await loadPreviews();
     return;
   }
+  const project = state.view === "job" ? selected() : null;
+  if (!project) return;
+  if (project.drawingId) await loadPreviews();
+  // The phase strip sits in the header, above the tabs, so it is loaded for
+  // every tab rather than by whichever one happens to want it.
+  state.phases = (await api.phases(project.id).catch(() => null));
   if (state.tab === "overview") {
     state.tasks = (await api.listTasks(project.id)).tasks;
   } else if (state.tab === "schedule") {
@@ -1620,20 +2232,69 @@ function wireApp() {
     state.newJob.error = "";
     renderComposer();
   });
-  document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && state.selectedId === "new" && !state.newJob?.saving) {
-      closeNewJob();
-    }
+  el("nav").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-view]");
+    if (button) goView(button.dataset.view);
   });
 
-  el("rail-list").addEventListener("click", async (event) => {
-    const button = event.target.closest("[data-project]");
-    if (!button) return;
-    state.selectedId = button.dataset.project;
-    state.openCertificate = null;
-    renderRail();
-    await loadTab();
-    renderMain();
+  el("switch-job").addEventListener("click", () => openSwitcher());
+
+  // --- the switcher ---
+  const switcher = el("switcher");
+  switcher.addEventListener("click", (event) => {
+    if (event.target === switcher) return closeSwitcher();
+    const row = event.target.closest("[data-project]");
+    if (!row) return;
+    const id = row.dataset.project;
+    closeSwitcher();
+    openJob(id);
+  });
+  el("switcher-query").addEventListener("input", (event) => {
+    if (!state.switcher) return;
+    state.switcher.query = event.target.value;
+    state.switcher.index = 0;
+    renderSwitcher();
+  });
+
+  // A canvas holds pixels, not geometry, so a window that changes width
+  // leaves every preview stretched until it is drawn again.
+  let repaint = null;
+  window.addEventListener("resize", () => {
+    clearTimeout(repaint);
+    repaint = setTimeout(paintPreviews, 120);
+  });
+
+  document.addEventListener("keydown", (event) => {
+    const palette = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k";
+    if (palette && state.view !== "new") {
+      event.preventDefault();
+      if (state.switcher) closeSwitcher();
+      else openSwitcher();
+      return;
+    }
+    if (state.switcher) {
+      const rows = switcherMatches();
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeSwitcher();
+      } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        if (!rows.length) return;
+        const step = event.key === "ArrowDown" ? 1 : -1;
+        state.switcher.index = (state.switcher.index + step + rows.length) % rows.length;
+        renderSwitcher();
+      } else if (event.key === "Enter") {
+        event.preventDefault();
+        const picked = rows[state.switcher.index];
+        if (!picked) return;
+        closeSwitcher();
+        openJob(picked.id);
+      }
+      return;
+    }
+    if (event.key === "Escape" && state.view === "new" && !state.newJob?.saving) {
+      closeNewJob();
+    }
   });
 
   const main = el("main");
@@ -1646,8 +2307,52 @@ function wireApp() {
       renderMain();
       return;
     }
+    // A phase step is a button inside the header, and must be read before the
+    // generic row handler: it is not a way of opening a different job.
+    const step = event.target.closest("[data-phase]");
+    if (step) {
+      const project = selected();
+      if (!project) return;
+      const saved = await attempt(() => api.setPhase(project.id, {
+        phaseRef: step.dataset.phase,
+      }));
+      if (!saved) return;
+      state.phases = saved;
+      state.phasePicker = false;
+      toast(`Now in ${saved.current}`);
+      await loadProjects();
+      renderMain();
+      return;
+    }
+    // Practice tiles and register rows both reach a job or a filtered list.
+    const tile = event.target.closest("[data-goto-filter]");
+    if (tile) return goView("register", { filter: tile.dataset.gotoFilter });
+    const row = event.target.closest("[data-project]");
+    if (row) return openJob(row.dataset.project);
+    const sorter = event.target.closest("[data-sort]");
+    if (sorter) {
+      const column = sorter.dataset.sort;
+      state.registerAsc = state.registerSort === column ? !state.registerAsc : false;
+      state.registerSort = column;
+      renderMain();
+      return;
+    }
+    const chip = event.target.closest("[data-filter]");
+    if (chip) {
+      state.registerFilter = chip.dataset.filter;
+      renderMain();
+      return;
+    }
     const action = event.target.closest("[data-action]")?.dataset;
     if (!action) return;
+
+    if (action.action === "go-register") return goView("register");
+    if (action.action === "phase-picker" || action.action === "phase-cancel") {
+      state.phasePicker = action.action === "phase-picker";
+      renderMain();
+      if (state.phasePicker) el("ph-ref")?.focus();
+      return;
+    }
 
     if (action.action === "drawing") {
       const button = event.target.closest("[data-action='drawing']");
@@ -1700,6 +2405,19 @@ function wireApp() {
   });
 
   main.addEventListener("input", (event) => {
+    if (event.target.id === "register-query") {
+      state.registerQuery = event.target.value;
+      const caret = event.target.selectionStart;
+      renderMain();
+      // The panel is re-rendered wholesale, so the box that was being typed
+      // into no longer exists. Put the cursor back where the keystroke left it.
+      const box = el("register-query");
+      if (box) {
+        box.focus();
+        box.setSelectionRange(caret, caret);
+      }
+      return;
+    }
     const form = event.target.closest('[data-form="time"]');
     if (form) updatePreview(form);
   });
@@ -1736,6 +2454,17 @@ function wireApp() {
         ? `Fee schedule saved: ${lines.length} phase${lines.length === 1 ? "" : "s"}, ${money(saved.feeSchedule.quoted)}`
         : "Fee schedule cleared. Burn falls back to the register budget.");
       await refresh();
+    } else if (kind === "phase") {
+      const saved = await attempt(() => api.setPhase(form.dataset.project, {
+        phaseRef: values.phaseRef,
+        note: values.note || null,
+      }));
+      if (!saved) return;
+      state.phases = saved;
+      state.phasePicker = false;
+      toast(`Now in ${saved.current}`);
+      await loadProjects();
+      renderMain();
     } else if (kind === "update") {
       const saved = await attempt(() => api.updateRegisterProject(form.dataset.project, values));
       if (!saved) return;
@@ -1816,7 +2545,7 @@ async function start() {
   el("app").hidden = false;
   el("who").textContent = `${state.session.email} · ${state.session.orgName || "—"}`;
   state.reference = await api.reference();
-  await loadProjects({ keepSelection: false });
+  await loadProjects({ initial: true });
   await loadTab();
   renderMain();
 }

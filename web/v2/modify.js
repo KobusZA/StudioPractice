@@ -20,6 +20,7 @@ import {
 } from "./compile.js";
 import { bbox, roundGrid } from "./geom.js";
 import {
+  ATTACHABLE_KINDS,
   collectionFor,
   effectiveLevel,
   nid,
@@ -31,7 +32,12 @@ import {
 } from "./model.js";
 
 const SHAPED = new Set(["room", "slab", "roof"]);
-const ENDPOINTED = new Set(["segment", "beam"]);
+// Every endpoint-geometry kind: rotate/mirror/copy/align/split/cut/join all
+// work on nothing but x1/y1/x2/y2, so a line (no SKU, no thickness) is as
+// eligible as a wall or beam for those. Attach/detach are narrower - a base
+// only resolves against something with a template-stated height - so those
+// two check `ATTACHABLE_KINDS` (model.js) instead of this set.
+const ENDPOINTED = new Set(["segment", "beam", "line"]);
 
 function fail(message) {
   return { ok: false, message };
@@ -307,9 +313,9 @@ export function splitSelection(doc, refs) {
 /** Break a wall or beam in two at its midpoint, so each half can be retyped. */
 export function cutSelection(doc, refs) {
   const rows = resolve(doc, refs);
-  if (rows.length !== 1) return fail("Select exactly one wall or beam to cut.");
+  if (rows.length !== 1) return fail("Select exactly one wall, beam or line to cut.");
   const { ref, obj } = rows[0];
-  if (!ENDPOINTED.has(ref.kind)) return fail("Cut applies to walls and beams; use Split for rooms.");
+  if (!ENDPOINTED.has(ref.kind)) return fail("Cut applies to walls, beams and lines; use Split for rooms.");
 
   const mx = roundGrid((obj.x1 + obj.x2) / 2);
   const my = roundGrid((obj.y1 + obj.y2) / 2);
@@ -332,8 +338,8 @@ const COLLINEAR_TOL = 1e-3;
 /** Weld two collinear walls or beams that meet end to end back into one. */
 export function joinSelection(doc, refs) {
   const rows = resolve(doc, refs);
-  if (rows.length !== 2) return fail("Select exactly two walls or beams to join.");
-  if (rows.some((r) => !ENDPOINTED.has(r.ref.kind))) return fail("Join applies to walls and beams.");
+  if (rows.length !== 2) return fail("Select exactly two walls, beams or lines to join.");
+  if (rows.some((r) => !ENDPOINTED.has(r.ref.kind))) return fail("Join applies to walls, beams and lines.");
   const [first, second] = rows;
   if (first.ref.kind !== second.ref.kind) return fail("Join one kind at a time.");
   if (first.obj.sku !== second.obj.sku) return fail("These have different types; retype one first.");
@@ -419,8 +425,8 @@ export function attachSelection(doc, refs, { targetRef = null, pack = null, comm
     return fail("Select at least one object and exactly one target.");
   }
   if (!rows.length) return fail("Pick a target that is not part of the selection.");
-  if (rows.some((row) => !ENDPOINTED.has(row.ref.kind))) return fail("Attach applies to walls and beams.");
-  if (!target || !ENDPOINTED.has(targetRef.kind)) return fail("Target has no resolvable elevation.");
+  if (rows.some((row) => !ATTACHABLE_KINDS.has(row.ref.kind))) return fail("Attach applies to walls and beams.");
+  if (!target || !ATTACHABLE_KINDS.has(targetRef.kind)) return fail("Target has no resolvable elevation.");
 
   const attach = [];
   const skipped = [];
@@ -477,7 +483,7 @@ export function attachSelection(doc, refs, { targetRef = null, pack = null, comm
  */
 export function detachSelection(doc, refs, { pack = null } = {}) {
   if (!pack) return fail("Detach needs the pack's level elevations; none is loaded.");
-  const rows = resolve(doc, refs).filter((row) => ENDPOINTED.has(row.ref.kind));
+  const rows = resolve(doc, refs).filter((row) => ATTACHABLE_KINDS.has(row.ref.kind));
   if (!rows.length) return fail("Detach applies to walls and beams.");
   const attached = rows.filter((row) => row.obj.baseAttach);
   if (!attached.length) return fail("Nothing selected is attached to anything.");

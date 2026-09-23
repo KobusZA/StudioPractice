@@ -117,7 +117,7 @@ function checkPartC(compiled, rules, findings) {
         push(findings, {
           part: "C", code: "part-c-min-dimension", severity: "fail",
           subject: roomClassLabel(room), roomId: room.id,
-          message: `${roomClassLabel(room)}: narrowest dimension ${room.minDimension.toFixed(2)} m is below the ${min.toFixed(2)} m SANS 10400-C minimum.`,
+          message: `${roomClassLabel(room)}: narrowest dimension ${Math.round(room.minDimension * 1000)} mm is below the ${Math.round(min * 1000)} mm SANS 10400-C minimum.`,
         });
       } else {
         push(findings, {
@@ -125,8 +125,8 @@ function checkPartC(compiled, rules, findings) {
           severity: room.minDimensionExact ? "pass" : "advisory",
           subject: roomClassLabel(room), roomId: room.id,
           message: room.minDimensionExact
-            ? `${roomClassLabel(room)}: narrowest dimension ${room.minDimension.toFixed(2)} m meets the ${min.toFixed(2)} m minimum.`
-            : `${roomClassLabel(room)}: narrowest dimension is at most ${room.minDimension.toFixed(2)} m (concave room, upper bound). Passes the ${min.toFixed(2)} m minimum on this estimate, but confirm on the free-polygon shape.`,
+            ? `${roomClassLabel(room)}: narrowest dimension ${Math.round(room.minDimension * 1000)} mm meets the ${Math.round(min * 1000)} mm minimum.`
+            : `${roomClassLabel(room)}: narrowest dimension is at most ${Math.round(room.minDimension * 1000)} mm (concave room, upper bound). Passes the ${Math.round(min * 1000)} mm minimum on this estimate, but confirm on the free-polygon shape.`,
         });
       }
     }
@@ -137,19 +137,19 @@ function checkPartC(compiled, rules, findings) {
       push(findings, {
         part: "C", code: "part-c-height", severity: "unknown",
         subject: roomClassLabel(room), roomId: room.id,
-        message: `${roomClassLabel(room)}: floor-to-ceiling height is not known yet (level floorToCeiling is null). Cannot check the ${minHeight.toFixed(2)} m minimum.`,
+        message: `${roomClassLabel(room)}: floor-to-ceiling height is not known yet (level floorToCeiling is null). Cannot check the ${Math.round(minHeight * 1000)} mm minimum.`,
       });
     } else if (room.ceilingHeight < minHeight) {
       push(findings, {
         part: "C", code: "part-c-height", severity: "fail",
         subject: roomClassLabel(room), roomId: room.id,
-        message: `${roomClassLabel(room)}: ceiling height ${room.ceilingHeight.toFixed(2)} m is below the ${minHeight.toFixed(2)} m SANS 10400-C minimum.`,
+        message: `${roomClassLabel(room)}: ceiling height ${Math.round(room.ceilingHeight * 1000)} mm is below the ${Math.round(minHeight * 1000)} mm SANS 10400-C minimum.`,
       });
     } else {
       push(findings, {
         part: "C", code: "part-c-height", severity: "pass",
         subject: roomClassLabel(room), roomId: room.id,
-        message: `${roomClassLabel(room)}: ceiling height ${room.ceilingHeight.toFixed(2)} m meets the ${minHeight.toFixed(2)} m minimum (checked as one number over the whole room, not the 70%-of-area test).`,
+        message: `${roomClassLabel(room)}: ceiling height ${Math.round(room.ceilingHeight * 1000)} mm meets the ${Math.round(minHeight * 1000)} mm minimum (checked as one number over the whole room, not the 70%-of-area test).`,
       });
     }
   }
@@ -290,28 +290,28 @@ function checkPartM(doc, pack, rules, findings) {
     if (c.maxFlightRise === null || c.maxFlightRise === undefined) {
       push(findings, {
         part: "M", code: "part-m-flight-rise", severity: "unknown", subject, skuId,
-        message: `${subject}: flight rise not supplied. Cannot check against the ${rules.partM.maxFlightRise.toFixed(1)} m maximum without a landing.`,
+        message: `${subject}: flight rise not supplied. Cannot check against the ${Math.round(rules.partM.maxFlightRise * 1000)} mm maximum without a landing.`,
       });
     } else {
       push(findings, {
         part: "M", code: "part-m-flight-rise",
         severity: c.maxFlightRise <= rules.partM.maxFlightRise ? "pass" : "fail",
         subject, skuId,
-        message: `${subject}: flight rise ${c.maxFlightRise.toFixed(2)} m against the ${rules.partM.maxFlightRise.toFixed(1)} m maximum before a landing is required.`,
+        message: `${subject}: flight rise ${Math.round(c.maxFlightRise * 1000)} mm against the ${Math.round(rules.partM.maxFlightRise * 1000)} mm maximum before a landing is required.`,
       });
     }
 
     if (c.landingLength === null || c.landingLength === undefined) {
       push(findings, {
         part: "M", code: "part-m-landing", severity: "unknown", subject, skuId,
-        message: `${subject}: landing length not supplied. A landing must be at least as long as the stair is wide (${(g.width ?? 0).toFixed(2)} m).`,
+        message: `${subject}: landing length not supplied. A landing must be at least as long as the stair is wide (${Math.round((g.width ?? 0) * 1000)} mm).`,
       });
     } else if (typeof g.width === "number") {
       push(findings, {
         part: "M", code: "part-m-landing",
         severity: c.landingLength >= g.width ? "pass" : "fail",
         subject, skuId,
-        message: `${subject}: landing length ${c.landingLength.toFixed(2)} m against the ${g.width.toFixed(2)} m stair width it must at least match.`,
+        message: `${subject}: landing length ${Math.round(c.landingLength * 1000)} mm against the ${Math.round(g.width * 1000)} mm stair width it must at least match.`,
       });
     }
 

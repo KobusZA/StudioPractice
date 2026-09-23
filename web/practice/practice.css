@@ -43,6 +43,21 @@ button { cursor: pointer; }
 .topbar .spacer { flex: 1; }
 .topbar .who { font-size: 11.5px; color: var(--ink-muted); }
 
+.nav { display: flex; gap: 2px; margin-left: 10px; }
+.nav button {
+  border: 0; background: transparent; height: 44px; padding: 0 12px;
+  font-size: 13px; font-weight: 600; color: var(--ink-soft);
+  border-bottom: 2px solid transparent;
+}
+.nav button:hover { background: var(--bg-hover); }
+.nav button[aria-current="page"] { color: var(--copper-dark); border-bottom-color: var(--copper); }
+
+kbd {
+  font: inherit; font-size: 10px; font-weight: 700; letter-spacing: 0.04em;
+  color: var(--ink-muted); border: 1px solid var(--hairline-strong);
+  border-radius: 2px; padding: 0 3px; margin-left: 5px;
+}
+
 .btn {
   height: 28px; padding: 0 11px; border: 1px solid var(--hairline-strong);
   background: var(--bg-elevated); border-radius: var(--radius-sm);
@@ -56,30 +71,9 @@ button { cursor: pointer; }
 
 /* --- layout ------------------------------------------------------------- */
 
-.workspace { display: grid; grid-template-columns: 286px minmax(0, 1fr); min-height: 0; }
+.workspace { display: grid; grid-template-columns: minmax(0, 1fr); min-height: 0; }
 
-.rail {
-  background: var(--bg-secondary); border-right: 1px solid var(--hairline);
-  overflow-y: auto; min-height: 0;
-}
-.rail header {
-  display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  padding: 10px 12px 8px; border-bottom: 1px solid var(--hairline);
-  position: sticky; top: 0; background: var(--bg-secondary); z-index: 1;
-}
-.rail header h2 { margin: 0; font-family: var(--font-display); font-size: 0.86rem; font-weight: 560; }
-
-.proj {
-  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px;
-  align-items: center; width: 100%; text-align: left; padding: 8px 12px;
-  border: 0; border-bottom: 1px solid var(--hairline); background: transparent;
-}
-.proj:hover { background: var(--bg-hover); }
-.proj[aria-current="true"] { background: var(--copper-tint-8); box-shadow: inset 3px 0 0 var(--copper); }
-.proj b { font-weight: 600; font-size: 13px; }
-.proj em { grid-column: 1; font-style: normal; font-size: 11px; color: var(--ink-muted); }
 .real {
-  grid-column: 2; grid-row: 1 / span 2; justify-self: end; align-self: center;
   font-variant-numeric: tabular-nums; font-size: 11.5px; font-weight: 700;
   padding: 1px 7px; border-radius: 999px; white-space: nowrap;
 }
@@ -88,15 +82,17 @@ button { cursor: pointer; }
 .real.bad { background: var(--copper-tint-16); color: var(--copper-dark); }
 .real.flat { background: var(--bg-tertiary); color: var(--ink-muted); }
 
-/* The rail is ordered by risk, not recency, and says so. Without this the
-   order reads as arbitrary and somebody re-sorts it back to a date. */
-.rail-note {
-  margin: 0; padding: 8px 12px; font-size: 11px; line-height: 1.45;
-  color: var(--ink-muted); border-bottom: 1px solid var(--hairline);
-}
-
 .main { overflow-y: auto; min-height: 0; }
+.wrap { width: min(1180px, calc(100% - 44px)); margin: 0 auto; }
 .proj-head { padding: 16px 22px 0; }
+.crumbs { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; font-size: 12px; }
+.crumbs button {
+  border: 0; background: transparent; padding: 2px 5px; margin-left: -5px;
+  font-size: 12px; font-weight: 600; color: var(--copper-dark);
+  border-radius: var(--radius-sm);
+}
+.crumbs button:hover { background: var(--bg-hover); }
+.crumbs span { color: var(--ink-muted); }
 .proj-head-row {
   display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
 }
@@ -106,6 +102,43 @@ button { cursor: pointer; }
 .proj-head h1 { margin: 2px 0 6px; font-family: var(--font-display); font-size: 1.28rem; font-weight: 560; }
 .facts { display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 12px; color: var(--ink-soft); }
 .facts b { color: var(--ink); font-weight: 600; }
+.proj-head-drawing { display: flex; flex-direction: column; align-items: flex-end; gap: 7px; }
+
+/* --- the drawing, at a glance ------------------------------------------- */
+
+/* Only jobs that have a document get one of these, so the frame never needs
+   an empty state for "no drawing" - only for "a drawing with nothing on it",
+   which is a different and more interesting thing. */
+.dwg { margin: 0; display: flex; flex-direction: column; gap: 4px; }
+.dwg-frame {
+  display: block; padding: 0; overflow: hidden; cursor: pointer;
+  background: var(--bg-elevated); border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+}
+.dwg-frame:hover { border-color: var(--copper); }
+.dwg-frame canvas { display: block; width: 100%; height: 100%; }
+.dwg-sm .dwg-frame { width: 100%; height: 104px; }
+.dwg-md .dwg-frame { width: 164px; height: 100px; }
+.dwg figcaption {
+  font-size: 11px; color: var(--ink-muted); font-variant-numeric: tabular-nums;
+}
+.dwg-md figcaption { text-align: right; }
+/* A started-but-empty document reads as paper, not as a failed image. */
+.dwg.blank .dwg-frame {
+  background: repeating-linear-gradient(
+    -45deg, var(--bg-secondary) 0 6px, var(--bg-tertiary) 6px 12px);
+}
+.dwg.blank figcaption { font-style: italic; }
+
+.dwg-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 14px;
+}
+.dwg-card { display: flex; flex-direction: column; gap: 5px; }
+.dwg-card .link-job {
+  border: 0; background: transparent; padding: 0; font: inherit; text-align: left;
+  font-size: 12px; font-weight: 600; color: var(--copper-dark);
+}
+.dwg-card .link-job:hover { text-decoration: underline; text-underline-offset: 2px; }
 
 .tabs { display: flex; gap: 2px; padding: 12px 22px 0; border-bottom: 1px solid var(--hairline); }
 .tabs button {
@@ -144,6 +177,14 @@ h3.sec small {
 .kpi.flag .val { color: var(--copper-dark); }
 .kpi.dim .val { color: var(--ink-muted); }
 
+/* A count that nobody can act on is a poster. Every risk tile is the entry
+   point to the register filtered to exactly the jobs it counted. */
+button.kpi { width: 100%; text-align: left; font: inherit; }
+button.kpi:hover { border-color: var(--copper); background: var(--bg-hover); }
+button.kpi:disabled { cursor: default; }
+button.kpi:disabled:hover { border-color: var(--hairline); background: var(--bg-elevated); }
+.kpi .go { font-size: 11px; font-weight: 700; color: var(--copper-dark); margin-top: 6px; }
+
 .pill { font-size: 10.5px; font-weight: 700; padding: 1px 6px; border-radius: 3px; white-space: nowrap; }
 .pill.err { background: var(--copper-tint-16); color: var(--copper-dark); }
 .pill.warn { background: var(--warn-tint); color: var(--warn); }
@@ -169,6 +210,127 @@ table.grid tr.flagged { background: var(--copper-tint-8); }
 .scroller { max-height: 460px; overflow-y: auto; border: 1px solid var(--hairline); }
 .scroller table.grid { border: 0; }
 .scroller table.grid thead th { position: sticky; top: 0; }
+
+/* --- where the job has got to -------------------------------------------- */
+
+/* The composer showed this sequence once, on the day the job was registered,
+   and then never again. This is the same list, kept, with the job's position
+   on it - and the position is a stated fact, so the phase nobody has set
+   reads as unstated rather than as phase one. */
+.phase-strip { margin-top: 14px; }
+.phase-strip.empty-strip { max-width: 72ch; }
+.phase-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.phase-head h2 {
+  margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.05em;
+  text-transform: uppercase; color: var(--ink-muted);
+}
+.phase-head p { margin: 0; font-size: 12.5px; color: var(--ink-soft); }
+.phase-head p b { color: var(--ink); }
+.phase-head p.unstated { color: var(--ink-muted); max-width: 66ch; }
+
+.phase-steps {
+  list-style: none; display: flex; gap: 4px; margin: 9px 0 0; padding: 0;
+  overflow-x: auto; scrollbar-width: thin;
+}
+.phase-steps .step { flex: 1 1 0; min-width: 132px; }
+.phase-steps button {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0 7px;
+  width: 100%; height: 100%; text-align: left; padding: 7px 9px 8px;
+  background: var(--bg-elevated); border: 1px solid var(--hairline);
+  border-top: 3px solid var(--hairline-strong); border-radius: var(--radius-sm);
+}
+.phase-steps button:hover { border-color: var(--hairline-strong); background: var(--bg-hover); }
+.step-seq {
+  grid-row: 1 / span 2; align-self: center; width: 19px; height: 19px;
+  display: grid; place-items: center; border-radius: 50%;
+  background: var(--bg-tertiary); color: var(--ink-muted);
+  font-size: 10.5px; font-weight: 700;
+}
+.step-name { font-size: 12.5px; font-weight: 600; line-height: 1.25; }
+.step-evi { font-size: 10.5px; color: var(--ink-muted); margin-top: 1px; }
+
+/* Behind, here, ahead - relative to a phase somebody stated. Not derived from
+   the tasks being ticked, which is a different claim. */
+.step.behind button { border-top-color: var(--ok); background: var(--bg-secondary); }
+.step.behind .step-seq { background: var(--ok-tint); color: var(--ok); }
+.step.current button {
+  border-top-color: var(--copper); border-color: var(--copper);
+  background: var(--copper-tint-8);
+}
+.step.current .step-seq { background: var(--copper); color: #fff; }
+.step.current .step-name { color: var(--copper-dark); font-weight: 700; }
+.step.ahead button { border-top-color: var(--hairline); }
+.step.ahead .step-name, .step.unknown .step-name { color: var(--ink-soft); }
+
+.phase-actions { margin-top: 10px; }
+.phase-form { margin-top: 10px; max-width: 620px; }
+
+/* --- the register ------------------------------------------------------- */
+
+.toolbar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px;
+}
+.toolbar input[type="search"] {
+  height: 30px; padding: 0 10px; min-width: 240px;
+  border: 1px solid var(--hairline-strong); background: var(--bg-elevated);
+  border-radius: var(--radius-sm);
+}
+.toolbar input[type="search"]:focus {
+  outline: 2px solid var(--copper-tint-16); border-color: var(--copper); outline-offset: -1px;
+}
+.chips { display: flex; gap: 4px; flex-wrap: wrap; }
+.chip {
+  height: 26px; padding: 0 10px; border: 1px solid var(--hairline-strong);
+  background: var(--bg-elevated); border-radius: 999px;
+  font-size: 12px; font-weight: 600; color: var(--ink-soft);
+}
+.chip:hover { background: var(--bg-hover); }
+.chip[aria-pressed="true"] {
+  background: var(--copper-tint-16); border-color: var(--copper); color: var(--copper-dark);
+}
+.chip b { font-weight: 700; }
+
+table.grid tbody tr.row-link { cursor: pointer; }
+table.grid td .code-cell { font-weight: 700; color: var(--copper-dark); letter-spacing: 0.03em; }
+table.grid td em { font-style: normal; font-size: 11px; color: var(--ink-muted); display: block; }
+
+/* The sort key is a column header, so the order is always readable off the
+   table. A single badge that showed one figure while the list was ordered by
+   another could not be reconciled by looking at it. */
+table.grid th.sortable { cursor: pointer; user-select: none; }
+table.grid th.sortable:hover { color: var(--ink); }
+table.grid th[aria-sort] { color: var(--copper-dark); }
+table.grid th[aria-sort]::after { content: " \25BE"; }
+table.grid th[aria-sort="ascending"]::after { content: " \25B4"; }
+
+/* --- switch job --------------------------------------------------------- */
+
+.switcher {
+  position: fixed; inset: 0; z-index: 25; padding: 12vh 16px 16px;
+  background: rgba(26, 22, 18, 0.28);
+}
+.switcher-frame {
+  width: min(560px, 100%); margin: 0 auto; overflow: hidden;
+  background: var(--bg-elevated); border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-md); box-shadow: 0 18px 44px rgba(26, 22, 18, 0.22);
+}
+.switcher input {
+  width: 100%; height: 42px; padding: 0 14px; border: 0;
+  border-bottom: 1px solid var(--hairline); background: transparent; font-size: 14px;
+}
+.switcher input:focus { outline: none; }
+#switcher-list { max-height: 46vh; overflow-y: auto; }
+.switcher-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px;
+  align-items: center; width: 100%; text-align: left; padding: 8px 14px;
+  border: 0; border-bottom: 1px solid var(--hairline); background: transparent;
+}
+.switcher-row:last-child { border-bottom: 0; }
+.switcher-row b { font-weight: 600; font-size: 13px; }
+.switcher-row em { grid-column: 1; font-style: normal; font-size: 11px; color: var(--ink-muted); }
+.switcher-row .real { grid-column: 2; grid-row: 1 / span 2; justify-self: end; }
+.switcher-row[aria-selected="true"] { background: var(--copper-tint-8); box-shadow: inset 3px 0 0 var(--copper); }
+.switcher-empty { padding: 18px 14px; text-align: center; font-size: 12.5px; color: var(--ink-muted); }
 
 /* --- tasks -------------------------------------------------------------- */
 
@@ -215,6 +377,10 @@ table.grid td select { height: 24px; padding: 0 4px; font-size: 11.5px; border: 
 .w.high .sev { background: var(--copper-tint-16); color: var(--copper-dark); }
 .w.med .sev { background: var(--warn-tint); color: var(--warn); }
 .w b { font-size: 13px; font-weight: 700; }
+.w .link-job {
+  border: 0; background: transparent; padding: 0; font: inherit;
+  color: var(--copper-dark); text-decoration: underline; text-underline-offset: 2px;
+}
 .w p { margin: 1px 0 0; font-size: 12px; line-height: 1.45; color: var(--ink-soft); }
 
 /* --- forms -------------------------------------------------------------- */
@@ -289,7 +455,7 @@ table.grid td select { height: 24px; padding: 0 4px; font-size: 11.5px; border: 
 
 /* --- new job ----------------------------------------------------------- */
 
-/* Covers the register. A new job is a sequence of decisions, and the rail
+/* Covers the workspace. A new job is a sequence of decisions, and the list
    of every other job is the thing that makes people rush the form. */
 .composer {
   position: fixed; inset: 44px 0 0; z-index: 15;

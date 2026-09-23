@@ -75,9 +75,12 @@ export function hasClickDraft(state) {
     state.wallDraft
     || state.shapeDraft
     || state.beamStart
+    || state.lineStart
     || state.siteDraft?.length
     || state.cameraDraft?.a
     || state.sectionDraft?.a
+    || state.calloutDraft?.a
+    || state.revisionCloudDraft?.a
     || state.measureDraft?.a
     || (state.calibration?.a && !state.calibration?.b)
   );

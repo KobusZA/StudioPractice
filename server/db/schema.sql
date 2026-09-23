@@ -388,6 +388,32 @@ create table if not exists fee_schedule_line (
 create index if not exists fee_schedule_line_project_live
   on fee_schedule_line (project_id, seq) where deleted_at is null;
 
+-- Where the job has got to in its own statutory process.
+--
+-- A log rather than a column on `project`, because "which phase" and "since
+-- when" are one fact: a denormalised current phase would be free to disagree
+-- with the history that produced it, and "how long has this been sitting at
+-- council" is the question an overrun is usually the answer to. The current
+-- phase is the newest row; a job with no rows has no phase, which is null and
+-- not "phase 1".
+--
+-- Nothing infers this. A phase whose tasks are all ticked is not advanced for
+-- you, because "the tasks are done" and "we have moved on" are different
+-- claims and only a person can make the second one. Where the two disagree,
+-- that disagreement is reported rather than resolved.
+create table if not exists project_phase_event (
+  id          text primary key,
+  project_id  text not null references project (id),
+  phase_ref   text not null,
+  note        text,
+  entered_at  timestamptz not null default now(),
+  created_by  text not null,
+  created_at  timestamptz not null default now()
+);
+
+create index if not exists project_phase_event_project
+  on project_phase_event (project_id, entered_at desc, created_at desc);
+
 create table if not exists payment_certificate (
   id            text primary key,
   project_id    text not null references project (id),

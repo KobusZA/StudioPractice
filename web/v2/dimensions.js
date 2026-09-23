@@ -11,8 +11,10 @@
 const ROOM_OFFSET = 0.25; // metres, how far a per-room dimension line sits off the room
 const OVERALL_OFFSET = 0.7; // metres, further out so it never overlaps a room string
 
+import { formatLengthMm } from "./geom.js";
+
 function fmt(v) {
-  return `${v.toFixed(2)} m`;
+  return `${formatLengthMm(v)} mm`;
 }
 
 /** One horizontal + one vertical dimension line for a box, offset outward (below and left of it). */

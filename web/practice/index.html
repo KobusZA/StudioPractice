@@ -42,21 +42,32 @@
 <div class="app" id="app" hidden>
   <div class="topbar">
     <div class="brand"><div class="brand-mark">S</div><div class="brand-name">StudioPractice</div></div>
-    <span class="pill flat">Practice operations</span>
+    <!-- Top-level destinations, not a job list. The register's rows live
+         inside Register; a navigation element that is also the master list
+         leaves the firm-wide view nowhere to be. -->
+    <nav class="nav" id="nav" aria-label="Practice operations">
+      <button type="button" data-view="practice">Practice</button>
+      <button type="button" data-view="register">Register</button>
+    </nav>
     <div class="spacer"></div>
+    <button class="btn btn-sm" id="switch-job" hidden>Switch job <kbd>Ctrl K</kbd></button>
+    <button class="btn btn-sm btn-primary" id="new-project">New job</button>
     <span class="who" id="who"></span>
     <button class="btn btn-sm" id="sign-out">Sign out</button>
   </div>
 
   <div class="workspace" id="workspace">
-    <div class="rail">
-      <header>
-        <h2>Register</h2>
-        <button class="btn btn-sm btn-primary" id="new-project">New job</button>
-      </header>
-      <div id="rail-list"></div>
-    </div>
     <div class="main" id="main"></div>
+  </div>
+</div>
+
+<!-- On demand, never resident. Switching job is a thing people do a few times
+     a day, which buys a keystroke rather than a third of the window. -->
+<div class="switcher" id="switcher" role="dialog" aria-modal="true" aria-label="Switch job" hidden>
+  <div class="switcher-frame">
+    <input id="switcher-query" type="text" autocomplete="off" spellcheck="false"
+           placeholder="Job code, description or client" aria-controls="switcher-list" />
+    <div id="switcher-list" role="listbox" aria-label="Jobs"></div>
   </div>
 </div>
 

@@ -151,11 +151,11 @@ export function validateLevelInsert(levels, spec) {
   if (sameHeight) {
     return {
       ok: false,
-      message: `"${sameHeight.name || sameHeight.id}" is already at ${elevation} m; two levels cannot share an elevation.`,
+      message: `"${sameHeight.name || sameHeight.id}" is already at ${Math.round(elevation * 1000)} mm; two levels cannot share an elevation.`,
     };
   }
 
-  return { ok: true, message: `${name} at ${elevation} m.` };
+  return { ok: true, message: `${name} at ${Math.round(elevation * 1000)} mm.` };
 }
 
 /**

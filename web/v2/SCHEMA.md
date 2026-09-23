@@ -333,23 +333,127 @@ belong to one printed drawing, not to the SKU catalog or the rule pack.
   than refusing to produce a sheet. A firm can still override it per sheet.
 - **The title block reads what the document already knows and admits what it
   does not.** `titleBlockFields()` prints `pack.name`, `pack.locale`,
-  `doc.site.erfNumber` where they exist and an em-dash where they do not -
-  the same "unknown is never a plausible default" rule this document states
-  for SKU compliance facts, applied to a drawing sheet instead of a SKU.
-  Job number, client name and similar project-wide facts are still
-  `project-info`'s unbuilt ribbon item; until it lands, drawn-by/checked-by
-  are edited per sheet rather than invented as a shared record, so the two
-  features do not fight over the same box on the title block later.
+  `doc.site.erfNumber`, and now `doc.projectInfo.jobNumber`/`.clientName` where
+  they exist, and an em-dash where they do not - the same "unknown is never a
+  plausible default" rule this document states for SKU compliance facts,
+  applied to a drawing sheet instead of a SKU. Job number and client name are
+  edited once, doc-wide, in the Project information panel `project-info`
+  opens; drawn-by/checked-by/date stay per-sheet fields, because those vary
+  sheet to sheet where a job number and client name do not.
 - **Revisions are letters, issued once, never reused** (A, B, ... Z, AA, ...),
   because a title block's revision history is part of the record, not a
   scratch value a firm can renumber after the fact.
 - **One fixed viewport per sheet, drawn schematically.** The Sheets panel
-  (`ui.js`) draws the current plan's walls (centrelines only) and rooms
-  (outline only) into the drawable area at the sheet's scale - no openings,
-  no dimensions, no per-level split. A movable/resizable viewport, and
-  placing a section or elevation instead of the plan, are `view-section`'s
-  and `callout`'s job "once sheets exist" - this file is the "sheets exist"
-  part they depend on.
+  (`ui.js`) draws the chosen view into the drawable area at the sheet's
+  scale: the plan (walls as centrelines, rooms as outline only - no openings,
+  no dimensions, no per-level split), a named section (`doc.sections`,
+  `sheets.js`'s `sheetView()`), drawn from the same clipped, extruded faces
+  and poché the interactive Section view uses (`massing.js`'s
+  `faceStyle()`/`hatchPolygon()`, exported for exactly this), a named
+  elevation (`doc.elevations`, [elevation.js](elevation.js)) drawn from the
+  same extruded faces unclipped and unhatched - an elevation is viewed from
+  outside the whole model, so nothing needs cutting away and nothing is a
+  poché face - or, now that `callout` has landed too, a named callout
+  (`doc.callouts`, [callout.js](callout.js)), which reuses the plan
+  branch's own schematic drawing windowed to the callout's own crop
+  rectangle instead of the whole plan's extent. The viewport is still not
+  movable or resizable.
+- **An elevation is a section with no line to draw.** `ribbon.js`'s
+  `elevation` used to read "one elevation extruded from the plan" as a Week 3
+  todo; it is now a small chooser (`ui.js`'s `openElevationPicker()`) rather
+  than an armed canvas tool like Section, because a whole building's facade
+  has no start point and no end point for the user to click - the only fact
+  they supply is which compass side to look from. [elevation.js](elevation.js)
+  reuses section.js's u/v projection maths (`sectionUV`, `projectSectionPoint`,
+  `sectionFrame`) against a locked origin and a compass-fixed look/along pair
+  instead of inventing a second projection, and every pick is saved as a
+  named view the moment it is made, the same permanence rule `createSection`
+  follows for the Section tool. `massing.js` gained a fourth camera mode
+  (`"elevation"`, alongside orbit/look/section) so the interactive massing
+  view can pan and zoom an elevation exactly as it already does a section,
+  minus the clip and the hatch.
+
+- **A callout crops the plan; it does not extrude a new direction.**
+  `ribbon.js`'s `callout` (Output > Views, "the TSP callout head") used to
+  read "needs its own crop/view mechanism" as a Week 3 todo. Unlike a
+  section or an elevation, a callout is not an orthographic view from a new
+  direction, so [callout.js](callout.js) shares none of section.js's/
+  elevation.js's u/v projection maths - its only geometry is a rectangle in
+  the plan's own x/y, `calloutFromClicks()` turning two plan clicks (the
+  same click-click shape Section's cut line and camera.js's look use, for
+  the same reason: a box needs two opposite corners exactly as a cut needs
+  two endpoints) into a crop, saved immediately as a named view the same
+  permanence rule `createSection`/`createElevation` follow. A callout also
+  carries its own `scale` - the "blow-up factor" the customer's brief named -
+  which stays `null` until the firm sets one and, when set, wins over
+  `sheetScale()`'s auto-fit recommendation (though a sheet's own explicit
+  `scaleOverride` still wins over that): the whole reason to draw a callout
+  rather than rely on the parent view is to read bigger than "fits" would
+  otherwise compute. `sheets.js`'s `sheetView()`/`setSheetView()` union grew
+  a third viewport kind (`plan | section | elevation | callout`) alongside
+  elevation, falling back to plan if the referenced callout is deleted, and
+  `ui.js`'s Sheets panel draws it by reusing the plan branch's own
+  schematic-drawing code windowed to the crop rectangle rather than
+  building a second drafted-view renderer. What is deliberately still not
+  here: a drafted detail view with its own openings/dimensions distinct
+  from the plan's, and any on-plan "callout head" marker/bubble showing
+  where the crop sits - sections and elevations do not draw an on-plan
+  marker yet either, so this is not a gap unique to callout.
+
+- **Document > Lines is one object, two ribbon buttons.** `model-lines` and
+  `annot-lines` used to both read "Week 3, with the sheet system" as a todo.
+  Unlike section/elevation/callout, a line is simple enough that it did not
+  get its own file: `model.js`'s `LINE_KINDS` (`["model", "annotation"]`)
+  documents the one distinction between the two buttons, `doc.lines` holds
+  both (level-scoped, no SKU - a line is a mark, not a catalog item), and
+  `ui.js` commits one with the beam tool's own click-click shape (`tool`
+  itself is `"model-line"` or `"annot-line"`, the same "the tool value
+  carries the choice" pattern `"section"`/`"elevation"`/`"callout"` already
+  use, rather than a second state variable). A model line ghosts to a
+  neighbouring level exactly as a wall/beam does - it is a modelled fact,
+  even though it is flat - and prints on a sheet's plan/callout viewport; an
+  annotation line does neither: it is a drafting mark on this drawing only,
+  the same distinction Revit draws between a Model Line and a Detail Line.
+  Neither compiles into a 3D face, a schedule row, or the DXF/IFC export -
+  compile.js never reads `doc.lines`, and wiring either kind into the
+  Exchange exports is a separate, later decision, not a silently dropped one.
+  Because both kinds are just endpoint geometry with no SKU, `modify.js`'s
+  rotate/mirror/copy/align/split/cut/join all work on a line for free via its
+  existing `ENDPOINTED` set (now `segment | beam | line`); attach/detach stay
+  narrower, gated on the pre-existing `ATTACHABLE_KINDS` (`segment | beam`
+  only) instead, since a line has no template-stated height for a base to
+  resolve against.
+
+- **A revision cloud is an annotation on top of a viewport, not a fifth
+  viewport kind.** `ribbon.js`'s `revision` (Document > Annotate) used to
+  read "Week 3, with the title block revision history" as a todo - that
+  history (`sheets.js`'s `addRevision`/`revisionLetter`) already existed, so
+  what was missing was purely the drawing/linking half, now
+  [revision.js](revision.js). A cloud is a rectangle in the plan's own x/y,
+  the same two-click shape `callout.js`'s crop box uses (`revisionCloudFromClicks`),
+  but it is not itself a sheet viewport the way a callout is: it is drawn
+  *over* whichever viewport a sheet already shows, so it lives in its own
+  `doc.revisionClouds` rather than joining `sheetView()`'s
+  `plan | section | elevation | callout` union. `createRevisionCloud` always
+  saves the cloud unlinked (`sheetId`/`rev` both `null`) the moment the box is
+  dropped - the same permanence rule every other Week 3 view follows - and
+  `linkRevisionCloud` is a deliberately separate, later step, because
+  guessing which future revision a freshly drawn cloud belongs to would
+  invent a fact nobody supplied. It is the one integrity block this file
+  enforces: a link is refused outright if the target sheet has not actually
+  issued that revision letter yet (`sheets.js`'s `addRevision` is the only
+  thing allowed to mint one), never accepted with an invented revision to
+  make the link succeed. The Sheets panel's new "Revision clouds" list only
+  ever offers a sheet's own `revisions` as link targets, so there is no path
+  to link a cloud to a revision that does not exist. `cloudArcs()` is the
+  one piece of drawing logic here - a fixed-radius scalloped outline around
+  the rectangle's four edges, the visual feature that reads as "a cloud"
+  rather than "a box" - returned as world-space circles so `ui.js` decides
+  how to project and stroke them rather than this file assuming a canvas.
+  Like a line, a cloud is level-scoped but not a modelled fact and does not
+  ghost to a neighbouring level; unlike a line it draws nowhere on the main
+  plan canvas at all (only its own two-click draft does, mid-draw) - the
+  same "no on-plan marker yet" gap `callout` already carries, not a new one.
 
 ## The drawing leaves as CAD for a Revit user who has no add-in
 
@@ -420,6 +524,7 @@ before they existed still opens:
 |---|---|---|
 | `id` | a new id on `emptyDoc()` | The drawing's stable identity, generated by the client. It is what a stored row will be keyed by; today it survives a reload |
 | `name` | `null` | The job name the builder typed. Never "Untitled Project": `titleBlockFields().projectName` prints it, and prints `—` when it is null. It is deliberately **not** `pack.name` - the pack is the firm's template, so printing it where the client's job name belongs is a plausible default rather than a fact |
+| `projectInfo` | `{ jobNumber: null, clientName: null }` | Filled by `ribbon.js`'s `project-info` command (ui.js's Project information panel), the Week 3 item that used to read "feeds the title block" as a todo. Doc-wide, not per-sheet, unlike a sheet's drawn-by/checked-by/date - one job has one job number - and never merged into the pack, since these are the client's own facts, not the firm's template |
 
 `hasJobContent()` sits beside `PlanStore.hasContent()` and answers a different
 question. `hasContent()` is about drawn plan geometry, which is what the canvas
@@ -564,7 +669,10 @@ offline when geometry editing is not. The table exists; the route is step 8.
 | [ribbon.js](ribbon.js) | The customer's four toolbars plus Check |
 | [rules.js](rules.js) | Week 2: the SANS rule pack and `evaluateCompliance()` |
 | [site.js](site.js) | Week 2: property line, SG reference, building line |
-| [sheets.js](sheets.js) | Week 3: A0-A4 title blocks, scale, revisions |
+| [sheets.js](sheets.js) | Week 3: A0-A4 title blocks, scale, revisions, and `view-section`'s plan/section/elevation/callout viewport chooser |
+| [elevation.js](elevation.js) | Week 3: compass-direction elevation cuts, reusing section.js's u/v projection |
+| [callout.js](callout.js) | Week 3: boxed detail crop of the plan and its own blow-up scale - no projection maths, unlike section/elevation |
+| [revision.js](revision.js) | Week 3: revision cloud - a drawn, scalloped annotation linked to a sheet's already-issued revision letter |
 | [modify.js](modify.js) | Rotate, mirror, copy, align, merge, split, cut, join, attach/detach base |
 | [underlay.js](underlay.js) | PDF and image underlay with two-point calibration |
-| [tests/](tests/) | 409 tests over all of the above |
+| [tests/](tests/) | 558 tests over all of the above |

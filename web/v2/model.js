@@ -32,7 +32,23 @@ export const ENTITY_KINDS = [
   "item",
   "beam",
   "stair",
+  "line",
 ];
+
+/**
+ * Document > Lines: two ribbon buttons (`model-lines`, `annot-lines`) over
+ * one object shape - a level-scoped line segment with no SKU, since a line
+ * is a mark, not a catalog item. The two kinds share every field; only their
+ * meaning differs, the same distinction Revit's Model Line vs Detail Line
+ * draws: a model line is a modelled fact (it ghosts to a neighbouring level
+ * the way a wall/beam does, and is what a DXF/IFC export would eventually
+ * hand a receiving Revit user), an annotation line is a drafting mark on
+ * this drawing only (it does not ghost - see ui.js's drawPlanLevel - and is
+ * never exported as if it were part of the building). Neither compiles into
+ * a 3D face or a schedule row: a Revit model line is a flat sketch line on
+ * its work plane too, not a solid, so `compile.js` never reads `doc.lines`.
+ */
+export const LINE_KINDS = ["model", "annotation"];
 
 /**
  * Room use vocabulary. `sansClass` is the regulation's own category, which is
@@ -92,8 +108,45 @@ export function emptyDoc() {
     items: [],
     beams: [],
     stairs: [],
+    // Document > Lines (`model-lines`/`annot-lines`) - see LINE_KINDS above
+    // for why one array serves both ribbon buttons.
+    lines: [],
     groups: [],
     sheets: [],
+    // Named section cuts (section.js's `createSection`). Every use of the
+    // Section tool saves one here, the same as Revit saving a view the
+    // moment it is drawn - see section.js's header comment. `sheets.js`'s
+    // `sheetView()` can point a sheet's viewport at one of these instead of
+    // only ever the plan.
+    sections: [],
+    // Named elevations (elevation.js's `createElevation`) - the same
+    // permanence rule as `sections` above, one compass direction per saved
+    // view rather than a scratch value the Elevation tool throws away.
+    elevations: [],
+    // Named callouts (callout.js's `createCallout`) - a boxed detail crop of
+    // the plan, not a third projection direction: a section and an
+    // elevation both extrude a new orthographic view out of the plan, so
+    // they share one u/v projection, but a callout crops the plan's own x/y
+    // at a larger scale, the way Revit's callout bubble references "the same
+    // drawing, blown up." Same permanence rule as `sections`/`elevations`:
+    // dropping the crop box always saves a named view.
+    callouts: [],
+    // Document > Annotate > Revision cloud (revision.js's
+    // `createRevisionCloud`) - a scalloped marker on the plan, always saved
+    // unlinked (`sheetId`/`rev` both null) and pointed at a sheet's
+    // already-issued revision letter as a separate, later step
+    // (`linkRevisionCloud`). Not folded into `sections`/`elevations`/
+    // `callouts` above: those are each a sheet's whole viewport, while a
+    // cloud is an annotation drawn on top of whichever viewport a sheet
+    // already shows.
+    revisionClouds: [],
+    // Job number and client name: the two facts `sheets.js`'s title block
+    // still printed an em-dash for until this landed. Doc-level, not
+    // per-sheet - one job has one job number - and never merged into the
+    // pack, because the pack is the firm's template and these are the
+    // client's own facts (PHILOSOPHY.md's "unknown is never a plausible
+    // default", applied to the project, not a SKU).
+    projectInfo: { jobNumber: null, clientName: null },
     // How many storeys above the ground floor the level switcher currently
     // offers, beyond the pack's own lowest non-foundation level - see
     // ui.js's "+ Add floor" ribbon command. 0 is "waiting, like a new Revit
@@ -274,6 +327,7 @@ const KIND_TO_ARRAY = {
   item: "items",
   beam: "beams",
   stair: "stairs",
+  line: "lines",
 };
 
 export function collectionFor(doc, kind) {
@@ -596,8 +650,10 @@ const JOB_CONTENT_ARRAYS = [
   "items",
   "beams",
   "stairs",
+  "lines",
   "sheets",
   "levels",
+  "revisionClouds",
 ];
 
 /**
@@ -681,8 +737,138 @@ export function normalizeDoc(raw) {
   doc.items = (raw.items || []).map((i) => ({ ...i, id: i.id || nid("i") }));
   doc.beams = (raw.beams || []).map((b) => ({ ...b, id: b.id || nid("b"), ...baseAttachFields(b) }));
   doc.stairs = (raw.stairs || []).map((s) => ({ ...s, id: s.id || nid("st") }));
+  // A line with a missing endpoint or an unrecognised `kind` is dropped
+  // rather than kept half-formed, the same rule every other malformed
+  // object on this page follows - `LINE_KINDS.includes()` rather than
+  // trusting whatever string was saved, since "model" vs "annotation" is
+  // the one thing that decides whether this line is ever treated as a
+  // modelled fact.
+  const lineCoord = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  doc.lines = (Array.isArray(raw.lines) ? raw.lines : [])
+    .map((l) => {
+      const x1 = lineCoord(l?.x1);
+      const y1 = lineCoord(l?.y1);
+      const x2 = lineCoord(l?.x2);
+      const y2 = lineCoord(l?.y2);
+      if (!l?.id || [x1, y1, x2, y2].some((v) => v === null) || !LINE_KINDS.includes(l.kind)) return null;
+      return {
+        id: l.id,
+        kind: l.kind,
+        level: l.level || null,
+        x1, y1, x2, y2,
+        status: l.status === "existing" ? "existing" : "planned",
+      };
+    })
+    .filter(Boolean);
   doc.groups = Array.isArray(raw.groups) ? raw.groups : [];
   doc.sheets = Array.isArray(raw.sheets) ? raw.sheets : [];
+  // A malformed section (missing a cut vector, a non-finite length) is
+  // dropped rather than kept half-formed - the same rule a room with no
+  // shape follows above. 20 here mirrors section.js's `SECTION_FAR_M`
+  // default; this file does not import that module to avoid a cycle
+  // (section.js imports `nid` from here).
+  const vec2 = (v) => (Array.isArray(v) && Number.isFinite(Number(v[0])) && Number.isFinite(Number(v[1]))
+    ? [Number(v[0]), Number(v[1])]
+    : null);
+  doc.sections = (Array.isArray(raw.sections) ? raw.sections : [])
+    .map((s) => {
+      const origin = vec2(s?.cut?.origin);
+      const along = vec2(s?.cut?.along);
+      const look = vec2(s?.cut?.look);
+      const length = Number(s?.cut?.length);
+      if (!s?.id || !origin || !along || !look || !Number.isFinite(length) || length <= 0) return null;
+      const far = Number(s.cut.far);
+      return {
+        id: s.id,
+        name: typeof s.name === "string" && s.name.trim() ? s.name.trim() : "Section",
+        cut: { mode: "section", origin, along, look, length, far: far > 0 ? far : 20 },
+      };
+    })
+    .filter(Boolean);
+  // Same drop-rather-than-half-load rule as `sections` above, checked
+  // against `direction` instead of a positive `length`: an elevation has no
+  // drawn length, so a malformed cut is one with a direction this file does
+  // not recognise. Hardcoded rather than imported from elevation.js for the
+  // same reason `sections` above does not import section.js - a cycle,
+  // since elevation.js imports `nid` from here.
+  const ELEVATION_DIRS = new Set(["N", "S", "E", "W"]);
+  doc.elevations = (Array.isArray(raw.elevations) ? raw.elevations : [])
+    .map((e) => {
+      const origin = vec2(e?.cut?.origin);
+      const along = vec2(e?.cut?.along);
+      const look = vec2(e?.cut?.look);
+      const direction = e?.cut?.direction;
+      if (!e?.id || !origin || !along || !look || !ELEVATION_DIRS.has(direction)) return null;
+      return {
+        id: e.id,
+        name: typeof e.name === "string" && e.name.trim() ? e.name.trim() : "Elevation",
+        cut: { mode: "elevation", direction, label: e.cut.label || direction, origin, along, look, length: 0, far: 0 },
+      };
+    })
+    .filter(Boolean);
+  // Same drop-rather-than-half-load rule again, checked against a rectangle
+  // instead of a cut vector: a callout with a missing corner or a rectangle
+  // too small to be a real crop (rather than a mis-click) is dropped, not
+  // kept half-formed. Not imported from callout.js for the same reason
+  // `sections`/`elevations` are not - a cycle, since callout.js imports `nid`
+  // from here. `0.5` mirrors callout.js's own `CALLOUT_MIN_SIZE_M`.
+  const CALLOUT_MIN_SIZE_M = 0.5;
+  const calloutNum = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  doc.callouts = (Array.isArray(raw.callouts) ? raw.callouts : [])
+    .map((c) => {
+      const minX = calloutNum(c?.rect?.minX);
+      const minY = calloutNum(c?.rect?.minY);
+      const maxX = calloutNum(c?.rect?.maxX);
+      const maxY = calloutNum(c?.rect?.maxY);
+      if (!c?.id || [minX, minY, maxX, maxY].some((v) => v === null)) return null;
+      if (maxX - minX < CALLOUT_MIN_SIZE_M || maxY - minY < CALLOUT_MIN_SIZE_M) return null;
+      const scale = Number(c.scale);
+      return {
+        id: c.id,
+        name: typeof c.name === "string" && c.name.trim() ? c.name.trim() : "Callout",
+        rect: { minX, minY, maxX, maxY },
+        scale: Number.isFinite(scale) && scale > 0 ? scale : null,
+      };
+    })
+    .filter(Boolean);
+  // Same drop-rather-than-half-load rule again, checked against a rectangle
+  // instead of a cut vector, mirroring the `callouts` block above - not
+  // imported from revision.js for the same reason (a cycle: revision.js
+  // imports `nid` from here). A cloud's link is re-validated against the
+  // sheets already parsed above rather than trusted verbatim: a `sheetId`
+  // that no longer exists, or a `rev` letter that sheet never issued, is
+  // dropped back to "unlinked" rather than kept - the same "unknown is
+  // never a plausible default" rule applied to a link instead of a fact.
+  // `0.3` mirrors revision.js's own `REVISION_CLOUD_MIN_SIZE_M`.
+  const REVISION_CLOUD_MIN_SIZE_M = 0.3;
+  doc.revisionClouds = (Array.isArray(raw.revisionClouds) ? raw.revisionClouds : [])
+    .map((c) => {
+      const minX = calloutNum(c?.rect?.minX);
+      const minY = calloutNum(c?.rect?.minY);
+      const maxX = calloutNum(c?.rect?.maxX);
+      const maxY = calloutNum(c?.rect?.maxY);
+      if (!c?.id || [minX, minY, maxX, maxY].some((v) => v === null)) return null;
+      if (maxX - minX < REVISION_CLOUD_MIN_SIZE_M || maxY - minY < REVISION_CLOUD_MIN_SIZE_M) return null;
+      const sheet = doc.sheets.find((s) => s.id === c.sheetId);
+      const linked = sheet && typeof c.rev === "string"
+        && (sheet.revisions || []).some((r) => r.rev === c.rev);
+      return {
+        id: c.id,
+        level: c.level || null,
+        rect: { minX, minY, maxX, maxY },
+        note: typeof c.note === "string" ? c.note : "",
+        sheetId: linked ? c.sheetId : null,
+        rev: linked ? c.rev : null,
+      };
+    })
+    .filter(Boolean);
+  // Trimmed to a non-empty string or null, the same rule `doc.name` follows:
+  // "" and "  " both mean "not supplied", not a fact worth printing.
+  const infoStr = (v) => (typeof v === "string" && v.trim() ? v.trim() : null);
+  doc.projectInfo = {
+    jobNumber: infoStr(raw.projectInfo?.jobNumber),
+    clientName: infoStr(raw.projectInfo?.clientName),
+  };
   doc.floorsRevealed = Number.isInteger(raw.floorsRevealed) && raw.floorsRevealed >= 0 ? raw.floorsRevealed : 0;
   // `num` rather than `Number(x)`: null and "" both coerce to 0, which would
   // silently turn an unstated floor-to-ceiling into a floor-to-ceiling of zero.

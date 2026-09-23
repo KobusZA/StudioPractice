@@ -56,7 +56,7 @@ test("the measured plan has room strings plus range and opening width", () => {
   assert.ok(model.openings.some((o) => o.kind === "window"));
   const lookDims = model.dims.filter((d) => d.look);
   assert.equal(lookDims.length, 2);
-  assert.ok(lookDims.some((d) => d.label.includes("2.00")));
+  assert.ok(lookDims.some((d) => d.label.includes("2000")));
   assert.ok(model.note.toLowerCase().includes("window"));
   assert.ok(lookPlanCaption(payload, look).includes("to window"));
 });

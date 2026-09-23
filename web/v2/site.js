@@ -74,7 +74,7 @@ export function deriveBuildingLine(doc, pack, rulePack) {
   }
   const points = offsetPolygonInward(propertyLine, setback);
   if (!points) {
-    return { ok: false, reason: `a uniform ${setback.toFixed(1)} m inward offset collapses this property line's shape` };
+    return { ok: false, reason: `a uniform ${Math.round(setback * 1000)} mm inward offset collapses this property line's shape` };
   }
   return { ok: true, points, setback };
 }

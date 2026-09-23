@@ -2,24 +2,25 @@
 // ribbon.js names outright: "the TSP_SHEET_A1 and A3 title blocks."
 //
 // Scope, and what is deliberately not here yet:
-//  - Placing a chosen view (section, elevation, callout) onto a sheet is
-//    `view-section`'s and `callout`'s job ("once sheets exist"); this file
-//    only creates the sheet and its title block. Until those land, the
-//    Sheets panel (ui.js) draws the current plan into the one viewport a
-//    sheet gets, so a sheet is not blank the day it is created.
-//  - `project-info` (job number, client) is still its own unbuilt ribbon
-//    item. Until it lands, the title block reads what the document already
-//    knows (`doc.name`, `pack.locale`, `doc.site.erfNumber`) and leaves
-//    drawn-by/checked-by/date as per-sheet fields rather than a shared
-//    project record, so the two features do not end up fighting over the
-//    same box on the title block when project-info does land.
+//  - A sheet's one viewport can now show the plan (default), a named section
+//    (`sheetView()`/`setSheetView()`, fed by section.js's `doc.sections`), a
+//    named elevation (fed by elevation.js's `doc.elevations`) or a named
+//    callout (fed by callout.js's `doc.callouts`) - `view-section`'s job,
+//    "placing a section view on a sheet, once sheets exist," extended to
+//    the elevation and callout view kinds that landed alongside it.
+//  - `project-info` (ui.js's Project information panel, `doc.projectInfo`)
+//    now feeds the job number and client name rows below. Drawn-by/checked-by
+//    /date stay per-sheet fields rather than folding into that same record:
+//    they vary sheet to sheet (who drew *this* one, when), where a job number
+//    and client name do not, so the two kinds of fact never fight over the
+//    same box on the title block.
 //  - No vector PDF export - that is `print-boq`/`print-bom`'s job, and a
 //    sheet system is the prerequisite for it, not the thing itself.
 //  - One fixed viewport per sheet, not a resizable/movable one. Real title
-//    block software lets a viewport be dragged and cropped; here the plan
-//    always fills the drawable area at the largest standard scale that fits,
-//    which is the common case and keeps this file about the title block, not
-//    a second copy of the canvas pan/zoom ui.js already has.
+//    block software lets a viewport be dragged and cropped; here the chosen
+//    view always fills the drawable area at the largest standard scale that
+//    fits, which is the common case and keeps this file about the title
+//    block, not a second copy of the canvas pan/zoom ui.js already has.
 
 import { nid } from "./model.js";
 
@@ -47,6 +48,13 @@ const TITLE_BLOCK_WIDTH_MM = 70; // right-hand strip, shared proportion across e
  * second copy of the labels. */
 export const FIELD_ROWS = [
   { key: "projectName", label: "Project" },
+  // Job number and client name come from `project-info` (model.js's
+  // `doc.projectInfo`), the ribbon item this file's own header comment named
+  // as still unbuilt. They sit right after the project name because that is
+  // where a title block reads them; an unset one prints the same em-dash
+  // every other unknown fact on this list does.
+  { key: "jobNumber", label: "Job no." },
+  { key: "clientName", label: "Client" },
   { key: "drawingTitle", label: "Drawing" },
   { key: "erf", label: "Erf / municipality" },
   { key: "scale", label: "Scale" },
@@ -82,6 +90,12 @@ export function createSheet(doc, { size = "A1", name, number } = {}) {
     drawnBy: "",
     checkedBy: "",
     scaleOverride: null,
+    // The one viewport this sheet gets. Plan is the default every existing
+    // sheet already drew; `view-section` (Output > Views) is what lets it
+    // point at a named section (section.js's `doc.sections`), a named
+    // elevation (elevation.js's `doc.elevations`) or a named callout
+    // (callout.js's `doc.callouts`) instead.
+    view: { kind: "plan" },
     revisions: [],
   };
   sheets.push(sheet);
@@ -98,6 +112,41 @@ export function removeSheet(doc, sheetId) {
 
 export function sheetById(doc, sheetId) {
   return ensureSheets(doc).find((s) => s.id === sheetId) || null;
+}
+
+/**
+ * The sheet's chosen viewport content: the plan (default), a named section
+ * from `doc.sections`, a named elevation from `doc.elevations`, or a named
+ * callout from `doc.callouts`. Falls back to plan if the referenced view no
+ * longer exists, rather than drafting a blank viewport for a deleted view -
+ * the same "unknown is never a plausible default" rule applied to a
+ * viewport instead of a SKU.
+ */
+export function sheetView(doc, sheet) {
+  const view = sheet?.view;
+  if (view?.kind === "section" && view.sectionId && (doc?.sections || []).some((s) => s.id === view.sectionId)) {
+    return view;
+  }
+  if (view?.kind === "elevation" && view.elevationId && (doc?.elevations || []).some((e) => e.id === view.elevationId)) {
+    return view;
+  }
+  if (view?.kind === "callout" && view.calloutId && (doc?.callouts || []).some((c) => c.id === view.calloutId)) {
+    return view;
+  }
+  return { kind: "plan" };
+}
+
+export function setSheetView(sheet, view) {
+  if (!sheet) return;
+  if (view?.kind === "section" && view.sectionId) {
+    sheet.view = { kind: "section", sectionId: view.sectionId };
+  } else if (view?.kind === "elevation" && view.elevationId) {
+    sheet.view = { kind: "elevation", elevationId: view.elevationId };
+  } else if (view?.kind === "callout" && view.calloutId) {
+    sheet.view = { kind: "callout", calloutId: view.calloutId };
+  } else {
+    sheet.view = { kind: "plan" };
+  }
 }
 
 /** A, B, ... Z, AA, AB, ... - a revision letter is issued once and never
@@ -165,10 +214,13 @@ export function recommendedScale(sheet, planExtentMeters) {
   return STANDARD_SCALES[STANDARD_SCALES.length - 1];
 }
 
-/** A sheet's scale is whatever the firm set explicitly, otherwise the
- * recommendation for what is actually drawn. */
-export function sheetScale(sheet, planExtentMeters) {
-  return sheet?.scaleOverride || recommendedScale(sheet, planExtentMeters);
+/** A sheet's scale is whatever the firm set explicitly on the sheet itself,
+ * otherwise `preferredScale` if the view being drawn names one - currently
+ * only a callout does, via its own `scale` (the detail's blow-up factor,
+ * which exists precisely to beat what "fits" would otherwise compute) -
+ * otherwise the auto-fit recommendation for what is actually drawn. */
+export function sheetScale(sheet, planExtentMeters, preferredScale) {
+  return sheet?.scaleOverride || preferredScale || recommendedScale(sheet, planExtentMeters);
 }
 
 export function formatScale(n) {
@@ -181,14 +233,16 @@ export function formatScale(n) {
  * em-dash rather than a guess - SCHEMA.md's "unknown is never a plausible
  * default" rule, applied to the title block instead of a SKU.
  */
-export function titleBlockFields(doc, pack, sheet, planExtentMeters) {
+export function titleBlockFields(doc, pack, sheet, planExtentMeters, preferredScale) {
   const site = doc?.site || {};
-  const scale = sheetScale(sheet, planExtentMeters);
+  const scale = sheetScale(sheet, planExtentMeters, preferredScale);
   return {
     // The job's own name, never the pack's: the pack is the firm's template,
     // and printing "TSP standard pack" where the client's name belongs is a
     // plausible default rather than a fact.
     projectName: doc?.name || "—",
+    jobNumber: doc?.projectInfo?.jobNumber || "—",
+    clientName: doc?.projectInfo?.clientName || "—",
     drawingTitle: sheet.drawingTitle || sheet.name || "—",
     erf: [site.erfNumber ? `Erf ${site.erfNumber}` : null, pack?.locale?.municipality]
       .filter(Boolean).join(", ") || "—",

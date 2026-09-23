@@ -100,6 +100,11 @@ export function openStore(queryable, { orgId, userId }) {
      * No thumbnail. Rendering one needs the geometry, and inventing a
      * placeholder image would be exactly the plausible default this codebase
      * refuses elsewhere - the library shows a name and a date, which are facts.
+     *
+     * `listDrawingPreviews` below does render one, and does not break either
+     * rule: it reads the geometry out of the jsonb rather than shipping the
+     * document, and a job with no drawing is left out rather than given a
+     * grey rectangle.
      */
     async listProjects({ includeDeleted = false } = {}) {
       const { rows } = await q(
@@ -562,6 +567,7 @@ export function openStore(queryable, { orgId, userId }) {
            from project p
            left join drawing d on d.project_id = p.id and d.deleted_at is null
            ${FINANCIAL_LATERALS}
+           ${PHASE_LATERAL}
           where p.org_id = $1
             and ($2 or p.deleted_at is null)
           order by coalesce(p.opened_at, p.updated_at) desc`,
@@ -576,10 +582,45 @@ export function openStore(queryable, { orgId, userId }) {
            from project p
            left join drawing d on d.project_id = p.id and d.deleted_at is null
            ${FINANCIAL_LATERALS}
+           ${PHASE_LATERAL}
           where p.id = $2 and p.org_id = $1 and p.deleted_at is null`,
         [orgId, projectId],
       );
       return rows[0] ? registerRow(rows[0]) : null;
+    },
+
+    /**
+     * Enough of every drawing to sketch it, and nothing else.
+     *
+     * `listProjects` refuses to carry a thumbnail, and both of its reasons
+     * still hold: a firm with forty jobs must not pull forty documents to
+     * draw a list, and a placeholder image would be a picture of a job
+     * nobody drew. What has changed is that the geometry can be had without
+     * the document. Rooms, walls, slabs and roofs are read out of the jsonb
+     * here; openings, items, beams, stairs, groups, sheets and levels stay
+     * in the database, where a picture forty pixels across has no use for
+     * them. A job with no drawing is absent from this list rather than
+     * present and blank.
+     */
+    async listDrawingPreviews() {
+      const { rows } = await q(
+        `select d.project_id,
+                d.id        as drawing_id,
+                d.revision,
+                d.updated_at,
+                d.doc -> 'rooms'    as rooms,
+                d.doc -> 'segments' as segments,
+                d.doc -> 'slabs'    as slabs,
+                d.doc -> 'roofs'    as roofs
+           from drawing d
+           join project p on p.id = d.project_id
+          where p.org_id = $1
+            and p.deleted_at is null
+            and d.deleted_at is null
+          order by d.updated_at desc`,
+        [orgId],
+      );
+      return rows.map(drawingPreviewRow);
     },
 
     /**
@@ -913,6 +954,168 @@ export function openStore(queryable, { orgId, userId }) {
         );
       }
       return this.listFeeSchedule(projectId);
+    },
+
+    // --- where the job has got to -----------------------------------------
+
+    /**
+     * The job's own sequence of phases, with the evidence for each one.
+     *
+     * Two sources, because a job can have either without the other: the fee
+     * schedule is what was quoted phase by phase, and the task list is what
+     * was to be done in each. For a templated job they are the same names
+     * cloned in the same transaction. A phase that exists only on the task
+     * list sorts after the quoted ones rather than being dropped - it is
+     * still work somebody has to do, it just carries no fee of its own.
+     *
+     * `position` is relative to the phase the job is actually in, and it is
+     * null for every phase when nobody has said. "Behind us" is derived from
+     * a stated fact; it is not derived from the tasks being ticked.
+     */
+    async listProjectPhases(projectId) {
+      const project = await this.getProject(projectId);
+      if (!project) return null;
+      const { rows } = await q(
+        `with quoted as (
+           select upper(btrim(fsl.label)) as key,
+                  min(fsl.label)          as ref,
+                  min(fsl.seq)            as seq,
+                  sum(fsl.quoted)         as quoted
+             from fee_schedule_line fsl
+             join project p on p.id = fsl.project_id
+                           and p.org_id = $1 and p.deleted_at is null
+            where fsl.project_id = $2 and fsl.deleted_at is null
+            group by upper(btrim(fsl.label))
+         ),
+         -- Task-only phases are offset past every quoted one rather than
+         -- interleaved: their task seq and the schedule's line seq are two
+         -- different numberings and mixing them would invent an order.
+         extra as (
+           select upper(btrim(pt.phase_label))  as key,
+                  min(pt.phase_label)           as ref,
+                  1000000 + min(pt.seq)         as seq,
+                  null::numeric                 as quoted
+             from project_task pt
+            where pt.project_id = $2 and pt.deleted_at is null
+              and pt.phase_label is not null and btrim(pt.phase_label) <> ''
+              and not exists (select 1 from quoted where quoted.key = upper(btrim(pt.phase_label)))
+            group by upper(btrim(pt.phase_label))
+         ),
+         phases as (select * from quoted union all select * from extra)
+         select ph.ref, ph.seq, ph.quoted,
+                coalesce(t.total, 0)     as tasks_total,
+                coalesce(t.done, 0)      as tasks_done,
+                coalesce(t.struck, 0)    as tasks_struck,
+                coalesce(c.certified, 0) as certified,
+                coalesce(c.draft, 0)     as draft,
+                coalesce(te.captured, 0) as captured
+           from phases ph
+           left join lateral (
+             select count(*)                                                 as total,
+                    count(*) filter (where pt.status = 'done')               as done,
+                    count(*) filter (where pt.status = 'not_required')       as struck
+               from project_task pt
+              where pt.project_id = $2 and pt.deleted_at is null
+                and upper(btrim(pt.phase_label)) = ph.key
+           ) t on true
+           left join lateral (
+             select coalesce(sum(cl.amount) filter (where pc.status = 'issued'), 0) as certified,
+                    coalesce(sum(cl.amount) filter (where pc.status = 'draft'), 0)  as draft
+               from certificate_line cl
+               join payment_certificate pc
+                 on pc.id = cl.certificate_id and pc.deleted_at is null
+              where pc.project_id = $2 and cl.deleted_at is null
+                and upper(btrim(cl.phase_ref)) = ph.key
+           ) c on true
+           left join lateral (
+             -- Partial on purpose. A time entry's phase is optional, so this
+             -- is "time somebody tagged to this phase", never "time this
+             -- phase cost". The caller is told how much was left untagged.
+             select coalesce(sum(e.captured_amount), 0) as captured
+               from time_entry e
+              where e.project_id = $2 and e.deleted_at is null
+                and upper(btrim(e.phase_ref)) = ph.key
+           ) te on true
+          order by ph.seq`,
+        [orgId, projectId],
+      );
+
+      const { rows: events } = await q(
+        `select ppe.phase_ref, ppe.entered_at, ppe.note
+           from project_phase_event ppe
+           join project p on p.id = ppe.project_id
+          where ppe.project_id = $2 and p.org_id = $1 and p.deleted_at is null
+          order by ppe.entered_at desc, ppe.created_at desc`,
+        [orgId, projectId],
+      );
+      const current = events[0] ?? null;
+      const currentKey = current ? current.phase_ref.trim().toUpperCase() : null;
+      const currentIndex = currentKey === null
+        ? -1
+        : rows.findIndex((row) => row.ref.trim().toUpperCase() === currentKey);
+
+      const { rows: untagged } = await q(
+        `select coalesce(sum(e.captured_amount), 0) as captured
+           from time_entry e
+           join project p on p.id = e.project_id
+                         and p.org_id = $1 and p.deleted_at is null
+          where e.project_id = $2 and e.deleted_at is null
+            and (e.phase_ref is null or btrim(e.phase_ref) = '')`,
+        [orgId, projectId],
+      );
+
+      return {
+        // The phase somebody said we are in, even if it is not on the list -
+        // a freehand phase is still an answer, and silently dropping it would
+        // be worse than showing it as unlisted.
+        current: current?.phase_ref ?? null,
+        currentSince: current?.entered_at ?? null,
+        currentNote: current?.note ?? null,
+        currentListed: currentIndex >= 0,
+        history: events.map((event) => ({
+          phaseRef: event.phase_ref,
+          enteredAt: event.entered_at,
+          note: event.note ?? null,
+        })),
+        capturedUntagged: num(untagged[0]?.captured) ?? 0,
+        phases: rows.map((row, index) => {
+          const quoted = num(row.quoted);
+          const certified = num(row.certified) ?? 0;
+          return {
+            ref: row.ref,
+            seq: index + 1,
+            quoted,
+            certified,
+            draft: num(row.draft) ?? 0,
+            variance: quoted === null ? null : toCents(quoted - certified),
+            captured: num(row.captured) ?? 0,
+            tasksTotal: Number(row.tasks_total),
+            tasksDone: Number(row.tasks_done),
+            tasksStruck: Number(row.tasks_struck),
+            position: currentIndex < 0 ? null
+              : index < currentIndex ? "behind"
+                : index === currentIndex ? "current" : "ahead",
+          };
+        }),
+      };
+    },
+
+    /**
+     * Advancing, or correcting. Append-only: moving back to an earlier phase
+     * is a new event and not a deletion, because "we went back to public
+     * participation in August" is the fact a fee query turns on.
+     */
+    async setProjectPhase(projectId, { phaseRef, note = null } = {}) {
+      const project = await this.getProject(projectId);
+      if (!project) return null;
+      const ref = trimmed(phaseRef);
+      if (!ref) throw new ValidationError("a phase is required");
+      await q(
+        `insert into project_phase_event (id, project_id, phase_ref, note, created_by)
+              values ($1, $2, $3, $4, $5)`,
+        [sid("ppe"), projectId, ref, trimmed(note), userId],
+      );
+      return this.listProjectPhases(projectId);
     },
 
     // --- the timesheet ----------------------------------------------------
@@ -1439,6 +1642,21 @@ const FINANCIAL_LATERALS = `
   ) schedule on true
 `;
 
+/**
+ * The newest phase event, which is what "current phase" means. Joined into
+ * the register listing rather than fetched per job, so a page that wants to
+ * say where twelve jobs have got to does not make twelve round trips.
+ */
+const PHASE_LATERAL = `
+  left join lateral (
+    select ppe.phase_ref, ppe.entered_at
+      from project_phase_event ppe
+     where ppe.project_id = p.id
+     order by ppe.entered_at desc, ppe.created_at desc
+     limit 1
+  ) phase on true
+`;
+
 const REGISTER_COLUMNS = `
   p.id, p.code, p.name, p.client_name, p.client_email, p.client_cell,
   p.client_address, p.property_description, p.type_code, p.budget_estimate,
@@ -1448,7 +1666,8 @@ const REGISTER_COLUMNS = `
   time_totals.uncertified_captured, time_totals.broken_rows,
   lines.certified_gross, lines.draft_gross,
   wds.written_down, wds.unexplained_written_down,
-  schedule.scheduled, schedule.schedule_lines
+  schedule.scheduled, schedule.schedule_lines,
+  phase.phase_ref as current_phase, phase.entered_at as phase_since
 `;
 
 // --- practice-ops mapping ---------------------------------------------------
@@ -1527,6 +1746,9 @@ function registerRow(row) {
     // these disciplines, and the planner uses this to decide whether "open"
     // means a canvas or a register page.
     drawingId: row.drawing_id ?? null,
+    // Null is "nobody has said", not "phase one". The register shows the gap.
+    currentPhase: row.current_phase ?? null,
+    phaseSince: row.phase_since ?? null,
     financials: financials(row),
   };
 }
@@ -1725,5 +1947,32 @@ function drawingRow(row) {
     revision: row.revision,
     doc: row.doc,
     updatedAt: row.updated_at ?? null,
+  };
+}
+
+/**
+ * Outlines only. A room's name, its SKU and its finishes are the document's
+ * business; a preview needs the shape and the storey it stands on. An entry
+ * the document holds but cannot be drawn - a shape that is missing, a wall
+ * with a non-numeric end - is dropped here rather than shipped for the
+ * browser to trip over.
+ */
+function drawingPreviewRow(row) {
+  const outlines = (list) => (Array.isArray(list) ? list : [])
+    .filter((entry) => entry?.shape)
+    .map((entry) => ({ shape: entry.shape, level: entry.level ?? null }));
+  return {
+    projectId: row.project_id,
+    drawingId: row.drawing_id,
+    revision: row.revision,
+    updatedAt: row.updated_at ?? null,
+    rooms: outlines(row.rooms),
+    slabs: outlines(row.slabs),
+    roofs: outlines(row.roofs),
+    segments: (Array.isArray(row.segments) ? row.segments : [])
+      .filter((seg) => [seg?.x1, seg?.y1, seg?.x2, seg?.y2].every(Number.isFinite))
+      .map((seg) => ({
+        x1: seg.x1, y1: seg.y1, x2: seg.x2, y2: seg.y2, level: seg.level ?? null,
+      })),
   };
 }

@@ -112,7 +112,7 @@
             <label id="v2-ctx-len-wrap">Length
               <span class="plan-context-field">
                 <input id="v2-ctx-len" type="text" inputmode="decimal" autocomplete="off" />
-                <span>m</span>
+                <span>mm</span>
               </span>
             </label>
             <label id="v2-ctx-ang-wrap">Angle
@@ -124,13 +124,13 @@
             <label id="v2-ctx-w-wrap" hidden>Width
               <span class="plan-context-field">
                 <input id="v2-ctx-w" type="text" inputmode="decimal" autocomplete="off" />
-                <span>m</span>
+                <span>mm</span>
               </span>
             </label>
             <label id="v2-ctx-h-wrap" hidden>Height
               <span class="plan-context-field">
                 <input id="v2-ctx-h" type="text" inputmode="decimal" autocomplete="off" />
-                <span>m</span>
+                <span>mm</span>
               </span>
             </label>
           </div>
@@ -151,8 +151,8 @@
           <label id="v2-hud-h-label">Height
             <input id="v2-hud-h" type="text" inputmode="decimal" autocomplete="off" />
           </label>
-          <span class="planner-size-unit">m</span>
-          <p class="hint" id="v2-hud-hint">Click the opposite corner, or type metres. Tab switches width / height.</p>
+          <span class="planner-size-unit">mm</span>
+          <p class="hint" id="v2-hud-hint">Click the opposite corner, or type millimetres. Tab switches width / height.</p>
         </div>
         <div class="planner-underlay-panel" id="v2-underlay-panel" hidden>
           <strong>Underlay</strong>
@@ -175,7 +175,7 @@
           <label id="v2-calibrate-distance-wrap" hidden>Real distance
             <span class="plan-context-field">
               <input id="v2-calibrate-distance" type="text" inputmode="decimal" autocomplete="off" />
-              <span>m</span>
+              <span>mm</span>
             </span>
           </label>
           <button type="button" id="v2-calibrate-confirm" hidden>Set scale</button>
@@ -210,7 +210,7 @@
           <label>Elevation
             <span class="plan-context-field">
               <input id="v2-level-elevation" type="text" inputmode="decimal" autocomplete="off" />
-              <span>m</span>
+              <span>mm</span>
             </span>
           </label>
           <button type="button" id="v2-level-confirm">Insert level</button>
@@ -406,6 +406,59 @@
     </div>
   </div>
 
+  <!-- Type detail: opt-in escalation from the palette row's expand icon, not
+       a step everyone has to pass through. Reuses the mass-overlay's
+       fixed/centered-panel pattern so it doesn't need its own show/hide
+       plumbing conventions. Media pane is a skeleton today (placeholder or
+       a single photo); it is where per-SKU photos, AI renders and later
+       supplier images/links all land. -->
+  <div class="type-detail-overlay" id="v2-type-detail-overlay" hidden>
+    <div class="panel type-detail-panel">
+      <header>
+        <button type="button" id="v2-type-detail-prev" class="type-detail-step" aria-label="Previous type" title="Previous type (←)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
+        </button>
+        <div class="type-detail-heading">
+          <h2 id="v2-type-detail-name">Type</h2>
+          <span id="v2-type-detail-meta" class="type-detail-meta"></span>
+        </div>
+        <button type="button" id="v2-type-detail-next" class="type-detail-step" aria-label="Next type" title="Next type (→)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>
+        </button>
+        <span id="v2-type-detail-count" class="type-detail-count"></span>
+        <button type="button" id="v2-type-detail-close">Close</button>
+      </header>
+      <div class="type-detail-body">
+        <!-- Side rail: every other option currently visible in the palette
+             (same category grouping), so switching types never means
+             closing this view and reopening it from scratch. -->
+        <nav class="type-detail-nav" id="v2-type-detail-nav" aria-label="Other options"></nav>
+        <div class="type-detail-media">
+          <div class="seg type-detail-media-tabs" role="group" aria-label="Preview">
+            <button type="button" data-detail-view="photo" class="active">Photo</button>
+            <button type="button" data-detail-view="3d">3D</button>
+          </div>
+          <div class="type-detail-media-frame" id="v2-type-detail-media-frame">
+            <div class="type-detail-placeholder" id="v2-type-detail-placeholder">
+              <span class="type-detail-placeholder-icon" id="v2-type-detail-placeholder-icon" aria-hidden="true"></span>
+              <p>No preview yet for this type.</p>
+              <p class="hint">Supplier photos and 3D renders will appear here.</p>
+            </div>
+            <img id="v2-type-detail-img" alt="" hidden />
+          </div>
+        </div>
+        <div class="type-detail-specs">
+          <h3 id="v2-type-detail-category">Category</h3>
+          <dl id="v2-type-detail-dims" class="type-detail-dims"></dl>
+          <div class="type-detail-supplier" id="v2-type-detail-supplier">
+            <p class="hint">Supplier info - pricing, product links, spec sheets - lands here later.</p>
+          </div>
+          <button type="button" id="v2-type-detail-use">Use this type</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="sheet-overlay" id="v2-sheet-overlay" hidden>
     <div class="panel sheet-panel">
       <header>
@@ -417,6 +470,9 @@
         <aside class="sheet-list" id="v2-sheet-list"></aside>
         <section class="sheet-main">
           <div class="sheet-fields" id="v2-sheet-fields" hidden>
+            <label>View
+              <select id="v2-sheet-view"></select>
+            </label>
             <label>Size
               <select id="v2-sheet-size"></select>
             </label>
@@ -453,8 +509,42 @@
               <button type="button" id="v2-sheet-rev-add">Add revision</button>
             </div>
           </div>
+          <div class="sheet-revisions">
+            <h3>Revision clouds</h3>
+            <p class="hint">Drawn on the plan with Document &gt; Annotate &gt; Revision cloud. Link each one to a revision this sheet has issued.</p>
+            <div id="v2-sheet-cloud-list"></div>
+          </div>
         </section>
       </div>
+    </div>
+  </div>
+
+  <div class="sheet-overlay project-info-overlay" id="v2-project-info-overlay" hidden>
+    <div class="panel sheet-panel project-info-panel">
+      <header>
+        <h2>Project information</h2>
+        <button type="button" id="v2-project-info-close">Close</button>
+      </header>
+      <p class="hint">Job number and client name are one job's own facts, not the pack's - every sheet's title block reads them from here.</p>
+      <div class="sheet-fields">
+        <label>Job number
+          <input id="v2-project-info-job-number" type="text" autocomplete="off" />
+        </label>
+        <label>Client name
+          <input id="v2-project-info-client-name" type="text" autocomplete="off" />
+        </label>
+      </div>
+    </div>
+  </div>
+
+  <div class="sheet-overlay elevation-overlay" id="v2-elevation-overlay" hidden>
+    <div class="panel sheet-panel elevation-panel">
+      <header>
+        <h2>Elevation</h2>
+        <button type="button" id="v2-elevation-close">Close</button>
+      </header>
+      <p class="hint">Pick a compass side. A whole elevation has no line to draw - it extrudes the plan from outside, looking straight in.</p>
+      <div class="elevation-directions" id="v2-elevation-directions"></div>
     </div>
   </div>
 

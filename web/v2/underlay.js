@@ -107,7 +107,7 @@ export function calibrate(doc, a, b, realMetres) {
 
   const pixelDistance = Math.hypot(b.x - a.x, b.y - a.y) / placement.metresPerPixel;
   if (pixelDistance < 1) return { ok: false, message: "Those two points are too close together to measure." };
-  if (!(realMetres > 0)) return { ok: false, message: "Enter the real distance in metres." };
+  if (!(realMetres > 0)) return { ok: false, message: "Enter the real distance in millimetres." };
 
   // Keep the first calibration point anchored so the drawing does not jump.
   const scale = realMetres / pixelDistance;
@@ -117,7 +117,7 @@ export function calibrate(doc, a, b, realMetres) {
   placement.metresPerPixel = scale;
   placement.calibrated = true;
 
-  return { ok: true, message: `Scale set: ${realMetres} m across ${Math.round(pixelDistance)} px.`, metresPerPixel: scale };
+  return { ok: true, message: `Scale set: ${Math.round(realMetres * 1000)} mm across ${Math.round(pixelDistance)} px.`, metresPerPixel: scale };
 }
 
 /** Centre of the placed sheet in world coordinates - the pivot for rotation and drag-scale alike. */

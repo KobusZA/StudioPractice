@@ -5,7 +5,9 @@
 // profileLoops, depth and, since this file needed it, per-object elevation.
 // Camera (Output > Views > Camera) is the same extrusion from a standing
 // eye, not a second model. Section (Document > Views > Section) is the same
-// extrusion on a vertical cut. No Revit mesh ingestion (that lives in
+// extrusion on a vertical cut, and Elevation (Output > Views > Elevation) is
+// the same extrusion again, viewed orthographically from a fixed compass
+// side instead of a user-drawn cut - see elevation.js. No Revit mesh ingestion (that lives in
 // web/extras.js against the old planner). Generate model is a separate step
 // that consumes a snapshot of this view rather than replacing the extrusion.
 //
@@ -578,7 +580,12 @@ export function massingLayer(face) {
   return z < -0.02 ? 0 : 2;
 }
 
-function faceStyle(face) {
+/** Fill/stroke for one face, by status and kind. Exported so a static
+ * drafted view (sheets.js's section viewport, drawn straight into the sheet
+ * canvas rather than this file's interactive one) can paint the same faces
+ * `facesFromPayload()`/`clipFacesForSection()` produce without a second copy
+ * of these rules. */
+export function faceStyle(face) {
   if (face.kind === "ground") return { fill: face.fill, stroke: face.stroke };
   const status = resolvedStatus(face.status);
   if (status === "planned" && (face.kind === "wall" || face.kind === "room")) {
@@ -591,6 +598,45 @@ function faceStyle(face) {
     return { fill: face.kind === "wall" ? "rgba(90,84,76,0.42)" : "rgba(92,83,72,0.28)", stroke: "#5c5348" };
   }
   return { fill: face.fill, stroke: face.stroke };
+}
+
+/**
+ * Diagonal 45° poché hatch clipped to a projected polygon, in pixel space.
+ * Skips a near-zero-area polygon rather than spraying hatch lines across its
+ * bounding box - see the section poché note above `faceOnCut` in section.js.
+ * Exported so sheets.js's static section viewport can draw the same poché
+ * this file's interactive Section view does.
+ */
+export function hatchPolygon(ctx, pts, stroke) {
+  let area = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i];
+    const b = pts[(i + 1) % pts.length];
+    area += a[0] * b[1] - b[0] * a[1];
+  }
+  if (Math.abs(area) / 2 < 12) return;
+  ctx.save();
+  ctx.beginPath();
+  pts.forEach((p, i) => (i === 0 ? ctx.moveTo(p[0], p[1]) : ctx.lineTo(p[0], p[1])));
+  ctx.closePath();
+  ctx.clip();
+  ctx.strokeStyle = stroke;
+  ctx.lineWidth = 0.7;
+  ctx.globalAlpha = 0.45;
+  const xs = pts.map((p) => p[0]);
+  const ys = pts.map((p) => p[1]);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const span = (maxX - minX) + (maxY - minY);
+  for (let d = minX - (maxY - minY); d < maxX + (maxY - minY); d += Math.max(6, span / 24)) {
+    ctx.beginPath();
+    ctx.moveTo(d, minY);
+    ctx.lineTo(d + (maxY - minY), maxY);
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 /**
@@ -635,45 +681,25 @@ export function createMassingView({ canvas, emptyEl, captionEl, titleEl, onDraw 
     draw();
   }
 
+  // An elevation shares a section's u/v projection (same `sectionUV`/
+  // `projectSectionPoint` maths, just an unclipped, compass-fixed cut - see
+  // elevation.js's header) but is never a poché face, so it gets its own
+  // camera mode rather than reusing "section" outright: that keeps the
+  // "draw a hatch on the cut face" branch below correctly section-only.
+  function setElevation(cut) {
+    if (!cut || cut.mode !== "elevation") return;
+    delete cam.lookHit;
+    Object.assign(cam, cut);
+    cam.mode = "elevation";
+    reframe = true;
+    draw();
+  }
+
   function setOrbit() {
     delete cam.lookHit;
     cam.mode = "orbit";
     reframe = true;
     draw();
-  }
-
-  function hatchCut(pts, stroke) {
-    let area = 0;
-    for (let i = 0; i < pts.length; i++) {
-      const a = pts[i];
-      const b = pts[(i + 1) % pts.length];
-      area += a[0] * b[1] - b[0] * a[1];
-    }
-    // A flattened receding face is a line. Clipping to that path does not
-    // contain the hatch, so the 45° strokes run across the bounding box.
-    if (Math.abs(area) / 2 < 12) return;
-    ctx.save();
-    ctx.beginPath();
-    pts.forEach((p, i) => (i === 0 ? ctx.moveTo(p[0], p[1]) : ctx.lineTo(p[0], p[1])));
-    ctx.closePath();
-    ctx.clip();
-    ctx.strokeStyle = stroke;
-    ctx.lineWidth = 0.7;
-    ctx.globalAlpha = 0.45;
-    const xs = pts.map((p) => p[0]);
-    const ys = pts.map((p) => p[1]);
-    const minX = Math.min(...xs);
-    const maxX = Math.max(...xs);
-    const minY = Math.min(...ys);
-    const maxY = Math.max(...ys);
-    const span = (maxX - minX) + (maxY - minY);
-    for (let d = minX - (maxY - minY); d < maxX + (maxY - minY); d += Math.max(6, span / 24)) {
-      ctx.beginPath();
-      ctx.moveTo(d, minY);
-      ctx.lineTo(d + (maxY - minY), maxY);
-      ctx.stroke();
-    }
-    ctx.restore();
   }
 
   function draw() {
@@ -692,8 +718,12 @@ export function createMassingView({ canvas, emptyEl, captionEl, titleEl, onDraw 
 
     const isLook = cam.mode === "look";
     const isSection = cam.mode === "section";
+    const isElevation = cam.mode === "elevation";
+    // A section and an elevation share every projection/orthographic detail
+    // below except clipping and the poché hatch, which stay section-only.
+    const isCutView = isSection || isElevation;
     if (titleEl) {
-      titleEl.textContent = isLook ? "Look" : isSection ? "Section" : "3D massing";
+      titleEl.textContent = isLook ? "Look" : isSection ? "Section" : isElevation ? `${cam.label || "Elevation"} elevation` : "3D massing";
     }
 
     const faces = facesFromPayload(payload, statusFilter);
@@ -706,18 +736,22 @@ export function createMassingView({ canvas, emptyEl, captionEl, titleEl, onDraw 
     if (emptyEl) emptyEl.hidden = true;
     if (captionEl) {
       captionEl.textContent = isLook
-        ? `Standing ${EYE_HEIGHT_M} m · drag to look around · scroll to zoom`
+        ? `Standing ${Math.round(EYE_HEIGHT_M * 1000)} mm · drag to look around · scroll to zoom`
         : isSection
           ? "Cut looking left of the line · drag to pan · scroll to zoom"
-          : "Drag to orbit · scroll to zoom · hatched plane is ground floor (0 m)";
+          : isElevation
+            ? "Orthographic, no perspective · drag to pan · scroll to zoom"
+            : "Drag to orbit · scroll to zoom · hatched plane is ground floor (0 mm)";
     }
 
     const bounds = boundsOfFaces(faces);
-    if (reframe && !isLook && !isSection) {
+    if (reframe && !isLook && !isCutView) {
       frameCamera(cam, bounds);
       reframe = false;
     }
     const withGround = [...faces, ...groundFacesFromBounds(bounds)];
+    // Only a section clips: an elevation is viewed from outside the whole
+    // model, so nothing needs to be cut away for it to make sense.
     const cutFaces = isSection ? clipFacesForSection(withGround, cam) : withGround;
     if (isSection && !cutFaces.length) {
       if (emptyEl) emptyEl.hidden = false;
@@ -725,7 +759,7 @@ export function createMassingView({ canvas, emptyEl, captionEl, titleEl, onDraw 
       if (typeof onDraw === "function") onDraw(cam, payload);
       return;
     }
-    if (isSection && reframe) {
+    if (isCutView && reframe) {
       const framed = sectionFrame(cutFaces, cam);
       cam.sectionOu = framed.originU;
       cam.sectionOv = framed.originV;
@@ -747,14 +781,14 @@ export function createMassingView({ canvas, emptyEl, captionEl, titleEl, onDraw 
     );
     const scale = cam.scale * Math.min(width, height) / (span * 28);
     const cx = width / 2;
-    const cy = height / 2 + (isLook || isSection ? 0 : 20);
+    const cy = height / 2 + (isLook || isCutView ? 0 : 20);
     const sectionScale = Number(cam.sectionScale) > 0 ? cam.sectionScale : scale;
 
     const projected = [];
     for (const face of cutFaces) {
       const pts = face.pts.map((p) => (isLook
         ? projectLookPoint(p[0], p[1], p[2], cam, cx, cy, height)
-        : isSection
+        : isCutView
           ? projectSectionPoint(p[0], p[1], p[2], cam, cam.sectionOu, cam.sectionOv, sectionScale, cx, cy)
           : projectPoint(p[0], p[1], p[2], origin, cx, cy, scale, cam)));
       const depth = pts.reduce((s, p) => s + p[2], 0) / pts.length;
@@ -762,7 +796,7 @@ export function createMassingView({ canvas, emptyEl, captionEl, titleEl, onDraw 
       projected.push({ face, pts, depth });
     }
     projected.sort((a, b) => massingLayer(a.face) - massingLayer(b.face)
-      || ((isLook || isSection) ? b.depth - a.depth : a.depth - b.depth));
+      || ((isLook || isCutView) ? b.depth - a.depth : a.depth - b.depth));
 
     for (const item of projected) {
       const style = faceStyle(item.face);
@@ -775,7 +809,7 @@ export function createMassingView({ canvas, emptyEl, captionEl, titleEl, onDraw 
       ctx.strokeStyle = style.stroke;
       ctx.lineWidth = projected.length > 8000 ? 0.2 : (item.face.cut ? 0.9 : 0.45);
       ctx.fill();
-      if (item.face.cut) hatchCut(item.pts, style.stroke);
+      if (item.face.cut) hatchPolygon(ctx, item.pts, style.stroke);
       if (projected.length < 25000) ctx.stroke();
     }
     if (typeof onDraw === "function") onDraw(cam, payload);
@@ -797,7 +831,7 @@ export function createMassingView({ canvas, emptyEl, captionEl, titleEl, onDraw 
     if (cam.mode === "look") {
       cam.yaw = drag.yaw + (event.clientX - drag.x) * 0.008;
       cam.pitch = Math.min(LOOK_PITCH_MAX, Math.max(LOOK_PITCH_MIN, drag.pitch - (event.clientY - drag.y) * 0.008));
-    } else if (cam.mode === "section") {
+    } else if (cam.mode === "section" || cam.mode === "elevation") {
       const s = Number(cam.sectionScale) > 0 ? cam.sectionScale : 40;
       cam.sectionOu = drag.ou - (event.clientX - drag.x) / s;
       cam.sectionOv = drag.ov + (event.clientY - drag.y) / s;
@@ -813,7 +847,7 @@ export function createMassingView({ canvas, emptyEl, captionEl, titleEl, onDraw 
     if (cam.mode === "look") {
       const fov = Number(cam.fov) > 0 ? cam.fov : LOOK_FOV_DEFAULT;
       cam.fov = Math.min(LOOK_FOV_MAX, Math.max(LOOK_FOV_MIN, fov * (event.deltaY > 0 ? 1.08 : 0.92)));
-    } else if (cam.mode === "section") {
+    } else if (cam.mode === "section" || cam.mode === "elevation") {
       const s = Number(cam.sectionScale) > 0 ? cam.sectionScale : 40;
       cam.sectionScale = Math.min(180, Math.max(12, s * (event.deltaY > 0 ? 0.92 : 1.08)));
     } else {
@@ -822,5 +856,5 @@ export function createMassingView({ canvas, emptyEl, captionEl, titleEl, onDraw 
     draw();
   }, { passive: false });
 
-  return { setPayload, setStatusFilter, setLook, setSection, setOrbit, draw, resize: draw };
+  return { setPayload, setStatusFilter, setLook, setSection, setElevation, setOrbit, draw, resize: draw };
 }

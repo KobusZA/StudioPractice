@@ -902,12 +902,18 @@ tbody tr:hover { background: rgba(26, 22, 18, 0.04); }
   font-weight: 600;
 }
 
+.sku-row {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--line);
+}
+
 .sku-item {
   display: block;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   text-align: left;
   border: none;
-  border-bottom: 1px solid var(--line);
   background: transparent;
   padding: 8px 8px;
 }
@@ -929,6 +935,56 @@ tbody tr:hover { background: rgba(26, 22, 18, 0.04); }
   display: block;
   font-size: 0.74rem;
   color: var(--ink-soft);
+}
+
+/* Opt-in escalation to the full type-detail overlay. Picking a type stays a
+   one-click affair on the row itself, but this control needs to actually be
+   seen - a hairline icon that only differs on hover blends into the row and
+   gets missed entirely, so it gets its own always-visible chip and a label
+   whenever there's room for one. */
+.sku-expand {
+  flex: 0 0 auto;
+  width: 44px;
+  margin: 6px 6px 6px 0;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #fff;
+  color: var(--ink);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+}
+
+.sku-expand:hover,
+.sku-expand:focus-visible {
+  background: rgba(178, 69, 30, 0.1);
+  border-color: rgba(178, 69, 30, 0.4);
+  color: #b2451e;
+}
+
+.sku-expand svg {
+  width: 16px;
+  height: 16px;
+}
+
+.sku-expand-label {
+  font-size: 0.6rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+/* The Inspector dock is narrow enough that a text label wraps awkwardly -
+   the icon plus tooltip/aria-label carries it there. */
+.dock-context .sku-expand {
+  width: 32px;
+  flex-direction: row;
+}
+
+.dock-context .sku-expand-label {
+  display: none;
 }
 
 .planner-fields {
@@ -1662,6 +1718,7 @@ body.auth-pending .check-overlay,
 body.auth-pending .schedule-overlay,
 body.auth-pending .mass-overlay,
 body.auth-pending .sheet-overlay,
+body.auth-pending .project-info-overlay,
 body.login-active .chrome,
 body.login-active #v2-app,
 body.login-active .account-overlay,
@@ -1671,6 +1728,7 @@ body.login-active .check-overlay,
 body.login-active .schedule-overlay,
 body.login-active .mass-overlay,
 body.login-active .sheet-overlay,
+body.login-active .project-info-overlay,
 body.library-home .chrome,
 body.library-home #v2-app,
 body.library-home .account-overlay,
@@ -1678,8 +1736,62 @@ body.library-home .about-overlay,
 body.library-home .check-overlay,
 body.library-home .schedule-overlay,
 body.library-home .mass-overlay,
-body.library-home .sheet-overlay {
+body.library-home .sheet-overlay,
+body.library-home .project-info-overlay {
   display: none !important;
+}
+
+.project-info-panel {
+  width: min(420px, 100%);
+  height: auto;
+  padding: 16px;
+  gap: 12px;
+  display: flex;
+  flex-direction: column;
+}
+
+.project-info-panel > header {
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+.project-info-panel .sheet-fields label {
+  flex: 1 1 160px;
+}
+
+.elevation-panel {
+  width: min(360px, 100%);
+  height: auto;
+  padding: 16px;
+  gap: 12px;
+  display: flex;
+  flex-direction: column;
+}
+
+.elevation-panel > header {
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+.elevation-directions {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+.elevation-direction-btn {
+  font: inherit;
+  padding: 14px 10px;
+  border: 1px solid var(--ink);
+  background: #fff;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.elevation-direction-btn:hover {
+  background: rgba(178, 69, 30, 0.08);
 }
 
 body.library-home {
@@ -2404,18 +2516,25 @@ body.library-home {
 
 /* Overlay on the canvas, not in page flow: showing a hint or length/angle
    fields must not resize the sketch (a click on a type or the first wall
-   click used to shove the canvas and the rubber-band jumped). Offset under
-   the floated plan tools so the two never sit on top of each other. */
+   click used to shove the canvas and the rubber-band jumped). Kept small and
+   tucked in the top-left corner - out from under the pointer while
+   drawing - with room reserved on the right for the floated plan tools
+   (.plan-float-tools) so the two never sit on top of each other. */
 .canvas-status {
   position: absolute;
-  top: 48px;
+  top: 8px;
   left: 8px;
-  right: 8px;
+  /* Leave room for the Select/Undo/Both/Existing/Planned toolbar floated at
+     top-right (.plan-float-tools) so the two never collide. */
+  right: 220px;
   z-index: 2;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  align-content: flex-start;
+  justify-content: flex-start;
+  gap: 4px 8px;
   pointer-events: none;
 }
 
@@ -2423,12 +2542,12 @@ body.library-home {
    to place a door."). One-shot commands surface their own feedback instead. */
 .ribbon-hint {
   margin: 0;
-  max-width: min(36rem, 100%);
-  padding: 6px 12px;
-  font-size: 0.82rem;
-  text-align: center;
+  max-width: 22rem;
+  padding: 4px 8px;
+  font-size: 0.74rem;
+  text-align: left;
   color: var(--ink-soft);
-  background: rgba(243, 238, 228, 0.96);
+  background: rgba(243, 238, 228, 0.9);
   border: 1px solid var(--line);
   box-shadow: var(--shadow);
 }
@@ -2537,13 +2656,13 @@ body.library-home {
    Type, name, roof form and the rest sit in the Inspector column. */
 .plan-options {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px 14px;
+  gap: 4px 8px;
   min-width: 0;
   max-width: 100%;
-  padding: 6px 12px;
-  background: rgba(243, 238, 228, 0.96);
+  padding: 4px 8px;
+  background: rgba(243, 238, 228, 0.9);
   border: 1px solid var(--line);
   box-shadow: var(--shadow);
   pointer-events: auto;
@@ -2557,9 +2676,9 @@ body.library-home {
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   margin: 0;
-  font-size: 0.82rem;
+  font-size: 0.72rem;
   letter-spacing: 0;
   text-transform: none;
   color: var(--ink);
@@ -2567,11 +2686,11 @@ body.library-home {
 }
 
 .plan-options input {
-  width: 4.4rem;
+  width: 3.6rem;
   font: inherit;
-  font-size: 0.82rem;
+  font-size: 0.74rem;
   color: var(--ink);
-  padding: 5px 8px;
+  padding: 3px 6px;
   border: 1px solid var(--ink);
   background: #fff;
   border-radius: 3px;
@@ -2583,8 +2702,17 @@ body.library-home {
   gap: 4px;
 }
 
+/* Wall/beam width and height come from the type, not from dragging in the
+   options strip - shown so the fixed cross-section is visible, styled so it
+   doesn't invite editing. */
+.plan-options label.readonly input {
+  background: rgba(0, 0, 0, 0.04);
+  color: var(--ink-soft);
+  cursor: default;
+}
+
 .plan-options .plan-context-field span {
-  font-size: 0.78rem;
+  font-size: 0.7rem;
   color: var(--ink-soft);
 }
 
@@ -2745,6 +2873,11 @@ body.library-home {
   min-height: 0;
   overflow: auto;
   padding: 6px;
+}
+
+.dock-context .sku-row {
+  border-bottom: none;
+  margin-bottom: 2px;
 }
 
 .dock-context .sku-item {
@@ -3216,6 +3349,298 @@ body.library-home {
 
 .mass-render-status[hidden] {
   display: none !important;
+}
+
+/* Type detail overlay: an opt-in escalation from a palette row's expand
+   icon (see .sku-expand). Same fixed/centered-panel convention as
+   .mass-overlay so it reads as "the same kind of full-screen moment", not a
+   new pattern. Media pane is a skeleton placeholder today; it is where
+   per-SKU photos, cached AI renders and later supplier imagery/links land. */
+.type-detail-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(20, 18, 15, 0.55);
+  padding: 24px;
+}
+
+.type-detail-overlay[hidden] {
+  display: none !important;
+}
+
+.type-detail-panel {
+  width: min(1080px, 100%);
+  height: min(620px, 100%);
+  display: flex;
+  flex-direction: column;
+}
+
+.type-detail-panel header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.type-detail-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-right: auto;
+  min-width: 0;
+}
+
+.type-detail-panel header h2 {
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.type-detail-meta {
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+/* Prev/next: the whole reason someone can flip through options without
+   backing out to the palette and reopening each one. Filled and solid, not
+   an outline, so it reads as a button against the panel's cream background
+   instead of disappearing like the old hairline treatment did. */
+.type-detail-step {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: #fff;
+  border-radius: 999px;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(20, 18, 15, 0.25);
+}
+
+.type-detail-step:hover,
+.type-detail-step:focus-visible {
+  background: #b2451e;
+  border-color: #b2451e;
+}
+
+.type-detail-step[hidden] {
+  display: none !important;
+}
+
+.type-detail-step svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 2.5;
+}
+
+.type-detail-count {
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+#v2-type-detail-close {
+  font: inherit;
+  padding: 5px 10px;
+  border: 1px solid var(--ink);
+  background: #fff;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.type-detail-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 16px;
+  margin-top: 10px;
+}
+
+/* Hidden and width-collapsed when there's nothing to navigate to (e.g. a
+   single-SKU category), rather than showing an empty rail. */
+.type-detail-nav {
+  flex: 0 0 0;
+  width: 0;
+  min-width: 0;
+  overflow: hidden auto;
+  border-right: 1px solid var(--line);
+  padding-right: 0;
+}
+
+.type-detail-body.has-nav .type-detail-nav {
+  flex: 0 0 190px;
+  width: 190px;
+  padding-right: 10px;
+}
+
+.type-detail-nav h4 {
+  margin: 10px 4px 4px;
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+
+.type-detail-nav h4:first-child {
+  margin-top: 0;
+}
+
+.type-detail-nav-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  padding: 6px 6px;
+  cursor: pointer;
+}
+
+.type-detail-nav-item:hover {
+  background: rgba(26, 22, 18, 0.05);
+}
+
+.type-detail-nav-item.active {
+  background: rgba(178, 69, 30, 0.1);
+  border-color: rgba(178, 69, 30, 0.35);
+}
+
+.type-detail-nav-item .sku-name {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.type-detail-nav-item .sku-meta {
+  display: block;
+  font-size: 0.7rem;
+  color: var(--ink-soft);
+}
+
+.type-detail-media {
+  flex: 1.3;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.type-detail-media-tabs button {
+  font: inherit;
+  padding: 4px 10px;
+  border: 1px solid var(--ink);
+  background: #fff;
+  cursor: pointer;
+}
+
+.type-detail-media-tabs button.active {
+  background: var(--ink);
+  color: #fff;
+}
+
+.type-detail-media-frame {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #f4ede1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.type-detail-placeholder {
+  text-align: center;
+  color: var(--ink-soft);
+  padding: 20px;
+}
+
+.type-detail-placeholder[hidden] {
+  display: none !important;
+}
+
+.type-detail-placeholder-icon {
+  display: block;
+  font-size: 2.4rem;
+  line-height: 1;
+  margin-bottom: 8px;
+  color: var(--ink-soft);
+}
+
+.type-detail-placeholder p {
+  margin: 4px 0;
+  font-size: 0.85rem;
+}
+
+.type-detail-media-frame img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.type-detail-specs {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+
+.type-detail-specs h3 {
+  margin: 0 0 8px;
+  font-size: var(--label-size);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+
+.type-detail-dims {
+  margin: 0 0 14px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 10px;
+}
+
+.type-detail-dims dt {
+  text-transform: capitalize;
+  color: var(--ink-soft);
+  font-size: 0.82rem;
+}
+
+.type-detail-dims dd {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.type-detail-supplier {
+  flex: 1;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+  margin-bottom: 10px;
+}
+
+#v2-type-detail-use {
+  font: inherit;
+  padding: 7px 12px;
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: #fff;
+  border-radius: 3px;
+  cursor: pointer;
+  align-self: stretch;
 }
 
 /* BOQ / BOM: Output > Schedules. Its own overlay for the same reason as the

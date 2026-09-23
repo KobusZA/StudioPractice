@@ -4,13 +4,14 @@
 
 import { planDimensionLines } from "./dimensions.js";
 import { EYE_HEIGHT_M, LOOK_FOV_DEFAULT, lookAxes } from "./massing.js";
+import { formatLengthMm } from "./geom.js";
 
 const STOREY_TOL = 0.35;
 const RANGE_OFFSET = 0.32;
 const OPENING_OFFSET = 0.22;
 
 function fmt(v) {
-  return `${Number(v).toFixed(2)} m`;
+  return `${formatLengthMm(v)} mm`;
 }
 
 function loopPoints(loop) {
@@ -239,7 +240,7 @@ export function lookPlanCaption(payload, cam) {
   const hit = measuredLookHit(payload, cam);
   const fov = Number(cam?.fov) > 0 ? cam.fov : LOOK_FOV_DEFAULT;
   const fovDeg = Math.round((fov * 180) / Math.PI);
-  const stand = `Standing ${EYE_HEIGHT_M} m`;
+  const stand = `Standing ${fmt(EYE_HEIGHT_M)}`;
   const fovBit = `FOV ${fovDeg}°`;
   if (hit) return `${stand} · ${fmt(hit.range)} to ${hit.label} · ${fovBit}`;
   if (Number(cam?.lookDist) > 0) return `${stand} · ${fmt(cam.lookDist)} look · ${fovBit}`;

@@ -49,6 +49,9 @@ export const api = {
   // A canvas for a job that was opened without one. The planner still requires
   // a document; this is how a township job grows one and a rezoning does not.
   attachDrawing: (id, body) => call("POST", `/api/projects/${encodeURIComponent(id)}/drawing`, body),
+  // Outlines for every drawing in the firm, in one request. The whole
+  // document is never asked for here - a preview has no use for it.
+  drawingPreviews: () => call("GET", "/api/practice/drawing-previews"),
   financials: (id) => call("GET", `/api/projects/${encodeURIComponent(id)}/financials`),
 
   feeSchedule: (id) => call("GET", `/api/projects/${encodeURIComponent(id)}/fee-schedule`),
@@ -56,6 +59,10 @@ export const api = {
   setFeeSchedule: (id, lines) => (
     call("PUT", `/api/projects/${encodeURIComponent(id)}/fee-schedule`, { lines })
   ),
+
+  phases: (id) => call("GET", `/api/projects/${encodeURIComponent(id)}/phases`),
+
+  setPhase: (id, body) => call("POST", `/api/projects/${encodeURIComponent(id)}/phase`, body),
 
   listTasks: (id) => call("GET", `/api/projects/${encodeURIComponent(id)}/tasks`),
   addTask: (id, body) => call("POST", `/api/projects/${encodeURIComponent(id)}/tasks`, body),

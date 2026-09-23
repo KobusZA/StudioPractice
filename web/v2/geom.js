@@ -13,6 +13,30 @@ export function roundGrid(n, grid = GRID) {
   return Math.round(n / grid) * grid;
 }
 
+// --- display units ----------------------------------------------------
+//
+// Internally everything stays in metres (see header comment). The UI always
+// shows lengths in millimetres, whole numbers, so these two functions are the
+// single seam between "metres in memory" and "mm on screen / in inputs".
+
+/** Metres -> a whole-mm display string, e.g. 3.005 -> "3005". No unit suffix. */
+export function formatLengthMm(metres) {
+  if (!Number.isFinite(metres)) return "";
+  return String(Math.round(metres * 1000));
+}
+
+/**
+ * A user-typed mm string -> metres, or `fallback` (metres) if it doesn't
+ * parse to a usable positive number. Accepts a comma decimal separator and
+ * ignores an accidental "mm" suffix so pasted values still work.
+ */
+export function parseLengthMm(raw, fallback) {
+  const cleaned = String(raw ?? "").trim().replace(",", ".").replace(/mm$/i, "").trim();
+  const n = Number(cleaned);
+  if (!Number.isFinite(n) || n <= 0) return fallback;
+  return Math.max(0.001, n / 1000);
+}
+
 export function keyOf(n) {
   return Number(n.toFixed(KEY_DP));
 }

@@ -9,6 +9,8 @@ import {
   groundFacesFromBounds,
   massingLayer,
   facesFromPayload,
+  faceStyle,
+  hatchPolygon,
   lookFromClicks,
   lookAxes,
   projectLookPoint,
@@ -113,4 +115,46 @@ test("look-from-here puts east to the right and west behind the camera", () => {
 
 test("a zero-length look is refused rather than invented", () => {
   assert.equal(lookFromClicks([2, 2], [2, 2]), null);
+});
+
+// --- faceStyle / hatchPolygon: shared with sheets.js's static section view -
+
+test("faceStyle colours a planned wall copper and an existing one grey", () => {
+  const planned = faceStyle({ kind: "wall", status: "planned" });
+  const existing = faceStyle({ kind: "wall", status: "existing" });
+  assert.equal(planned.stroke, "#b2451e");
+  assert.equal(existing.stroke, "#5c5348");
+});
+
+test("faceStyle passes a ground face's own fill/stroke through unchanged", () => {
+  const ground = { kind: "ground", fill: "rgba(1,2,3,1)", stroke: "#000" };
+  assert.deepEqual(faceStyle(ground), { fill: ground.fill, stroke: ground.stroke });
+});
+
+function mockCtx() {
+  const calls = [];
+  return {
+    calls,
+    save() { calls.push("save"); },
+    restore() { calls.push("restore"); },
+    beginPath() {},
+    moveTo() {},
+    lineTo() {},
+    closePath() {},
+    clip() { calls.push("clip"); },
+    stroke() { calls.push("stroke"); },
+  };
+}
+
+test("hatchPolygon clips and strokes a real polygon", () => {
+  const ctx = mockCtx();
+  hatchPolygon(ctx, [[0, 0], [40, 0], [40, 40], [0, 40]], "#111");
+  assert.ok(ctx.calls.includes("clip"));
+  assert.ok(ctx.calls.includes("stroke"));
+});
+
+test("hatchPolygon skips a near-zero-area (flattened) polygon rather than spraying hatch across its box", () => {
+  const ctx = mockCtx();
+  hatchPolygon(ctx, [[0, 0], [1, 0], [1, 0.001], [0, 0.001]], "#111");
+  assert.equal(ctx.calls.length, 0);
 });

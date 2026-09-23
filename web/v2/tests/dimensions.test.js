@@ -8,8 +8,8 @@ test("a box gets one horizontal and one vertical dimension line", () => {
   assert.equal(lines.length, 2);
   const h = lines.find((l) => l.kind === "h");
   const v = lines.find((l) => l.kind === "v");
-  assert.equal(h.label, "4.00 m");
-  assert.equal(v.label, "3.00 m");
+  assert.equal(h.label, "4000 mm");
+  assert.equal(v.label, "3000 mm");
   // Offset outward: above and to the left of the box, not through it.
   assert.equal(h.y1, -0.25);
   assert.equal(v.x1, -0.25);
@@ -38,7 +38,7 @@ test("plan dimensions are one pair per room plus one overall pair", () => {
   const overall = lines.filter((l) => l.overall);
   assert.equal(overall.length, 2);
   const overallH = overall.find((l) => l.kind === "h");
-  assert.equal(overallH.label, "7.00 m"); // full width of both rooms together
+  assert.equal(overallH.label, "7000 mm"); // full width of both rooms together
 });
 
 test("an empty plan produces no dimension lines", () => {
@@ -48,7 +48,7 @@ test("an empty plan produces no dimension lines", () => {
 test("two picked points become a labelled distance", () => {
   const dim = pickedDimension({ x: 0, y: 0 }, { x: 3, y: 4 });
   assert.equal(dim.length, 5);
-  assert.equal(dim.label, "5.00 m");
+  assert.equal(dim.label, "5000 mm");
 });
 
 test("a zero-length pick is refused", () => {

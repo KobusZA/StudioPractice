@@ -60,6 +60,7 @@ export function createApi(pool, options = {}, env = process.env) {
     // document because a canvas with no drawing cannot be saved. A strata
     // report has no geometry and must not have to invent an empty one.
     ["GET", "/api/practice/reference", handleReference],
+    ["GET", "/api/practice/drawing-previews", handleDrawingPreviews],
     ["GET", "/api/register", handleListRegister],
     ["POST", "/api/register", handleCreateRegisterProject],
     ["GET", "/api/register/:id", handleGetRegisterProject],
@@ -67,6 +68,8 @@ export function createApi(pool, options = {}, env = process.env) {
     ["GET", "/api/projects/:id/financials", handleFinancials],
     ["GET", "/api/projects/:id/fee-schedule", handleGetFeeSchedule],
     ["PUT", "/api/projects/:id/fee-schedule", handleSetFeeSchedule],
+    ["GET", "/api/projects/:id/phases", handleListProjectPhases],
+    ["POST", "/api/projects/:id/phase", handleSetProjectPhase],
     ["GET", "/api/projects/:id/tasks", handleListProjectTasks],
     ["POST", "/api/projects/:id/tasks", handleAddProjectTask],
     ["PATCH", "/api/tasks/:id", handleUpdateProjectTask],
@@ -405,6 +408,40 @@ async function handleSetFeeSchedule({ req, res, pool, params }) {
   ));
   if (!feeSchedule) throw new HttpError(404, "No such job");
   sendJson(res, 200, { feeSchedule });
+}
+
+/**
+ * Every drawing in the firm, reduced to its outlines. One request rather than
+ * one per job: the practice page shows them together, and a gallery that
+ * needs forty round trips to fill is a gallery that arrives one tile at a
+ * time.
+ */
+async function handleDrawingPreviews({ req, res, pool }) {
+  const store = await requireStore(pool, req);
+  sendJson(res, 200, { previews: await store.listDrawingPreviews() });
+}
+
+async function handleListProjectPhases({ req, res, pool, params }) {
+  const store = await requireStore(pool, req);
+  const phases = await store.listProjectPhases(params.id);
+  if (!phases) throw new HttpError(404, "No such job");
+  sendJson(res, 200, phases);
+}
+
+/**
+ * POST and not PATCH: entering a phase is an event, and the record of them is
+ * append-only. Moving back to an earlier phase is another event rather than a
+ * correction, because "we went back to public participation in August" is
+ * exactly the fact a fee query turns on.
+ */
+async function handleSetProjectPhase({ req, res, pool, params }) {
+  const session = await requireSession(pool, req);
+  const body = (await readJsonBody(req)) || {};
+  const phases = await withTransaction(pool, (client) => (
+    openStore(client, session).setProjectPhase(params.id, body)
+  ));
+  if (!phases) throw new HttpError(404, "No such job");
+  sendJson(res, 201, phases);
 }
 
 async function handleListProjectTasks({ req, res, pool, params }) {
