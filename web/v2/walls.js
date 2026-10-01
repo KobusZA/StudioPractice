@@ -226,8 +226,124 @@ export function deriveDrawnWalls(doc, pack, minLength = 0.3) {
   return walls;
 }
 
+/**
+ * How close two drawn endpoints must be, in metres, to be treated as "the
+ * same corner" by `joinWallCorners`. Wide enough to absorb the snap slop a
+ * single-axis alignment guide can leave (see snap.js's `applyNicePoint`),
+ * narrow enough to never merge two corners a person actually drew apart -
+ * the narrowest wall/footing this app draws is well over 100 mm thick.
+ */
+export const CORNER_JOIN_TOL = 0.006;
+
+/**
+ * Pull every wall/foundation endpoint within `tol` of another one on the
+ * same level onto a single shared point, before any renderer turns a wall
+ * into a solid.
+ *
+ * Every renderer (massing.js's `pushWallPrism`, dxf.js's `wallFootprint`,
+ * ui.js's `drawWall`) offsets a wall's thickness symmetrically off its own
+ * exact endpoints and stops there - there is no Revit-style "Edit Wall
+ * Joins" cleanup afterwards. Two segments whose endpoints are geometrically
+ * meant to be the same corner render as a clean mitred join *only if* those
+ * endpoints are bit-identical; drawing/snapping can leave them a millimetre
+ * or two apart (an axis-alignment guide only locks one axis - see
+ * `applyNicePoint`), which shows up as a small overhanging tab or gap at
+ * the corner instead of the flush corner a user drawing a foundation in
+ * Revit would expect. This closes that gap at the geometry level, so the
+ * fix holds regardless of how the endpoint got placed.
+ *
+ * Endpoints already exactly equal (the common case: room-derived walls
+ * share literal polygon vertices) are left untouched - a group's shared
+ * point is the average of its members, so an already-exact pair snaps to
+ * itself.
+ */
+export function joinWallCorners(walls, tol = CORNER_JOIN_TOL) {
+  const pts = [];
+  for (let i = 0; i < walls.length; i += 1) {
+    pts.push({ wall: i, x: walls[i].x1, y: walls[i].y1 });
+    pts.push({ wall: i, x: walls[i].x2, y: walls[i].y2 });
+  }
+
+  // Grid-bucketed neighbour search: with cells the size of the tolerance, any
+  // point within `tol` of another falls in the same or an adjacent cell, so
+  // each point only needs to check its 3x3 neighbourhood instead of every
+  // other point - O(n) instead of O(n^2) for the wall counts a real plan has.
+  const cellOf = (v) => Math.floor(v / tol);
+  const buckets = new Map();
+  const bucketKey = (cx, cy) => `${cx}|${cy}`;
+  for (let i = 0; i < pts.length; i += 1) {
+    const key = bucketKey(cellOf(pts[i].x), cellOf(pts[i].y));
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key).push(i);
+  }
+
+  const parent = pts.map((_, i) => i);
+  function find(i) {
+    while (parent[i] !== i) {
+      parent[i] = parent[parent[i]];
+      i = parent[i];
+    }
+    return i;
+  }
+  function union(a, b) {
+    const ra = find(a);
+    const rb = find(b);
+    if (ra !== rb) parent[ra] = rb;
+  }
+
+  for (let i = 0; i < pts.length; i += 1) {
+    const cx = cellOf(pts[i].x);
+    const cy = cellOf(pts[i].y);
+    for (let dx = -1; dx <= 1; dx += 1) {
+      for (let dy = -1; dy <= 1; dy += 1) {
+        const bucket = buckets.get(bucketKey(cx + dx, cy + dy));
+        if (!bucket) continue;
+        for (const j of bucket) {
+          if (j <= i) continue;
+          if (pts[i].wall === pts[j].wall) continue; // a wall's own two ends
+          if (walls[pts[i].wall].level !== walls[pts[j].wall].level) continue;
+          if (Math.hypot(pts[i].x - pts[j].x, pts[i].y - pts[j].y) <= tol) union(i, j);
+        }
+      }
+    }
+  }
+
+  const groups = new Map();
+  for (let i = 0; i < pts.length; i += 1) {
+    const r = find(i);
+    if (!groups.has(r)) groups.set(r, []);
+    groups.get(r).push(i);
+  }
+  const snappedX = pts.map((p) => p.x);
+  const snappedY = pts.map((p) => p.y);
+  for (const idxs of groups.values()) {
+    if (idxs.length < 2) continue;
+    let sx = 0;
+    let sy = 0;
+    for (const idx of idxs) {
+      sx += pts[idx].x;
+      sy += pts[idx].y;
+    }
+    const cx = sx / idxs.length;
+    const cy = sy / idxs.length;
+    for (const idx of idxs) {
+      snappedX[idx] = cx;
+      snappedY[idx] = cy;
+    }
+  }
+
+  return walls.map((wall, i) => {
+    const x1 = snappedX[i * 2];
+    const y1 = snappedY[i * 2];
+    const x2 = snappedX[i * 2 + 1];
+    const y2 = snappedY[i * 2 + 1];
+    if (x1 === wall.x1 && y1 === wall.y1 && x2 === wall.x2 && y2 === wall.y2) return wall;
+    return { ...wall, x1, y1, x2, y2, length: Math.hypot(x2 - x1, y2 - y1) };
+  });
+}
+
 export function deriveWalls(doc, pack) {
-  return [...deriveRoomWalls(doc, pack), ...deriveDrawnWalls(doc, pack)];
+  return joinWallCorners([...deriveRoomWalls(doc, pack), ...deriveDrawnWalls(doc, pack)]);
 }
 
 /** External walls are bounded by exactly one room. Needed by Part XA and Part O. */

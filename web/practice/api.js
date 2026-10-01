@@ -39,8 +39,31 @@ export const api = {
   signUp: (body) => call("POST", "/api/auth/sign-up", body),
   signOut: () => call("POST", "/api/auth/sign-out", {}),
 
+  // Owner-only server-side (server/src/api.js's handleInviteTeamMember); the
+  // button that calls this is hidden for anyone else, see app.js's
+  // `isOwner()`.
+  listTeam: () => call("GET", "/api/team"),
+  inviteTeamMember: (body) => call("POST", "/api/team", body),
+  teamRoster: () => call("GET", "/api/team/roster"),
+  updateTeamMember: (id, body) => call("PATCH", `/api/team/${encodeURIComponent(id)}`, body),
+  removeTeamMember: (id) => call("DELETE", `/api/team/${encodeURIComponent(id)}`),
+
+  // Owner-only server-side. Captured value per person, job and activity.
+  teamReport: ({ from, to } = {}) => {
+    const query = new URLSearchParams();
+    if (from) query.set("from", from);
+    if (to) query.set("to", to);
+    const suffix = query.toString();
+    return call("GET", `/api/team/report${suffix ? `?${suffix}` : ""}`);
+  },
+
   reference: () => call("GET", "/api/practice/reference"),
+  orgSettings: () => call("GET", "/api/org/settings"),
+  putOrgSettings: (body) => call("PUT", "/api/org/settings", body),
   feeTemplate: (code) => call("GET", `/api/fee-templates/${encodeURIComponent(code)}`),
+  // Owner-only server-side. Replace-all: a template is edited as one document.
+  putFeeTemplate: (code, body) => call("PUT", `/api/fee-templates/${encodeURIComponent(code)}`, body),
+  resetFeeTemplate: (code) => call("POST", `/api/fee-templates/${encodeURIComponent(code)}/reset`, {}),
 
   listRegister: () => call("GET", "/api/register"),
   getRegisterProject: (id) => call("GET", `/api/register/${encodeURIComponent(id)}`),

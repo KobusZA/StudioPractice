@@ -12,6 +12,7 @@ import {
   joinSelection,
   mergeSelection,
   mirrorSelection,
+  retypeSelection,
   rotateSelection,
   selectionBounds,
   splitSelection,
@@ -213,6 +214,58 @@ test("every operation refuses an empty selection without throwing", () => {
     assert.equal(result.ok, false, `${op.name} should refuse`);
     assert.ok(result.message.length > 0);
   }
+});
+
+// --- retype (multi-select) ---------------------------------------------
+
+const RETYPE_CATS = { W1: "wall", W2: "wall", F2: "foundation", D1: "door", D2: "door", WIN1: "window" };
+function retypeSkuById(id) {
+  return RETYPE_CATS[id] ? { id, category: RETYPE_CATS[id], name: id } : null;
+}
+
+test("retype changes every compatible object in a mixed selection and skips the rest", () => {
+  const doc = docWith({
+    segments: [wall("w1", 0, 0, 3, 0, "W1"), wall("f1", 3, 0, 6, 0, "F1")],
+    beams: [{ id: "b1", sku: "BEAM1", x1: 0, y1: 1, x2: 3, y2: 1, status: "planned" }],
+  });
+  const newFoundation = { id: "F2", category: "foundation", name: "F2" };
+  const result = retypeSelection(
+    doc,
+    [ref("segment", "w1"), ref("segment", "f1"), ref("beam", "b1")],
+    newFoundation,
+    { skuById: retypeSkuById },
+  );
+  assert.equal(result.ok, true);
+  assert.equal(doc.segments[0].sku, "F2");
+  assert.equal(doc.segments[1].sku, "F2");
+  assert.equal(doc.beams[0].sku, "BEAM1", "a beam cannot take a foundation sku");
+  assert.deepEqual(result.refs, [ref("segment", "w1"), ref("segment", "f1")]);
+  assert.deepEqual(result.skipped, [ref("beam", "b1")]);
+  assert.match(result.message, /Retyped 2 objects.*left 1 unchanged/);
+});
+
+test("retype refuses when nothing selected can take the type", () => {
+  const doc = docWith({ beams: [{ id: "b1", sku: "BEAM1", x1: 0, y1: 0, x2: 1, y2: 0, status: "planned" }] });
+  const result = retypeSelection(doc, [ref("beam", "b1")], { id: "D1", category: "door", name: "D1" }, { skuById: retypeSkuById });
+  assert.equal(result.ok, false);
+  assert.equal(doc.beams[0].sku, "BEAM1");
+});
+
+test("retype on a room picks the wall or floor field by the new type's category", () => {
+  const doc = docWith({ rooms: [room("a", 0, 0, 4, 2, { wallSku: "W1", floorSku: "FLR1" })] });
+  const result = retypeSelection(doc, [ref("room", "a")], { id: "W2", category: "wall", name: "W2" }, { skuById: retypeSkuById });
+  assert.equal(result.ok, true);
+  assert.equal(doc.rooms[0].wallSku, "W2");
+  assert.equal(doc.rooms[0].floorSku, "FLR1", "the floor type is untouched by a wall retype");
+});
+
+test("retype on an opening only accepts a SKU of the same category as its own", () => {
+  const doc = docWith({ openings: [{ id: "o1", sku: "D1", wallId: "w1", t: 0.5, status: "planned" }] });
+  const toWindow = retypeSelection(doc, [ref("opening", "o1")], { id: "WIN1", category: "window", name: "WIN1" }, { skuById: retypeSkuById });
+  assert.equal(toWindow.ok, false);
+  const toDoor = retypeSelection(doc, [ref("opening", "o1")], { id: "D2", category: "door", name: "D2" }, { skuById: retypeSkuById });
+  assert.equal(toDoor.ok, true);
+  assert.equal(doc.openings[0].sku, "D2");
 });
 
 // --- attach base -----------------------------------------------------------

@@ -25,6 +25,22 @@ create table if not exists org (
   deleted_at  timestamptz
 );
 
+-- What a payment certificate prints above the line table. Every column is
+-- nullable and nothing is seeded: these are one firm's own particulars, and a
+-- certificate with a blank banking block is a visible gap, not a guessed one.
+alter table org add column if not exists trading_name     text;
+alter table org add column if not exists address_lines    text;
+alter table org add column if not exists vat_number       text;
+alter table org add column if not exists company_reg      text;
+alter table org add column if not exists bank_name        text;
+alter table org add column if not exists bank_branch      text;
+alter table org add column if not exists bank_branch_code text;
+alter table org add column if not exists bank_account_no  text;
+alter table org add column if not exists contact_name     text;
+alter table org add column if not exists contact_cell     text;
+alter table org add column if not exists contact_email    text;
+alter table org add column if not exists pop_email        text;
+
 create table if not exists app_user (
   id             text primary key,
   email          text not null,
@@ -59,6 +75,13 @@ create table if not exists membership (
 
 create unique index if not exists membership_user_org_live
   on membership (user_id, org_id) where deleted_at is null;
+
+-- Owner-only personal details about a team member.
+alter table membership add column if not exists full_name  text;
+alter table membership add column if not exists phone      text;
+alter table membership add column if not exists job_title  text;
+alter table membership add column if not exists start_date date;
+alter table membership add column if not exists notes      text;
 
 create table if not exists session (
   id             text primary key,
@@ -187,6 +210,19 @@ alter table project add column if not exists client_address       text;
 alter table project add column if not exists property_description text;
 alter table project add column if not exists type_code            text;
 alter table project add column if not exists budget_estimate      numeric(14, 2);
+-- What the firm expects the job to cost it, in total: staff, consultants,
+-- printing, council fees it carries, anything. Typed in, not derived from
+-- hours, because most of those costs never pass through the timesheet. Null
+-- is "nobody has said", which is the normal state of an older job. Profit and
+-- margin are worked out against the quote, never stored, so they cannot drift
+-- from it when the quote is revised.
+alter table project add column if not exists projected_cost       numeric(14, 2);
+-- What the template said the fee was on the day the job was registered. The
+-- job's fee schedule is a copy the firm is free to revise, so without this
+-- there is no way to see how far a job has drifted from the price its type
+-- usually carries. Null for a job with no template behind it, and for jobs
+-- registered before this column existed: not knowable, so not guessed.
+alter table project add column if not exists template_quote       numeric(14, 2);
 alter table project add column if not exists lead_user_id         text references app_user (id);
 
 alter table project add column if not exists billing_basis text
@@ -227,6 +263,15 @@ create unique index if not exists project_type_code_live
 -- number is bumped when a firm edits its own template, so a job instantiated
 -- last year can say which version of the phase list it was built from.
 alter table project_type add column if not exists template_version integer not null default 0;
+
+-- What a job of this type is expected to cost, as a fraction of its fee
+-- (0.65 = the firm expects to spend 65 cents of every rand it quotes). A
+-- fraction rather than a rand figure so it still means something after a
+-- phase is re-priced for a bigger job. Null is "the firm has not said", and
+-- is what every type starts as: the workbook carries no cost data, so there
+-- is nothing to seed and nothing should be invented. Copied onto a job's
+-- `projected_cost` when the job is registered, never linked.
+alter table project_type add column if not exists default_cost_pct numeric(7, 4);
 
 -- The fee template: what this discipline charges for, in the order it happens.
 --
@@ -511,3 +556,19 @@ create table if not exists write_down (
 
 create index if not exists write_down_cert_live
   on write_down (certificate_id) where deleted_at is null;
+
+-- `fee_ceiling`: work past a fixed, capped fee that the client will never be
+-- charged for. Restated the way certificate_line_source_check is, because
+-- `create table if not exists` leaves an older database with the older list.
+alter table write_down drop constraint if exists write_down_reason_code_check;
+alter table write_down add constraint write_down_reason_code_check
+  check (reason_code in (
+    'scope_creep', 'under_quoted', 'our_error',
+    'client_relationship', 'goodwill', 'legacy_unspecified', 'fee_ceiling'));
+
+-- A job whose quoted fee is a cap: what is certified stops at the quote, and
+-- hours past it are written down (reason `fee_ceiling`) rather than billed.
+-- An explicit flag, not inferred from billing_basis: some fixed-fee jobs are
+-- renegotiated when scope moves and some time-and-materials jobs carry a
+-- not-to-exceed, and only the firm knows which this is.
+alter table project add column if not exists fee_ceiling boolean not null default false;

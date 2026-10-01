@@ -1,0 +1,28 @@
+# Live-reload overlay for docker-compose.yml. It changes nothing about the
+# base stack except how the `app` service gets its code and how it starts:
+# the repo is bind-mounted in instead of baked into the image, and the
+# process runs under `nodemon` instead of a plain `node`.
+#
+#   cd server
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+#   # edit server/src/*.js on the host - the container restarts itself
+#   # (web/* needs no restart at all: static.js reads it from disk per request)
+#
+# `db` is untouched: only `app` needs an override, so only `app` appears here.
+services:
+  app:
+    environment:
+      NODE_ENV: development
+    # Build context is the repo root (see docker-compose.yml), so the mount
+    # has to be the repo root too, or web/ goes stale while server/ reloads.
+    volumes:
+      - ..:/app
+    # `nodemon --legacy-watch`, not plain `node --watch`: Docker Desktop's
+    # Windows bind mount does not forward the inotify events fs.watch (and
+    # so node's native --watch) depends on, and a file edited on the host is
+    # never noticed. --legacy-watch polls instead, which works over any
+    # mount. `nodemon` itself is a devDependency, present here only because
+    # the Dockerfile has no .dockerignore and copies server/node_modules
+    # (installed on the host, where `npm install` was last run) into the
+    # image alongside the source - see the COPY steps there.
+    command: ["sh", "-c", "cd server && npm run dev"]

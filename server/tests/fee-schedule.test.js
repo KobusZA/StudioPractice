@@ -184,6 +184,55 @@ test("money certified against no phase is reported rather than absorbed", async 
   assert.deepEqual(lines.map((l) => l.draft), [0, 0, 0, 0, 0]);
 });
 
+/**
+ * The per-phase miniature of the job's own fee bar. A job can sit comfortably
+ * inside its fee overall and have spent one phase twice over, so each phase
+ * carries the same ladder the job does - and it is matched on the phase label
+ * the same trimmed, case-folded way the certified column already is.
+ */
+test("a phase carries the same money ladder the job does, one phase wide", async () => {
+  const { baseUrl } = await testServer();
+  const { client, project } = await firmWithFreehandProject(baseUrl);
+  await put(client, project.id, REZONING);
+
+  // Two hours tagged to inception, one of which gets certified and then partly
+  // written down; one hour tagged to public participation and never billed.
+  await logHour(client, project.id, { phaseRef: "1 - Inception", date: "2026-03-02" });
+  await logHour(client, project.id, { phaseRef: "1 - INCEPTION ", date: "2026-03-03" });
+  await logHour(client, project.id, { phaseRef: "3 - Public participation", date: "2026-03-04" });
+
+  const draft = (await client.post(`/api/projects/${project.id}/certificates`, {}))
+    .body.certificate;
+  await client.post(`/api/certificates/${draft.id}/lines`, {
+    description: "Inception", amount: 15000, phaseRef: "1 - Inception",
+  });
+  await client.post(`/api/certificates/${draft.id}/write-downs`, {
+    amount: 4000, reasonCode: "client_relationship", phaseRef: "1 - inception",
+  });
+  await client.post(`/api/certificates/${draft.id}/issue`, {});
+
+  const { lines } = (await client.get(`/api/projects/${project.id}/fee-schedule`))
+    .body.feeSchedule;
+  const [inception, , participation] = lines;
+
+  assert.equal(inception.captured, 3840);
+  assert.equal(inception.certified, 15000);
+  assert.equal(inception.writtenDown, 4000);
+  assert.equal(inception.billed, 11000);
+  // Both hours are on the hand-typed line's phase but neither is on a *line*,
+  // so both are still uncertified: a schedule line is not a time line.
+  assert.equal(inception.uncertifiedCaptured, 3840);
+
+  assert.equal(participation.captured, 1920);
+  assert.equal(participation.certified, 0);
+  assert.equal(participation.writtenDown, 0);
+  assert.equal(participation.uncertifiedCaptured, 1920);
+
+  // An untagged phase is empty, not zeroed by inheriting the job's totals.
+  assert.equal(lines[1].captured, 0);
+  assert.equal(lines[1].uncertifiedCaptured, 0);
+});
+
 test("a schedule line needs a label and a number", async () => {
   const { baseUrl } = await testServer();
   const { client, project } = await firmWithFreehandProject(baseUrl);

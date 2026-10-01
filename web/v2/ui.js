@@ -19,7 +19,7 @@
 import { complianceGaps, normalizePackUnits, GEOMETRY_LENGTH_KEYS } from "./schema.js";
 import { RULE_PACK, evaluateCompliance, groupFindingsByPart, summarizeFindings } from "./rules.js";
 import { deriveBuildingLine, setBuildingLine, setPropertyLine, setSgReference } from "./site.js?v=20260915-offset";
-import { HINTS, firstTabId, renderRibbon } from "./ribbon.js?v=20260917-measure";
+import { HINTS, firstTabId, renderRibbon } from "./ribbon.js?v=20260928-select-similar";
 import { closeOverflowMenus, decorateRibbon, fitRibbon } from "./ribbon-fit.js?v=20260917-section";
 import {
   lookUpLevelId,
@@ -45,6 +45,7 @@ import {
   joinSelection,
   mergeSelection,
   mirrorSelection,
+  retypeSelection,
   rotateSelection,
   splitSelection,
 } from "./modify.js";
@@ -77,7 +78,7 @@ import {
   setLineLength,
 } from "./click-draw.js?v=20260921-click-draw";
 import { area as polyArea, bbox, clipSegToRect, distToSeg, formatLengthMm, headingDeg, parseLengthMm, pointInPoly, roundGrid } from "./geom.js?v=20260915-offset";
-import { SNAP_PIXEL_TOL, GAP_MAX_M, NICE_MIN_STEP_M, PROBE_VECTORS, applyNicePoint, bestEndpointSnap, collectSnapEdges, collectSnapTargets, nearestAlignments, resolveProbes, snapLengthFrom, snapPoint } from "./snap.js";
+import { SNAP_PIXEL_TOL, GAP_MAX_M, ALIGN_ORIGIN_MAX_M, NICE_MIN_STEP_M, PROBE_VECTORS, applyNicePoint, bestEndpointSnap, collectSnapEdges, collectSnapTargets, isExactPointSnap, nearestAlignments, resolveProbes, snapLengthFrom, snapPoint } from "./snap.js";
 import { DEFAULT_ROOF_PITCH, roofGuideLines } from "./roof.js";
 import {
   ATTACHABLE_KINDS,
@@ -833,6 +834,13 @@ function hideAuth() {
   setAuthError("");
   syncLibrarySurface();
   resizeCanvas();
+  // The ribbon's boot-time fit ran while .chrome was still display:none
+  // (body.auth-pending), so every group measured as zero-width and stayed
+  // at its unshrunk "large" scale — the ribbon then looks like it belongs to
+  // a much wider window until something re-triggers fitRibbon (a resize, or
+  // a Simple/Full click, which redraws and refits). Now that the chrome is
+  // actually visible, refit for real once layout has settled.
+  requestAnimationFrame(() => fitRibbon(el.ribbonFunctions));
 }
 
 function setAuthError(message) {
@@ -1118,7 +1126,13 @@ function closeLibrary() {
 function syncLibrarySurface() {
   const visible = Boolean(el.libraryOverlay && !el.libraryOverlay.hidden);
   const home = visible && !openDrawingId;
+  const wasHome = document.body.classList.contains("library-home");
   document.body.classList.toggle("library-home", home);
+  // body.library-home hides .chrome the same way auth-pending does, so
+  // fitRibbon measured everything as zero-width while it was up. When it
+  // comes back down and the chrome is visible again, refit for real rather
+  // than leaving every group stuck at its unshrunk "large" scale.
+  if (wasHome && !home) requestAnimationFrame(() => fitRibbon(el.ribbonFunctions));
   if (el.libraryTitle) el.libraryTitle.textContent = home ? "Your drawings" : "Jobs";
   if (el.libraryKicker) {
     el.libraryKicker.hidden = !home;
@@ -1790,7 +1804,12 @@ function applySnap(wx, wy, exclude) {
   const edges = collectSnapEdges(store.doc, snapOpts(exclude));
   const tol = SNAP_PIXEL_TOL / cam.scale;
   const result = snapPoint(wx, wy, targets, tol);
-  const align = nearestAlignments(wx, wy, targets, edges);
+  // An exact join already fully determines the point (both axes locked to
+  // the same target corner) - an edge-alignment origin has nothing left to
+  // contribute, and showing one anyway would draw a second, unrelated
+  // dimension next to a corner that is already snapped.
+  const exactJoin = isExactPointSnap(result);
+  const align = exactJoin ? { nearest: null, dist: Infinity } : nearestAlignments(wx, wy, targets, edges);
   const from = snapFrom();
   const originsX = [];
   const originsY = [];
@@ -1798,11 +1817,18 @@ function applySnap(wx, wy, exclude) {
     originsX.push(from.x);
     originsY.push(from.y);
   }
-  const near = align.nearest && align.dist <= GAP_MAX_M;
-  if (near) {
+  // Gates two different things at two different radii: `nearForOrigin` is
+  // whether the alignment point is close enough to trust as the anchor for
+  // round-length snapping (tight - it would otherwise steal the rounding
+  // away from the run's own start point), `near` is only whether it is
+  // close enough to be worth drawing as an informational gap dimension
+  // (looser - "6000 mm to that wall" is useful from well across the site).
+  const nearForOrigin = align.nearest && align.dist <= ALIGN_ORIGIN_MAX_M;
+  if (nearForOrigin) {
     originsX.push(align.nearest.x);
     originsY.push(align.nearest.y);
   }
+  const near = align.nearest && align.dist <= GAP_MAX_M;
   originsX.push(0);
   originsY.push(0);
   const point = applyNicePoint(wx, wy, {
@@ -1829,6 +1855,11 @@ function applySnap(wx, wy, exclude) {
     snapped: result.snapped,
     snapX: result.guideX != null,
     snapY: result.guideY != null,
+    // So drawSnapGuide can tell a hard endpoint/corner join apart from a
+    // same-X/Y alignment guide - both otherwise look like the same dashed
+    // line + square marker, which is what made an alignment guide read as
+    // "snapped to the middle of that wall".
+    exactJoin,
     origin,
     dx: origin ? point.x - origin.x : null,
     dy: origin ? point.y - origin.y : null,
@@ -1892,8 +1923,21 @@ function pruneInvisibleSelection() {
   store.setSelection(kept, primaryKept ? store.primary : kept[0]);
 }
 
+/** Plan thickness of a drawn segment, for the face corners snapping needs.
+ * Zero when the SKU is unknown, which `faceCorners` reads as "no faces". */
+function segmentThickness(seg) {
+  const sku = skuById(seg?.sku);
+  return sku ? drawnWallThickness(sku) : 0;
+}
+
+/** SKU category ("wall", "foundation", "boundarywall", "beam"...) of a drawn
+ * segment or beam, for the snap-target caption to name what it caught. */
+function segmentCategory(seg) {
+  return skuById(seg?.sku)?.category || null;
+}
+
 function snapOpts(extra = {}) {
-  return { ...extra, include: planObjectVisible };
+  return { ...extra, include: planObjectVisible, thicknessOf: segmentThickness, categoryOf: segmentCategory };
 }
 
 function currentWalls() {
@@ -3512,12 +3556,15 @@ function drawLengthLabel(x1, y1, x2, y2) {
  * arrowheads at both witnesses, like `<-- 240 mm -->`. `kind` is the
  * measured axis (`h` = east-west gap, `v` = north-south) so the string
  * sits above a horizontal gap and to the left of a vertical one. */
-function drawGapDimension(x1, y1, x2, y2, kind) {
+function drawGapDimension(x1, y1, x2, y2, kind, note = "") {
   const len = segmentLength(x1, y1, x2, y2);
   if (len < 0.005) return;
   const [ax, ay] = worldToScreen(x1, y1);
   const [bx, by] = worldToScreen(x2, y2);
-  const label = `${formatLengthMm(len)} mm`;
+  // `note` names what the far end of the string actually is. A bare "300 mm"
+  // beside a 600 mm footing leaves the reader guessing whether it measures to
+  // the centreline it is aligned with or the face they can see.
+  const label = note ? `${formatLengthMm(len)} mm · ${note}` : `${formatLengthMm(len)} mm`;
   const off = 20;
   const dx = bx - ax;
   const dy = by - ay;
@@ -3727,26 +3774,22 @@ function drawSnapGuide(rect) {
     ctx.stroke();
   }
   ctx.setLineDash([]);
+  // The nearest-object origin behind a gap dimension / round-length anchor.
+  // Drawn first (bottom of the stack) since it's purely informational - how
+  // far to that object - never something the point is snapped or aligned
+  // to, so it should never visually outrank an actual join or alignment
+  // drawn on top of it below.
   if (g.origin) {
     const [ox, oy] = worldToScreen(g.origin.x, g.origin.y);
-    ctx.strokeStyle = "#3a5f7a";
-    ctx.fillStyle = "#f4ede1";
-    ctx.lineWidth = 1.4;
-    ctx.fillRect(ox - 4, oy - 4, 8, 8);
-    ctx.strokeRect(ox - 4, oy - 4, 8, 8);
+    ctx.fillStyle = "rgba(58, 95, 122, 0.55)";
+    ctx.beginPath();
+    ctx.arc(ox, oy, 2.5, 0, Math.PI * 2);
+    ctx.fill();
   }
-  // Mark whichever point actually put the axis guide there, distinct from
-  // `origin` (the nearest-of-all gap target) - an aligned guide can be
-  // latched onto a completely different, further-away point.
-  for (const guidePoint of new Set([g.snapX ? g.guideXPoint : null, g.snapY ? g.guideYPoint : null])) {
-    if (!guidePoint) continue;
-    const [qx, qy] = worldToScreen(guidePoint.x, guidePoint.y);
-    ctx.strokeStyle = "#3a5f7a";
-    ctx.fillStyle = "#f4ede1";
-    ctx.lineWidth = 1.4;
-    ctx.fillRect(qx - 4, qy - 4, 8, 8);
-    ctx.strokeRect(qx - 4, qy - 4, 8, 8);
-  }
+  // The point itself, drawn next so the join/alignment glyphs below always
+  // paint on top of it instead of being hidden underneath a same-colour,
+  // same-position dot (an exact join lands on this exact point, and used to
+  // draw its marker *first* - the dot then covered it almost entirely).
   const [px, py] = worldToScreen(g.x, g.y);
   ctx.fillStyle = g.snapped ? "#3a5f7a" : "rgba(58, 95, 122, 0.7)";
   ctx.strokeStyle = "#3a5f7a";
@@ -3757,6 +3800,41 @@ function drawSnapGuide(rect) {
   else {
     ctx.fill();
     ctx.stroke();
+  }
+  // A hard endpoint/corner join draws a dashed halo around the point: a
+  // visible "you are connected here" cue, distinct from the plain dot above
+  // and big enough (12x12 around a 8px dot) that it can never be swallowed
+  // by it. A same-X/Y alignment guide (matched only one axis, to a point
+  // that can be a perpendicular foot anywhere along a wall's run rather
+  // than one of its ends) draws a lighter hollow diamond instead - it says
+  // "lines up with this", not "locked to this".
+  for (const guidePoint of new Set([g.snapX ? g.guideXPoint : null, g.snapY ? g.guideYPoint : null])) {
+    if (!guidePoint) continue;
+    const [qx, qy] = worldToScreen(guidePoint.x, guidePoint.y);
+    ctx.strokeStyle = "#3a5f7a";
+    if (g.exactJoin) {
+      ctx.lineWidth = 1.4;
+      ctx.setLineDash([3, 2]);
+      ctx.strokeRect(qx - 6, qy - 6, 12, 12);
+      ctx.setLineDash([]);
+      // An exact join leaves no gap dimension to hang a note off (the offset
+      // is zero), so the reference is named here instead - latching a drawn
+      // face looks identical to latching a centreline, and only the
+      // centreline is what the corner-join pass will weld.
+      const note = targetNote(guidePoint);
+      if (note) drawSnapTag(qx + 10, qy - 10, note);
+    } else {
+      ctx.fillStyle = "#f4ede1";
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(qx, qy - 5);
+      ctx.lineTo(qx + 5, qy);
+      ctx.lineTo(qx, qy + 5);
+      ctx.lineTo(qx - 5, qy);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
   }
   ctx.restore();
 
@@ -3778,10 +3856,10 @@ function drawSnapGuide(rect) {
   // matched point is (it could be off the top of the current view, as far
   // as the line is drawn). Label that distance whenever it's non-trivial.
   if (!pinned.v && g.snapX && g.guideXPoint && Math.abs(g.y - g.guideXPoint.y) > minLabel) {
-    drawGapDimension(g.x, g.guideXPoint.y, g.x, g.y, "v");
+    drawGapDimension(g.x, g.guideXPoint.y, g.x, g.y, "v", targetNote(g.guideXPoint));
   }
   if (!pinned.h && g.snapY && g.guideYPoint && Math.abs(g.x - g.guideYPoint.x) > minLabel) {
-    drawGapDimension(g.guideYPoint.x, g.y, g.x, g.y, "h");
+    drawGapDimension(g.guideYPoint.x, g.y, g.x, g.y, "h", targetNote(g.guideYPoint));
   }
   for (const kind of ["h", "v"]) {
     const probe = pinned[kind];
@@ -3792,6 +3870,48 @@ function drawSnapGuide(rect) {
       drawEmptyProbe(probe.from.x, probe.from.y, probe.side);
     }
   }
+}
+
+/** Cream-chipped caption beside a snap marker, matching the gap strings. */
+function drawSnapTag(sx, sy, text) {
+  ctx.save();
+  ctx.setLineDash([]);
+  ctx.font = "600 10px Source Sans 3, sans-serif";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  const w = ctx.measureText(text).width + 6;
+  ctx.fillStyle = "rgba(244, 237, 225, 0.92)";
+  ctx.fillRect(sx, sy - 7, w, 14);
+  ctx.fillStyle = "#3a5f7a";
+  ctx.fillText(text, sx + 3, sy);
+  ctx.restore();
+}
+
+/** SKU category to the word a drawing would use for it. */
+const CATEGORY_NOTE = {
+  wall: "wall",
+  foundation: "foundation",
+  boundarywall: "boundary wall",
+  beam: "beam",
+  column: "column",
+};
+
+/**
+ * What a snap target actually is, in the words a drawing would use: "face -
+ * foundation", "centreline - wall". Centreline ends and drawn faces sit half
+ * a wall apart, and only the centreline is what `joinWallCorners` welds - so
+ * which one you caught is worth saying, and naming the object it belongs to
+ * matters just as much: targets are collected across every level (there is
+ * no level filter in `collectSnapTargets`), so a corner caught while drawing
+ * a foundation can quite easily belong to an upper-floor wall that is not
+ * even drawn on the current level - without the category that reads as an
+ * unexplained extra corner on the foundation itself.
+ */
+function targetNote(point) {
+  const kind = point?.kind === "endpoint" ? "centreline" : point?.kind === "face" ? "face" : "";
+  if (!kind) return "";
+  const category = CATEGORY_NOTE[point.category] || null;
+  return category ? `${kind} - ${category}` : kind;
 }
 
 /** A pinned direction with nothing in it: the measurement line still points
@@ -4239,16 +4359,66 @@ function setTypeFlyoutOpen(open) {
   el.typeCurrent.setAttribute("aria-expanded", open ? "true" : "false");
 }
 
+/** Kinds a SKU can retype at all - the same set `syncPlanContext` uses to
+ * decide whether the type picker applies to a selection, single or multi. */
+const TYPEABLE_KINDS = new Set(["room", "segment", "beam", "roof", "slab", "opening", "item"]);
+
+function currentSkuOfRef(ref) {
+  const obj = objByRef(ref);
+  if (!obj) return null;
+  if (ref.kind === "room") return skuById(obj.floorSku || obj.wallSku);
+  if (obj.sku) return skuById(obj.sku);
+  return null;
+}
+
+/** The categories the palette should show while retyping an existing
+ * selection: whatever categories its typeable members are currently made
+ * of, so clicking the Type pill on a selected wall behaves like arming the
+ * Walls ribbon button instead of demanding a ribbon tool first. Null when
+ * nothing selected is typeable (falls back to the idle "pick a tool" copy). */
+function selectionSkuCategories() {
+  if (wallDraft) return null;
+  const refs = store.selected.length ? store.selected : store.primary ? [store.primary] : [];
+  const cats = new Set();
+  for (const ref of refs) {
+    if (!TYPEABLE_KINDS.has(ref.kind)) continue;
+    const sku = currentSkuOfRef(ref);
+    if (sku) cats.add(sku.category);
+  }
+  return cats.size ? Array.from(cats) : null;
+}
+
 function contextSku() {
   if (wallDraft) return skuById(placeSkuId);
   const ref = store.selected.length === 1 ? store.primary : null;
-  const obj = ref ? objByRef(ref) : null;
-  if (obj && ref.kind === "room") return skuById(obj.floorSku || obj.wallSku);
-  if (obj?.sku) return skuById(obj.sku);
+  if (ref) {
+    const sku = currentSkuOfRef(ref);
+    if (sku) return sku;
+  }
   return skuById(placeSkuId);
 }
 
+/**
+ * The "current type" pill above the palette, for one object exactly as
+ * before, and now also for a multi-object selection: the shared type if every
+ * typeable member agrees, "Multiple types" if they don't - Revit's Type
+ * Selector shows the same blank-when-mixed state on a multi-selection.
+ */
 function syncTypeCurrent() {
+  if (!wallDraft && store.selected.length > 1) {
+    const skus = store.selected
+      .filter((ref) => TYPEABLE_KINDS.has(ref.kind))
+      .map(currentSkuOfRef)
+      .filter(Boolean);
+    const distinct = new Set(skus.map((s) => s.id));
+    if (el.typeCurrentName) {
+      el.typeCurrentName.textContent = distinct.size === 0 ? "Pick a type"
+        : distinct.size === 1 ? skus[0].name
+        : "Multiple types";
+    }
+    if (el.typeCurrentMeta) el.typeCurrentMeta.textContent = distinct.size === 1 ? skuDimLabel(skus[0]) : "";
+    return;
+  }
   const sku = contextSku();
   if (el.typeCurrentName) el.typeCurrentName.textContent = sku?.name || "Pick a type";
   if (el.typeCurrentMeta) el.typeCurrentMeta.textContent = sku ? skuDimLabel(sku) : "";
@@ -4261,7 +4431,11 @@ function placingToolArmed() {
 function renderPalette() {
   if (!el.skuList || !el.search) return;
   const q = (el.search.value || "").trim().toLowerCase();
-  if (!q && !paletteFilter) {
+  // Drawing arms `paletteFilter` via the ribbon; retyping an existing
+  // selection has no ribbon tool armed, so fall back to the categories
+  // already present in the selection - same list, same click-to-apply.
+  const effectiveFilter = paletteFilter || selectionSkuCategories();
+  if (!q && !effectiveFilter) {
     el.skuList.innerHTML = `<p class="hint palette-idle">Pick Walls, Doors or another tool on the ribbon to see types.</p>`;
     return;
   }
@@ -4269,7 +4443,7 @@ function renderPalette() {
   for (const sku of pack.skus) {
     // A search term reaches every type; browsing stays inside the last
     // ribbon function, so 64 electrical points never bury 3 wall types.
-    if (!q && paletteFilter && !paletteFilter.includes(sku.category)) continue;
+    if (!q && effectiveFilter && !effectiveFilter.includes(sku.category)) continue;
     const hay = `${sku.id} ${sku.name} ${sku.category}`.toLowerCase();
     if (q && !hay.includes(q)) continue;
     if (!groups.has(sku.category)) groups.set(sku.category, []);
@@ -4350,33 +4524,25 @@ function onSkuClick(sku) {
   render();
 }
 
-/** Retype an already-selected object from the palette, v1's applySkuToSelection. */
+/**
+ * Retype the current selection from the palette - v1's applySkuToSelection,
+ * now covering the whole selection in one click instead of just one object
+ * (Revit's Type Selector, applied to a multi-object selection). Returns
+ * false when nothing selected can take this SKU at all, so the caller (a
+ * click on a palette swatch) falls back to arming a draw tool exactly as it
+ * did when there was no eligible selection.
+ */
 function applySkuToSelection(sku) {
-  if (store.selected.length !== 1) return false;
-  const ref = store.primary;
-  const obj = objByRef(ref);
-  if (!obj) return false;
-
-  if (ref.kind === "room") {
-    if (sku.category === "wall" || sku.category === "boundarywall") { store.pushUndo(); obj.wallSku = sku.id; }
-    else if (sku.category === "floor") { store.pushUndo(); obj.floorSku = sku.id; }
-    else return false;
-  } else if (ref.kind === "slab" && (sku.category === "floor" || sku.category === "pool")) {
-    store.pushUndo(); obj.sku = sku.id;
-  } else if (ref.kind === "roof" && (sku.category === "roof" || sku.category === "carport")) {
-    store.pushUndo(); obj.sku = sku.id;
-  } else if (ref.kind === "segment" && (sku.category === "wall" || sku.category === "foundation" || sku.category === "boundarywall")) {
-    store.pushUndo(); obj.sku = sku.id;
-  } else if (ref.kind === "opening" && skuById(obj.sku)?.category === sku.category) {
-    store.pushUndo(); obj.sku = sku.id;
-  } else if (ref.kind === "item" && skuById(obj.sku)?.category === sku.category) {
-    store.pushUndo(); obj.sku = sku.id;
-  } else if (ref.kind === "beam" && (sku.category === "beam" || sku.category === "column")) {
-    store.pushUndo(); obj.sku = sku.id;
-  } else {
+  if (!store.selected.length) return false;
+  store.pushUndo();
+  const result = retypeSelection(store.doc, store.selected, sku, { skuById });
+  if (!result.ok) {
+    store.undoStack.pop();
     return false;
   }
+  store.setSelection(result.refs, store.primary);
   store.persist();
+  setStatusMessage(result.message, result.skipped.length ? "warn" : "ok");
   return true;
 }
 
@@ -4812,6 +4978,13 @@ function ribbonCommandState(item) {
       title: attached.length ? HINTS.detach : "Nothing selected is attached to anything.",
     };
   }
+  if (item.id === "select-similar") {
+    if (store.selected.length !== 1) return { disabled: true, title: "Select one wall, foundation, beam, roof, floor, door, window or item first." };
+    const obj = objByRef(store.primary);
+    const category = obj ? skuById(obj.sku)?.category : null;
+    if (!category) return { disabled: true, title: "That has no type category to match against." };
+    return { title: `Select every other ${CATEGORY_LABEL[category] || category} in the drawing, ready to retype from the palette.` };
+  }
   if (item.id === "view-camera") {
     return { active: tool === "camera", title: HINTS["view-camera"] };
   }
@@ -4922,6 +5095,7 @@ function runCommand(name) {
       return;
     case "attach": startAttachPick(); return;
     case "detach": runDetach(); return;
+    case "select-similar": runSelectSimilar(); return;
     case "rotate": case "mirror": case "copy": case "align":
     case "merge": case "split": case "cut": case "join":
       modifySelection(name);
@@ -6337,6 +6511,51 @@ function runDetach() {
   render();
 }
 
+/**
+ * Grow a single selected object into every other object of its own kind
+ * that shares its exact type category - "select all the foundations" means
+ * category === "foundation", not the broader wall/foundation/boundarywall
+ * group `catsForContext` uses to populate what a wall *could* retype into.
+ * This is the "select all instances of this type" step that precedes a bulk
+ * retype from the palette. Deliberately whole-drawing, not level-scoped: a
+ * run of foundations usually spans the whole foundation level, and there is
+ * no cost to over-selecting here - the retype that follows only touches
+ * whichever category the clicked SKU actually matches.
+ */
+function runSelectSimilar() {
+  if (store.selected.length !== 1) {
+    setStatusMessage("Select one wall, foundation, beam, roof, floor, door, window or item first.", "warn");
+    return;
+  }
+  const ref = store.primary;
+  const obj = objByRef(ref);
+  const category = obj ? skuById(obj.sku)?.category : null;
+  if (!category) {
+    setStatusMessage("That has no type category to match against.", "warn");
+    return;
+  }
+  const pool = collectionFor(store.doc, ref.kind) || [];
+  const matches = pool
+    .filter((o) => skuById(o.sku)?.category === category)
+    .map((o) => ({ kind: ref.kind, id: o.id }));
+  if (matches.length <= 1) {
+    setStatusMessage(`Nothing else of that type (${category}) in the drawing.`, "warn");
+    return;
+  }
+  store.setSelection(matches, ref);
+  setStatusMessage(`Selected ${matches.length} ${CATEGORY_LABEL[category] || category}. Pick a type from the palette to retype them all.`, "ok");
+  // Open the palette straight to this category rather than leaving it on
+  // whatever was last armed - the whole point of this command is "select
+  // these, then click a new type," so the list should already show the
+  // types that would apply.
+  paletteFilter = [category];
+  lastPaletteLabel = CATEGORY_LABEL[category] || category;
+  setTypeFlyoutOpen(true);
+  renderPalette();
+  drawRibbon();
+  render();
+}
+
 /** One line per selected wall/beam, for the Inspector's read-only Base row. */
 function attachStateText(obj) {
   const base = resolvedBase(store.doc, pack, obj, drawnObjectHeight(pack, obj));
@@ -7055,6 +7274,7 @@ function onPointerMove(ev) {
           ...best.guide,
           snapX: best.guide.guideX != null,
           snapY: best.guide.guideY != null,
+          exactJoin: isExactPointSnap(best.guide),
         };
       }
     }
@@ -7546,14 +7766,20 @@ function syncPlanContext() {
   const item = Boolean(obj && ref.kind === "item");
   const rect = (room || slab || roof) && obj.shape?.kind === "rect";
   const multi = !draft && refs.length > 1;
+  // A multi-selection can be retyped (applySkuToSelection now covers the
+  // whole selection, not just one object) as long as at least one member is
+  // a kind a SKU applies to; the type picker opens for that, while every
+  // other Inspector field - name, length, geometry - stays hidden, because
+  // those are still genuinely per-object.
+  const multiTypeable = multi && refs.some((r) => TYPEABLE_KINDS.has(r.kind));
   const showType = linear || slab || roof || opening || item;
   const showGeom = linear || rect;
   const showInspect = Boolean(el.inspectFields) && (linear || room || slab || roof || opening || item);
   const creating = !showInspect && !multi && placingToolArmed();
-  const dockState = showInspect ? "edit" : creating ? "create" : "empty";
+  const dockState = showInspect ? "edit" : multiTypeable ? "edit" : creating ? "create" : "empty";
 
   if (el.dockContext) el.dockContext.dataset.state = dockState;
-  setHidden(el.ctxTypePicker, !(showType || creating || room));
+  setHidden(el.ctxTypePicker, !(showType || creating || room || multiTypeable));
   syncTypeCurrent();
   // Arming a draw tool makes picking a type the whole job, so open the chooser
   // straight away (it fills the inspector). Leaving create - either an empty
@@ -7572,6 +7798,7 @@ function syncPlanContext() {
     if (dockState === "create") el.paletteTitle.textContent = lastPaletteLabel || "Types";
     else if (draft) el.paletteTitle.textContent = inspectKindLabel("wall", skuById(placeSkuId)) || "Wall";
     else if (obj) el.paletteTitle.textContent = inspectKindLabel(ref.kind, skuById(obj.sku)) || "Inspector";
+    else if (multiTypeable) el.paletteTitle.textContent = "Types";
     else el.paletteTitle.textContent = "Inspector";
   }
 
@@ -7593,7 +7820,7 @@ function syncPlanContext() {
   setHidden(el.inspectEmpty, dockState !== "empty");
   if (el.inspectEmpty && dockState === "empty") {
     el.inspectEmpty.textContent = multi
-      ? "Type and identity apply to one object at a time."
+      ? "Nothing in this selection has a type to change."
       : "Select a wall, room, roof or opening to edit its type and identity, or pick a tool on the ribbon to start drawing.";
   }
 

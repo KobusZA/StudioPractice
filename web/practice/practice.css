@@ -31,7 +31,7 @@ button { cursor: pointer; }
 
 .topbar {
   height: 44px; display: flex; align-items: center; gap: 12px; padding: 0 14px;
-  background: var(--bg-secondary); border-bottom: 1px solid var(--hairline);
+  background: var(--bg-secondary); border-bottom: 1px solid var(--hairline-strong);
 }
 .brand { display: flex; align-items: center; gap: 8px; }
 .brand-mark {
@@ -59,15 +59,40 @@ kbd {
 }
 
 .btn {
-  height: 28px; padding: 0 11px; border: 1px solid var(--hairline-strong);
+  height: 32px; padding: 0 14px; border: 1px solid var(--hairline-strong);
   background: var(--bg-elevated); border-radius: var(--radius-sm);
-  font-size: 12px; font-weight: 600;
+  font-size: 12.5px; font-weight: 600;
 }
 .btn:hover { background: var(--bg-hover); }
-.btn-primary { background: var(--copper); border-color: var(--copper-dark); color: #fff; }
+/* Primary actions carry more visual weight than their box: a subtle lift and
+   a slightly heavier weight, so "the thing to click" reads before the label
+   does. Kept modest - this is still the compact, editorial chrome, not a
+   marketing button. */
+.btn-primary {
+  background: var(--copper); border-color: var(--copper-dark); color: #fff;
+  box-shadow: 0 1px 0 rgba(26, 22, 18, 0.14);
+}
 .btn-primary:hover { background: var(--copper-dark); }
 .btn:disabled { opacity: 0.45; cursor: default; }
-.btn-sm { height: 24px; padding: 0 8px; font-size: 11.5px; }
+.btn-sm { height: 27px; padding: 0 10px; font-size: 12px; }
+/* The one primary call-to-action living in the topbar ("New job") stays a
+   notch larger than the other small buttons around it, so the busiest
+   screen in the app still has one obvious next action for someone new to it. */
+.btn-sm.btn-primary { height: 30px; padding: 0 13px; font-size: 12.5px; }
+/* The sticky-selection pill: distinguished with a copper left edge so it
+   reads as "your place, held" rather than another action button like
+   "Switch job" beside it. */
+#current-job {
+  border-left: 3px solid var(--copper); font-weight: 700; color: var(--ink);
+}
+#current-job .muted { font-weight: 500; color: var(--ink-muted); }
+/* In a job: the pill goes solid copper-tinted so it reads as the current
+   location, and Register is only the lit parent section. */
+#current-job.is-here {
+  background: var(--copper); border-color: var(--copper-dark); color: #fff; cursor: default;
+}
+#current-job.is-here .muted { color: rgba(255, 255, 255, 0.85); }
+.nav button.is-parent { border-bottom: 2px dotted var(--copper); }
 
 /* --- layout ------------------------------------------------------------- */
 
@@ -93,6 +118,7 @@ kbd {
 }
 .crumbs button:hover { background: var(--bg-hover); }
 .crumbs span { color: var(--ink-muted); }
+.crumbs .crumb-code { font-weight: 700; color: var(--copper-dark); letter-spacing: 0.04em; }
 .proj-head-row {
   display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
 }
@@ -102,7 +128,15 @@ kbd {
 .proj-head h1 { margin: 2px 0 6px; font-family: var(--font-display); font-size: 1.28rem; font-weight: 560; }
 .facts { display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 12px; color: var(--ink-soft); }
 .facts b { color: var(--ink); font-weight: 600; }
-.proj-head-drawing { display: flex; flex-direction: column; align-items: flex-end; gap: 7px; }
+.proj-head-drawing { position: relative; display: flex; flex-direction: column; align-items: flex-end;
+  /* Pull the thumbnail up beside the breadcrumb row so its top edge lines up with "← Register". */
+  margin-top: -27px; }
+/* The open button sits on the thumbnail rather than under it. */
+.proj-head-drawing > .btn {
+  position: absolute; right: 6px; bottom: 6px; box-shadow: 0 1px 4px rgba(0,0,0,.25);
+}
+.dwg figcaption:empty { display: none; }
+.proj-head-drawing .dwg-md figcaption { display: none; }
 
 /* --- the drawing, at a glance ------------------------------------------- */
 
@@ -112,7 +146,7 @@ kbd {
 .dwg { margin: 0; display: flex; flex-direction: column; gap: 4px; }
 .dwg-frame {
   display: block; padding: 0; overflow: hidden; cursor: pointer;
-  background: var(--bg-elevated); border: 1px solid var(--hairline);
+  background: var(--bg-elevated); border: 1px solid var(--hairline-strong);
   border-radius: var(--radius-md);
 }
 .dwg-frame:hover { border-color: var(--copper); }
@@ -140,7 +174,7 @@ kbd {
 }
 .dwg-card .link-job:hover { text-decoration: underline; text-underline-offset: 2px; }
 
-.tabs { display: flex; gap: 2px; padding: 12px 22px 0; border-bottom: 1px solid var(--hairline); }
+.tabs { display: flex; gap: 2px; padding: 12px 22px 0; border-bottom: 1px solid var(--hairline-strong); }
 .tabs button {
   border: 0; background: transparent; padding: 6px 11px 7px; font-size: 13px;
   font-weight: 600; color: var(--ink-soft); border-bottom: 2px solid transparent;
@@ -150,8 +184,15 @@ kbd {
 .tabs button[aria-selected="true"] { color: var(--copper-dark); border-bottom-color: var(--copper); }
 
 .panel { padding: 18px 22px 44px; }
-h3.sec { margin: 26px 0 10px; font-family: var(--font-display); font-size: 0.95rem; font-weight: 560; }
-h3.sec:first-child { margin-top: 0; }
+/* Each h3.sec starts a new region of the tab (KPIs, warnings, phase plan,
+   forms...). The type alone used to be the only signal a new section had
+   started; a rule above it gives that same stack a boundary someone can see
+   without reading the heading first. */
+h3.sec {
+  margin: 30px 0 12px; padding-top: 16px; border-top: 1px solid var(--hairline);
+  font-family: var(--font-display); font-size: 0.95rem; font-weight: 560;
+}
+h3.sec:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
 h3.sec small {
   font-family: var(--font-ui); font-size: 11px; font-weight: 400;
   color: var(--ink-muted); margin-left: 8px;
@@ -161,7 +202,7 @@ h3.sec small {
 
 .kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
 .kpi {
-  background: var(--bg-elevated); border: 1px solid var(--hairline);
+  background: var(--bg-elevated); border: 1px solid var(--hairline-strong);
   border-radius: var(--radius-md); padding: 11px 13px 12px;
 }
 .kpi .lbl {
@@ -182,7 +223,7 @@ h3.sec small {
 button.kpi { width: 100%; text-align: left; font: inherit; }
 button.kpi:hover { border-color: var(--copper); background: var(--bg-hover); }
 button.kpi:disabled { cursor: default; }
-button.kpi:disabled:hover { border-color: var(--hairline); background: var(--bg-elevated); }
+button.kpi:disabled:hover { border-color: var(--hairline-strong); background: var(--bg-elevated); }
 .kpi .go { font-size: 11px; font-weight: 700; color: var(--copper-dark); margin-top: 6px; }
 
 .pill { font-size: 10.5px; font-weight: 700; padding: 1px 6px; border-radius: 3px; white-space: nowrap; }
@@ -207,7 +248,18 @@ table.grid td.num, table.grid th.num {
 table.grid tfoot td { font-weight: 700; background: var(--bg-tertiary); border-bottom: 0; }
 table.grid tbody tr:hover { background: var(--bg-hover); }
 table.grid tr.flagged { background: var(--copper-tint-8); }
-.scroller { max-height: 460px; overflow-y: auto; border: 1px solid var(--hairline); }
+/* The fee-schedule row currently drilled into (Time tab filter, or the
+   matching certificate line once a certificate is open) — a persistent,
+   quiet marker of "this is the lens right now", not a status colour. */
+table.grid tr.current-phase { box-shadow: inset 3px 0 0 var(--copper); }
+table.grid tr.current-phase td:first-child { font-weight: 700; }
+.phase-filter-banner {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  margin: 0 0 10px; padding: 8px 12px; border: 1px solid var(--hairline-strong);
+  border-left: 3px solid var(--copper); border-radius: var(--radius-sm);
+  background: var(--copper-tint-8); font-size: 12.5px;
+}
+.scroller { max-height: 460px; overflow-y: auto; border: 1px solid var(--hairline-strong); }
 .scroller table.grid { border: 0; }
 .scroller table.grid thead th { position: sticky; top: 0; }
 
@@ -343,6 +395,8 @@ table.grid tr.phase-row td {
    months later when the fee is queried. */
 table.grid tr.struck td:first-child { text-decoration: line-through; color: var(--ink-muted); }
 table.grid tr.struck { opacity: 0.72; }
+table.grid tr.done td:first-child { color: var(--ok); }
+table.grid tr.done { background: var(--ok-tint); }
 table.grid td select { height: 24px; padding: 0 4px; font-size: 11.5px; border: 1px solid var(--hairline-strong); background: var(--bg-primary); border-radius: var(--radius-sm); }
 .task-note { font-size: 11px; color: var(--ink-muted); margin-top: 2px; }
 
@@ -364,7 +418,7 @@ table.grid td select { height: 24px; padding: 0 4px; font-size: 11.5px; border: 
 .warn-list { display: grid; gap: 8px; }
 .w {
   display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 10px;
-  background: var(--bg-elevated); border: 1px solid var(--hairline);
+  background: var(--bg-elevated); border: 1px solid var(--hairline-strong);
   border-left: 3px solid var(--ink-muted); border-radius: var(--radius-md); padding: 9px 12px;
 }
 .w.high { border-left-color: var(--copper); }
@@ -386,7 +440,7 @@ table.grid td select { height: 24px; padding: 0 4px; font-size: 11.5px; border: 
 /* --- forms -------------------------------------------------------------- */
 
 .form {
-  background: var(--bg-elevated); border: 1px solid var(--hairline);
+  background: var(--bg-elevated); border: 1px solid var(--hairline-strong);
   border-radius: var(--radius-md); padding: 14px 16px 16px;
 }
 .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px 14px; }
@@ -409,6 +463,24 @@ table.grid td select { height: 24px; padding: 0 4px; font-size: 11.5px; border: 
 }
 .actions { display: flex; align-items: center; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
 .actions .spacer { flex: 1; }
+
+/* A hand-rolled combobox standing in for `<input list>`. Chromium's own
+   datalist popup has a long-standing race between the browser process
+   painting the suggestion list and the page processing the click that
+   opened it, so the list can close within the same gesture that opened it -
+   "the dropdown closes as soon as I open it" is a browser bug, not
+   something this stylesheet can fix on a native popup. Rendering the list
+   ourselves means there is no browser-owned popup left to race. */
+.combo { position: relative; }
+.combo-menu {
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 30;
+  max-height: 220px; overflow-y: auto; margin: 0; padding: 4px 0; list-style: none;
+  background: var(--bg-elevated); border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-sm); box-shadow: 0 10px 28px rgba(26, 22, 18, 0.18);
+}
+.combo-menu[hidden] { display: none; }
+.combo-menu li { padding: 6px 10px; font-size: 13px; cursor: pointer; }
+.combo-menu li.active, .combo-menu li:hover { background: var(--copper-tint-8); }
 
 /* Repeated rows of the same two fields. Only the first row is labelled on
    screen; the rest keep their labels for a screen reader, because every input
@@ -436,6 +508,104 @@ table.grid td select { height: 24px; padding: 0 4px; font-size: 11.5px; border: 
 .bar i.ok { background: var(--ok); }
 .bar i.warn { background: var(--warn); }
 .bar i.over { background: var(--copper); }
+
+/* --- the fee bar -------------------------------------------------------- */
+/*
+ * The full width of `.feebar-track` is the quoted fee, and the track is a fixed
+ * share of the row in every placement - so the 100% mark sits at the same x
+ * position on every bar and two jobs can be compared without reading an axis.
+ *
+ * An overrun grows into `.feebar-gutter`, past the end of the bar, and never by
+ * rescaling the track to fit it. A bar that silently renormalises to 142% makes
+ * 100% look like the edge of the chart instead of the edge of the agreement.
+ * Past the gutter the tail is clipped and says so; the amount is printed beside
+ * it either way, so nothing is lost but the length.
+ */
+.feebar { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.feebar-scale { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.feebar-track {
+  flex: 0 0 62%; display: flex; height: 12px; min-width: 0;
+  background: var(--bg-tertiary); border-radius: 2px; overflow: hidden;
+}
+.feebar.compact .feebar-track { height: 9px; }
+.feebar-gutter { flex: 1 1 38%; display: flex; align-items: center; gap: 5px; min-width: 0; }
+.feebar-gutter em {
+  font-style: normal; font-size: 10.5px; font-weight: 700; color: var(--copper-dark);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+
+.fseg { flex: 0 0 auto; min-width: 0; padding: 0; border: 0; display: block; }
+button.fseg { cursor: pointer; }
+button.fseg:hover { filter: brightness(1.15); }
+button.fseg:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+
+.fseg-invoiced, .fsw-invoiced { background: var(--ok); }
+.fseg-draft, .fsw-draft { background: #6f8f7f; }
+.fseg-ready, .fsw-ready { background: var(--copper); }
+.fseg-unearned, .fsw-unearned { background: var(--bg-tertiary); box-shadow: inset 0 0 0 1px var(--hairline); }
+/* Hatched, not a fifth flat colour: written-down money was claimed and then
+   given up, which is a hole in the segment rather than another kind of claim. */
+.fseg-writtenDown, .fsw-writtenDown {
+  background: repeating-linear-gradient(
+    135deg, var(--warn) 0 2px, transparent 2px 5px
+  ), var(--warn-tint);
+}
+
+/* Outside the track, dashed, and open-ended when it is clipped. */
+.feebar-tail {
+  height: 12px; border: 1px dashed var(--copper); border-left: 0;
+  background: repeating-linear-gradient(
+    135deg, var(--copper-tint-16) 0 3px, transparent 3px 6px
+  );
+  border-radius: 0 2px 2px 0; min-width: 4px;
+}
+.feebar.compact .feebar-tail { height: 9px; }
+.feebar-tail.clipped { border-right: 0; }
+
+.feebar-read {
+  display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--ink-soft);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.feebar-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.fleg {
+  display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px;
+  color: var(--ink-soft); background: none; border: 0; padding: 0; text-align: left;
+}
+button.fleg { cursor: pointer; }
+button.fleg:hover { color: var(--ink); }
+button.fleg:hover .fsw { box-shadow: 0 0 0 2px var(--copper-tint-16); }
+.fleg b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.fleg.over { color: var(--copper-dark); }
+.fsw {
+  width: 11px; height: 11px; border-radius: 2px; flex: 0 0 auto; display: block;
+}
+.fsw-over { border: 1px dashed var(--copper); background: var(--copper-tint-8); }
+
+/* The two ratios sit under the bar, not in it: each is a ratio of two things
+   the bar has already shown, and a segment cannot be a percentage of itself. */
+.feebar-reads {
+  display: flex; flex-wrap: wrap; gap: 6px 22px; padding-top: 7px;
+  border-top: 1px solid var(--hairline);
+}
+.feebar-reads > span { display: flex; flex-direction: column; gap: 1px; }
+.feebar-reads em {
+  font-style: normal; font-size: 10px; letter-spacing: 0.07em; text-transform: uppercase;
+  color: var(--ink-muted); font-weight: 700;
+}
+.feebar-reads b {
+  font-family: var(--font-display); font-size: 1.05rem; font-weight: 560; color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.feebar-reads b.real { font-family: var(--font-ui); font-size: 11.5px; align-self: start; }
+.feebar-reads small { font-size: 10.5px; color: var(--ink-muted); }
+.feebar-reads > span.bad b { color: var(--copper-dark); }
+
+.feebar-gap {
+  font-size: 11.5px; color: var(--ink-muted); padding: 10px 0;
+}
+/* The register's bar column: wide enough for a readable track, and it does not
+   get to squeeze the code and client out of the row. */
+td.feebar-cell { width: 240px; min-width: 200px; }
 
 .empty {
   padding: 30px 14px; text-align: center; color: var(--ink-muted); font-size: 12.5px;
@@ -490,7 +660,7 @@ table.grid td select { height: 24px; padding: 0 4px; font-size: 11.5px; border: 
 .choice {
   display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px;
   align-items: start; padding: 11px 12px; cursor: pointer;
-  background: var(--bg-elevated); border: 1px solid var(--hairline);
+  background: var(--bg-elevated); border: 1px solid var(--hairline-strong);
   border-radius: var(--radius-md);
 }
 .choice:hover { border-color: var(--hairline-strong); }
@@ -502,11 +672,41 @@ table.grid td select { height: 24px; padding: 0 4px; font-size: 11.5px; border: 
 .choice b { display: block; font-size: 14px; font-weight: 700; }
 .choice p { margin: 3px 0 0; font-size: 12.5px; line-height: 1.45; color: var(--ink-soft); }
 
+/* One-line variant: name + a short tag, no paragraph. Used where the full
+   explanation would repeat itself across many rows (project type); the
+   explanation instead lives in `.type-detail`, painted once under whichever
+   row is selected. Laid out as a wrapping row of buttons rather than a
+   stacked list: a project type is a single pick from a short set, and a
+   horizontal run of options scans faster than a tall list for that case.
+   Each pill still carries name + tag; only the direction changed. */
+.choices-compact { display: flex; flex-wrap: wrap; gap: 8px; }
+.choice-row {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  padding: 8px 14px; cursor: pointer; text-align: left;
+  background: var(--bg-elevated); border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-sm);
+}
+.choice-row:hover { border-color: var(--copper); }
+.choice-row:has(input:checked) {
+  border-color: var(--copper); background: var(--copper-tint-8);
+  box-shadow: inset 0 -3px 0 var(--copper);
+}
+.choice-row:has(input:focus-visible) { outline: 2px solid var(--copper); outline-offset: 1px; }
+.choice-row input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.choice-row-name { font-size: 13.5px; font-weight: 700; }
+.choice-row-tag { font-size: 11px; color: var(--ink-muted); white-space: nowrap; }
+
+/* The explanation for the one selected row, painted directly under its own
+   choice-group instead of appended after all ten rows. Empty and collapses
+   to nothing when its group holds no selection. */
+.type-detail-slot:empty { display: none; }
+.type-detail-slot .type-detail { margin-top: 10px; }
+
 /* The type's own sequence, shown once a templated type is chosen. Read-only:
    this is the firm's template, and the job's copy is edited after it exists. */
 .roadmap {
   margin-top: 22px; padding: 14px 16px 4px;
-  background: var(--bg-elevated); border: 1px solid var(--hairline);
+  background: var(--bg-elevated); border: 1px solid var(--hairline-strong);
   border-radius: var(--radius-md);
 }
 .roadmap h2 {
@@ -539,7 +739,7 @@ table.grid td select { height: 24px; padding: 0 4px; font-size: 11.5px; border: 
 }
 .composer-summary {
   display: grid; gap: 6px; margin: 0 0 16px; padding: 12px 14px;
-  background: var(--bg-elevated); border: 1px solid var(--hairline); border-radius: var(--radius-md);
+  background: var(--bg-elevated); border: 1px solid var(--hairline-strong); border-radius: var(--radius-md);
 }
 .composer-summary div { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 8px; font-size: 13px; }
 .composer-summary dt { color: var(--ink-muted); font-weight: 600; }
@@ -550,3 +750,113 @@ table.grid td select { height: 24px; padding: 0 4px; font-size: 11.5px; border: 
 .gate h1 { margin: 0 0 4px; font-family: var(--font-display); font-size: 1.3rem; font-weight: 560; }
 .gate p { margin: 0 0 14px; font-size: 12.5px; color: var(--ink-soft); line-height: 1.5; }
 .gate .fields { grid-template-columns: 1fr; }
+
+/* --- fee template editor (settings.js) --------------------------------- */
+.tpl { max-width: 900px; }
+.tpl h1 { font-family: var(--font-display); font-weight: 500; margin: 0 0 6px; }
+.tpl-bar { display: flex; align-items: center; gap: 10px; margin: 14px 0; flex-wrap: wrap; }
+.tpl-bar label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-muted); }
+.tpl-total { margin-left: auto; font-size: 13px; color: var(--ink-soft); }
+.tpl-error { color: var(--copper-dark); }
+.tpl select, .tpl input[type="text"] {
+  height: 30px; padding: 0 8px; border: 1px solid var(--hairline-strong);
+  background: var(--bg-primary); border-radius: var(--radius-sm); min-width: 0; font: inherit;
+}
+.tpl select:focus, .tpl input[type="text"]:focus {
+  outline: 2px solid var(--copper-tint-16); border-color: var(--copper); outline-offset: -1px;
+}
+.tpl-phase { background: var(--bg-elevated); border: 1px solid var(--hairline); border-radius: var(--radius-md); padding: 10px; margin-bottom: 12px; }
+.tpl-phase-head, .tpl-task { display: grid; grid-template-columns: 1fr 9.5rem 100px auto; gap: 8px; align-items: center; margin-bottom: 6px; }
+.tpl-task { grid-template-columns: 1fr 9.5rem auto; }
+.tpl-task-main { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.tpl-num { flex: 0 0 2.6rem; text-align: right; font-variant-numeric: tabular-nums; font-size: 13px; color: var(--ink-muted); }
+.tpl-task-main input { flex: 1; min-width: 0; }
+.tpl-phase-head input[data-f="phase-name"] { font-weight: 600; }
+.tpl-fee { text-align: right; font-variant-numeric: tabular-nums; }
+.tpl-phase-aside { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink-soft); }
+/* A second row of the phase header grid, ending where the fee and total columns end. */
+.tpl-phase-hint {
+  grid-column: 1 / 4; margin: -2px 0 0; text-align: right;
+  font-size: 12px; line-height: 1.4; font-variant-numeric: tabular-nums; color: var(--ink-muted);
+}
+.tpl-phase-hint.over { color: var(--copper-dark); }
+.tpl-phase-hint.ok { color: var(--ok); }
+.tpl-phase-hint[hidden] { display: none; }
+.tpl-tools { display: inline-flex; align-items: center; gap: 10px; }
+.tpl-moves { display: inline-flex; gap: 3px; }
+.tpl-remove { color: var(--copper-dark); }
+.tpl-add { margin: 6px 0 0 calc(2.6rem + 8px); }
+
+/* My time: one person's log across every job, a day at a time. The composer
+   sits at the foot of the open day so it reads as the next row of a sheet. */
+.mt-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 8px; }
+.mt-controls { display: flex; gap: 12px; }
+.mt-day { margin-top: 18px; }
+.mt-day.open { padding: 0 0 4px; }
+.mt-day .sec .btn { margin-left: 10px; vertical-align: middle; }
+.mt-composer { margin-top: 10px; }
+.mt-composer .fields { grid-template-columns: minmax(200px, 1.6fr) repeat(3, minmax(90px, 0.6fr)) minmax(140px, 1fr); }
+.mt-more[hidden], #mt-phase-free[hidden] { display: none; }
+.mt-more { margin-top: 8px; }
+#mt-phase-free { margin-top: 6px; }
+.client-tag { display: block; min-height: 1.2em; margin-top: 3px; font-size: 12px; color: var(--ink-muted); }
+.client-tag.bad { color: var(--copper-dark); }
+
+/* The payment certificate as a page. On screen it is the top of the
+   certificate panel; printed, it is the whole document and nothing else. */
+.cert-sheet { background: var(--bg-elevated); border: 1px solid var(--hairline); border-radius: var(--radius-sm); padding: 28px 32px; margin: 8px 0 16px; }
+.cert-head { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; padding-bottom: 14px; border-bottom: 2px solid var(--ink); }
+.cert-firm { font-size: 12.5px; line-height: 1.5; }
+.cert-firm-name { font-family: var(--font-display); font-size: 1.25rem; font-weight: 600; margin-bottom: 2px; }
+.cert-title { text-align: right; font-size: 12.5px; line-height: 1.5; }
+.cert-title-main { font-family: var(--font-display); font-size: 1.05rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+.cert-meta { display: grid; grid-template-columns: max-content 1fr; gap: 6px 18px; margin: 16px 0 18px; font-size: 13px; }
+.cert-meta dt { font-weight: 700; text-transform: uppercase; font-size: 11px; letter-spacing: 0.06em; color: var(--ink-muted); padding-top: 2px; }
+.cert-meta dd { margin: 0; }
+.cert-sub { font-size: 12px; color: var(--ink-soft); }
+.cert-gap { font-style: italic; color: var(--copper-dark); }
+.cert-foot { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 22px; padding-top: 12px; border-top: 1px solid var(--hairline-strong); font-size: 12.5px; line-height: 1.5; }
+.cert-foot-h { font-weight: 700; text-transform: uppercase; font-size: 11px; letter-spacing: 0.06em; color: var(--ink-muted); margin-bottom: 2px; }
+
+@media print {
+  @page { size: A4; margin: 16mm; }
+  body * { visibility: hidden; }
+  #cert-sheet, #cert-sheet * { visibility: visible; }
+  #cert-sheet { position: absolute; left: 0; top: 0; width: 100%; border: 0; padding: 0; margin: 0; background: #fff; }
+  .no-print { display: none !important; }
+  /* Draft-only marks (the phase highlight) are working aids, not the document. */
+  #cert-sheet .current-phase { background: none; }
+  #cert-sheet tr, #cert-sheet .cert-foot { break-inside: avoid; }
+  #cert-sheet thead { display: table-header-group; }
+}
+
+.ceiling-notice { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 14px; margin: 0 0 14px; border: 1px solid var(--hairline-strong); border-left: 3px solid var(--warn); border-radius: var(--radius-sm); background: var(--bg-secondary); font-size: 13px; }
+.ceiling-notice.over { border-left-color: var(--copper); background: var(--copper-tint-8); }
+label.check { display: flex; align-items: center; gap: 8px; text-transform: none; letter-spacing: 0; font-weight: 500; }
+
+/* --- Team (owner) -------------------------------------------------------- */
+.team .tm-bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 10px 0 4px; }
+.team .tm-range { display: flex; gap: 6px; align-items: center; margin-left: auto; }
+.team .kpis { margin: 12px 0 18px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.team .tm-people td, .team .tm-people th { vertical-align: middle; }
+.team .tm-util-cell { min-width: 120px; white-space: nowrap; }
+.team .tm-util { display: inline-block; width: 70px; height: 6px; margin-right: 6px; background: var(--bg-tertiary); border-radius: 3px; overflow: hidden; vertical-align: middle; }
+.team .tm-util i { display: block; height: 100%; background: var(--ok); }
+.team .tm-util.low i { background: var(--warn); }
+.team .tm-util.over i { background: var(--copper); }
+.team .tm-mix { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0; }
+.team .tm-drill { padding: 8px 4px 14px; }
+.team .tm-drill-row td { background: var(--bg-secondary); }
+.team .tm-day h4 { margin: 12px 0 4px; font-size: 12.5px; }
+.team .tm-day h4 small { color: var(--ink-muted); font-weight: 400; }
+.team .tm-entry { display: grid; grid-template-columns: 70px 1fr 200px 60px 100px; gap: 10px; padding: 3px 0; font-size: 12.5px; border-bottom: 1px solid var(--hairline); }
+.team .tm-entry .num { text-align: right; }
+
+.team .tm-member-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin: 8px 0 14px; padding: 12px; border: 1px solid var(--line, #ddd); border-radius: 6px; }
+.team .tm-member-form label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
+.team .tm-member-form .wide { grid-column: 1 / -1; }
+.team .tm-roles { border: 1px solid var(--line, #ddd); border-radius: 6px; padding: 6px 10px; margin: 0; }
+.team .tm-roles legend { font-size: 12px; padding: 0 4px; }
+.team .tm-role-grid th { font-size: 11px; font-weight: 600; text-align: center; }
+.team .tm-role-grid .tm-role-cell { text-align: center; }
+.team .tm-member-form .tm-role-pick { flex-direction: row; align-items: center; gap: 6px; font-size: 13px; }

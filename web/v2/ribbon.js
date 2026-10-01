@@ -166,6 +166,7 @@ export const RIBBON = [
       {
         label: "Modify",
         items: [
+          { id: "select-similar", label: "Select same type", command: "select-similar" },
           { id: "rotate", label: "Rotate", command: "rotate" },
           { id: "mirror", label: "Mirror", command: "mirror" },
           { id: "copy", label: "Copy", command: "copy" },
@@ -347,7 +348,7 @@ const SIMPLE_TABS = [
     label: "Modify",
     needsSelection: true,
     groups: [
-      { label: "Edit", items: ["rotate", "mirror", "copy", "align", "split", "join"] },
+      { label: "Edit", items: ["select-similar", "rotate", "mirror", "copy", "align", "split", "join"] },
       { label: "Elevation", items: ["attach", "detach"] },
       { label: "Arrange", items: ["group", "ungroup", "delete"] },
     ],

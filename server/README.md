@@ -24,6 +24,23 @@ docker compose up -d --build
 because the image serves `web/` as well as the API. It reaches Postgres by
 service name inside the compose network, and waits for the healthcheck.
 
+## Local, both containers, live reload
+
+The stack above is deliberately production-shaped: the image is built once and
+the code inside it is a frozen copy, so an edit on the host does nothing until
+the next `--build`. `docker-compose.dev.yml` is an overlay, not a replacement,
+that bind-mounts the repo into `app` and runs it under `node --watch` instead:
+
+```sh
+cd server
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+# edit server/src/*.js or web/* on the host - the container restarts itself
+```
+
+Only `app` changes; `db` is the same service either way. This is the Docker
+equivalent of "Local, app on the host" below — reach for that one instead if
+you don't need the app running inside a container at all.
+
 ## Local, app on the host
 
 Postgres in Docker, Node on the machine — the loop for working on the server

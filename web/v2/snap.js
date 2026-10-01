@@ -85,7 +85,7 @@ export function snapLengthFrom(from, to, tolWorld, minStep = NICE_MIN_STEP_M) {
   return { x: from.x + dx * s, y: from.y + dy * s };
 }
 
-function isExactPointSnap(join) {
+export function isExactPointSnap(join) {
   return Boolean(
     join?.snapped
     && join.guideX != null
@@ -132,39 +132,110 @@ export function applyNicePoint(wx, wy, opts = {}) {
 export const GAP_MAX_M = 4;
 
 /**
- * Every point another wall, beam, room, slab or roof corner could be joined
- * to, minus whatever the caller is currently dragging (so an object never
- * "snaps" to its own other endpoint or its own corners).
+ * Past this, an edge-alignment point (the perpendicular foot on some other
+ * wall/foundation's run, not one of its endpoints) is too far away to be
+ * trusted as the anchor for round-length snapping. Deliberately tighter than
+ * `GAP_MAX_M`: that constant only gates the informational gap dimension
+ * (fine to show "6000 mm to that wall" from well across the site), but
+ * letting the same 4 m radius seed the "nice length" origin meant a wall's
+ * own distant run could steal the rounding anchor away from the draw's own
+ * start point - which reads as "snapped to the middle of that wall" even
+ * though nothing was actually joined to it.
  */
+export const ALIGN_ORIGIN_MAX_M = 1.5;
+
 function snapIncluded(obj, opts) {
   return !opts.include || opts.include(obj);
 }
 
+/**
+ * The four corners of a segment's drawn thickness: each centreline end pushed
+ * half a thickness out to either face.
+ *
+ * A wall/foundation is stored as a centreline and drawn as a stroke that wide,
+ * so on a 600 mm strip footing the corner the user can see is 300 mm off the
+ * only point that used to be collected. Nothing was snappable where they were
+ * actually pointing, and the centreline end 300 mm away could only announce
+ * itself as an unexplained "300 mm" gap label.
+ *
+ * Empty for a zero/unknown thickness or a zero-length run - neither has faces.
+ */
+export function faceCorners(seg, thickness, category = null) {
+  if (!(thickness > 0)) return [];
+  const dx = seg.x2 - seg.x1;
+  const dy = seg.y2 - seg.y1;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-9) return [];
+  // Unit normal scaled to the half-thickness, so the offset is half a wall
+  // however long the run is.
+  const nx = (-dy / len) * (thickness / 2);
+  const ny = (dx / len) * (thickness / 2);
+  const corners = [];
+  for (const [x, y] of [[seg.x1, seg.y1], [seg.x2, seg.y2]]) {
+    corners.push({ x: x + nx, y: y + ny, kind: "face", category });
+    corners.push({ x: x - nx, y: y - ny, kind: "face", category });
+  }
+  return corners;
+}
+
+/**
+ * Every point another wall, beam, room, slab or roof corner could be joined
+ * to, minus whatever the caller is currently dragging (so an object never
+ * "snaps" to its own other endpoint or its own corners).
+ *
+ * Each point carries a `kind`, and the distinction is not only cosmetic:
+ *  - "endpoint": a wall/beam centreline end. This is the corner
+ *    `joinWallCorners` merges on, so it is the structurally real join.
+ *  - "face": a corner of a wall/foundation's drawn thickness. Visible, and
+ *    what a person points at, but half a thickness off the centreline - so it
+ *    is a drafting alignment, *not* something the corner-join pass will weld.
+ *  - "corner": a room/slab/roof polygon corner, already a real outline point
+ *    rather than a centreline abstraction.
+ *
+ * Wall/beam points also carry `category` (the SKU category - "wall",
+ * "foundation", "boundarywall", "beam"...) when the caller supplies
+ * `categoryOf`, so a caption can say *which* object a corner belongs to. That
+ * matters because targets are collected across every level, not only the
+ * active one (there is no level filter here) - a foundation-level user can
+ * catch a corner belonging to an upper-floor wall they cannot currently see,
+ * and without the category it looks like an unexplained foundation corner.
+ *
+ * Both `categoryOf` and `thicknessOf` read the SKU pack, which this module
+ * deliberately has no access to, so it can be unit tested on its own; face
+ * corners and categories simply don't appear until a caller supplies them.
+ */
 export function collectSnapTargets(doc, opts = {}) {
   const excludeSegmentIds = opts.excludeSegmentIds || new Set();
   const excludeBeamIds = opts.excludeBeamIds || new Set();
+  const thicknessOf = opts.thicknessOf || null;
+  const categoryOf = opts.categoryOf || null;
   const points = [];
   for (const seg of doc.segments || []) {
     if (excludeSegmentIds.has(seg.id) || !snapIncluded(seg, opts)) continue;
-    points.push({ x: seg.x1, y: seg.y1 });
-    points.push({ x: seg.x2, y: seg.y2 });
+    const category = categoryOf ? categoryOf(seg) : null;
+    points.push({ x: seg.x1, y: seg.y1, kind: "endpoint", category });
+    points.push({ x: seg.x2, y: seg.y2, kind: "endpoint", category });
+    if (thicknessOf) {
+      for (const corner of faceCorners(seg, thicknessOf(seg), category)) points.push(corner);
+    }
   }
   for (const beam of doc.beams || []) {
     if (excludeBeamIds.has(beam.id) || !snapIncluded(beam, opts)) continue;
-    points.push({ x: beam.x1, y: beam.y1 });
-    points.push({ x: beam.x2, y: beam.y2 });
+    const category = categoryOf ? categoryOf(beam) : "beam";
+    points.push({ x: beam.x1, y: beam.y1, kind: "endpoint", category });
+    points.push({ x: beam.x2, y: beam.y2, kind: "endpoint", category });
   }
   for (const room of doc.rooms || []) {
     if (!snapIncluded(room, opts)) continue;
-    for (const [x, y] of roomPolygon(room)) points.push({ x, y });
+    for (const [x, y] of roomPolygon(room)) points.push({ x, y, kind: "corner" });
   }
   for (const slab of doc.slabs || []) {
     if (!snapIncluded(slab, opts)) continue;
-    for (const [x, y] of shapePolygon(slab.shape)) points.push({ x, y });
+    for (const [x, y] of shapePolygon(slab.shape)) points.push({ x, y, kind: "corner" });
   }
   for (const roof of doc.roofs || []) {
     if (!snapIncluded(roof, opts)) continue;
-    for (const [x, y] of shapePolygon(roof.shape)) points.push({ x, y });
+    for (const [x, y] of shapePolygon(roof.shape)) points.push({ x, y, kind: "corner" });
   }
   return points;
 }

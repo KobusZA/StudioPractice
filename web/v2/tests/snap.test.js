@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { emptyDoc, rectShape } from "../model.js";
-import { applyNicePoint, bestEndpointSnap, collectSnapEdges, collectSnapTargets, nearestAlignments, probeAlongEdge, probeAlongOccupiedEdge, probeDirection, resolveProbes, snapCoord, snapLengthFrom, snapNiceDelta, snapPoint } from "../snap.js";
+import { ALIGN_ORIGIN_MAX_M, GAP_MAX_M, applyNicePoint, bestEndpointSnap, collectSnapEdges, collectSnapTargets, faceCorners, isExactPointSnap, nearestAlignments, probeAlongEdge, probeAlongOccupiedEdge, probeDirection, resolveProbes, snapCoord, snapLengthFrom, snapNiceDelta, snapPoint } from "../snap.js";
 
 function docWithWall(x1, y1, x2, y2, id = "s1") {
   const doc = emptyDoc();
@@ -37,6 +37,96 @@ test("collectSnapTargets includes room, slab and roof corners", () => {
   const points = collectSnapTargets(doc);
   assert.equal(points.length, 12);
   assert.ok(points.some((p) => p.x === -0.4 && p.y === -0.4), "roof eaves are snap targets");
+});
+
+test("faceCorners offsets both ends by half the drawn thickness", () => {
+  // A 600 mm strip footing running east: its visible corners sit 300 mm either
+  // side of the centreline, which is the offset that used to show up as an
+  // unexplained "300 mm" gap label with nothing snappable at it.
+  const corners = faceCorners({ x1: 0, y1: 0, x2: 5, y2: 0 }, 0.6);
+  assert.equal(corners.length, 4);
+  assert.ok(corners.every((c) => c.kind === "face"));
+  assert.ok(corners.some((c) => c.x === 0 && Math.abs(c.y - 0.3) < 1e-9));
+  assert.ok(corners.some((c) => c.x === 0 && Math.abs(c.y + 0.3) < 1e-9));
+  assert.ok(corners.some((c) => c.x === 5 && Math.abs(c.y - 0.3) < 1e-9));
+  assert.ok(corners.some((c) => c.x === 5 && Math.abs(c.y + 0.3) < 1e-9));
+});
+
+test("faceCorners offsets perpendicular to the run, whatever its direction", () => {
+  // Running north, so the faces are east/west - the offset follows the normal,
+  // not a fixed axis.
+  const corners = faceCorners({ x1: 2, y1: 0, x2: 2, y2: 4 }, 0.22);
+  assert.ok(corners.some((c) => Math.abs(c.x - 1.89) < 1e-9 && c.y === 0));
+  assert.ok(corners.some((c) => Math.abs(c.x - 2.11) < 1e-9 && c.y === 0));
+});
+
+test("faceCorners has nothing to offset without a thickness or a length", () => {
+  assert.deepEqual(faceCorners({ x1: 0, y1: 0, x2: 5, y2: 0 }, 0), []);
+  assert.deepEqual(faceCorners({ x1: 0, y1: 0, x2: 5, y2: 0 }, undefined), []);
+  assert.deepEqual(faceCorners({ x1: 1, y1: 1, x2: 1, y2: 1 }, 0.6), []);
+});
+
+test("collectSnapTargets tags what each point is", () => {
+  const doc = docWithWall(0, 0, 3, 0);
+  doc.rooms.push({ id: "r1", shape: rectShape(0, 0, 4, 3) });
+  doc.beams.push({ id: "b1", sku: "beam", level: "l1", x1: 0, y1: 5, x2: 2, y2: 5 });
+  const kinds = new Set(collectSnapTargets(doc).map((p) => p.kind));
+  assert.deepEqual([...kinds].sort(), ["corner", "endpoint"]);
+});
+
+test("collectSnapTargets adds face corners only when given a thickness resolver", () => {
+  const doc = docWithWall(0, 0, 3, 0);
+  // Without a resolver the centreline ends are still all there is, so callers
+  // that never had pack access keep their old target set exactly.
+  assert.equal(collectSnapTargets(doc).length, 2);
+
+  const withFaces = collectSnapTargets(doc, { thicknessOf: () => 0.6 });
+  assert.equal(withFaces.length, 6);
+  assert.equal(withFaces.filter((p) => p.kind === "endpoint").length, 2);
+  assert.equal(withFaces.filter((p) => p.kind === "face").length, 4);
+});
+
+test("collectSnapTargets skips faces for a segment whose SKU is unknown", () => {
+  // segmentThickness() in ui.js returns 0 for an unresolved SKU, which must
+  // read as "no faces" rather than a zero-width pair on the centreline.
+  const doc = docWithWall(0, 0, 3, 0);
+  const points = collectSnapTargets(doc, { thicknessOf: () => 0 });
+  assert.equal(points.length, 2);
+  assert.ok(points.every((p) => p.kind === "endpoint"));
+});
+
+test("collectSnapTargets tags wall/beam points with category when given a resolver", () => {
+  const doc = docWithWall(0, 0, 3, 0, "s1");
+  doc.segments.push({ id: "s2", sku: "footing", level: "l1", x1: 0, y1: 5, x2: 3, y2: 5, status: "planned" });
+  doc.beams.push({ id: "b1", sku: "beam-a", level: "l1", x1: 0, y1: 10, x2: 2, y2: 10 });
+  const categoryOf = (obj) => ({ wall: "wall", footing: "foundation", "beam-a": "beam" }[obj.sku] || null);
+  const points = collectSnapTargets(doc, {
+    thicknessOf: () => 0.6,
+    categoryOf,
+  });
+  assert.ok(points.filter((p) => p.x === 0 && p.y === 0).every((p) => p.category === "wall"));
+  assert.ok(points.some((p) => p.category === "foundation" && p.kind === "face"));
+  assert.ok(points.some((p) => p.category === "beam" && p.kind === "endpoint"));
+});
+
+test("collectSnapTargets falls back to \"beam\" category without a resolver", () => {
+  const doc = emptyDoc();
+  doc.beams.push({ id: "b1", sku: "beam-a", level: "l1", x1: 0, y1: 0, x2: 2, y2: 0 });
+  const points = collectSnapTargets(doc);
+  assert.ok(points.every((p) => p.category === "beam"));
+});
+
+test("a face corner is joinable in its own right", () => {
+  // The reported symptom: pointing at the visible corner of a 600 mm footing.
+  // The centreline end is 300 mm away and far outside a tight tolerance, so
+  // before faces were collected this could not snap to anything at all.
+  const doc = docWithWall(0, 0, 5, 0);
+  const targets = collectSnapTargets(doc, { thicknessOf: () => 0.6 });
+  const join = snapPoint(0.002, 0.298, targets, 0.05);
+  assert.equal(isExactPointSnap(join), true);
+  assert.equal(join.x, 0);
+  assert.ok(Math.abs(join.y - 0.3) < 1e-9);
+  assert.equal(join.guideXPoint.kind, "face");
 });
 
 test("snapPoint joins onto the nearest target within tolerance", () => {
@@ -284,6 +374,36 @@ test("applyNicePoint does not break an exact endpoint join", () => {
   });
   assert.equal(point.x, 3);
   assert.equal(point.y, 0);
+});
+
+test("isExactPointSnap is true only for a same-point join on both axes", () => {
+  const join = snapPoint(3.02, 0.02, [{ x: 3, y: 0 }], 0.1);
+  assert.equal(isExactPointSnap(join), true);
+
+  const alignment = snapPoint(5.02, 0.5, [{ x: 5, y: 9 }], 0.1);
+  assert.equal(isExactPointSnap(alignment), false);
+
+  const nothing = snapPoint(0, 0, [{ x: 5, y: 5 }], 0.1);
+  assert.equal(isExactPointSnap(nothing), false);
+});
+
+test("ALIGN_ORIGIN_MAX_M is tighter than GAP_MAX_M", () => {
+  // The gap-dimension label is fine to draw from well across the site, but
+  // an edge-alignment point that far away must not be trusted as the
+  // anchor for round-length snapping - see applySnap() in ui.js, which
+  // gates the two at these two different radii.
+  assert.ok(ALIGN_ORIGIN_MAX_M < GAP_MAX_M);
+});
+
+test("nearestAlignments beyond ALIGN_ORIGIN_MAX_M is still reported, for the caller to filter", () => {
+  // nearestAlignments itself has no opinion on the radius - it just reports
+  // the closest point/edge and lets the caller (applySnap) decide which of
+  // its two thresholds applies.
+  const edges = [{ x1: 0, y1: 0, x2: 0, y2: 10 }];
+  const result = nearestAlignments(2.5, 5, [], edges);
+  assert.ok(result.dist > ALIGN_ORIGIN_MAX_M);
+  assert.ok(result.dist <= GAP_MAX_M);
+  assert.deepEqual(result.nearest, { x: 0, y: 5 });
 });
 
 test("applyNicePoint keeps an X alignment and rounds the free length", () => {

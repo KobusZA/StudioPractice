@@ -374,6 +374,68 @@ export function joinSelection(doc, refs) {
   return done("Joined into one.", [first.ref]);
 }
 
+// --- retype ------------------------------------------------------------
+
+/**
+ * Which field a SKU would land in on this object, or null if the SKU's
+ * category cannot retype this kind at all. Mirrors the per-kind rules v1's
+ * `applySkuToSelection` (ui.js) checked one object at a time - kept here so a
+ * one-object click and a whole-selection retype apply exactly the same rule.
+ */
+function retypeField(ref, obj, sku, skuById) {
+  if (ref.kind === "room") {
+    if (sku.category === "wall" || sku.category === "boundarywall") return "wallSku";
+    if (sku.category === "floor") return "floorSku";
+    return null;
+  }
+  if (ref.kind === "slab") return (sku.category === "floor" || sku.category === "pool") ? "sku" : null;
+  if (ref.kind === "roof") return (sku.category === "roof" || sku.category === "carport") ? "sku" : null;
+  if (ref.kind === "segment") {
+    return (sku.category === "wall" || sku.category === "foundation" || sku.category === "boundarywall") ? "sku" : null;
+  }
+  if (ref.kind === "opening" || ref.kind === "item") {
+    return skuById(obj.sku)?.category === sku.category ? "sku" : null;
+  }
+  if (ref.kind === "beam") return (sku.category === "beam" || sku.category === "column") ? "sku" : null;
+  return null;
+}
+
+/**
+ * Retype a whole selection to one SKU in one action - Revit's Type Selector
+ * applied to a multi-object selection, rather than the one-object-at-a-time
+ * limit the palette click used to have. Compatibility is judged per object,
+ * so a mixed selection (say, a run of foundations plus one interior wall)
+ * retypes only the members that accept the clicked SKU's category and
+ * reports the rest as skipped instead of silently leaving the whole
+ * selection untouched.
+ */
+export function retypeSelection(doc, refs, sku, { skuById = () => null } = {}) {
+  const rows = resolve(doc, refs);
+  if (!rows.length) return fail("Nothing selected.");
+
+  const retyped = [];
+  const skipped = [];
+  for (const row of rows) {
+    const field = retypeField(row.ref, row.obj, sku, skuById);
+    if (!field) { skipped.push(row); continue; }
+    row.obj[field] = sku.id;
+    retyped.push(row);
+  }
+
+  if (!retyped.length) return fail("Nothing selected can be that type.");
+
+  const plural = retyped.length === 1 ? "" : "s";
+  const skipText = skipped.length
+    ? `; left ${skipped.length} unchanged (different kind)`
+    : "";
+  return {
+    ok: true,
+    message: `Retyped ${retyped.length} object${plural} to "${sku.name}"${skipText}.`,
+    refs: retyped.map((row) => row.ref),
+    skipped: skipped.map((row) => row.ref),
+  };
+}
+
 // --- attach base -----------------------------------------------------------
 //
 // Revit's Attach Base, scoped to the numeric relationship: an object's base is

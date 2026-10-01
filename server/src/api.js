@@ -4,11 +4,12 @@
 
 import {
   AuthError, RateLimiter, SESSION_COOKIE, SESSION_TTL_MS,
-  refreshOfflineLease, resolveSession, revokeSession, signIn, signUp,
+  inviteMember, refreshOfflineLease, resolveSession, revokeSession, signIn, signUp,
 } from "./auth.js";
 import {
-  ConflictError, DuplicateCodeError, IssuedError, ValidationError, openStore,
+  ConflictError, DuplicateCodeError, IssuedError, PermissionError, ValidationError, openStore,
 } from "./store.js";
+import { capabilitiesFor } from "./permissions.js";
 import {
   ACTIVITY_TYPES, BILLING_BASES, PROJECT_STATUSES, WRITE_DOWN_REASONS,
 } from "./defaults.js";
@@ -17,6 +18,7 @@ import {
   HttpError, clearedCookie, createRouter, parseCookies, readJsonBody, sendJson, sessionCookie,
 } from "./http.js";
 import { generateVisualization } from "./visualize.js";
+import { validDate } from "./team-report.js";
 
 /**
  * `env` is a parameter rather than a read of `process.env` inside so that the
@@ -42,6 +44,16 @@ export function createApi(pool, options = {}, env = process.env) {
     ["POST", "/api/auth/sign-in", handleSignIn],
     ["POST", "/api/auth/sign-out", handleSignOut],
     ["GET", "/api/auth/session", handleSession],
+
+    // A firm's own people, and adding a second one. Owner-only to add: this
+    // is the only path that can ever write a `membership` row after sign-up,
+    // and its role is fixed to `'employee'` (see auth.js's inviteMember) so
+    // it cannot be used to hand out `'owner'` over the API.
+    ["GET", "/api/team", handleListTeam],
+    ["POST", "/api/team", handleInviteTeamMember],
+    ["GET", "/api/team/roster", handleTeamRoster],
+    ["PATCH", "/api/team/:userId", handleUpdateTeamMember],
+    ["DELETE", "/api/team/:userId", handleRemoveTeamMember],
 
     ["GET", "/api/projects", handleListProjects],
     ["POST", "/api/projects", handleCreateProject],
@@ -74,7 +86,13 @@ export function createApi(pool, options = {}, env = process.env) {
     ["POST", "/api/projects/:id/tasks", handleAddProjectTask],
     ["PATCH", "/api/tasks/:id", handleUpdateProjectTask],
     ["GET", "/api/fee-templates/:code", handleGetFeeTemplate],
+    ["PUT", "/api/fee-templates/:code", handlePutFeeTemplate],
+    ["POST", "/api/fee-templates/:code/reset", handleResetFeeTemplate],
 
+    ["GET", "/api/org/settings", handleGetOrgSettings],
+    ["PUT", "/api/org/settings", handlePutOrgSettings],
+
+    ["GET", "/api/team/report", handleTeamReport],
     ["GET", "/api/time-entries", handleListTimeEntries],
     ["POST", "/api/time-entries", handleCreateTimeEntry],
     ["DELETE", "/api/time-entries/:id", handleDeleteTimeEntry],
@@ -132,6 +150,10 @@ export function createApi(pool, options = {}, env = process.env) {
           error: "That certificate has been issued and cannot be changed",
           certificateId: error.certificateId,
         });
+      } else if (error instanceof PermissionError) {
+        // Reachable, so 403 rather than the 404 an out-of-org id gets - the
+        // caller is right that the record exists, just not allowed the write.
+        sendJson(res, 403, { error: error.message });
       } else if (error instanceof ValidationError) {
         sendJson(res, 400, { error: error.message });
       } else if (error instanceof HttpError) {
@@ -185,6 +207,55 @@ async function handleSession({ req, res, pool }) {
   // Being here, online, is what renews the offline lease (§6).
   const offlineUntil = await refreshOfflineLease(pool, session.sessionId);
   sendJson(res, 200, { signedIn: true, ...sessionPayload({ ...session, offlineUntil }) });
+}
+
+// --- the team ----------------------------------------------------------
+
+async function handleListTeam({ req, res, pool }) {
+  const store = await requireStore(pool, req);
+  sendJson(res, 200, { members: await store.listTeam() });
+}
+
+async function handleTeamRoster({ req, res, pool }) {
+  const store = await requireStore(pool, req);
+  sendJson(res, 200, { members: await store.teamRoster() });
+}
+
+async function handleUpdateTeamMember({ req, res, pool, params }) {
+  const store = await requireStore(pool, req);
+  const body = (await readJsonBody(req)) || {};
+  if (!(await store.updateTeamMember(params.userId, body))) throw new HttpError(404, "No such team member");
+  sendJson(res, 200, { members: await store.teamRoster() });
+}
+
+async function handleRemoveTeamMember({ req, res, pool, params }) {
+  const store = await requireStore(pool, req);
+  if (!(await store.removeTeamMember(params.userId))) throw new HttpError(404, "No such team member");
+  sendJson(res, 200, { members: await store.teamRoster() });
+}
+
+/**
+ * Adding a second person to a firm. Owner-only - checked here, not left to
+ * `inviteMember` alone, because the store layer has no concept of "who is
+ * allowed to call this method" and this is the one write in the whole API
+ * whose caller-role check has nothing to do with the record being touched
+ * (there is no project/certificate id to scope against; the check is purely
+ * "is this session an owner").
+ */
+async function handleInviteTeamMember({ req, res, pool }) {
+  const session = await requireSession(pool, req);
+  if (session.role !== "owner") {
+    throw new AuthError(403, "Only an owner can add a team member");
+  }
+  const body = (await readJsonBody(req)) || {};
+  const member = await inviteMember(pool, {
+    orgId: session.orgId,
+    invitedBy: session.userId,
+    email: body.email,
+    password: body.password,
+    role: body.role || undefined,
+  });
+  sendJson(res, 201, { member });
 }
 
 // --- the library -----------------------------------------------------------
@@ -402,6 +473,14 @@ async function handleGetFeeSchedule({ req, res, pool, params }) {
  */
 async function handleSetFeeSchedule({ req, res, pool, params }) {
   const session = await requireSession(pool, req);
+  // Guarded at the route rather than inside `setFeeSchedule` itself: that
+  // store method is also how `instantiateTemplate` clones a template's
+  // phases onto a new job, which must keep working for whoever is allowed to
+  // register a job at all. The explicit "revise the schedule" request this
+  // route answers is the thing that is owner-only, not the method.
+  if (!capabilitiesFor(session.role).canViewBilled) {
+    throw new AuthError(403, "Only an owner can revise the fee schedule");
+  }
   const body = (await readJsonBody(req)) || {};
   const feeSchedule = await withTransaction(pool, (client) => (
     openStore(client, session).setFeeSchedule(params.id, body.lines)
@@ -481,7 +560,57 @@ async function handleGetFeeTemplate({ req, res, pool, params }) {
   sendJson(res, 200, { template: await store.getFeeTemplate(params.code) });
 }
 
+/** Owner-only (the store refuses anyone else): replaces a type's template. */
+async function handlePutFeeTemplate({ req, res, pool, params }) {
+  const session = await requireSession(pool, req);
+  const body = (await readJsonBody(req)) || {};
+  const template = await withTransaction(pool, (client) => (
+    openStore(client, session).replaceFeeTemplate(params.code, body)
+  ));
+  if (!template) throw new HttpError(404, "No such project type");
+  sendJson(res, 200, { template });
+}
+
+async function handleResetFeeTemplate({ req, res, pool, params }) {
+  const session = await requireSession(pool, req);
+  const template = await withTransaction(pool, (client) => (
+    openStore(client, session).resetFeeTemplate(params.code)
+  ));
+  if (!template) throw new HttpError(404, "No such project type");
+  sendJson(res, 200, { template });
+}
+
+// --- the firm's letterhead ---------------------------------------------------
+
+async function handleGetOrgSettings({ req, res, pool }) {
+  const store = await requireStore(pool, req);
+  sendJson(res, 200, { settings: await store.getOrgSettings() });
+}
+
+async function handlePutOrgSettings({ req, res, pool }) {
+  const session = await requireSession(pool, req);
+  const body = (await readJsonBody(req)) || {};
+  const settings = await withTransaction(pool, (client) => (
+    openStore(client, session).updateOrgSettings(body)
+  ));
+  sendJson(res, 200, { settings });
+}
+
 // --- the timesheet ---------------------------------------------------------
+
+/**
+ * Defaults to the month so far. `to` is clamped to today inside the report:
+ * a month that is half over must not score anyone against a full one.
+ */
+async function handleTeamReport({ req, res, pool, url }) {
+  const store = await requireStore(pool, req);
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Johannesburg" }).format(new Date());
+  const from = blankToNull(url.searchParams.get("from")) ?? `${today.slice(0, 8)}01`;
+  const to = blankToNull(url.searchParams.get("to")) ?? today;
+  if (!validDate(from) || !validDate(to)) throw new HttpError(400, "from and to are dates, YYYY-MM-DD");
+  if (from > to) throw new HttpError(400, "from is after to");
+  sendJson(res, 200, { report: await store.teamReport({ from, to, today }) });
+}
 
 async function handleListTimeEntries({ req, res, pool, url }) {
   const store = await requireStore(pool, req);
@@ -569,6 +698,7 @@ async function handleAddLinesFromTime({ req, res, pool, params }) {
     openStore(client, session).addCertificateLinesFromTime(params.id, {
       from: blankToNull(body.from),
       to: blankToNull(body.to),
+      userId: blankToNull(body.userId),
     })
   ));
   if (!certificate) throw new HttpError(404, "No such certificate");
@@ -663,6 +793,11 @@ function sessionPayload(session) {
     orgId: session.orgId ?? null,
     orgName: session.orgName ?? null,
     role: session.role ?? null,
+    // Sent alongside the role, not looked up separately by the client: the
+    // web app hides money by capability, not by hardcoding "role ===
+    // 'owner'" in a dozen places that would all have to change together the
+    // day a third role exists.
+    capabilities: capabilitiesFor(session.role),
     memberSince: session.memberSince ? new Date(session.memberSince).toISOString() : null,
     offlineUntil: session.offlineUntil ?? null,
   };

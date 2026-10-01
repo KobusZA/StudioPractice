@@ -5,11 +5,15 @@
   "description": "System of record for jobs: accounts, projects, and the drawing row each project owns.",
   "scripts": {
     "start": "node src/server.js",
+    "dev": "nodemon --legacy-watch --watch src src/server.js",
     "migrate": "node db/migrate.js",
     "pretest": "node db/migrate.js",
     "test": "node --test \"tests/**/*.test.js\""
   },
   "dependencies": {
     "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
   }
 }

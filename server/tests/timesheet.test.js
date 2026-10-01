@@ -150,6 +150,38 @@ test("time captured but never certified is reported as such", async () => {
   assert.equal(financials.certifiedGross, 0);
 });
 
+test("prints and kilometres are recorded on the row without pricing it", async () => {
+  const { baseUrl } = await testServer();
+  const { client, project } = await firmWithRegisterProject(baseUrl);
+  const { entry } = await logHour(client, project.id, {
+    activityType: "Print", printsQty: 46, travelKm: 34.5,
+  });
+
+  assert.equal(entry.printsQty, 46);
+  assert.equal(entry.travelKm, 34.5);
+  // The quantities travel with the hour but do not touch what the hour is
+  // worth: the workbook's own manual claimed its macro priced both and the
+  // macro never read either column, so an unpriced quantity is the honest
+  // state until a unit rate exists to price it with.
+  assert.equal(entry.capturedAmount, 1920);
+
+  const listed = await client.get(`/api/time-entries?project=${project.id}`);
+  assert.equal(listed.body.entries[0].printsQty, 46);
+  assert.equal(listed.body.entries[0].travelKm, 34.5);
+
+  const { financials } = (await client.get(`/api/projects/${project.id}/financials`)).body;
+  assert.equal(financials.captured, 1920);
+});
+
+test("an entry with no quantities reads as zero, not null", async () => {
+  const { baseUrl } = await testServer();
+  const { client, project } = await firmWithRegisterProject(baseUrl);
+  // The form sends "" for an untouched optional number field.
+  const { entry } = await logHour(client, project.id, { printsQty: "", travelKm: "" });
+  assert.equal(entry.printsQty, 0);
+  assert.equal(entry.travelKm, 0);
+});
+
 test("an entry that is not a record is refused", async () => {
   const { baseUrl } = await testServer();
   const { client, project } = await firmWithRegisterProject(baseUrl);

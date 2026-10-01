@@ -10,6 +10,7 @@ import { promisify } from "node:util";
 import { sid } from "./ids.js";
 import { withTransaction } from "./db.js";
 import { openStore } from "./store.js";
+import { ROLES } from "./permissions.js";
 
 const scrypt = promisify(scryptCb);
 
@@ -132,6 +133,47 @@ export async function signUp(pool, { email, password, orgName }) {
 }
 
 /**
+ * A second person under an existing firm, added by its owner. The shape is
+ * `signUp` minus "create the org" - same account rules (email, a real
+ * password), but the membership row joins the caller's org rather than a new
+ * one, and its role is fixed to `'employee'`: this path exists to answer
+ * PERMISSIONS-PROPOSAL.md's rollout step 3 ("no invite flow exists at all
+ * today"), not to let anyone hand out `'owner'` over the API.
+ *
+ * No practice-defaults seeding here - that only ever runs once, for the org's
+ * first user, and the org this person is joining already has its type list
+ * and tariff bands.
+ */
+export async function inviteMember(pool, { orgId, invitedBy, email, password, role = "employee" }) {
+  if (!ROLES.includes(role)) throw new AuthError(400, `role must be one of: ${ROLES.join(", ")}`);
+  const clean = normalizeEmail(email);
+  if (!clean.includes("@")) throw new AuthError(400, "A valid email is required");
+  if (String(password || "").length < 10) {
+    throw new AuthError(400, "A password of at least 10 characters is required");
+  }
+  const userId = sid("usr");
+  const passwordHash = await hashPassword(password);
+
+  return withTransaction(pool, async (client) => {
+    try {
+      await client.query(
+        `insert into app_user (id, email, password_hash, created_by) values ($1, $2, $3, $4)`,
+        [userId, clean, passwordHash, invitedBy],
+      );
+    } catch (error) {
+      if (error.code === "23505") throw new AuthError(409, "That email is already registered");
+      throw error;
+    }
+    await client.query(
+      `insert into membership (id, user_id, org_id, role, created_by)
+            values ($1, $2, $3, $4, $5)`,
+      [sid("mem"), userId, orgId, role, invitedBy],
+    );
+    return { userId, email: clean, orgId, role };
+  });
+}
+
+/**
  * Sign-in. Rate limiting lives in the route (it needs the client address); what
  * is here is the part that must not leak which half was wrong. A missing
  * account and a wrong password return the same message, and an unknown email
@@ -163,14 +205,19 @@ export async function signIn(pool, { email, password }) {
   );
   if (!memberships[0]) throw new AuthError(403, "That account is not a member of a firm");
 
+  const membership = memberships[0];
+  // Idempotent: ON CONFLICT DO NOTHING. Firms created before practice defaults
+  // existed arrive with an empty type list; signing in is when that is fixed.
+  await openStore(pool, { orgId: membership.org_id, userId: user.id }).seedPracticeDefaults();
+
   const session = await issueSession(pool, user.id);
   return {
     userId: user.id,
     email: clean,
-    orgId: memberships[0].org_id,
-    orgName: memberships[0].org_name,
-    role: memberships[0].role,
-    memberSince: memberships[0].member_since,
+    orgId: membership.org_id,
+    orgName: membership.org_name,
+    role: membership.role,
+    memberSince: membership.member_since,
     ...session,
   };
 }

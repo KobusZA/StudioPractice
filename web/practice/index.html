@@ -48,8 +48,18 @@
     <nav class="nav" id="nav" aria-label="Practice operations">
       <button type="button" data-view="practice">Practice</button>
       <button type="button" data-view="register">Register</button>
+      <button type="button" data-view="time">My time</button>
+      <!-- Owner-only; renderChrome() reveals it. Absent, not greyed. -->
+      <button type="button" data-view="team" id="nav-team" hidden>Team</button>
+      <button type="button" data-view="templates" id="nav-templates" hidden>Fee templates</button>
+      <button type="button" data-view="firm" id="nav-firm" hidden>Firm details</button>
     </nav>
     <div class="spacer"></div>
+    <!-- Sticky selection: the job you were last in stays reachable in one
+         click while you wander off to Practice or Register, the way
+         Vantagepoint keeps a hub's selection alive across applications.
+         Hidden whenever there's nothing to be sticky about. -->
+    <button class="btn btn-sm" id="current-job" hidden></button>
     <button class="btn btn-sm" id="switch-job" hidden>Switch job <kbd>Ctrl K</kbd></button>
     <button class="btn btn-sm btn-primary" id="new-project">New job</button>
     <span class="who" id="who"></span>

@@ -74,6 +74,33 @@ test("a job with no code is refused", async () => {
   assert.match(res.body.error, /project code is required/);
 });
 
+test("sign-in backfills practice defaults for a firm that predates them", async () => {
+  const { baseUrl, pool } = await testServer();
+  const { client, email, account } = await signedUpAgent(baseUrl);
+  await pool.query(
+    "update project_type set deleted_at = now() where org_id = $1 and deleted_at is null",
+    [account.orgId],
+  );
+  await pool.query(
+    "update rate_band set deleted_at = now() where org_id = $1 and deleted_at is null",
+    [account.orgId],
+  );
+
+  const empty = await client.get("/api/practice/reference");
+  assert.equal(empty.body.projectTypes.length, 0);
+
+  await client.post("/api/auth/sign-out", {});
+  const signIn = await client.post("/api/auth/sign-in", {
+    email,
+    password: "correct horse battery",
+  });
+  assert.equal(signIn.status, 200);
+
+  const { body } = await client.get("/api/practice/reference");
+  assert.equal(body.projectTypes.length, 9);
+  assert.equal(body.rateBands.length, 4);
+});
+
 test("a new firm starts with the type list and the tariff bands", async () => {
   const { baseUrl } = await testServer();
   const { client } = await signedUpAgent(baseUrl);
@@ -165,4 +192,77 @@ test("a job with no budget reports no burn rather than a fabricated one", async 
   assert.equal(body.project.financials.quoted, null);
   assert.equal(body.project.financials.captured, 1920);
   assert.equal(body.project.financials.burn, null);
+});
+
+/**
+ * An amount with no reason beside it is trivia, and the reason is already
+ * stored - so the breakdown travels with the total on every register row rather
+ * than being a second request the list would never make.
+ */
+test("the register says why money was written down, not only how much", async () => {
+  const { baseUrl } = await testServer();
+  const { client, project } = await firmWithRegisterProject(baseUrl);
+
+  const draft = (await client.post(`/api/projects/${project.id}/certificates`, {}))
+    .body.certificate;
+  await client.post(`/api/certificates/${draft.id}/lines`, {
+    description: "Stage one", amount: 40000,
+  });
+  await client.post(`/api/certificates/${draft.id}/write-downs`, {
+    amount: 10400, reasonCode: "client_relationship",
+  });
+  await client.post(`/api/certificates/${draft.id}/write-downs`, {
+    amount: 2000, reasonCode: "our_error",
+  });
+
+  // Still a draft: nothing has gone out, so nothing has been given up.
+  const asDraft = (await client.get(`/api/register/${project.id}`)).body.project.financials;
+  assert.equal(asDraft.writtenDown, 0);
+  assert.deepEqual(asDraft.writtenDownByReason, []);
+
+  await client.post(`/api/certificates/${draft.id}/issue`, {});
+  const issued = (await client.get(`/api/register/${project.id}`)).body.project.financials;
+  assert.equal(issued.writtenDown, 12400);
+  // Largest first, and the split adds up to the total it was summed from.
+  assert.deepEqual(issued.writtenDownByReason, [
+    { reasonCode: "client_relationship", amount: 10400 },
+    { reasonCode: "our_error", amount: 2000 },
+  ]);
+  assert.equal(
+    issued.writtenDownByReason.reduce((sum, row) => sum + row.amount, 0),
+    issued.writtenDown,
+  );
+});
+
+/**
+ * Where the next certificate's period starts. On the register row, because the
+ * question "what can I invoice right now" is asked of the whole list at once.
+ */
+test("the register carries the last certificate that actually went out", async () => {
+  const { baseUrl } = await testServer();
+  const { client, project } = await firmWithRegisterProject(baseUrl);
+
+  const never = (await client.get(`/api/register/${project.id}`)).body.project;
+  assert.equal(never.lastCertificate, null);
+
+  const first = (await client.post(`/api/projects/${project.id}/certificates`, {
+    periodStart: "2026-05-01", periodEnd: "2026-05-31",
+  })).body.certificate;
+  // A draft is not a certificate that went out.
+  assert.equal((await client.get(`/api/register/${project.id}`)).body.project.lastCertificate, null);
+
+  await client.post(`/api/certificates/${first.id}/issue`, {});
+  const after = (await client.get(`/api/register/${project.id}`)).body.project.lastCertificate;
+  assert.equal(after.seq, 1);
+  assert.equal(String(after.periodEnd).slice(0, 10), "2026-05-31");
+  assert.ok(after.issuedAt);
+
+  // The newest issued one, not the first.
+  const second = (await client.post(`/api/projects/${project.id}/certificates`, {
+    periodStart: "2026-06-01", periodEnd: "2026-06-30",
+  })).body.certificate;
+  await client.post(`/api/certificates/${second.id}/issue`, {});
+  const newest = (await client.get(`/api/register/${project.id}`)).body.project.lastCertificate;
+  assert.equal(newest.seq, 2);
+  assert.equal(String(newest.periodEnd).slice(0, 10), "2026-06-30");
 });

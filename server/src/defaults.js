@@ -43,7 +43,17 @@ export const DEFAULT_RATE_BANDS = [
 export const ACTIVITY_TYPES = [
   "Phone call", "Report", "File work", "Meeting", "Site visit", "Admin",
   "Networking", "Town planning", "Architectural work", "Training", "Marketing",
-  "Travel", "Print", "Daily huddle", "Friday club", "Excel work", "Other",
+  "Travel", "Print", "Daily huddle", "Friday club", "Excel work", "Finances", "Other",
+];
+
+/**
+ * Time spent running the firm rather than doing a client's work. Drives the
+ * billable share on the team report; a type not listed here counts as client
+ * work, because guessing "internal" would flatter nobody and hide real hours.
+ */
+export const INTERNAL_ACTIVITY_TYPES = [
+  "Admin", "Networking", "Training", "Marketing", "Daily huddle",
+  "Friday club", "Excel work", "Finances", "Other",
 ];
 
 /**
@@ -53,6 +63,10 @@ export const ACTIVITY_TYPES = [
  */
 export const WRITE_DOWN_REASONS = [
   "scope_creep", "under_quoted", "our_error", "client_relationship", "goodwill",
+  // Hours past a capped fee (project.fee_ceiling). Distinct from under_quoted:
+  // that one says the quote was wrong, this one says the cap did what it was
+  // meant to and the overrun is the firm's.
+  "fee_ceiling",
 ];
 
 export const BILLING_BASES = ["fixed_fee", "time_and_materials"];

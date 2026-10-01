@@ -18,6 +18,8 @@ import { DEFAULT_PROJECT_TYPES, DEFAULT_RATE_BANDS } from "./defaults.js";
 import { FEE_TEMPLATES, pctSplit, templateTotal } from "./fee-templates.js";
 import { certificateUnits, priceEntry, toCents } from "./pricing.js";
 import { sid } from "./ids.js";
+import { buildTeamReport } from "./team-report.js";
+import { capabilitiesFor, gate, ROLES } from "./permissions.js";
 
 /**
  * How stale the newest recovery snapshot must be before a save writes another.
@@ -76,19 +78,190 @@ export class IssuedError extends Error {
 }
 
 /**
+ * The caller can reach the record - it is in their org - but their role does
+ * not carry the capability the write requires. Its own class, not a bare
+ * ValidationError, because the fix is "ask an owner", not "correct the
+ * request", and the route answers 403 rather than 400.
+ */
+export class PermissionError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "PermissionError";
+  }
+}
+
+/**
  * @param queryable a pool or, for anything that writes more than one row, a
  *   client already inside a transaction. Both satisfy `.query`.
- * @param scope `{ orgId, userId }`, resolved from the session.
+ * @param scope `{ orgId, userId, role }`, resolved from the session. `role`
+ *   is optional at the type level only for auth.js's own two seeding calls
+ *   (creating a firm, signing in), neither of which reads a gated field;
+ *   everywhere else it is the session's own `membership.role`.
  */
-export function openStore(queryable, { orgId, userId }) {
+export function openStore(queryable, { orgId, userId, role }) {
   if (!orgId) throw new Error("openStore requires an orgId");
   if (!userId) throw new Error("openStore requires a userId");
 
   const q = (text, params) => queryable.query(text, params);
+  const capabilities = capabilitiesFor(role);
+  const requireCapability = (capability, message) => {
+    if (!capabilities[capability]) throw new PermissionError(message);
+  };
 
   return {
     orgId,
     userId,
+    capabilities,
+
+    // --- the team ---------------------------------------------------------
+
+    /** Everyone with a live membership in this firm, owner first by join date. */
+    /**
+     * The firm's own particulars, printed on a certificate: trading name,
+     * address, VAT and registration numbers, banking, contact. Owner-only both
+     * ways - an employee never sees a certificate, so has no use for the
+     * account number on it.
+     *
+     * Every field is nullable and nothing is seeded; `name` (the sign-up
+     * label) is returned beside them so the screen can show what a blank
+     * trading name falls back to.
+     */
+    async getOrgSettings() {
+      requireCapability("canViewBilled", "only an owner can read the firm's letterhead");
+      const { rows } = await q(
+        `select name, ${Object.values(ORG_SETTING_COLUMNS).join(", ")}
+           from org where id = $1 and deleted_at is null`,
+        [orgId],
+      );
+      if (!rows[0]) return null;
+      const settings = { orgName: rows[0].name };
+      for (const [key, column] of Object.entries(ORG_SETTING_COLUMNS)) {
+        settings[key] = rows[0][column] ?? null;
+      }
+      return settings;
+    },
+
+    /** Only the keys present move; a blank clears one. Unknown keys are refused, not ignored. */
+    async updateOrgSettings(fields) {
+      requireCapability("canViewBilled", "only an owner can edit the firm's letterhead");
+      if (!fields || typeof fields !== "object") {
+        throw new ValidationError("settings are an object of fields");
+      }
+      const sets = [];
+      const params = [orgId];
+      for (const [key, value] of Object.entries(fields)) {
+        if (key === "orgName") continue;
+        const column = ORG_SETTING_COLUMNS[key];
+        if (!column) throw new ValidationError(`${key} is not a firm setting`);
+        params.push(trimmed(value));
+        sets.push(`${column} = $${params.length}`);
+      }
+      if (sets.length) {
+        await q(`update org set ${sets.join(", ")}, updated_at = now() where id = $1`, params);
+      }
+      return this.getOrgSettings();
+    },
+
+    async listTeam() {
+      const { rows } = await q(
+        `select m.user_id, m.role, m.created_at, u.email
+           from membership m
+           join app_user u on u.id = m.user_id and u.deleted_at is null
+          where m.org_id = $1 and m.deleted_at is null
+          order by m.created_at`,
+        [orgId],
+      );
+      return rows.map((row) => ({
+        userId: row.user_id,
+        email: row.email,
+        role: row.role,
+        createdAt: row.created_at,
+      }));
+    },
+
+    /**
+     * The owner's roster: everyone in the firm with their personal details and
+     * when they joined. Owner-only - phone numbers and notes about a colleague
+     * are not for the whole office.
+     */
+    async teamRoster() {
+      requireCapability("canViewBilled", "only an owner can see the team roster");
+      const { rows } = await q(
+        `select m.user_id, m.role, m.created_at, m.full_name, m.phone, m.job_title,
+                m.start_date, m.notes, u.email
+           from membership m
+           join app_user u on u.id = m.user_id and u.deleted_at is null
+          where m.org_id = $1 and m.deleted_at is null
+          order by (m.role = 'owner') desc, m.created_at`,
+        [orgId],
+      );
+      return rows.map((row) => ({
+        userId: row.user_id,
+        email: row.email,
+        role: row.role,
+        fullName: row.full_name,
+        phone: row.phone,
+        jobTitle: row.job_title,
+        // The date they joined the firm; defaults to when the account was added.
+        startDate: row.start_date
+          ? (row.start_date instanceof Date ? row.start_date.toISOString().slice(0, 10) : String(row.start_date).slice(0, 10))
+          : null,
+        notes: row.notes,
+        createdAt: row.created_at,
+        isYou: row.user_id === userId,
+      }));
+    },
+
+    async updateTeamMember(memberId, patch = {}) {
+      requireCapability("canViewBilled", "only an owner can edit a team member");
+      const columns = { fullName: "full_name", phone: "phone", jobTitle: "job_title", notes: "notes", startDate: "start_date" };
+      const sets = [];
+      const params = [orgId, memberId];
+      if (patch.role !== undefined) {
+        if (!ROLES.includes(patch.role)) throw new ValidationError(`role must be one of: ${ROLES.join(", ")}`);
+        // Nobody changes their own role, so a firm can never be left without an owner.
+        if (memberId === userId) throw new ValidationError("You cannot change your own permission level");
+        params.push(patch.role);
+        sets.push(`role = $${params.length}`);
+      }
+      for (const [key, column] of Object.entries(columns)) {
+        if (!(key in patch)) continue;
+        let value = patch[key] === null || patch[key] === undefined ? "" : String(patch[key]).trim();
+        if (key === "startDate" && value && !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+          throw new ValidationError("start date is YYYY-MM-DD");
+        }
+        if (value.length > 2000) throw new ValidationError(`${key} is too long`);
+        params.push(value === "" ? null : value);
+        sets.push(`${column} = $${params.length}`);
+      }
+      if (!sets.length) return false;
+      const { rowCount } = await q(
+        `update membership set ${sets.join(", ")}
+          where org_id = $1 and user_id = $2 and deleted_at is null`,
+        params,
+      );
+      return rowCount > 0;
+    },
+
+    /**
+     * Take someone out of the firm. Their time entries stay (they are the
+     * firm's record); their account is closed and their sessions end, so the
+     * address can be reused. Cannot remove yourself or an owner.
+     */
+    async removeTeamMember(memberId) {
+      requireCapability("canViewBilled", "only an owner can remove a team member");
+      if (memberId === userId) throw new ValidationError("You cannot remove yourself");
+      const { rows } = await q(
+        `select role from membership where org_id = $1 and user_id = $2 and deleted_at is null`,
+        [orgId, memberId],
+      );
+      if (!rows[0]) return false;
+      if (rows[0].role === "owner") throw new ValidationError("An owner cannot be removed");
+      await q(`update membership set deleted_at = now() where org_id = $1 and user_id = $2 and deleted_at is null`, [orgId, memberId]);
+      await q(`update session set deleted_at = now() where user_id = $1 and deleted_at is null`, [memberId]);
+      await q(`update app_user set deleted_at = now() where id = $1 and deleted_at is null`, [memberId]);
+      return true;
+    },
 
     // --- the library ----------------------------------------------------
 
@@ -216,7 +389,7 @@ export function openStore(queryable, { orgId, userId }) {
       const { rows } = await q(
         `select p.name, p.client_name, p.client_email, p.client_cell,
                 p.client_address, p.property_description, p.type_code,
-                p.budget_estimate, p.billing_basis, p.lead_user_id,
+                p.budget_estimate, p.projected_cost, p.billing_basis, p.lead_user_id,
                 d.pack_id, d.doc
            from project p
            left join drawing d on d.project_id = p.id and d.deleted_at is null
@@ -237,6 +410,7 @@ export function openStore(queryable, { orgId, userId }) {
           clientCell: source.client_cell, clientAddress: source.client_address,
           propertyDescription: source.property_description,
           typeCode: source.type_code, budgetEstimate: source.budget_estimate,
+          projectedCost: source.projected_cost,
           billingBasis: source.billing_basis, leadUserId: source.lead_user_id,
         }, { allowMissingCode: true });
         return { ...(await this.getProject(created.id)), drawing: null };
@@ -485,7 +659,16 @@ export function openStore(queryable, { orgId, userId }) {
     },
 
     /** A type's phases and tasks, for showing what a job would be built from. */
-    async getFeeTemplate(typeCode) {
+    async getFeeTemplate(typeCode, { internal = false } = {}) {
+      // Read first and gated the same way as the fees: what a type is
+      // expected to cost is as much the firm's business as what it charges.
+      const { rows: typeRows } = await q(
+        `select default_cost_pct from project_type
+          where org_id = $1 and upper(btrim(code)) = upper(btrim($2))
+            and deleted_at is null`,
+        [orgId, typeCode],
+      );
+      const costPct = gate(num(typeRows[0]?.default_cost_pct), internal || capabilities.canViewBilled);
       const { rows: phases } = await q(
         `select ftp.id, ftp.seq, ftp.name, ftp.default_pct_split, ftp.default_fee
            from fee_template_phase ftp
@@ -495,7 +678,7 @@ export function openStore(queryable, { orgId, userId }) {
           order by ftp.seq`,
         [orgId, typeCode],
       );
-      if (!phases.length) return { typeCode, phases: [], quoted: 0 };
+      if (!phases.length) return { typeCode, phases: [], quoted: 0, costPct };
       const { rows: tasks } = await q(
         `select id, phase_id, seq, description, rate_band_code, default_hours, default_fee
            from fee_template_task
@@ -503,25 +686,118 @@ export function openStore(queryable, { orgId, userId }) {
           order by seq`,
         [phases.map((phase) => phase.id)],
       );
+      // `internal` is for instantiateTemplate only: cloning a template onto a
+      // job must copy the real fees whoever registers it. Redacting here gave
+      // an employee-registered job null task fees and a R0 quote.
+      const billed = internal || capabilities.canViewBilled;
       return {
         typeCode,
-        quoted: toCents(phases.reduce((sum, phase) => sum + (num(phase.default_fee) ?? 0), 0)),
+        costPct,
+        quoted: gate(
+          toCents(phases.reduce((sum, phase) => sum + (num(phase.default_fee) ?? 0), 0)),
+          billed,
+        ),
         phases: phases.map((phase) => ({
           id: phase.id,
           seq: Number(phase.seq),
           name: phase.name,
           defaultPctSplit: num(phase.default_pct_split),
-          defaultFee: num(phase.default_fee),
+          defaultFee: gate(num(phase.default_fee), billed),
           tasks: tasks.filter((task) => task.phase_id === phase.id).map((task) => ({
             id: task.id,
             seq: Number(task.seq),
             description: task.description,
             rateBandCode: task.rate_band_code ?? null,
             defaultHours: num(task.default_hours),
-            defaultFee: num(task.default_fee),
+            defaultFee: gate(num(task.default_fee), billed),
           })),
         })),
       };
+    },
+
+    /**
+     * The firm rewrites what a type charges for. Owner-only (it is cost-tier
+     * money: it decides what every future job of this type is quoted at).
+     *
+     * A whole-template replace rather than row-by-row edits: the editor shows
+     * the template as one document, and a phase list has no natural key to
+     * patch against. The old rows are soft-deleted, not removed, because a
+     * job's `project_task.template_task_id` still points at them - jobs
+     * already registered are copies and are deliberately untouched.
+     *
+     * A phase with no fee of its own takes the sum of its task fees (the
+     * TOWNSHIP shape); a phase with a fee keeps it (the REZONING shape).
+     * `template_version` is bumped so a job can say which version built it.
+     */
+    async replaceFeeTemplate(typeCode, input) {
+      requireCapability("canViewCost", "only an owner can edit a fee template");
+      const { rows: types } = await q(
+        `select id from project_type
+          where org_id = $1 and upper(btrim(code)) = upper(btrim($2))
+            and deleted_at is null`,
+        [orgId, typeCode],
+      );
+      if (!types[0]) return null;
+      const phases = normaliseTemplateInput(input);
+      // Checked before any row is rewritten, so a bad share cannot leave a
+      // half-replaced template behind.
+      const share = "costPct" in input ? costShare(input.costPct) : undefined;
+      const total = Math.round(phases.reduce((sum, phase) => sum + phase.fee, 0) * 100) / 100;
+
+      await q(
+        `update fee_template_task set deleted_at = now()
+          where deleted_at is null
+            and phase_id in (select id from fee_template_phase
+                              where project_type_id = $1 and deleted_at is null)`,
+        [types[0].id],
+      );
+      await q(
+        `update fee_template_phase set deleted_at = now()
+          where project_type_id = $1 and deleted_at is null`,
+        [types[0].id],
+      );
+      for (const [phaseIndex, phase] of phases.entries()) {
+        const phaseId = sid("ftp");
+        await q(
+          `insert into fee_template_phase (
+             id, project_type_id, seq, name, default_pct_split, default_fee, created_by
+           ) values ($1, $2, $3, $4, $5, $6, $7)`,
+          [phaseId, types[0].id, phaseIndex + 1, phase.name, pctSplit(phase, total), phase.fee, userId],
+        );
+        for (const [taskIndex, task] of phase.tasks.entries()) {
+          await q(
+            `insert into fee_template_task (
+               id, phase_id, seq, description, default_fee, created_by
+             ) values ($1, $2, $3, $4, $5, $6)`,
+            [sid("ftt"), phaseId, taskIndex + 1, task.description, task.fee, userId],
+          );
+        }
+      }
+      await q(
+        `update project_type set template_version = template_version + 1 where id = $1`,
+        [types[0].id],
+      );
+      // Only when named, like the register: a client that does not know about
+      // the cost share must not clear one by saying nothing. Restoring the
+      // workbook's version therefore leaves it alone too - the workbook never
+      // carried one, so there is nothing to restore it to.
+      if (share !== undefined) {
+        await q(
+          `update project_type set default_cost_pct = $2 where id = $1`,
+          [types[0].id, share],
+        );
+      }
+      return this.getFeeTemplate(typeCode);
+    },
+
+    /** Put a type back to the workbook's content, or to nothing if it had none. */
+    async resetFeeTemplate(typeCode) {
+      requireCapability("canViewCost", "only an owner can edit a fee template");
+      const seeded = FEE_TEMPLATES[typeCode]
+        ?? Object.entries(FEE_TEMPLATES).find(
+          ([code]) => code.trim().toUpperCase() === String(typeCode).trim().toUpperCase(),
+        )?.[1];
+      return this.replaceFeeTemplate(typeCode, seeded ?? { phases: [] });
     },
 
     async listProjectTypes() {
@@ -551,7 +827,10 @@ export function openStore(queryable, { orgId, userId }) {
       return rows.map((row) => ({
         code: row.code,
         label: row.label,
-        hourlyRate: num(row.hourly_rate),
+        // The most restricted field in every competitor this proposal
+        // researched - what staff cost/earn - stays null without
+        // `canViewCost`, even for a role that can otherwise see billed $.
+        hourlyRate: gate(num(row.hourly_rate), capabilities.canViewCost),
         effectiveFrom: row.effective_from,
       }));
     },
@@ -568,12 +847,13 @@ export function openStore(queryable, { orgId, userId }) {
            left join drawing d on d.project_id = p.id and d.deleted_at is null
            ${FINANCIAL_LATERALS}
            ${PHASE_LATERAL}
+           ${LAST_CERTIFICATE_LATERAL}
           where p.org_id = $1
             and ($2 or p.deleted_at is null)
           order by coalesce(p.opened_at, p.updated_at) desc`,
         [orgId, includeDeleted],
       );
-      return rows.map(registerRow);
+      return rows.map((row) => registerRow(row, capabilities));
     },
 
     async getRegisterProject(projectId) {
@@ -583,10 +863,11 @@ export function openStore(queryable, { orgId, userId }) {
            left join drawing d on d.project_id = p.id and d.deleted_at is null
            ${FINANCIAL_LATERALS}
            ${PHASE_LATERAL}
+           ${LAST_CERTIFICATE_LATERAL}
           where p.id = $2 and p.org_id = $1 and p.deleted_at is null`,
         [orgId, projectId],
       );
-      return rows[0] ? registerRow(rows[0]) : null;
+      return rows[0] ? registerRow(rows[0], capabilities) : null;
     },
 
     /**
@@ -639,16 +920,16 @@ export function openStore(queryable, { orgId, userId }) {
              id, org_id, name, opened_at, created_by,
              code, client_name, client_email, client_cell, client_address,
              property_description, type_code, budget_estimate, billing_basis,
-             lead_user_id, status
+             lead_user_id, status, fee_ceiling, projected_cost
            ) values ($1, $2, $3, coalesce($4, now()), $5,
-                     $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+                     $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
         returning id`,
           [
             projectId, orgId, clean.name, clean.openedAt, userId,
             clean.code, clean.clientName, clean.clientEmail, clean.clientCell,
             clean.clientAddress, clean.propertyDescription, clean.typeCode,
             clean.budgetEstimate, clean.billingBasis, clean.leadUserId,
-            clean.status || "open",
+            clean.status || "open", clean.feeCeiling, clean.projectedCost,
           ],
         );
         // The task list and the fee schedule are cloned from the same template
@@ -677,6 +958,7 @@ export function openStore(queryable, { orgId, userId }) {
         type_code: clean.typeCode, budget_estimate: clean.budgetEstimate,
         billing_basis: clean.billingBasis, lead_user_id: clean.leadUserId,
         status: clean.status, opened_at: clean.openedAt,
+        fee_ceiling: clean.feeCeiling, projected_cost: clean.projectedCost,
       };
       const sets = [];
       const params = [projectId, orgId];
@@ -717,7 +999,7 @@ export function openStore(queryable, { orgId, userId }) {
      * silently double the quoted fee.
      */
     async instantiateTemplate(projectId, typeCode) {
-      const template = await this.getFeeTemplate(typeCode);
+      const template = await this.getFeeTemplate(typeCode, { internal: true });
       if (!template.phases.length) return { tasks: 0, scheduleLines: 0 };
       const { rows: existing } = await q(
         `select 1 from project_task where project_id = $1 and deleted_at is null limit 1`,
@@ -745,6 +1027,22 @@ export function openStore(queryable, { orgId, userId }) {
         label: phase.name,
         quoted: phase.defaultFee ?? 0,
       })));
+      // Remember what the template charged, and start the job's projected cost
+      // from the type's usual cost share. `coalesce` so a cost somebody typed
+      // while registering the job is never overwritten by a default, and a type
+      // with no share leaves it null rather than inventing one.
+      const templateQuote = toCents(
+        template.phases.reduce((sum, phase) => sum + (phase.defaultFee ?? 0), 0),
+      );
+      const defaultCost = template.costPct === null || template.costPct === undefined
+        ? null : toCents(templateQuote * template.costPct);
+      await q(
+        `update project
+            set template_quote = $2,
+                projected_cost = coalesce(projected_cost, $3)
+          where id = $1`,
+        [projectId, templateQuote, defaultCost],
+      );
       return { tasks: seq, scheduleLines: template.phases.length };
     },
 
@@ -776,7 +1074,10 @@ export function openStore(queryable, { orgId, userId }) {
         seq: Number(row.seq),
         phaseLabel: row.phase_label ?? null,
         description: row.description,
-        defaultFee: num(row.default_fee),
+        // A task fee is a slice of the quote: addScheduleLinesFromTasks turns
+        // it into a certificate line, so it is billed-tier money wearing the
+        // clothes of a to-do list.
+        defaultFee: gate(num(row.default_fee), capabilities.canViewBilled),
         status: row.status,
         assigneeId: row.assignee_id ?? null,
         assigneeEmail: row.assignee_email ?? null,
@@ -792,6 +1093,12 @@ export function openStore(queryable, { orgId, userId }) {
       if (!project) return null;
       const text = trimmed(description);
       if (!text) throw new ValidationError("a task needs a description");
+      // Adding the task is operational work; pricing it is not. Refused rather
+      // than quietly dropped, because a fee typed and silently discarded is
+      // worse than one rejected - it reads as accepted on the way out.
+      if (defaultFee !== null && defaultFee !== "") {
+        requireCapability("canViewBilled", "only an owner can put a fee on a task");
+      }
       await q(
         `insert into project_task (
            id, project_id, seq, phase_label, description, default_fee, created_by
@@ -857,8 +1164,11 @@ export function openStore(queryable, { orgId, userId }) {
     async listFeeSchedule(projectId) {
       const { rows } = await q(
         `select fsl.id, fsl.seq, fsl.label, fsl.quoted,
-                coalesce(claimed.certified, 0) as certified,
-                coalesce(claimed.draft, 0)     as draft
+                coalesce(claimed.certified, 0)        as certified,
+                coalesce(claimed.draft, 0)            as draft,
+                coalesce(down.written_down, 0)        as written_down,
+                coalesce(time_phase.uncertified, 0)   as uncertified_captured,
+                coalesce(time_phase.captured, 0)      as captured
            from fee_schedule_line fsl
            join project p on p.id = fsl.project_id
            left join lateral (
@@ -871,6 +1181,30 @@ export function openStore(queryable, { orgId, userId }) {
                 and cl.deleted_at is null
                 and upper(btrim(cl.phase_ref)) = upper(btrim(fsl.label))
            ) claimed on true
+           -- Matched on the phase the same trimmed, case-folded way, because a
+           -- write-down carries the phase it reduced and a phase bar that
+           -- ignored it would show money as still claimable that is gone.
+           left join lateral (
+             select coalesce(sum(wd.amount) filter (where pc.status = 'issued'), 0) as written_down
+               from write_down wd
+               join payment_certificate pc
+                 on pc.id = wd.certificate_id and pc.deleted_at is null
+              where pc.project_id = fsl.project_id
+                and wd.deleted_at is null
+                and upper(btrim(wd.phase_ref)) = upper(btrim(fsl.label))
+           ) down on true
+           left join lateral (
+             select coalesce(sum(te.captured_amount), 0) as captured,
+                    coalesce(sum(te.captured_amount) filter (
+                      where not exists (select 1 from certificate_line cl
+                                         where cl.time_entry_id = te.id
+                                           and cl.deleted_at is null)
+                    ), 0)                                as uncertified
+               from time_entry te
+              where te.project_id = fsl.project_id
+                and te.deleted_at is null
+                and upper(btrim(te.phase_ref)) = upper(btrim(fsl.label))
+           ) time_phase on true
           where fsl.project_id = $2 and fsl.deleted_at is null
             and p.org_id = $1 and p.deleted_at is null
           order by fsl.seq`,
@@ -892,29 +1226,48 @@ export function openStore(queryable, { orgId, userId }) {
             )`,
         [orgId, projectId],
       );
+      const billed = capabilities.canViewBilled;
+      // Totals are summed from the real (ungated) numbers first, then the
+      // whole result is gated - summing already-nulled lines would silently
+      // turn "hidden" into "zero", which is exactly the invented-number this
+      // codebase's own "unknown is null, never 0" rule (SKILL.md decision 6)
+      // exists to prevent.
       const lines = rows.map((row) => {
         const quoted = num(row.quoted) ?? 0;
         const certified = num(row.certified) ?? 0;
+        const writtenDown = num(row.written_down) ?? 0;
         return {
           id: row.id,
           seq: Number(row.seq),
           label: row.label,
-          quoted,
-          certified,
-          draft: num(row.draft) ?? 0,
+          quoted: gate(quoted, billed),
+          certified: gate(certified, billed),
+          draft: gate(num(row.draft) ?? 0, billed),
+          // The same ladder as the job's own financials, one phase wide, so a
+          // phase can be drawn as a miniature of the same bar instead of a
+          // second chart with its own arithmetic. A job can sit comfortably
+          // inside its fee overall and have spent one phase twice over.
+          writtenDown: gate(writtenDown, billed),
+          billed: gate(toCents(certified - writtenDown), billed),
+          captured: gate(num(row.captured) ?? 0, billed),
+          uncertifiedCaptured: gate(num(row.uncertified_captured) ?? 0, billed),
           // Positive is money still to claim, negative is an overrun on this
           // phase. Signed rather than absolute, because which way it points is
           // the entire content of the number.
-          variance: toCents(quoted - certified),
+          variance: gate(toCents(quoted - certified), billed),
         };
       });
+      const quotedTotal = toCents(rows.reduce((total, row) => total + (num(row.quoted) ?? 0), 0));
+      const certifiedTotal = toCents(
+        rows.reduce((total, row) => total + (num(row.certified) ?? 0), 0),
+      );
       return {
         lines,
-        quoted: toCents(lines.reduce((total, line) => total + line.quoted, 0)),
-        certified: toCents(lines.reduce((total, line) => total + line.certified, 0)),
+        quoted: gate(quotedTotal, billed),
+        certified: gate(certifiedTotal, billed),
         unallocated: {
-          certified: num(loose[0]?.certified) ?? 0,
-          draft: num(loose[0]?.draft) ?? 0,
+          certified: gate(num(loose[0]?.certified) ?? 0, billed),
+          draft: gate(num(loose[0]?.draft) ?? 0, billed),
         },
       };
     },
@@ -1077,18 +1430,23 @@ export function openStore(queryable, { orgId, userId }) {
           enteredAt: event.entered_at,
           note: event.note ?? null,
         })),
-        capturedUntagged: num(untagged[0]?.captured) ?? 0,
+        capturedUntagged: gate(num(untagged[0]?.captured) ?? 0, capabilities.canViewBilled),
         phases: rows.map((row, index) => {
           const quoted = num(row.quoted);
           const certified = num(row.certified) ?? 0;
+          const billed = capabilities.canViewBilled;
           return {
             ref: row.ref,
             seq: index + 1,
-            quoted,
-            certified,
-            draft: num(row.draft) ?? 0,
-            variance: quoted === null ? null : toCents(quoted - certified),
-            captured: num(row.captured) ?? 0,
+            quoted: gate(quoted, billed),
+            certified: gate(certified, billed),
+            draft: gate(num(row.draft) ?? 0, billed),
+            variance: gate(quoted === null ? null : toCents(quoted - certified), billed),
+            captured: gate(num(row.captured) ?? 0, billed),
+            // Operational, not money: how many tasks exist/are done/are
+            // struck, and where the job sits relative to its current phase -
+            // "phase progress" in the proposal's `can_view_hours` tier, kept
+            // visible regardless of `can_view_billed`.
             tasksTotal: Number(row.tasks_total),
             tasksDone: Number(row.tasks_done),
             tasksStruck: Number(row.tasks_struck),
@@ -1124,8 +1482,15 @@ export function openStore(queryable, { orgId, userId }) {
      * One log for the practice, filtered - not a hidden sheet per person. The
      * workbook kept seven, most of them `veryHidden`, which is why nobody
      * could answer "what did this job cost" without opening all of them.
+     *
+     * Filtered by person, but not by whichever person the caller names: without
+     * the billed capability the only readable log is your own. The money is
+     * already nulled on a colleague's rows, so what leaks otherwise is who
+     * spent how long on what - which is the substance of a timesheet, not
+     * metadata about one.
      */
     async listTimeEntries({ projectId = null, personId = null, from = null, to = null } = {}) {
+      const person = capabilities.canViewBilled ? personId : userId;
       const { rows } = await q(
         `select te.id, te.project_id, te.user_id, u.email as user_email,
                 p.code as project_code, p.name as project_name,
@@ -1147,9 +1512,61 @@ export function openStore(queryable, { orgId, userId }) {
             and ($4::date is null or te.entry_date >= $4)
             and ($5::date is null or te.entry_date <= $5)
           order by te.entry_date desc, te.started_at desc nulls last, te.created_at desc`,
-        [orgId, projectId, personId, from, to],
+        [orgId, projectId, person, from, to],
       );
-      return rows.map(timeEntryRow);
+      return rows.map((row) => timeEntryRow(row, capabilities));
+    },
+
+    /**
+     * What every person did over a period, and what it was worth. Owner-only:
+     * it is a ranking of colleagues by money, which is exactly what the
+     * billed gate exists to keep away from an employee.
+     */
+    async teamReport({ from, to, today }) {
+      requireCapability("canViewBilled", "only an owner can see the team report");
+      const { rows } = await q(
+        `select te.id, te.project_id, te.user_id, u.email as user_email,
+                p.code as project_code, p.name as project_name,
+                te.entry_date, te.minutes, te.activity_type, te.description,
+                te.captured_amount, te.created_at,
+                exists (select 1 from certificate_line cl
+                          join payment_certificate pc on pc.id = cl.certificate_id
+                                                     and pc.deleted_at is null
+                         where cl.time_entry_id = te.id and cl.deleted_at is null) as on_certificate,
+                exists (select 1 from certificate_line cl
+                          join payment_certificate pc on pc.id = cl.certificate_id
+                                                     and pc.deleted_at is null
+                                                     and pc.status = 'issued'
+                         where cl.time_entry_id = te.id and cl.deleted_at is null) as billed_on_issued
+           from time_entry te
+           join project p on p.id = te.project_id
+           join app_user u on u.id = te.user_id
+          where p.org_id = $1
+            and p.deleted_at is null
+            and te.deleted_at is null
+            and te.entry_date >= $2::date
+            and te.entry_date <= $3::date`,
+        [orgId, from, to],
+      );
+      return buildTeamReport({
+        members: await this.listTeam(),
+        entries: rows.map((row) => ({
+          projectId: row.project_id,
+          projectCode: row.project_code ?? null,
+          projectName: row.project_name ?? null,
+          userId: row.user_id,
+          userEmail: row.user_email,
+          date: row.entry_date,
+          minutes: Number(row.minutes),
+          activityType: row.activity_type,
+          description: row.description,
+          capturedAmount: num(row.captured_amount) ?? 0,
+          createdDate: row.created_at ? String(row.created_at).slice(0, 10) : null,
+          onCertificate: row.on_certificate,
+          billedOnIssued: row.billed_on_issued,
+        })),
+        from, to, today,
+      });
     },
 
     /**
@@ -1186,6 +1603,21 @@ export function openStore(queryable, { orgId, userId }) {
       }
       const { capturedAmount, rateApplied } = priceEntry({ minutes, rule, hourlyRate });
 
+      // Logging on somebody else's behalf is an owner's job - she reads a
+      // handwritten day off a desk and types it in. Left ungated, `fields.userId`
+      // let anyone attribute an hour to anyone, in any firm, which would put a
+      // row that cannot be edited under a name that never agreed to it.
+      const author = trimmed(fields.userId) ?? userId;
+      if (author !== userId) {
+        requireCapability("canViewBilled", "only an owner can log time for somebody else");
+        const { rows: member } = await q(
+          `select 1 from membership
+            where user_id = $1 and org_id = $2 and deleted_at is null`,
+          [author, orgId],
+        );
+        if (!member[0]) throw new ValidationError("no such person in this firm");
+      }
+
       const description = trimmed(fields.description);
       const activityType = trimmed(fields.activityType);
       if (!description) throw new ValidationError("a description is required");
@@ -1197,14 +1629,14 @@ export function openStore(queryable, { orgId, userId }) {
            id, project_id, user_id, entry_date, started_at, ended_at, minutes,
            activity_type, description, phase_ref, prints_qty, travel_km,
            rate_band_code, rate_applied, pricing_rule, captured_amount, created_by
-         ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $3)
+         ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
       returning id`,
         [
-          sid("te"), projectId, fields.userId || userId, fields.date,
+          sid("te"), projectId, author, fields.date,
           trimmed(fields.start) ?? null, trimmed(fields.end) ?? null, minutes,
           activityType, description, trimmed(fields.phaseRef) ?? null,
           Number(fields.printsQty) || 0, Number(fields.travelKm) || 0,
-          bandCode, rateApplied, rule, capturedAmount,
+          bandCode, rateApplied, rule, capturedAmount, userId,
         ],
       );
       return this.getTimeEntry(rows[0].id);
@@ -1228,7 +1660,7 @@ export function openStore(queryable, { orgId, userId }) {
             and p.org_id = $1 and p.deleted_at is null`,
         [orgId, entryId],
       );
-      return rows[0] ? timeEntryRow(rows[0]) : null;
+      return rows[0] ? timeEntryRow(rows[0], capabilities) : null;
     },
 
     /**
@@ -1276,7 +1708,10 @@ export function openStore(queryable, { orgId, userId }) {
       const { rows } = await q(
         `select p.id,
                 p.budget_estimate,
+                p.projected_cost,
+                p.template_quote,
                 p.billing_basis,
+                p.fee_ceiling,
                 p.status,
                 schedule.scheduled,
                 schedule.schedule_lines,
@@ -1284,6 +1719,7 @@ export function openStore(queryable, { orgId, userId }) {
                 lines.draft_gross,
                 wds.written_down,
                 wds.unexplained_written_down,
+                wds.written_down_by_reason,
                 time_totals.captured,
                 time_totals.captured_minutes,
                 time_totals.uncertified_captured,
@@ -1293,7 +1729,7 @@ export function openStore(queryable, { orgId, userId }) {
           where p.id = $2 and p.org_id = $1 and p.deleted_at is null`,
         [orgId, projectId],
       );
-      return rows[0] ? financials(rows[0]) : null;
+      return rows[0] ? financials(rows[0], capabilities) : null;
     },
 
     // --- certificates -----------------------------------------------------
@@ -1321,7 +1757,7 @@ export function openStore(queryable, { orgId, userId }) {
           order by pc.seq`,
         [orgId, projectId],
       );
-      return rows.map(certificateSummary);
+      return rows.map((row) => certificateSummary(row, capabilities));
     },
 
     /** A certificate with everything on it. The document, not a row. */
@@ -1351,10 +1787,70 @@ export function openStore(queryable, { orgId, userId }) {
           order by created_at`,
         [certificateId],
       );
-      return certificateDocument(rows[0], lines, downs);
+      const document = certificateDocument(rows[0], lines, downs, capabilities);
+      // Billed-tier throughout: the cap is the quote, and the quote is not
+      // an employee's to read.
+      document.ceiling = capabilities.canViewBilled
+        ? await this.certificateCeiling(rows[0].project_id, certificateId, document.net)
+        : null;
+      return document;
+    },
+
+    /**
+     * Where this certificate stands against a capped fee (`project.fee_ceiling`).
+     *
+     * `priorNet` is what every *other* live certificate on the job already
+     * claims, drafts included: two drafts each fitting the cap on their own
+     * would together bill past it. `excess` is how far this one's net goes
+     * over the room left, and `proposedWriteDown` is that same figure - the
+     * write-down (reason `fee_ceiling`) that brings the net exactly to the
+     * cap. The hours stay on the certificate at their captured value and the
+     * write-down says what is not being charged; the alternative, trimming
+     * lines, would put "we did this work" and "you are paying for it" on the
+     * same row and lose the first.
+     *
+     * Null when the job is not capped or has no fee to cap it at - "no ceiling"
+     * and "a ceiling of nothing" are different answers.
+     */
+    async certificateCeiling(projectId, certificateId, thisNet) {
+      const { rows } = await q(
+        `select p.fee_ceiling, p.budget_estimate,
+                (select coalesce(sum(fsl.quoted), 0) from fee_schedule_line fsl
+                  where fsl.project_id = p.id and fsl.deleted_at is null) as scheduled,
+                (select count(*) from fee_schedule_line fsl
+                  where fsl.project_id = p.id and fsl.deleted_at is null) as schedule_lines,
+                (select coalesce(sum(cl.amount), 0)
+                   from certificate_line cl
+                   join payment_certificate pc
+                     on pc.id = cl.certificate_id and pc.deleted_at is null
+                  where pc.project_id = p.id and pc.id <> $3
+                    and cl.deleted_at is null) as other_lines,
+                (select coalesce(sum(wd.amount), 0)
+                   from write_down wd
+                   join payment_certificate pc
+                     on pc.id = wd.certificate_id and pc.deleted_at is null
+                  where pc.project_id = p.id and pc.id <> $3
+                    and wd.deleted_at is null) as other_downs
+           from project p
+          where p.id = $1 and p.org_id = $2 and p.deleted_at is null`,
+        [projectId, orgId, certificateId],
+      );
+      const row = rows[0];
+      if (!row || !row.fee_ceiling) return null;
+      const quoted = Number(row.schedule_lines) ? num(row.scheduled) : num(row.budget_estimate);
+      if (quoted === null) return null;
+      const priorNet = toCents((num(row.other_lines) ?? 0) - (num(row.other_downs) ?? 0));
+      const room = Math.max(0, toCents(quoted - priorNet));
+      const excess = Math.max(0, toCents(thisNet - room));
+      return { quoted, priorNet, room, net: thisNet, excess, proposedWriteDown: excess };
     },
 
     async createCertificate(projectId, { periodStart = null, periodEnd = null } = {}) {
+      // Owner-only for now (PERMISSIONS-PROPOSAL.md open decision 3): nothing
+      // in the current UI reaches this flow for a non-owner, and deciding
+      // "which non-owner, on which project" now would be guessing ahead of a
+      // real workflow.
+      requireCapability("canViewBilled", "only an owner can create a certificate");
       const project = await this.getProject(projectId);
       if (!project) return null;
       const { rows } = await q(
@@ -1374,6 +1870,7 @@ export function openStore(queryable, { orgId, userId }) {
      * amount is the honest version, and it is the same row either way.
      */
     async addScheduleLine(certificateId, { description, amount, pct = null, phaseRef = null }) {
+      requireCapability("canViewBilled", "only an owner can add a certificate line");
       if (!await requireDraft(this, certificateId)) return null;
       const text = trimmed(description);
       if (!text) throw new ValidationError("a description is required");
@@ -1405,6 +1902,7 @@ export function openStore(queryable, { orgId, userId }) {
      * fee schedule show it against the phase that was quoted.
      */
     async addScheduleLinesFromTasks(certificateId, selections) {
+      requireCapability("canViewBilled", "only an owner can bill tasks onto a certificate");
       const certificate = await requireDraft(this, certificateId);
       if (!certificate) return null;
       if (!Array.isArray(selections) || !selections.length) {
@@ -1474,7 +1972,8 @@ export function openStore(queryable, { orgId, userId }) {
      * enforces underneath; re-running an overlapping range is a no-op instead
      * of billing the overlap twice.
      */
-    async addCertificateLinesFromTime(certificateId, { from = null, to = null } = {}) {
+    async addCertificateLinesFromTime(certificateId, { from = null, to = null, userId: staffId = null } = {}) {
+      requireCapability("canViewBilled", "only an owner can pull time onto a certificate");
       const certificate = await requireDraft(this, certificateId);
       if (!certificate) return null;
       const { rows: entries } = await q(
@@ -1486,12 +1985,13 @@ export function openStore(queryable, { orgId, userId }) {
             and p.org_id = $2
             and ($3::date is null or te.entry_date >= $3)
             and ($4::date is null or te.entry_date <= $4)
+            and ($5::text is null or te.user_id = $5)
             and not exists (
               select 1 from certificate_line cl
                where cl.time_entry_id = te.id and cl.deleted_at is null
             )
           order by te.entry_date, te.created_at`,
-        [certificate.projectId, orgId, from, to],
+        [certificate.projectId, orgId, from, to, staffId],
       );
       const { rows: seqRows } = await q(
         `select coalesce(max(seq), 0) as seq from certificate_line
@@ -1527,6 +2027,10 @@ export function openStore(queryable, { orgId, userId }) {
      * close.
      */
     async addWriteDown(certificateId, { amount = null, pct = null, reasonCode, note = null, phaseRef = null }) {
+      // Cost-tier information (what was given up, and why) as well as a
+      // billed-tier write - gated on the same, wider capability the other
+      // certificate writes use, since today's two roles never disagree on it.
+      requireCapability("canViewBilled", "only an owner can record a write-down");
       if (!await requireDraft(this, certificateId)) return null;
       const reason = trimmed(reasonCode);
       if (!reason) throw new ValidationError("a reason is required for a write-down");
@@ -1556,6 +2060,18 @@ export function openStore(queryable, { orgId, userId }) {
 
     /** Issuing is one way. A correction is the next certificate. */
     async issueCertificate(certificateId) {
+      requireCapability("canViewBilled", "only an owner can issue a certificate");
+      // A capped fee is only a cap if issuing respects it. Refused with the
+      // figure that fixes it, rather than issued and left for somebody to
+      // notice the client was billed past the agreed fee.
+      const before = await this.getCertificate(certificateId);
+      if (before?.status === "draft" && before.ceiling?.excess > 0) {
+        throw new ValidationError(
+          `this job's fee is a ceiling, and this certificate goes R${before.ceiling.excess.toFixed(2)} `
+          + `past it. Write down R${before.ceiling.excess.toFixed(2)} as "fee ceiling" first, `
+          + "or take the ceiling off the job if the fee has been renegotiated",
+        );
+      }
       const { rows } = await q(
         `update payment_certificate pc
             set status = 'issued', issued_at = now(), updated_at = now()
@@ -1625,14 +2141,26 @@ const FINANCIAL_LATERALS = `
       join payment_certificate pc on pc.id = cl.certificate_id and pc.deleted_at is null
      where pc.project_id = p.id and cl.deleted_at is null
   ) lines on true
+  -- Grouped by reason first, then summed, because the total and the breakdown
+  -- must be the same arithmetic. An amount with no reason beside it is trivia,
+  -- and the reason is already stored - so it travels with the total rather than
+  -- being a second request the caller may or may not make.
   left join lateral (
-    select coalesce(sum(wd.amount) filter (where pc.status = 'issued'), 0) as written_down,
-           coalesce(sum(wd.amount) filter (
-             where pc.status = 'issued' and wd.reason_code = 'legacy_unspecified'
-           ), 0)                                                          as unexplained_written_down
-      from write_down wd
-      join payment_certificate pc on pc.id = wd.certificate_id and pc.deleted_at is null
-     where pc.project_id = p.id and wd.deleted_at is null
+    select coalesce(sum(byreason.amount), 0)                              as written_down,
+           coalesce(sum(byreason.amount) filter (
+             where byreason.reason_code = 'legacy_unspecified'
+           ), 0)                                                          as unexplained_written_down,
+           coalesce(jsonb_agg(jsonb_build_object(
+             'reasonCode', byreason.reason_code,
+             'amount', byreason.amount
+           ) order by byreason.amount desc), '[]'::jsonb)                 as written_down_by_reason
+      from (
+        select wd.reason_code, sum(wd.amount) as amount
+          from write_down wd
+          join payment_certificate pc on pc.id = wd.certificate_id and pc.deleted_at is null
+         where pc.project_id = p.id and pc.status = 'issued' and wd.deleted_at is null
+         group by wd.reason_code
+      ) byreason
   ) wds on true
   left join lateral (
     select coalesce(sum(fsl.quoted), 0) as scheduled,
@@ -1640,6 +2168,22 @@ const FINANCIAL_LATERALS = `
       from fee_schedule_line fsl
      where fsl.project_id = p.id and fsl.deleted_at is null
   ) schedule on true
+`;
+
+/**
+ * The last certificate that actually went out, which is where the next one's
+ * period starts. Joined into the register rather than fetched per job, because
+ * the question "what can I invoice right now" is asked of the whole list at
+ * once and twelve round trips is how it stops being asked.
+ */
+const LAST_CERTIFICATE_LATERAL = `
+  left join lateral (
+    select pc.seq, pc.period_end, pc.issued_at
+      from payment_certificate pc
+     where pc.project_id = p.id and pc.deleted_at is null and pc.status = 'issued'
+     order by pc.issued_at desc nulls last, pc.seq desc
+     limit 1
+  ) last_cert on true
 `;
 
 /**
@@ -1660,22 +2204,87 @@ const PHASE_LATERAL = `
 const REGISTER_COLUMNS = `
   p.id, p.code, p.name, p.client_name, p.client_email, p.client_cell,
   p.client_address, p.property_description, p.type_code, p.budget_estimate,
-  p.billing_basis, p.lead_user_id, p.status, p.opened_at, p.updated_at,
+  p.projected_cost, p.template_quote, p.billing_basis, p.fee_ceiling, p.lead_user_id, p.status, p.opened_at, p.updated_at,
   p.created_at, p.deleted_at, d.id as drawing_id,
   time_totals.captured, time_totals.captured_minutes,
   time_totals.uncertified_captured, time_totals.broken_rows,
   lines.certified_gross, lines.draft_gross,
-  wds.written_down, wds.unexplained_written_down,
+  wds.written_down, wds.unexplained_written_down, wds.written_down_by_reason,
   schedule.scheduled, schedule.schedule_lines,
-  phase.phase_ref as current_phase, phase.entered_at as phase_since
+  phase.phase_ref as current_phase, phase.entered_at as phase_since,
+  last_cert.seq as last_certificate_seq,
+  last_cert.period_end as last_certificate_period_end,
+  last_cert.issued_at as last_certificate_issued_at
 `;
 
 // --- practice-ops mapping ---------------------------------------------------
+
+/** Settings key -> org column. The allow-list for updateOrgSettings. */
+const ORG_SETTING_COLUMNS = {
+  tradingName: "trading_name",
+  addressLines: "address_lines",
+  vatNumber: "vat_number",
+  companyReg: "company_reg",
+  bankName: "bank_name",
+  bankBranch: "bank_branch",
+  bankBranchCode: "bank_branch_code",
+  bankAccountNo: "bank_account_no",
+  contactName: "contact_name",
+  contactCell: "contact_cell",
+  contactEmail: "contact_email",
+  popEmail: "pop_email",
+};
 
 function trimmed(value) {
   if (value === null || value === undefined) return null;
   const text = String(value).trim();
   return text || null;
+}
+
+/** A fee typed into the editor: blank is "no fee", anything else must be a non-negative number. */
+function templateFee(value, what) {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new ValidationError(`${what} must be a number of rand, zero or more`);
+  }
+  return Math.round(parsed * 100) / 100;
+}
+
+/** Validate an edited template into `{ name, fee, tasks: [{ description, fee }] }`. */
+function normaliseTemplateInput(input) {
+  if (!input || !Array.isArray(input.phases)) {
+    throw new ValidationError("a template is a list of phases");
+  }
+  return input.phases.map((phase, index) => {
+    const name = trimmed(phase?.name);
+    if (!name) throw new ValidationError(`phase ${index + 1} needs a name`);
+    const rawTasks = Array.isArray(phase.tasks) ? phase.tasks : [];
+    const tasks = rawTasks.map((task, taskIndex) => {
+      const description = trimmed(task?.description);
+      if (!description) {
+        throw new ValidationError(`task ${taskIndex + 1} in "${name}" needs a description`);
+      }
+      return { description, fee: templateFee(task.fee, `the fee for "${description}"`) };
+    });
+    const own = templateFee(phase.fee, `the fee for "${name}"`);
+    const summed = Math.round(tasks.reduce((sum, task) => sum + (task.fee ?? 0), 0) * 100) / 100;
+    return { name, fee: own ?? summed, tasks };
+  });
+}
+
+/**
+ * A cost share typed into the template editor: blank is "not said", otherwise a
+ * fraction of the fee from 0 to 1. Rejected rather than clamped, because 65
+ * typed where 0.65 was meant would otherwise be stored as a cost of 6 500%.
+ */
+function costShare(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) {
+    throw new ValidationError("the cost share must be a fraction of the fee, from 0 to 1");
+  }
+  return Math.round(parsed * 10000) / 10000;
 }
 
 /** `numeric` arrives as a string, exactly. Money is a Number at the JSON edge. */
@@ -1716,14 +2325,19 @@ function registerFields(fields, { partial = false } = {}) {
     propertyDescription: text("propertyDescription"),
     typeCode: text("typeCode"),
     billingBasis: text("billingBasis"),
+    // A flag, so absence is "unchanged" on update and false on create.
+    feeCeiling: "feeCeiling" in fields
+      ? (fields.feeCeiling === true || fields.feeCeiling === "true" || fields.feeCeiling === "on")
+      : (partial ? undefined : false),
     leadUserId: text("leadUserId"),
     status: text("status"),
     openedAt: text("openedAt"),
     budgetEstimate: money("budgetEstimate"),
+    projectedCost: money("projectedCost"),
   };
 }
 
-function registerRow(row) {
+function registerRow(row, capabilities = capabilitiesFor("owner")) {
   return {
     id: row.id,
     code: row.code ?? null,
@@ -1734,8 +2348,10 @@ function registerRow(row) {
     clientAddress: row.client_address ?? null,
     propertyDescription: row.property_description ?? null,
     typeCode: row.type_code ?? null,
-    budgetEstimate: num(row.budget_estimate),
+    budgetEstimate: gate(num(row.budget_estimate), capabilities.canViewBilled),
+    projectedCost: gate(num(row.projected_cost), capabilities.canViewBilled),
     billingBasis: row.billing_basis ?? null,
+    feeCeiling: Boolean(row.fee_ceiling),
     leadUserId: row.lead_user_id ?? null,
     status: row.status ?? null,
     openedAt: row.opened_at ?? null,
@@ -1749,7 +2365,17 @@ function registerRow(row) {
     // Null is "nobody has said", not "phase one". The register shows the gap.
     currentPhase: row.current_phase ?? null,
     phaseSince: row.phase_since ?? null,
-    financials: financials(row),
+    // The last certificate that went out, which is where the next one's period
+    // starts. Dates and a sequence number, not money, so it reads for every
+    // role - an employee can already see that a certificate exists.
+    lastCertificate: row.last_certificate_seq === null || row.last_certificate_seq === undefined
+      ? null
+      : {
+        seq: Number(row.last_certificate_seq),
+        periodEnd: row.last_certificate_period_end ?? null,
+        issuedAt: row.last_certificate_issued_at ?? null,
+      },
+    financials: financials(row, capabilities),
   };
 }
 
@@ -1767,31 +2393,91 @@ function registerRow(row) {
  * showing both as "the fee" would give the firm two numbers that drift, and
  * burn would mean something different on two screens.
  */
-function financials(row) {
+/**
+ * `capabilities` defaults to full visibility so every existing internal
+ * caller (and every test that built its expectations before this file
+ * existed) keeps seeing what it always saw; the two call sites that read a
+ * caller's own request thread the real value through explicitly.
+ */
+function financials(row, capabilities = capabilitiesFor("owner")) {
   const budgetEstimate = num(row.budget_estimate);
   const scheduleLines = Number(row.schedule_lines ?? 0);
   const quoted = scheduleLines ? num(row.scheduled) : budgetEstimate;
   const captured = num(row.captured) ?? 0;
   const certifiedGross = num(row.certified_gross) ?? 0;
   const writtenDown = num(row.written_down) ?? 0;
-  const billed = toCents(certifiedGross - writtenDown);
+  const billedAmount = toCents(certifiedGross - writtenDown);
+  // Ratios computed from the real numbers first, gated after - the same
+  // "never sum already-redacted fields" rule listFeeSchedule follows, so a
+  // hidden numerator/denominator cannot quietly read as a real 0% or 100%.
+  const realisation = ratio(billedAmount, captured);
+  const burn = ratio(captured, quoted);
+  const gateBilled = (value) => gate(value, capabilities.canViewBilled);
+  // Expected profit is the quote less the cost the firm typed in. Both must
+  // exist: a missing cost is "not planned", not a cost of zero, and a profit
+  // of the whole fee would flatter every job nobody has costed. It follows
+  // the quote, so revising the schedule moves it without anyone re-typing.
+  const projectedCost = num(row.projected_cost);
+  const projectedProfit = quoted !== null && projectedCost !== null
+    ? toCents(quoted - projectedCost) : null;
+  // How far the job's own quote has moved from what its template charged on
+  // the day it was registered. Only meaningful while the quote is still a fee
+  // schedule; a job whose schedule was cleared is back on the register's
+  // estimate, which the template never priced.
+  const templateQuote = num(row.template_quote);
+  const vsTemplate = templateQuote !== null && scheduleLines && quoted !== null
+    ? toCents(quoted - templateQuote) : null;
   return {
-    quoted,
+    templateQuote: gateBilled(templateQuote),
+    vsTemplate: gateBilled(vsTemplate),
+    projectedCost: gateBilled(projectedCost),
+    projectedProfit: gateBilled(projectedProfit),
+    projectedMargin: gateBilled(projectedProfit === null ? null : ratio(projectedProfit, quoted)),
+    quoted: gateBilled(quoted),
     quotedSource: scheduleLines ? "fee_schedule" : "budget_estimate",
-    budgetEstimate,
+    budgetEstimate: gateBilled(budgetEstimate),
     scheduleLines,
-    captured,
+    captured: gateBilled(captured),
+    // Hours, not currency - visible on `can_view_hours` alone, same as `burn`
+    // below.
     capturedMinutes: Number(row.captured_minutes ?? 0),
-    certifiedGross,
-    draftGross: num(row.draft_gross) ?? 0,
-    writtenDown,
-    unexplainedWrittenDown: num(row.unexplained_written_down) ?? 0,
-    billed,
-    uncertifiedCaptured: num(row.uncertified_captured) ?? 0,
+    certifiedGross: gateBilled(certifiedGross),
+    draftGross: gateBilled(num(row.draft_gross) ?? 0),
+    writtenDown: gateBilled(writtenDown),
+    unexplainedWrittenDown: gateBilled(num(row.unexplained_written_down) ?? 0),
+    // The same total, split by why. Carried on the row so the fee bar can name
+    // the reason on the notch it draws - an amount with no reason beside it is
+    // trivia, and a second request per job to fetch it would mean the register
+    // never bothers.
+    writtenDownByReason: gateBilled(writtenDownByReason(row.written_down_by_reason)),
+    billed: gateBilled(billedAmount),
+    // The room a capped fee has left, counting only what has been issued. Null
+    // where the job is not capped or has no fee; the certificate carries the
+    // sharper reading that includes drafts.
+    ceilingRoom: gateBilled(row.fee_ceiling && quoted !== null
+      ? Math.max(0, toCents(quoted - billedAmount)) : null),
+    uncertifiedCaptured: gateBilled(num(row.uncertified_captured) ?? 0),
     brokenRows: Number(row.broken_rows ?? 0),
-    realisation: ratio(billed, captured),
-    burn: ratio(captured, quoted),
+    // Realisation is explicitly billed-tier in the proposal (it's the
+    // firm's margin, expressed as a ratio rather than an amount); burn is
+    // explicitly hours-tier ("burn %" is named in `can_view_hours`) and stays
+    // visible without `can_view_billed`, matching Mosaic's Work Planner tier.
+    realisation: gateBilled(realisation),
+    burn,
   };
+}
+
+/**
+ * jsonb in, `[{ reasonCode, amount }]` out, newest schema first. Empty when
+ * nothing has been written down - an empty list, not null: "nothing was given
+ * up" is a real answer, where null would read as "not asked".
+ */
+function writtenDownByReason(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map((entry) => ({
+    reasonCode: entry.reasonCode,
+    amount: num(entry.amount) ?? 0,
+  }));
 }
 
 function ratio(top, bottom) {
@@ -1799,7 +2485,8 @@ function ratio(top, bottom) {
   return Math.round((top / bottom) * 10000) / 10000;
 }
 
-function timeEntryRow(row) {
+function timeEntryRow(row, capabilities = capabilitiesFor("owner")) {
+  const billed = capabilities.canViewBilled;
   return {
     id: row.id,
     projectId: row.project_id,
@@ -1810,6 +2497,9 @@ function timeEntryRow(row) {
     date: row.entry_date,
     start: row.started_at ?? null,
     end: row.ended_at ?? null,
+    // Duration is hours, not currency - visible either way (this is what
+    // lets an employee log and see their own timesheet without ever seeing
+    // what an hour costs).
     minutes: Number(row.minutes),
     activityType: row.activity_type,
     description: row.description,
@@ -1817,30 +2507,33 @@ function timeEntryRow(row) {
     printsQty: Number(row.prints_qty ?? 0),
     travelKm: num(row.travel_km) ?? 0,
     rateBandCode: row.rate_band_code ?? null,
-    rateApplied: num(row.rate_applied),
+    rateApplied: gate(num(row.rate_applied), billed),
     pricingRule: row.pricing_rule,
-    capturedAmount: num(row.captured_amount) ?? 0,
+    capturedAmount: gate(num(row.captured_amount) ?? 0, billed),
     createdAt: row.created_at ?? null,
     certificateId: row.certificate_id ?? null,
   };
 }
 
-function certificateSummary(row) {
+function certificateSummary(row, capabilities = capabilitiesFor("owner")) {
   const subtotal = num(row.subtotal) ?? 0;
   const writtenDown = num(row.written_down) ?? 0;
+  const billed = capabilities.canViewBilled;
   return {
     id: row.id,
     projectId: row.project_id,
     seq: Number(row.seq),
     periodStart: row.period_start ?? null,
     periodEnd: row.period_end ?? null,
+    // Status and dates are process facts, not money - a certificate exists
+    // and is draft/issued regardless of who is looking at it.
     status: row.status,
     vatRate: num(row.vat_rate) ?? 0,
     issuedAt: row.issued_at ?? null,
     createdAt: row.created_at ?? null,
-    subtotal,
-    writtenDown,
-    net: toCents(subtotal - writtenDown),
+    subtotal: gate(subtotal, billed),
+    writtenDown: gate(writtenDown, billed),
+    net: gate(toCents(subtotal - writtenDown), billed),
   };
 }
 
@@ -1851,30 +2544,46 @@ function certificateSummary(row) {
  * writes it and the only arrangement where the client's discount and the
  * firm's lost value are both visible on one page.
  */
-function certificateDocument(row, lines, downs) {
-  const mappedLines = lines.map((line) => ({
-    id: line.id,
-    seq: Number(line.seq),
-    source: line.source,
-    description: line.description,
-    phaseRef: line.phase_ref ?? null,
-    pct: num(line.pct),
-    units: num(line.units),
-    amount: num(line.amount) ?? 0,
-    timeEntryId: line.time_entry_id ?? null,
-    projectTaskId: line.project_task_id ?? null,
-  }));
+function certificateDocument(row, lines, downs, capabilities = capabilitiesFor("owner")) {
+  const billed = capabilities.canViewBilled;
+  // Write-down amount and reason are the cost-tier field this proposal
+  // deliberately named ("the most locked-down field of all" in the
+  // competitor research) - gated on `canViewCost`, not the wider
+  // `canViewBilled` every other certificate figure uses. Today's two roles
+  // never disagree between the two, but a future middle tier (billed
+  // visible, cost still hidden) would.
+  const cost = capabilities.canViewCost;
+  // Totals are computed from the real amounts first, then gated - so a
+  // write-down hidden by `canViewCost` cannot make the net read as if the
+  // write-down never happened.
+  const mappedLines = lines.map((line) => {
+    const amount = num(line.amount) ?? 0;
+    return {
+      id: line.id,
+      seq: Number(line.seq),
+      source: line.source,
+      description: line.description,
+      phaseRef: line.phase_ref ?? null,
+      pct: num(line.pct),
+      units: num(line.units),
+      amount: gate(amount, billed),
+      timeEntryId: line.time_entry_id ?? null,
+      projectTaskId: line.project_task_id ?? null,
+    };
+  });
+  const realAmounts = lines.map((line) => num(line.amount) ?? 0);
   const writeDowns = downs.map((down) => ({
     id: down.id,
     phaseRef: down.phase_ref ?? null,
-    amount: num(down.amount) ?? 0,
+    amount: gate(num(down.amount) ?? 0, cost),
     pct: num(down.pct),
-    reasonCode: down.reason_code,
-    note: down.note ?? null,
+    reasonCode: gate(down.reason_code, cost),
+    note: gate(down.note ?? null, cost),
     createdAt: down.created_at ?? null,
   }));
-  const subtotal = toCents(mappedLines.reduce((total, line) => total + line.amount, 0));
-  const writtenDown = toCents(writeDowns.reduce((total, down) => total + down.amount, 0));
+  const realWriteDowns = downs.map((down) => num(down.amount) ?? 0);
+  const subtotal = toCents(realAmounts.reduce((total, amount) => total + amount, 0));
+  const writtenDown = toCents(realWriteDowns.reduce((total, amount) => total + amount, 0));
   const net = toCents(subtotal - writtenDown);
   const vatRate = num(row.vat_rate) ?? 0;
   const vat = toCents(net * vatRate);
@@ -1890,11 +2599,11 @@ function certificateDocument(row, lines, downs) {
     createdAt: row.created_at ?? null,
     lines: mappedLines,
     writeDowns,
-    subtotal,
-    writtenDown,
-    net,
-    vat,
-    total: toCents(net + vat),
+    subtotal: gate(subtotal, billed),
+    writtenDown: gate(writtenDown, billed),
+    net: gate(net, billed),
+    vat: gate(vat, billed),
+    total: gate(toCents(net + vat), billed),
   };
 }
 
