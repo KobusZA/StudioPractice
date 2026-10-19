@@ -8,6 +8,15 @@
 // Scale is established by clicking two points whose real separation the user
 // knows, exactly as a surveyor would. Nothing is assumed about the source
 // document's DPI, because a scanned or re-plotted drawing rarely honours it.
+// A satellite view is the exception: its scale is known, so it arrives
+// calibrated (satellite.js).
+
+import {
+  SATELLITE_AREA_METRES,
+  fetchBestSatelliteImage,
+  fetchSatelliteImage,
+  resolveLocation,
+} from "./satellite.js?v=20261015-geocode";
 
 const PDFJS_URL = "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.6.82/build/pdf.min.mjs";
 const PDFJS_WORKER = "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.6.82/build/pdf.worker.min.mjs";
@@ -20,12 +29,17 @@ const PDFJS_WORKER = "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.6.82/build/pdf.w
  */
 let bitmap = null;
 
+/** The satellite placement whose pixels are being re-fetched, and those that already failed to. */
+let restoring = null;
+const restoreFailed = new WeakSet();
+
 export function underlayBitmap() {
   return bitmap;
 }
 
 export function clearUnderlay(doc) {
   bitmap = null;
+  restoring = null;
   doc.underlay = null;
 }
 
@@ -53,8 +67,71 @@ export async function loadUnderlayFile(doc, file) {
   if (!image.ok) return image;
 
   bitmap = image.bitmap;
+  restoring = null;
   doc.underlay = defaultPlacement(file.name, image.bitmap.width, image.bitmap.height);
   return { ok: true, message: `${file.name} loaded. Calibrate the scale before tracing.` };
+}
+
+/**
+ * Centre a north-up satellite view of `text` (an address or a coordinate) on
+ * `centre`, a world point - the middle of whatever the user is looking at.
+ */
+export async function loadSatelliteUnderlay(doc, text, centre, areaMetres = SATELLITE_AREA_METRES, place = null) {
+  const known = place && Number.isFinite(place.lat) && Number.isFinite(place.lng) ? place : null;
+  const where = known
+    ? { ok: true, lat: known.lat, lng: known.lng, label: known.label || text }
+    : await resolveLocation(text);
+  if (!where.ok) return where;
+
+  const image = await fetchBestSatelliteImage(where.lat, where.lng, areaMetres);
+  if (!image.ok) return image;
+
+  const { width, height } = image.bitmap;
+  const mpp = image.metresPerPixel;
+  bitmap = image.bitmap;
+  restoring = null;
+  doc.underlay = {
+    ...defaultPlacement(`Satellite: ${where.label}`, width, height),
+    x: centre.x - (width * mpp) / 2,
+    y: centre.y - (height * mpp) / 2,
+    metresPerPixel: mpp,
+    opacity: 0.7,
+    calibrated: true,
+    source: { type: "satellite", lat: where.lat, lng: where.lng, zoom: image.zoom, areaMetres, label: where.label },
+  };
+  const resolution = mpp < 1 ? `${Math.round(mpp * 100)} cm` : `${mpp.toFixed(1)} m`;
+  return {
+    ok: true,
+    message: `Satellite view of ${where.label} loaded at true scale (${resolution} per pixel). Trace over it, or Set scale against a measured distance to fine-tune.`,
+  };
+}
+
+/**
+ * A saved satellite underlay has its placement but not its pixels. Fetch them
+ * again from the stored coordinate. Returns null when there is nothing to do,
+ * otherwise a promise of "shown", "failed", or "stale" (the document moved on
+ * while it downloaded). Each placement is tried once, so an offline session
+ * does not retry on every redraw.
+ */
+export function restoreSatelliteUnderlay(doc) {
+  const placement = doc.underlay;
+  if (placement?.source?.type !== "satellite" || bitmap) return null;
+  if (restoring === placement || restoreFailed.has(placement)) return null;
+  restoring = placement;
+  return fetchSatelliteImage(placement.source).then((image) => {
+    if (restoring === placement) restoring = null;
+    if (doc.underlay !== placement || bitmap) return "stale";
+    if (!image.ok) {
+      restoreFailed.add(placement);
+      return "failed";
+    }
+    bitmap = image.bitmap;
+    return "shown";
+  });
+}
+
+export function isSatelliteUnderlay(doc) {
+  return doc?.underlay?.source?.type === "satellite";
 }
 
 async function loadImage(file) {

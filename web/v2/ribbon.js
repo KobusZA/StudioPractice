@@ -21,6 +21,7 @@ export const RIBBON = [
         label: "Add drawing",
         items: [
           { id: "underlay", label: "PDF / image", command: "underlay" },
+          { id: "satellite", label: "Satellite", command: "satellite" },
           { id: "underlay-adjust", label: "Adjust", command: "underlay-adjust" },
           { id: "calibrate", label: "Set scale", command: "calibrate" },
           { id: "underlay-toggle", label: "Hide", command: "underlay-toggle" },
@@ -271,6 +272,7 @@ const ITEM_INDEX = ribbonItems();
  */
 export const HINTS = {
   underlay: "Load a PDF or image to trace.",
+  satellite: "Load a satellite view of an address or coordinates, already at true scale.",
   calibrate: "Click two points on the sheet, then type the real distance or drag a corner to resize.",
   "underlay-adjust": "Drag the sheet to move, a corner to resize, the top handle to rotate.",
   "underlay-toggle": "Hide the sheet without removing it.",
@@ -325,7 +327,7 @@ const SIMPLE_TABS = [
     id: "draw",
     label: "Draw",
     groups: [
-      { label: "Sheet", collapseAfterLoad: true, items: ["underlay", "calibrate", "underlay-adjust", "underlay-toggle"] },
+      { label: "Sheet", collapseAfterLoad: true, items: ["underlay", "satellite", "calibrate", "underlay-adjust", "underlay-toggle"] },
       { label: "Levels", items: ["level-isolate"] },
       { label: "Walls", items: ["walls"] },
       { label: "Floors & roofs", items: ["floors", "roofs"] },
@@ -370,11 +372,14 @@ export function firstTabId(mode) {
   return (mode === "simple" ? SIMPLE_TABS : RIBBON)[0]?.id;
 }
 
+/** In Simple, the Sheet group offers only these until a sheet is loaded, then only the tools that act on it. */
+const SHEET_LOADERS = new Set(["underlay", "satellite"]);
+
 function visibleInSimple(item, group, state, sheetLoaded) {
   if (!item) return false;
   if (item.todo) return false;
   if (item.categories && state.skuCount(item.categories) === 0) return false;
-  if (group.collapseAfterLoad) return sheetLoaded ? item.id !== "underlay" : item.id === "underlay";
+  if (group.collapseAfterLoad) return sheetLoaded ? !SHEET_LOADERS.has(item.id) : SHEET_LOADERS.has(item.id);
   return true;
 }
 

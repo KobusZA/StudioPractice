@@ -19,6 +19,7 @@ import {
   simplify,
   unionRectsOuter,
 } from "./geom.js";
+import { normalizeSatelliteUnderlay } from "./satellite.js";
 
 export const DOC_SCHEMA = "sp.doc/2";
 export const DOC_STORE_KEY = "sp-planner-document-v2";
@@ -688,6 +689,8 @@ export function normalizeDoc(raw) {
   doc.name = typeof raw.name === "string" && raw.name.trim() ? raw.name.trim() : null;
   doc.packId = raw.packId ?? null;
   doc.site = raw.site ?? null;
+  const underlay = normalizeSatelliteUnderlay(raw.underlay);
+  if (underlay) doc.underlay = underlay;
 
   doc.rooms = (raw.rooms || []).map((room) => ({
     id: room.id || nid("r"),

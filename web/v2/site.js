@@ -6,7 +6,8 @@
 // Three facts, kept separate because they come from different places and
 // change on different cycles, the same reasoning SCHEMA.md gives for the SKU
 // pack's five blocks:
-//   - propertyLine: the erf boundary, from the deeds/SG diagram, drawn once.
+//   - propertyLine: the erf boundary, from the deeds/SG diagram. Drawn once,
+//     then reshaped by dragging a corner or moved by dragging the line.
 //   - sgReference: one control point tying the plan's local origin to the
 //     real-world SG diagram coordinate system, plus the erf number. A single
 //     point (not a full transform) is a deliberate simplification - it
@@ -18,7 +19,7 @@
 //     drawn by hand when the municipality has an irregular building line the
 //     uniform-offset approximation cannot express.
 
-import { offsetPolygonInward } from "./geom.js?v=20260915-offset";
+import { distToSeg, offsetPolygonInward } from "./geom.js?v=20260915-offset";
 import { polyShape } from "./model.js";
 
 export function ensureSite(doc) {
@@ -43,6 +44,39 @@ export function setBuildingLine(doc, points, { derived = false } = {}) {
   const site = ensureSite(doc);
   site.buildingLine = points && points.length >= 3 ? { ...polyShape(points), derived } : null;
   return site;
+}
+
+/**
+ * What a click lands on along a closed property line.
+ * A vertex wins over the edges that meet there, so a corner can be grabbed
+ * even though both edges are also inside `tol`. `tol` is in plan metres.
+ * Returns `{ part: "vertex"|"edge", index }` or null.
+ */
+export function hitPropertyLine(points, x, y, tol) {
+  if (!points || points.length < 3 || !(tol >= 0)) return null;
+  let bestV = Infinity;
+  let vIndex = -1;
+  for (let i = 0; i < points.length; i += 1) {
+    const d = Math.hypot(points[i][0] - x, points[i][1] - y);
+    if (d <= tol && d < bestV) {
+      bestV = d;
+      vIndex = i;
+    }
+  }
+  if (vIndex >= 0) return { part: "vertex", index: vIndex };
+
+  let bestE = Infinity;
+  let eIndex = -1;
+  for (let i = 0; i < points.length; i += 1) {
+    const a = points[i];
+    const b = points[(i + 1) % points.length];
+    const d = distToSeg(a[0], a[1], b[0], b[1], x, y);
+    if (d <= tol && d < bestE) {
+      bestE = d;
+      eIndex = i;
+    }
+  }
+  return eIndex >= 0 ? { part: "edge", index: eIndex } : null;
 }
 
 export function setSgReference(doc, { erfNumber = null, real = null, plan = null } = {}) {

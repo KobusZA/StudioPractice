@@ -3094,6 +3094,64 @@ body.library-home {
   margin: 0;
 }
 
+/* The address is a sentence, not a number like the rotation field, so this
+   panel is a column with a full-width box and a match list under it. */
+#v2-satellite-panel {
+  width: 36rem;
+  max-width: calc(100% - 24px);
+  align-items: stretch;
+}
+
+#v2-satellite-panel .satellite-query {
+  flex: 1 1 100%;
+  flex-direction: column;
+  align-items: stretch;
+  white-space: normal;
+  gap: 4px;
+}
+
+#v2-satellite-query {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.satellite-suggest {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex: 1 1 100%;
+  max-height: 14rem;
+  overflow: auto;
+  background: #fff;
+  border: 1px solid var(--ink);
+  border-radius: 3px;
+}
+
+.satellite-suggest[hidden] {
+  display: none !important;
+}
+
+.satellite-suggest button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  white-space: normal;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 6px 8px;
+}
+
+.satellite-suggest button[aria-selected="true"],
+.satellite-suggest button:hover {
+  background: #e7dcc8;
+}
+
+.satellite-actions {
+  display: flex;
+  gap: 8px;
+}
+
 /* SG diagram coordinates: the field row is a nested wrapper (JS toggles one
    hidden attribute rather than three), so it needs the same flex/wrap
    behaviour as the panel itself to lay its labels out identically. */

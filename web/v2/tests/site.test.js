@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 
 import { area, offsetPolygonInward } from "../geom.js";
 import { emptyDoc } from "../model.js";
-import { deriveBuildingLine, ensureSite, setBuildingLine, setPropertyLine, setSgReference } from "../site.js";
+import { deriveBuildingLine, ensureSite, hitPropertyLine, setBuildingLine, setPropertyLine, setSgReference } from "../site.js";
 import { RULE_PACK } from "../rules.js";
 import { normalizePackUnits } from "../schema.js";
 
@@ -68,6 +68,15 @@ test("setPropertyLine leaves a hand-drawn building line alone", () => {
   setBuildingLine(doc, [[1, 1], [5, 1], [5, 5], [1, 5]], { derived: false });
   setPropertyLine(doc, [[0, 0], [10, 0], [10, 10], [0, 10]]);
   assert.ok(doc.site.buildingLine, "a hand-drawn override was placed on purpose");
+});
+
+test("hitPropertyLine prefers a corner over the edges that meet there", () => {
+  const square = [[0, 0], [10, 0], [10, 10], [0, 10]];
+  assert.deepEqual(hitPropertyLine(square, 0.05, 0.02, 0.2), { part: "vertex", index: 0 });
+  assert.deepEqual(hitPropertyLine(square, 5, 0.1, 0.2), { part: "edge", index: 0 });
+  assert.deepEqual(hitPropertyLine(square, 0, 5, 0.2), { part: "edge", index: 3 });
+  assert.equal(hitPropertyLine(square, 5, 5, 0.2), null);
+  assert.equal(hitPropertyLine([[0, 0], [1, 0]], 0, 0, 0.2), null);
 });
 
 test("setPropertyLine with fewer than 3 points clears it", () => {

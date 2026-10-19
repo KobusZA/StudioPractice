@@ -18,9 +18,9 @@
 
 import { complianceGaps, normalizePackUnits, GEOMETRY_LENGTH_KEYS } from "./schema.js";
 import { RULE_PACK, evaluateCompliance, groupFindingsByPart, summarizeFindings } from "./rules.js";
-import { deriveBuildingLine, setBuildingLine, setPropertyLine, setSgReference } from "./site.js?v=20260915-offset";
-import { HINTS, firstTabId, renderRibbon } from "./ribbon.js?v=20260928-select-similar";
-import { closeOverflowMenus, decorateRibbon, fitRibbon } from "./ribbon-fit.js?v=20260917-section";
+import { deriveBuildingLine, hitPropertyLine, setBuildingLine, setPropertyLine, setSgReference } from "./site.js?v=20261015-property";
+import { HINTS, firstTabId, renderRibbon } from "./ribbon.js?v=20261015-satellite";
+import { closeOverflowMenus, decorateRibbon, fitRibbon } from "./ribbon-fit.js?v=20261015-satellite";
 import {
   lookUpLevelId,
   ghostContext,
@@ -53,8 +53,11 @@ import {
   calibrate,
   clearUnderlay,
   drawUnderlay,
+  isSatelliteUnderlay,
+  loadSatelliteUnderlay,
   loadUnderlayFile,
   moveUnderlayTo,
+  restoreSatelliteUnderlay,
   rotateUnderlayBy,
   scaleUnderlayFromCorner,
   setUnderlayOpacity,
@@ -64,7 +67,8 @@ import {
   underlayCorners,
   underlayPixelFromWorld,
   underlayWorldFromPixel,
-} from "./underlay.js?v=20260917-calibrate";
+} from "./underlay.js?v=20261015-geocode";
+import { SATELLITE_ATTRIBUTION, locateSuggestion, suggestAddresses } from "./satellite.js?v=20261015-geocode";
 import { pickedDimension, planDimensionLines } from "./dimensions.js?v=20260917-measure";
 import {
   MIN_TRACE,
@@ -226,6 +230,12 @@ const el = {
   calibrateDistance: document.getElementById("v2-calibrate-distance"),
   calibrateConfirm: document.getElementById("v2-calibrate-confirm"),
   calibrateCancel: document.getElementById("v2-calibrate-cancel"),
+  satellitePanel: document.getElementById("v2-satellite-panel"),
+  satelliteHint: document.getElementById("v2-satellite-hint"),
+  satelliteQuery: document.getElementById("v2-satellite-query"),
+  satelliteSuggest: document.getElementById("v2-satellite-suggest"),
+  satelliteConfirm: document.getElementById("v2-satellite-confirm"),
+  satelliteCancel: document.getElementById("v2-satellite-cancel"),
   sgPanel: document.getElementById("v2-sg-panel"),
   sgHint: document.getElementById("v2-sg-hint"),
   sgFieldsWrap: document.getElementById("v2-sg-fields-wrap"),
@@ -266,6 +276,7 @@ const el = {
   inspectKicker: document.getElementById("v2-inspect-kicker"),
   inspectEmpty: document.getElementById("v2-inspect-empty"),
   inspectFields: document.getElementById("v2-inspect-fields"),
+  ctxProperty: document.getElementById("v2-ctx-property"),
   dockContext: document.getElementById("v2-dock-context"),
   ctxTypePicker: document.getElementById("v2-ctx-type-picker"),
   typeCurrent: document.getElementById("v2-type-current"),
@@ -420,6 +431,11 @@ let placeStatus = "planned";
 let planStatusFilter = "both";
 let placeRotation = 0;
 let cam = { scale: 48, ox: 80, oy: 60 };
+// Pixels per metre. 3000 is a few millimetres across the screen. 3 is far
+// enough out that the 200 m satellite, and the ground around it, fit on a
+// laptop; the old floor of 12 stopped at roughly 100 m.
+const MIN_VIEW_SCALE = 3;
+const MAX_VIEW_SCALE = 3000;
 let drag = null;
 // Click–click wall: first click writes the start, the free end follows the
 // pointer with the button up, second click commits and chains from that end.
@@ -435,6 +451,9 @@ let lineStart = null;
 // Site > Property line: the vertices clicked so far, while tool === "property".
 // Closed by clicking near the first point again, Enter, or double-click.
 let siteDraft = null;
+// The drawn boundary is selected. Corners can be dragged; the line itself moves.
+let propertySelected = false;
+let propertyHover = null;
 // Site > SG diagram coordinates: the plan point clicked, while tool === "sg-ref",
 // waiting on the erf number and real coordinate fields in the SG panel.
 let sgPick = null;
@@ -788,7 +807,7 @@ function frameDrawing(doc) {
   const pad = 1.4;
   const w = Math.max(1, b.maxX - b.minX + pad * 2);
   const h = Math.max(1, b.maxY - b.minY + pad * 2);
-  cam.scale = Math.min(90, Math.max(18, Math.min((rect.width - 48) / w, (rect.height - 48) / h)));
+  cam.scale = Math.min(90, Math.max(MIN_VIEW_SCALE, Math.min((rect.width - 48) / w, (rect.height - 48) / h)));
   const cx = (b.minX + b.maxX) / 2;
   const cy = (b.minY + b.maxY) / 2;
   cam.ox = rect.width / 2 - cx * cam.scale;
@@ -1784,6 +1803,10 @@ function activeGrid() {
 function snapFrom() {
   if (wallDraft) return { x: wallDraft.x1, y: wallDraft.y1 };
   if (drag?.kind === "segment-end") return { x: drag.fx, y: drag.fy };
+  if (drag?.kind === "property-vertex" && drag.origin) {
+    const prev = drag.origin[(drag.index - 1 + drag.origin.length) % drag.origin.length];
+    return { x: prev[0], y: prev[1] };
+  }
   if (shapeDraft?.x0 != null) return { x: shapeDraft.x0, y: shapeDraft.y0 };
   if (beamStart) return beamStart;
   if (measureDraft?.a) return measureDraft.a;
@@ -2635,9 +2658,11 @@ function draw() {
   if (tool === "measure" && measureDraft?.a) drawMeasureDraft();
   drawSnapGuide(rect);
   drawEndpointHandles();
+  drawPropertyChrome();
   drawUnderlayHandles();
   if (calibration?.a) drawCalibration();
   drawOpeningDraft(walls);
+  if (isSatelliteUnderlay(store.doc) && underlayIsVisible()) drawSatelliteAttribution(rect);
 
   el.empty.hidden = shouldHidePlanEmpty();
   el.legend.hidden = !store.hasContent();
@@ -2851,13 +2876,16 @@ function drawRevisionCloudDraft() {
 let lastRibbonHasSelection = null;
 
 function render() {
+  if (tool !== "select" || !propertyRing()) propertySelected = false;
   draw();
   syncSizeHud();
   syncPlanContext();
   syncUnderlayPanel();
   syncCalibratePanel();
+  syncSatellitePanel();
   syncSgPanel();
   syncLevelPanel();
+  restoreSatelliteBitmap();
   syncAttachPanel();
   syncHeaderModify();
   // Simple's Modify tab gates its whole content on selection; refresh it
@@ -2875,7 +2903,10 @@ function render() {
  * for the three operations they reach for constantly. */
 function syncHeaderModify() {
   if (!el.headerModify) return;
-  el.headerModify.hidden = !store.selected.length;
+  const model = store.selected.length > 0;
+  el.headerModify.hidden = !model && !propertySelected;
+  if (el.hmRotate) el.hmRotate.hidden = !model;
+  if (el.hmCopy) el.hmCopy.hidden = !model;
 }
 
 /** Opacity slider + rotation field, shown only while the underlay is the active selection (and not mid-calibration - the two panels would otherwise overlap). */
@@ -2937,7 +2968,8 @@ function drawGrid(rect) {
   const [wx0, wy0] = screenToWorld(0, 0);
   const [wx1, wy1] = screenToWorld(rect.width, rect.height);
   const step =
-    cam.scale < 24 ? 5
+    cam.scale < 8 ? 20
+    : cam.scale < 24 ? 5
     : cam.scale < 60 ? 1
     : cam.scale < 90 ? 0.5
     : cam.scale < 140 ? 0.2
@@ -3044,13 +3076,20 @@ function drawPolyFill(poly, fill, stroke) {
   ctx.restore();
 }
 
-function drawPolyOutline(poly, stroke, dashed) {
+function drawPolyOutline(poly, stroke, dashed, width = 1.4, halo = false) {
   if (poly.length < 3) return;
   ctx.save();
+  if (halo) {
+    // Light underlay so the line stays readable over satellite imagery.
+    pathForPoly(poly);
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.85)";
+    ctx.lineWidth = width + 3;
+    ctx.stroke();
+  }
   if (dashed) ctx.setLineDash([6, 5]);
   pathForPoly(poly);
   ctx.strokeStyle = stroke;
-  ctx.lineWidth = 1.4;
+  ctx.lineWidth = width;
   ctx.stroke();
   ctx.restore();
 }
@@ -3684,6 +3723,86 @@ function endpointHandleHit(wx, wy) {
   return null;
 }
 
+/** The closed ring actually drawn for the property line, or null. */
+function propertyRing() {
+  const shape = store.doc.site?.propertyLine;
+  if (!shape) return null;
+  const poly = shapePolygon(shape);
+  return poly.length >= 3 ? poly : null;
+}
+
+function propertyPickTol() {
+  return Math.max(0.15, 8 / cam.scale);
+}
+
+function propertyHandleTol() {
+  return (HANDLE / 2 + 2) / cam.scale;
+}
+
+/** Vertex (when selected, and only within the handle) or the boundary stroke. */
+function propertyHitAt(wx, wy) {
+  const pts = propertyRing();
+  if (!pts || tool !== "select") return null;
+  if (propertySelected) {
+    const vertex = hitPropertyLine(pts, wx, wy, propertyHandleTol());
+    if (vertex?.part === "vertex") return vertex;
+  }
+  return hitPropertyLine(pts, wx, wy, propertyPickTol());
+}
+
+function drawPropertyChrome() {
+  const pts = propertyRing();
+  if (!pts) return;
+  if (propertyHover && !propertySelected && !drag && tool === "select") {
+    ctx.save();
+    ctx.strokeStyle = COLOUR.hover;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 3]);
+    pathForPoly(pts);
+    ctx.stroke();
+    ctx.restore();
+  }
+  if (!propertySelected || tool !== "select") return;
+  ctx.save();
+  ctx.strokeStyle = COLOUR.selection;
+  ctx.lineWidth = 2.4;
+  ctx.setLineDash([]);
+  pathForPoly(pts);
+  ctx.stroke();
+  ctx.fillStyle = "#f4ede1";
+  ctx.lineWidth = 1.6;
+  for (const [x, y] of pts) {
+    const [hx, hy] = worldToScreen(x, y);
+    ctx.fillRect(hx - HANDLE / 2, hy - HANDLE / 2, HANDLE, HANDLE);
+    ctx.strokeRect(hx - HANDLE / 2, hy - HANDLE / 2, HANDLE, HANDLE);
+  }
+  ctx.restore();
+}
+
+function beginPropertyDrag(ev, wx, wy) {
+  const pts = propertyRing();
+  const hit = propertyHitAt(wx, wy);
+  if (!pts || !hit) return false;
+  const was = propertySelected;
+  propertySelected = true;
+  underlaySelected = false;
+  store.clearSelection();
+  store.pushUndo();
+  const origin = pts.map(([x, y]) => [x, y]);
+  const vertex = hitPropertyLine(origin, wx, wy, propertyHandleTol());
+  const hadDerived = Boolean(store.doc.site?.buildingLine?.derived);
+  if (vertex?.part === "vertex") {
+    drag = { kind: "property-vertex", index: vertex.index, origin, moved: false, hadDerived };
+  } else {
+    drag = { kind: "property-move", x0: wx, y0: wy, origin, moved: false, hadDerived };
+  }
+  if (!was) {
+    setStatusMessage("Drag a corner to reshape the property line, or drag the line to move it. Delete removes it.", "ok");
+  }
+  el.canvas.setPointerCapture(ev.pointerId);
+  return true;
+}
+
 function setSegmentLength(seg, length) {
   const cur = segmentLength(seg.x1, seg.y1, seg.x2, seg.y2);
   const next = Math.max(MIN_TRACE, roundGrid(Number(length) || cur, activeGrid()));
@@ -3944,8 +4063,8 @@ function drawEmptyProbe(x, y, side) {
 function drawSiteLines() {
   const site = store.doc.site;
   if (!site) return;
-  if (site.propertyLine) drawPolyOutline(shapePolygon(site.propertyLine), COLOUR.propertyLine, true);
-  if (site.buildingLine) drawPolyOutline(shapePolygon(site.buildingLine), COLOUR.buildingLine, true);
+  if (site.propertyLine) drawPolyOutline(shapePolygon(site.propertyLine), COLOUR.propertyLine, true, 3, true);
+  if (site.buildingLine) drawPolyOutline(shapePolygon(site.buildingLine), COLOUR.buildingLine, true, 3, true);
 }
 
 /** Live preview while drawing a property line: the vertices placed so far,
@@ -3955,7 +4074,7 @@ function drawPropertyDraft() {
   ctx.save();
   ctx.strokeStyle = COLOUR.propertyLine;
   ctx.fillStyle = COLOUR.propertyLine;
-  ctx.lineWidth = 1.5;
+  ctx.lineWidth = 3;
   ctx.setLineDash([5, 4]);
   ctx.beginPath();
   siteDraft.forEach(({ x, y }, i) => {
@@ -3974,6 +4093,15 @@ function drawPropertyDraft() {
     ctx.beginPath();
     ctx.arc(sx, sy, 4, 0, Math.PI * 2);
     ctx.fill();
+  }
+  if (siteDraft.length >= 3) {
+    // Ready to close: ring the first point so it is obvious where to click.
+    const [fx, fy] = worldToScreen(siteDraft[0].x, siteDraft[0].y);
+    ctx.strokeStyle = "#2e9e4f";
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.arc(fx, fy, 9, 0, Math.PI * 2);
+    ctx.stroke();
   }
   ctx.restore();
 }
@@ -4997,7 +5125,7 @@ function ribbonCommandState(item) {
   const ids = new Set(["underlay-adjust", "calibrate", "underlay-toggle", "underlay-off"]);
   if (!ids.has(item.id)) return null;
   const loaded = Boolean(store.doc.underlay);
-  if (!loaded) return { disabled: true, title: "Load a PDF or image first." };
+  if (!loaded) return { disabled: true, title: "Load a PDF, image or satellite view first." };
   const hidden = Boolean(store.doc.underlay.hidden);
   if (item.id === "underlay-toggle") {
     return {
@@ -5077,6 +5205,7 @@ function runCommand(name) {
     case "sheets": case "view-section": openSheets(); return;
     case "project-info": openProjectInfo(); return;
     case "underlay": openUnderlayPicker(); return;
+    case "satellite": openSatellitePanel(); return;
     case "underlay-adjust": startUnderlayAdjust(); return;
     case "calibrate": startCalibration(); return;
     case "underlay-toggle": toggleUnderlayVisibility(); return;
@@ -6123,6 +6252,196 @@ function openUnderlayPicker() {
   input.click();
 }
 
+let satelliteOpen = false;
+let satelliteBusy = false;
+let satelliteSuggestions = [];
+let satelliteSuggestIndex = -1;
+let satelliteSuggestFor = "";
+let satelliteSuggestTimer = 0;
+let satelliteSuggestAbort = null;
+const SATELLITE_HINT = el.satelliteHint?.textContent ?? "";
+
+function openSatellitePanel() {
+  cancelCalibration();
+  underlaySelected = false;
+  satelliteOpen = true;
+  if (el.satelliteHint) el.satelliteHint.textContent = SATELLITE_HINT;
+  render();
+  el.satelliteQuery?.focus();
+  el.satelliteQuery?.select();
+}
+
+function closeSatellitePanel() {
+  if (satelliteBusy) return;
+  satelliteOpen = false;
+  clearSatelliteSuggestions();
+  render();
+}
+
+function syncSatellitePanel() {
+  if (!el.satellitePanel) return;
+  el.satellitePanel.hidden = !satelliteOpen;
+  if (el.satelliteConfirm) {
+    el.satelliteConfirm.disabled = satelliteBusy;
+    el.satelliteConfirm.textContent = satelliteBusy ? "Loading…" : "Load";
+  }
+}
+
+function clearSatelliteSuggestions() {
+  satelliteSuggestAbort?.abort();
+  satelliteSuggestAbort = null;
+  clearTimeout(satelliteSuggestTimer);
+  satelliteSuggestions = [];
+  satelliteSuggestIndex = -1;
+  satelliteSuggestFor = "";
+  if (!el.satelliteSuggest) return;
+  el.satelliteSuggest.hidden = true;
+  el.satelliteSuggest.replaceChildren();
+  el.satelliteQuery?.setAttribute("aria-expanded", "false");
+}
+
+function paintSatelliteSuggestion() {
+  const buttons = el.satelliteSuggest?.querySelectorAll("button") ?? [];
+  buttons.forEach((button, i) => {
+    button.setAttribute("aria-selected", i === satelliteSuggestIndex ? "true" : "false");
+  });
+}
+
+function showSatelliteSuggestions(items, query) {
+  const list = el.satelliteSuggest;
+  if (!list) return;
+  satelliteSuggestions = items;
+  satelliteSuggestFor = query;
+  satelliteSuggestIndex = items.length ? 0 : -1;
+  list.replaceChildren();
+  if (!items.length) {
+    list.hidden = true;
+    el.satelliteQuery?.setAttribute("aria-expanded", "false");
+    return;
+  }
+  items.forEach((item, i) => {
+    const li = document.createElement("li");
+    li.setAttribute("role", "presentation");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.setAttribute("role", "option");
+    button.textContent = item.label;
+    button.setAttribute("aria-selected", i === satelliteSuggestIndex ? "true" : "false");
+    button.addEventListener("mousedown", (ev) => {
+      ev.preventDefault();
+      pickSatelliteSuggestion(i);
+    });
+    li.appendChild(button);
+    list.appendChild(li);
+  });
+  list.hidden = false;
+  el.satelliteQuery?.setAttribute("aria-expanded", "true");
+}
+
+function scheduleSatelliteSuggestions() {
+  const query = el.satelliteQuery?.value ?? "";
+  satelliteSuggestAbort?.abort();
+  clearTimeout(satelliteSuggestTimer);
+  satelliteSuggestions = [];
+  satelliteSuggestIndex = -1;
+  satelliteSuggestFor = "";
+  if (el.satelliteSuggest) {
+    el.satelliteSuggest.hidden = true;
+    el.satelliteSuggest.replaceChildren();
+  }
+  el.satelliteQuery?.setAttribute("aria-expanded", "false");
+  if (query.trim().length < 3) return;
+  satelliteSuggestTimer = setTimeout(() => {
+    refreshSatelliteSuggestions(query);
+  }, 300);
+}
+
+async function refreshSatelliteSuggestions(query) {
+  const abort = new AbortController();
+  satelliteSuggestAbort = abort;
+  try {
+    const items = await suggestAddresses(query, { signal: abort.signal });
+    if (abort.signal.aborted || el.satelliteQuery?.value !== query) return;
+    showSatelliteSuggestions(items, query);
+  } catch (err) {
+    if (err?.name === "AbortError") return;
+    if (el.satelliteQuery?.value === query) clearSatelliteSuggestions();
+  }
+}
+
+async function pickSatelliteSuggestion(index) {
+  const item = satelliteSuggestions[index];
+  if (!item || satelliteBusy) return;
+  if (el.satelliteQuery) el.satelliteQuery.value = item.label;
+  clearSatelliteSuggestions();
+  await commitSatellite(item);
+}
+
+async function commitSatellite(place) {
+  if (satelliteBusy) return;
+  const query = el.satelliteQuery?.value ?? "";
+  const rect = el.canvasWrap.getBoundingClientRect();
+  const [cx, cy] = screenToWorld(rect.width / 2, rect.height / 2);
+  satelliteBusy = true;
+  syncSatellitePanel();
+  clearSatelliteSuggestions();
+  let known = place && Number.isFinite(place.lat) && Number.isFinite(place.lng) ? place : null;
+  if (place && !known) {
+    setStatusMessage("Looking up that address…", "ok");
+    const located = await locateSuggestion(place);
+    if (!located.ok) {
+      satelliteBusy = false;
+      syncSatellitePanel();
+      setStatusMessage(located.message, "warn");
+      if (el.satelliteHint) el.satelliteHint.textContent = located.message;
+      render();
+      return;
+    }
+    known = located;
+  }
+  setStatusMessage("Fetching the satellite view…", "ok");
+  const result = await loadSatelliteUnderlay(store.doc, query, { x: cx, y: cy }, undefined, known);
+  satelliteBusy = false;
+  setStatusMessage(result.message, result.ok ? "ok" : "warn");
+  if (result.ok) {
+    satelliteOpen = false;
+    store.persist();
+    drawRibbon();
+  } else if (el.satelliteHint) {
+    el.satelliteHint.textContent = result.message;
+  }
+  render();
+}
+
+/** A reopened drawing carries the satellite placement but not its pixels; fetch them once. */
+function restoreSatelliteBitmap() {
+  const pending = restoreSatelliteUnderlay(store.doc);
+  if (!pending) return;
+  pending.then((outcome) => {
+    if (outcome === "shown") {
+      drawRibbon();
+      render();
+    } else if (outcome === "failed") {
+      setStatusMessage("Could not download the saved satellite view. Check the connection, then remove it and load it again.", "warn");
+    }
+  });
+}
+
+function drawSatelliteAttribution(rect) {
+  ctx.save();
+  ctx.font = "10px Source Sans 3, sans-serif";
+  const pad = 4;
+  const width = ctx.measureText(SATELLITE_ATTRIBUTION).width + pad * 2;
+  const x = rect.width - width - 6;
+  const y = rect.height - 22;
+  ctx.fillStyle = "rgba(255, 255, 255, 0.8)";
+  ctx.fillRect(x, y, width, 16);
+  ctx.fillStyle = "#333";
+  ctx.textBaseline = "middle";
+  ctx.fillText(SATELLITE_ATTRIBUTION, x + pad, y + 8);
+  ctx.restore();
+}
+
 function startCalibration() {
   if (!store.doc.underlay) {
     setStatusMessage("Load an underlay first.", "warn");
@@ -6222,7 +6541,7 @@ function startPropertyLineDraw() {
   store.clearSelection();
   syncToolButtons();
   drawRibbon();
-  setStatusMessage("Click each corner of the property boundary, then click the first point again (or press Enter) to close it.", "ok");
+  setStatusMessage("Click each corner of the property boundary, then click the first point again (or press Enter) to close it. Esc removes the last point.", "ok");
   render();
 }
 
@@ -6644,7 +6963,7 @@ function syncToolButtons() {
 // Drags that edit geometry already in the document mutate it live, off the
 // speculative undo entry pushed on pointer-down. Cancelling one therefore
 // means rolling that entry back, not just forgetting the drag.
-const REVERTIBLE_DRAGS = new Set(["move", "segment-end", "underlay-move", "underlay-scale", "underlay-rotate"]);
+const REVERTIBLE_DRAGS = new Set(["move", "segment-end", "property-vertex", "property-move", "underlay-move", "underlay-scale", "underlay-rotate"]);
 
 /**
  * Drop the in-progress click–click segment (or last property-line vertex)
@@ -6712,6 +7031,8 @@ function cancelDrawing() {
   sizeDraft = null;
   snapGuide = null;
   underlaySelected = false;
+  propertySelected = false;
+  propertyHover = null;
   calibration = null;
   siteDraft = null;
   sgPick = null;
@@ -6816,7 +7137,9 @@ function wireCanvas() {
   el.canvas.addEventListener("pointerleave", () => {
     hoverPoint = null;
     hover = null;
-    if (tool === "door" || tool === "window" || wallDraft || shapeDraft || beamStart || lineStart || (tool === "camera" && cameraDraft?.a) || (tool === "section" && sectionDraft?.a) || (tool === "callout" && calloutDraft?.a) || (tool === "revision" && revisionCloudDraft?.a) || (tool === "measure" && measureDraft?.a)) render();
+    const wasProp = propertyHover;
+    propertyHover = null;
+    if (wasProp || tool === "door" || tool === "window" || wallDraft || shapeDraft || beamStart || lineStart || (tool === "camera" && cameraDraft?.a) || (tool === "section" && sectionDraft?.a) || (tool === "callout" && calloutDraft?.a) || (tool === "revision" && revisionCloudDraft?.a) || (tool === "measure" && measureDraft?.a)) render();
   });
   window.addEventListener("pointerup", onPointerUp);
   el.canvas.addEventListener("wheel", onWheel, { passive: false });
@@ -6830,7 +7153,7 @@ function onWheel(ev) {
   const py = ev.clientY - rect.top;
   const [wx, wy] = screenToWorld(px, py);
   const factor = ev.deltaY < 0 ? 1.1 : 1 / 1.1;
-  cam.scale = Math.min(3000, Math.max(12, cam.scale * factor));
+  cam.scale = Math.min(MAX_VIEW_SCALE, Math.max(MIN_VIEW_SCALE, cam.scale * factor));
   const [nx, ny] = worldToScreen(wx, wy);
   cam.ox += px - nx;
   cam.oy += py - ny;
@@ -6863,6 +7186,16 @@ function onPointerDown(ev) {
         my: handle.end === 1 ? obj.y1 : obj.y2,
       };
       el.canvas.setPointerCapture(ev.pointerId);
+      render();
+      return;
+    }
+  }
+
+  // A selected property-line corner is the selection's own handle, same as a
+  // wall end: it wins over a wall that happens to sit on that corner.
+  if (tool === "select" && !attachPick && !ev.shiftKey && propertySelected) {
+    const vertex = hitPropertyLine(propertyRing(), wx, wy, propertyHandleTol());
+    if (vertex?.part === "vertex" && beginPropertyDrag(ev, wx, wy)) {
       render();
       return;
     }
@@ -6937,6 +7270,9 @@ function onPointerDown(ev) {
       }
     }
     siteDraft.push(p);
+    setStatusMessage(siteDraft.length >= 3
+      ? "Click the green first point (or press Enter) to close the boundary. Esc removes the last point."
+      : `Point ${siteDraft.length} placed. Keep clicking each corner (at least 3). Esc removes the last point.`, "ok");
     render();
     return;
   }
@@ -7064,6 +7400,7 @@ function onPointerDown(ev) {
   if (hit) {
     if (underlaySelected) drawRibbon();
     underlaySelected = false;
+    propertySelected = false;
     if (ev.shiftKey) {
       store.toggleRefs([hit], hit);
     } else if (!(store.isSelected(hit.kind, hit.id) && store.selected.length > 1)) {
@@ -7081,9 +7418,12 @@ function onPointerDown(ev) {
       oy: store.doc.underlay.y,
       moved: false,
     };
+  } else if (tool === "select" && !ev.shiftKey && beginPropertyDrag(ev, wx, wy)) {
+    // Clicking the boundary selects it. A corner drag reshapes; an edge drag moves.
   } else {
     const wasUnderlay = underlaySelected;
     underlaySelected = false;
+    propertySelected = false;
     if (!ev.shiftKey) store.clearSelection();
     drag = { kind: "marquee", x0: wx, y0: wy, x1: wx, y1: wy, shift: ev.shiftKey };
     if (wasUnderlay) drawRibbon();
@@ -7288,14 +7628,41 @@ function onPointerMove(ev) {
     render();
     return;
   }
+  if (drag?.kind === "property-vertex") {
+    const p = applySnap(wx, wy);
+    const [ox, oy] = drag.origin[drag.index];
+    if (Math.hypot(p.x - ox, p.y - oy) * cam.scale > 2) drag.moved = true;
+    if (drag.moved) {
+      const next = drag.origin.map((pt, i) => (i === drag.index ? [p.x, p.y] : [pt[0], pt[1]]));
+      setPropertyLine(store.doc, next);
+    }
+    render();
+    return;
+  }
+  if (drag?.kind === "property-move") {
+    const dx = wx - drag.x0;
+    const dy = wy - drag.y0;
+    if (Math.hypot(dx, dy) * cam.scale > 2) drag.moved = true;
+    if (drag.moved) {
+      const grid = activeGrid();
+      const next = drag.origin.map(([x, y]) => [roundGrid(x + dx, grid), roundGrid(y + dy, grid)]);
+      setPropertyLine(store.doc, next);
+    }
+    render();
+    return;
+  }
   if (!drag && tool === "select") {
     const uHandle = underlayHandleHit(wx, wy);
+    propertyHover = hover ? null : propertyHitAt(wx, wy);
     el.canvas.style.cursor = endpointHandleHit(wx, wy) ? "ew-resize"
       : uHandle?.kind === "underlay-rotate" ? "grab"
       : uHandle?.kind === "underlay-scale" ? "nwse-resize"
       : hover ? "move"
+      : propertyHover ? "move"
       : underlaySelected && hitUnderlay(wx, wy) ? "move"
       : "default";
+  } else {
+    propertyHover = null;
   }
   if (wallDraft && !drag) {
     const p = applySnap(wx, wy);
@@ -7343,6 +7710,11 @@ function onPointerUp(ev) {
     if (!drag.moved) store.undoStack.pop(); // no-op click: drop the speculative undo entry
   } else if (drag.kind === "segment-end") {
     store.persist();
+  } else if (drag.kind === "property-vertex" || drag.kind === "property-move") {
+    if (!drag.moved) store.undoStack.pop();
+    else if (drag.hadDerived) {
+      setStatusMessage("Property line updated. Run Building line again — the old setback was cleared.", "ok");
+    }
   }
 
   drag = null;
@@ -7353,6 +7725,14 @@ function onPointerUp(ev) {
 }
 
 function deleteSelection() {
+  if (propertySelected && !store.selected.length) {
+    store.pushUndo();
+    setPropertyLine(store.doc, null);
+    propertySelected = false;
+    store.persist();
+    setStatusMessage("Property line removed.", "ok");
+    return;
+  }
   if (!store.selected.length) return;
   store.pushUndo();
   for (const ref of store.selected) {
@@ -7425,7 +7805,7 @@ function wireKeyboard() {
       finishShapeRect();
     } else if (ev.key === "Enter" && tool === "property" && siteDraft?.length >= 3) {
       finishPropertyLine();
-    } else if ((ev.key === "Delete" || ev.key === "Backspace") && store.selected.length) {
+    } else if ((ev.key === "Delete" || ev.key === "Backspace") && (store.selected.length || propertySelected)) {
       deleteSelection();
       render();
     } else if ((ev.key === "Delete" || ev.key === "Backspace") && underlaySelected) {
@@ -7775,8 +8155,9 @@ function syncPlanContext() {
   const showType = linear || slab || roof || opening || item;
   const showGeom = linear || rect;
   const showInspect = Boolean(el.inspectFields) && (linear || room || slab || roof || opening || item);
-  const creating = !showInspect && !multi && placingToolArmed();
-  const dockState = showInspect ? "edit" : multiTypeable ? "edit" : creating ? "create" : "empty";
+  const editingProperty = propertySelected && !draft && refs.length === 0;
+  const creating = !showInspect && !multi && !editingProperty && placingToolArmed();
+  const dockState = editingProperty || showInspect ? "edit" : multiTypeable ? "edit" : creating ? "create" : "empty";
 
   if (el.dockContext) el.dockContext.dataset.state = dockState;
   setHidden(el.ctxTypePicker, !(showType || creating || room || multiTypeable));
@@ -7797,12 +8178,15 @@ function syncPlanContext() {
   if (el.paletteTitle) {
     if (dockState === "create") el.paletteTitle.textContent = lastPaletteLabel || "Types";
     else if (draft) el.paletteTitle.textContent = inspectKindLabel("wall", skuById(placeSkuId)) || "Wall";
+    else if (editingProperty) el.paletteTitle.textContent = "Property line";
     else if (obj) el.paletteTitle.textContent = inspectKindLabel(ref.kind, skuById(obj.sku)) || "Inspector";
     else if (multiTypeable) el.paletteTitle.textContent = "Types";
     else el.paletteTitle.textContent = "Inspector";
   }
 
-  if (multi) {
+  if (editingProperty) {
+    syncInspectKicker("Site boundary");
+  } else if (multi) {
     const group = store.groupForRef(refs[0]);
     syncInspectKicker(group ? group.name : `${refs.length} selected`);
   } else if (creating) {
@@ -7816,7 +8200,8 @@ function syncPlanContext() {
   }
 
   setHidden(el.planOptions, !showGeom);
-  setHidden(el.inspectFields, !showInspect && !creating);
+  setHidden(el.inspectFields, !showInspect && !creating && !editingProperty);
+  setHidden(el.ctxProperty, !editingProperty);
   setHidden(el.inspectEmpty, dockState !== "empty");
   if (el.inspectEmpty && dockState === "empty") {
     el.inspectEmpty.textContent = multi
@@ -7824,7 +8209,7 @@ function syncPlanContext() {
       : "Select a wall, room, roof or opening to edit its type and identity, or pick a tool on the ribbon to start drawing.";
   }
 
-  if (!showInspect && !showGeom && !creating) {
+  if (!showInspect && !showGeom && !creating && !editingProperty) {
     planContextKey = "";
     return;
   }
@@ -8123,6 +8508,34 @@ el.calibrateDistance?.addEventListener("keydown", (ev) => {
   if (ev.key === "Enter") {
     ev.preventDefault();
     confirmCalibration();
+  }
+});
+
+// --- satellite panel ---------------------------------------------------------
+
+el.satelliteConfirm?.addEventListener("click", () => commitSatellite());
+el.satelliteCancel?.addEventListener("click", closeSatellitePanel);
+el.satelliteQuery?.addEventListener("input", scheduleSatelliteSuggestions);
+el.satelliteQuery?.addEventListener("keydown", (ev) => {
+  const open = satelliteSuggestions.length > 0 && satelliteSuggestFor === el.satelliteQuery?.value;
+  if ((ev.key === "ArrowDown" || ev.key === "ArrowUp") && open) {
+    ev.preventDefault();
+    const count = satelliteSuggestions.length;
+    satelliteSuggestIndex = ev.key === "ArrowDown"
+      ? (satelliteSuggestIndex + 1) % count
+      : (satelliteSuggestIndex - 1 + count) % count;
+    paintSatelliteSuggestion();
+    return;
+  }
+  if (ev.key === "Enter") {
+    ev.preventDefault();
+    if (open && satelliteSuggestIndex >= 0) pickSatelliteSuggestion(satelliteSuggestIndex);
+    else commitSatellite();
+    return;
+  }
+  if (ev.key === "Escape") {
+    if (open) clearSatelliteSuggestions();
+    else closeSatellitePanel();
   }
 });
 

@@ -181,6 +181,18 @@
           <button type="button" id="v2-calibrate-confirm" hidden>Set scale</button>
           <button type="button" id="v2-calibrate-cancel">Cancel</button>
         </div>
+        <div class="planner-underlay-panel" id="v2-satellite-panel" hidden>
+          <strong>Satellite view</strong>
+          <p class="hint" id="v2-satellite-hint">Start typing a South African address and pick a match, or paste coordinates such as -25.7479, 28.2293. About 200 × 200 m around it loads at true scale, centred on your view.</p>
+          <label class="satellite-query">Address or coordinates
+            <input id="v2-satellite-query" type="text" autocomplete="off" spellcheck="false" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="v2-satellite-suggest" placeholder="94 Aberdeen Road, Clubview, Centurion" />
+          </label>
+          <ul id="v2-satellite-suggest" class="satellite-suggest" role="listbox" hidden></ul>
+          <div class="satellite-actions">
+            <button type="button" id="v2-satellite-confirm">Load</button>
+            <button type="button" id="v2-satellite-cancel">Cancel</button>
+          </div>
+        </div>
         <div class="planner-underlay-panel" id="v2-sg-panel" hidden>
           <strong>SG diagram coordinates</strong>
           <p class="hint" id="v2-sg-hint">Click the point on your drawing that matches a known SG diagram coordinate.</p>
@@ -261,6 +273,7 @@
           </div>
         </div>
         <div class="planner-fields" id="v2-inspect-fields" hidden>
+          <p class="hint" id="v2-ctx-property" hidden>Drag a corner to reshape the boundary, or drag the line to move it. Delete removes it. A derived building line is cleared and has to be run again.</p>
           <label id="v2-ctx-name-wrap" hidden>Name
             <input id="v2-ctx-name" type="text" autocomplete="off" />
           </label>
@@ -785,6 +798,6 @@
     </form>
   </div>
 
-  <script type="module" src="./ui.js?v=20260928-select-similar"></script>
+  <script type="module" src="./ui.js?v=20261015-property"></script>
 </body>
 </html>
