@@ -40,6 +40,7 @@ import {
   wallNormal,
 } from "./openings.js";
 import { deriveDrawnWalls, deriveWalls, isExternalWall, skuDrawnHeight } from "./walls.js";
+import { edgeHomeLevel, runGradient, serviceTakeoff } from "./services.js";
 
 const CATEGORY_TO_SCHEDULE = {
   wall: "Walls",
@@ -569,6 +570,7 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
       kind: sku.category === "window" ? "Window" : "Opening",
       elementId: opening.id,
       name: sku.name,
+      hostWallId: wall.id,
       depth: g.height || (sku.category === "window" ? 1.2 : 2.1),
       sill: sku.category === "window" ? (g.sill ?? 0.9) : 0,
       // Follows its host wall's base, so a door in a wall attached to a
@@ -666,6 +668,78 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
     instances.push(row);
   }
 
+  // --- services ------------------------------------------------------------
+  // One row per counted run, carrying its true 3D length. Only explicit
+  // fittings (placed components, counted as items above) are counted: no
+  // fitting SKU or routing rule exists in the pack to derive elbows from.
+  const takeoff = serviceTakeoff(doc, pack);
+  for (const run of takeoff.runs) {
+    if (!run.include) continue;
+    const { edge, measure: m, sku, network } = run;
+    const row = baseRow(pack, sku, edge.id, network.status);
+    applyMeasures(row, sku, { length: m.length, count: 1 });
+    row.level = edgeHomeLevel(doc, pack, edge);
+    row.kind = "serviceEdge";
+    row.networkId = network.id;
+    row.system = network.system;
+    row.mode = edge.mode;
+    row.planLength = m.plan;
+    row.verticalRise = Math.abs(m.dz);
+    // Grade along the run's own direction; a riser has none (null, not 0).
+    row.slope = m.slope;
+    row.gradient = runGradient(m.slope);
+    // Wastage on the material, after the measured length - null unless the SKU
+    // states a wasteFactor. Never added to `length`.
+    if (run.orderLength !== null) {
+      row.wasteFactor = sku.cost.wasteFactor;
+      row.orderLength = run.orderLength;
+    }
+    row.phaseCreated = phase;
+    instances.push(row);
+  }
+  // Bends. Where the pipe SKU names a fitting for the angle (`fittings`, e.g.
+  // { "bend90": "SKU_ID" }) the row is that fitting, so it prices from its own
+  // rate. Where it names none, the bend is still counted - the quantity is
+  // known - under a derived line the QS can price, and flagged as derived.
+  const nodeById = new Map((doc.serviceNodes || []).map((n) => [n.id, n]));
+  for (const bend of takeoff.bends) {
+    if (bend.mixed) continue;
+    const pipe = skuById(pack, bend.skuId);
+    const network = (doc.serviceNetworks || []).find((n) => n.id === bend.networkId);
+    if (!pipe || !network) continue;
+    const key = bend.standard === null ? "other" : String(bend.standard).replace(".", "_");
+    const fitting = skuById(pack, pipe.fittings?.[`bend${key}`]);
+    const status = network.status;
+    let row;
+    if (fitting) {
+      row = baseRow(pack, fitting, bend.nodeId, status);
+    } else {
+      const label = bend.standard === null ? "Non-standard bend" : `${bend.standard}° bend`;
+      row = {
+        category: "Service fittings",
+        model: `BEND-${bend.standard === null ? "OTHER" : bend.standard}:${pipe.id}`,
+        family: "",
+        type: `${label}, ${pipe.name}`,
+        elementId: bend.nodeId,
+        count: 1,
+        unit: "ea",
+        rateRef: null,
+        colourClass: pipe.drawing?.colourClass ?? "other",
+        status,
+        derived: true,
+      };
+    }
+    row.count = 1;
+    row.kind = nodeById.get(bend.nodeId) ? "serviceNode" : null;
+    row.level = bend.level;
+    row.networkId = bend.networkId;
+    row.system = network.system;
+    row.angle = bend.angle;
+    row.phaseCreated = phase;
+    instances.push(row);
+  }
+  warnings.push(...takeoff.warnings);
+
   explodeRecipes(doc, pack, instances, walls.filter((w) => !w.drawn));
 
   return {
@@ -681,6 +755,12 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
     sketchForms,
     rooms,
     warnings,
+    // Additive: per-network totals and the drainage findings. `schematicLength`
+    // is shown for information and is in no instance row.
+    services: {
+      networks: takeoff.networks,
+      drainage: takeoff.drainage,
+    },
     walls: walls.map((w) => ({
       id: w.id,
       sku: w.sku,

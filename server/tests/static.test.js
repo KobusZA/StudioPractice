@@ -36,13 +36,19 @@ async function serve(path, method = "HEAD") {
   return res;
 }
 
-test("the root redirects to the planner rather than serving it in place", async () => {
+test("the root redirects to practice operations rather than serving it in place", async () => {
   const res = await serve("/");
-  // Served in place, the page's own relative URLs - ./ui.js, ./v2.css,
-  // ../samples/tsp-pack.json - resolve against "/" and 404, which presents as
-  // a blank app rather than as a broken route.
+  // Served in place, the page's own relative URLs - ./app.js, ./practice.css -
+  // resolve against "/" and 404, which presents as a blank app rather than as
+  // a broken route. Practice, not the planner: a job starts there.
   assert.equal(res.status, 302);
-  assert.equal(res.headers.Location, "/v2/index.html");
+  assert.equal(res.headers.Location, "/practice/index.html");
+});
+
+test("practice operations' index is served at its own address", async () => {
+  const res = await serve("/practice/index.html");
+  assert.equal(res.status, 200);
+  assert.equal(res.headers["Content-Type"], "text/html; charset=utf-8");
 });
 
 test("the planner's index is served at its own address", async () => {

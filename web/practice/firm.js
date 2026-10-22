@@ -57,7 +57,7 @@ export async function mountFirmSettings(host, ctx) {
     try {
       saved = (await api.putOrgSettings(body)).settings;
       ctx.onSaved?.(saved);
-      ctx.toast("Firm details saved.");
+      ctx.toast("Invoice details saved.");
       paint(host);
     } catch (error) {
       ctx.toast(error.message, true);
@@ -68,7 +68,7 @@ export async function mountFirmSettings(host, ctx) {
 function paint(host) {
   host.innerHTML = `
     <div class="tpl">
-      <h1>Firm details</h1>
+      <h1>Invoice details</h1>
       <p class="note-line">Printed on every payment certificate. Nothing here is filled in for you:
         a certificate printed with a blank block says which block is blank.
         ${saved.orgName ? `Your firm is registered as <b>${esc(saved.orgName)}</b>; that is the name

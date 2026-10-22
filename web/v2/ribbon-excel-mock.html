@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>StudioPractice — adaptive ribbon (mock)</title>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet" />
+<style>
+  :root { --paper:#f3eee4; --ink:#1a1612; --soft:#5c5348; --line:#cfc4b3; --copper:#b2451e; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:"Source Sans 3","Segoe UI",sans-serif; background:#fbf9f4; color:var(--ink); }
+  header.top { background:#1f2a37; color:var(--paper); padding:12px 24px; display:flex; flex-wrap:wrap; gap:10px 22px; align-items:center; position:sticky; top:0; z-index:9; }
+  header.top h1 { font:500 1.05rem Fraunces,serif; margin:0; }
+  header.top label { font-size:.85rem; display:flex; gap:6px; align-items:center; cursor:pointer; }
+  header.top input[type=range] { width:260px; }
+  header.top button { background:transparent; color:inherit; border:1px solid rgba(243,238,228,.4); padding:3px 9px; border-radius:3px; font:inherit; font-size:.8rem; cursor:pointer; }
+  main { padding:18px 24px 60px; }
+  main p { color:var(--soft); font-size:.88rem; max-width:105ch; margin:0 0 10px; }
+  .frame { border:1px solid var(--line); background:var(--paper); max-width:100%; }
+  .tabs { display:flex; gap:18px; padding:6px 14px 0; font-size:.82rem; }
+  .tabs span { padding:4px 2px; color:var(--soft); }
+  .tabs span.on { color:var(--ink); border-bottom:2px solid var(--copper); font-weight:600; }
+  .rib { display:flex; width:100%; padding:6px 6px 0; border-top:1px solid var(--line); }
+  .grp { display:flex; flex-direction:column; flex:none; padding:0 8px; border-right:1px solid var(--line); position:relative; }
+  .grp:last-child { border-right:none; }
+  .items { display:grid; grid-auto-flow:column; grid-template-rows:repeat(3, var(--row)); gap:0 2px; height:72px; align-content:center; }
+  .items.big { grid-template-rows:none; align-content:stretch; }
+  .lab { text-align:center; font-size:.58rem; letter-spacing:.07em; text-transform:uppercase; color:var(--soft); padding:3px 0 4px; white-space:nowrap; }
+  svg { width:1em; height:1em; fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; flex:none; }
+  button { font:inherit; color:inherit; background:transparent; border:1px solid transparent; border-radius:2px; cursor:pointer; }
+  button:hover:not(:disabled) { background:#fff; border-color:var(--line); }
+  button:disabled { cursor:default; }
+  .sm { display:flex; align-items:center; gap:6px; height:var(--row); padding:0 8px; font-size:.74rem; white-space:nowrap; text-align:left; min-width:var(--colw, 0); }
+  .sm svg { font-size:var(--ico); }
+  .lg { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; min-width:var(--lgw, 56px); padding:2px 8px; font-size:.74rem; font-weight:600; }
+  .lg svg { font-size:var(--lgi, 28px); }
+  .ctx:disabled { opacity:.42; }
+  .soon:disabled { opacity:.32; font-style:italic; }
+  .tog.on { background:#fff; border-color:var(--copper); box-shadow:inset 3px 0 0 var(--copper); }
+
+  .comfy { --row:24px; --ico:16px; --colw:92px; }
+  .narrow { --colw:0px; }
+  .items.mixed { display:flex; gap:4px; grid-template-rows:none; align-items:stretch; }
+  .items-big { display:flex; gap:2px; }
+  .items-big.stacked { display:grid; grid-template-rows:repeat(2, 1fr); height:72px; align-content:stretch; }
+  .items-big .md { height:auto; min-height:0; min-width:104px; padding:0 10px; gap:8px; font-size:.8rem; font-weight:600; }
+  .items-big .md svg { font-size:20px; }
+  .items-big.tight .md { min-width:0; padding:0 7px; gap:5px; font-size:.72rem; }
+  .items-big.tight .md svg { font-size:16px; }
+  .items-small { display:grid; grid-auto-flow:column; grid-template-rows:repeat(3, var(--row)); gap:0 2px; align-content:center; }
+  .tight { --row:19px; --ico:13px; --colw:0px; --lgw:48px; --lgi:24px; }
+  .tight .sm { padding:0 5px; gap:4px; font-size:.7rem; }
+  .tight .lg { padding:2px 5px; font-size:.7rem; }
+  .icon .cap { display:none; }
+  .icon .sm { padding:0 6px; min-width:0; }
+  .icon { --ico:16px; --row:22px; }
+
+  .menu-wrap { position:relative; }
+  .menu { display:none; position:absolute; top:100%; left:0; z-index:20; background:#fff; border:1px solid var(--line); box-shadow:0 6px 18px rgba(0,0,0,.14); padding:4px; min-width:170px; }
+  .grp.open .menu { display:block; }
+  .menu .sm { width:100%; height:26px; font-size:.78rem; padding:0 8px; --colw:0; }
+  .menu .sm svg { font-size:15px; }
+
+  table.st { border-collapse:collapse; font-size:.78rem; margin-top:14px; }
+  table.st td, table.st th { padding:3px 12px 3px 0; text-align:left; border-bottom:1px solid var(--line); }
+  table.st th { font-weight:600; color:var(--soft); font-size:.72rem; text-transform:uppercase; letter-spacing:.05em; }
+  .legend { display:flex; gap:18px; font-size:.78rem; color:var(--soft); margin-top:12px; flex-wrap:wrap; }
+</style>
+</head>
+<body>
+<header class="top">
+  <h1>Adaptive ribbon</h1>
+  <label>Window width <input type="range" id="w" min="520" max="1700" step="10" value="1500"> <b id="wv"></b></label>
+  <span><button data-w="1700">Wide</button> <button data-w="1400">Laptop</button> <button data-w="1100">Narrow</button> <button data-w="800">Tablet</button> <button data-w="560">Tiny</button></span>
+  <label><input type="checkbox" id="sheet"> Drawing loaded</label>
+  <label><input type="checkbox" id="simple"> Simple (hide "coming later")</label>
+</header>
+<main>
+  <p>One ribbon, no scrollbar. It starts at the best version (comfortable, large buttons for one- and two-command groups) and gives up the least important things first, one step at a time, until the row fits. Drag the width slider and watch the table below: low-priority groups step down first and lead the others by a couple of steps; Walls, Floors, Openings and Ceilings are protected and stay big the longest. Comfort (row height, padding) goes before button size, and dropdowns are the last resort.</p>
+  <div class="frame" id="frame">
+    <div class="tabs"><span class="on">Build</span><span>Document</span><span>Site &amp; modify</span><span>Output</span><span>Check</span></div>
+    <div class="rib" id="rib"></div>
+  </div>
+  <table class="st" id="st"></table>
+  <div class="legend"><span>Steps: <b>comfortable</b> → <b>tight</b> → (small groups: <b>stack</b>) → <b>icons only</b> → <b>dropdown</b> (groups of 3+ only).</span></div>
+</main>
+
+<script>
+const I = {
+  pdf:'<rect x="4" y="5" width="16" height="14" rx="1"/><path d="M4 15l4-4 3 3 4-5 5 6"/>',
+  sat:'<circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c3 3 3 13 0 16M12 4c-3 3-3 13 0 16"/>',
+  adj:'<rect x="5" y="7" width="14" height="10" rx="1"/><path d="M12 4v3M12 17v3"/>',
+  scale:'<path d="M4 20L20 4"/><path d="M8 20h-4v-4M16 4h4v4"/>',
+  eye:'<path d="M3 12s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6z"/><circle cx="12" cy="12" r="2.2"/>',
+  x:'<path d="M6 6l12 12M18 6L6 18"/>',
+  file:'<path d="M7 4h7l5 5v11H7z"/><path d="M14 4v5h5"/>',
+  lvl:'<path d="M4 7h16M4 12h16M4 17h16"/><rect x="5" y="10" width="14" height="4" fill="currentColor" stroke="none"/>',
+  lv:'<path d="M4 8h16M4 12h16M4 16h16"/>',
+  wall:'<path d="M4 8h16M4 16h16M9 4v16M15 4v16"/>',
+  bound:'<rect x="4" y="4" width="16" height="16" rx="1" stroke-dasharray="3 2"/>',
+  found:'<path d="M4 18h16M6 18V9l6-4 6 4v9"/>',
+  floor:'<rect x="4" y="10" width="16" height="8"/><path d="M4 10l8-5 8 5"/>',
+  roof:'<path d="M3 13l9-8 9 8"/><path d="M6 13v7h12v-7"/>',
+  ceil:'<path d="M4 7h16M6 7v4M18 7v4M8 11h8"/>',
+  door:'<rect x="7" y="3" width="10" height="18"/><circle cx="15" cy="13" r="0.8" fill="currentColor" stroke="none"/>',
+  win:'<rect x="4" y="5" width="16" height="14"/><path d="M12 5v14M4 12h16"/>',
+  beam:'<path d="M4 11h16v3H4z"/><path d="M7 8v8M17 8v8"/>',
+  col:'<path d="M9 4h6M10 4v16M14 4v16M8 20h8"/>',
+  stair:'<path d="M4 20h4v-4h4v-4h4V8h4V4"/>',
+  ramp:'<path d="M4 20h16V8z"/>',
+  rail:'<path d="M4 20V8M12 20V8M20 20V8M4 8h16"/>',
+  elec:'<path d="M10 2l-2 10h4l-2 10"/>',
+  plumb:'<path d="M8 4v6a4 4 0 008 0V4M12 14v6"/>',
+  wh:'<rect x="7" y="4" width="10" height="16" rx="3"/><path d="M12 9v4"/>',
+  drain:'<path d="M4 6h16M6 6v6a6 6 0 0012 0V6"/>',
+  place:'<circle cx="12" cy="12" r="5"/><path d="M12 3v4M12 17v4M3 12h4M17 12h4"/>',
+  route:'<path d="M4 18h8V8h8"/><circle cx="4" cy="18" r="1.6"/><circle cx="20" cy="8" r="1.6"/>',
+  node:'<path d="M3 17l7-6 11 3"/><circle cx="10" cy="11" r="2.4"/>',
+  rise:'<path d="M12 20V6M7 11l5-5 5 5"/><path d="M5 20h14"/>',
+  conn:'<circle cx="7" cy="12" r="3"/><circle cx="17" cy="12" r="3"/><path d="M10 12h4"/>',
+  size:'<path d="M4 8h16M4 16h16"/><circle cx="12" cy="12" r="3"/>',
+  slope:'<path d="M4 8l16 8"/><path d="M4 8v8h16"/>',
+  furn:'<path d="M5 11h14v8H5zM5 11V8h14v3M9 19v2M15 19v2"/>',
+  case:'<rect x="4" y="5" width="16" height="15"/><path d="M12 5v15M4 12h16"/>',
+  more:'<path d="M5 9l7 7 7-7"/>'
+};
+const ic = k => `<svg viewBox="0 0 24 24">${I[k]}</svg>`;
+
+// item: [label, icon, state, toggleOn]  state: '' | 'ctx' (needs a drawing) | 'soon' (roadmap)
+// prio: how many steps AHEAD of the others this group shrinks. Negative = protected.
+const GROUPS = [
+  // PDF / image and Satellite are "anchor" items (5th field): large buttons that keep
+  // their size and margins ahead of Floors, Ceilings and Openings.
+  { name:'Add drawing', prio:2, icon:'pdf', items:[['PDF / image','pdf','',0,1],['Satellite','sat','',0,1],['DWG','file','soon'],['CAD','file','soon'],['Adjust','adj','ctx'],['Set scale','scale','ctx'],['Hide','eye','ctx'],['Remove','x','ctx']] },
+  { name:'Levels', prio:1, icon:'lvl', items:[['This level only','lvl','',1],['+ Add floor','lv'],['Insert level','lv']] },
+  { name:'Walls', prio:-1, icon:'wall', items:[['Walls','wall'],['Boundary','bound'],['Foundations','found']] },
+  { name:'Floors & roofs', prio:0, icon:'floor', items:[['Floors','floor'],['Roofs','roof']] },
+  { name:'Ceilings', prio:1, icon:'ceil', items:[['Ceiling','ceil']] },
+  { name:'Openings', prio:0, icon:'door', items:[['Doors','door'],['Windows','win']] },
+  { name:'Structure', prio:1, icon:'col', items:[['Beams','beam','soon'],['Columns','col'],['Staircase','stair'],['Ramp','ramp','soon'],['Railings','rail','soon']] },
+  { name:'Services', prio:0, icon:'elec', items:[['Electrical','elec'],['Plumbing','plumb'],['Water heating','wh'],['Drainage','drain'],['Place component','place'],['Draw route','route'],['Add node','node'],['Rise / drop','rise','soon'],['Connect','conn'],['Change size / type','size','soon'],['Drainage slope','slope','soon']] },
+  { name:'Components', prio:1, icon:'case', items:[['Furniture','furn','soon'],['Casework','case']] }
+];
+const STEP_NAMES = {
+  large: ['large · comfortable', 'large · tight', 'stacked · tight', 'icons only'],
+  stack: ['comfortable', 'comfortable · narrow', 'tight', 'icons only', 'dropdown'],
+  // Anchors stay large and comfortable while the small buttons shrink around them.
+  // Side-by-side large anchors are the luxury step: they go first, then the small buttons shrink.
+  mixed: ['anchors side by side · rest comfortable', 'anchors stacked', 'rest narrow', 'rest tight', 'rest icons only', 'anchors tight', 'all icons', 'dropdown']
+};
+/** Shrink order: lowest key goes first. Mixed groups give up their small buttons early and their anchors late. */
+const keyOf = (g, step) => kindOf(g) === 'mixed' ? (step < 2 ? step - 3 : step < 5 ? step - 3 : step - 2) : step - g.prio;
+// Large groups stop at icons; stacked groups may fall back to a dropdown.
+const maxStep = g => STEP_NAMES[kindOf(g)].length - 1;
+
+const $ = id => document.getElementById(id);
+let visible = [], steps = [];
+
+function btn(b, cls, sheet) {
+  const [label, icon, st = '', on] = b;
+  const locked = (st === 'ctx' && !sheet) || st === 'soon';
+  const stateCls = st === 'soon' ? 'soon' : st === 'ctx' ? 'ctx' : '';
+  const title = st === 'soon' ? 'Not built yet' : (st === 'ctx' && !sheet) ? 'Load a PDF or image first' : label;
+  const text = cls === 'lg' ? `<span class="cap">${label}</span>` : `<span class="cap">${label}</span>`;
+  return `<button class="${cls} ${stateCls} ${on ? 'tog on' : ''}" ${locked ? 'disabled' : ''} title="${title}">${ic(icon)}${text}</button>`;
+}
+
+function kindOf(g) { return g.items.some(b => b[4]) ? 'mixed' : g.items.length <= 2 ? 'large' : 'stack'; }
+
+function groupHtml(g, s, sheet, idx) {
+  const kind = kindOf(g);
+  let mode, big = false, collapsed = false;
+  if (kind === 'large') { big = s <= 1; mode = s === 0 ? 'comfy' : s === 3 ? 'tight icon' : 'tight'; }
+  else if (kind === 'stack') { mode = ['comfy', 'comfy narrow', 'tight', 'tight icon', ''][s]; collapsed = s === 4; }
+  else if (s <= 5) {
+    const smallMode = ['comfy', 'comfy', 'comfy narrow', 'tight', 'tight icon', 'tight icon'][s];
+    const side = s === 0;                       // large, side by side
+    const bigMode = s <= 4 ? 'comfy' : 'tight'; // step 5: anchors tight
+    const anchors = g.items.filter(b => b[4]), rest = g.items.filter(b => !b[4]);
+    const abtn = b => side ? btn(b, 'lg', sheet) : btn(b, 'sm md', sheet);
+    return `<div class="grp" data-i="${idx}"><div class="items mixed"><div class="items-big ${side ? '' : 'stacked'} ${bigMode}">${anchors.map(abtn).join('')}</div><div class="items-small ${smallMode}">${rest.map(b => btn(b, 'sm', sheet)).join('')}</div></div><div class="lab">${g.name}</div></div>`;
+  } else { mode = 'tight icon'; collapsed = s === 7; }
+  if (collapsed) {
+    return `<div class="grp" data-i="${idx}"><div class="items big tight"><div class="menu-wrap"><button class="lg" onclick="toggleMenu(${idx},event)">${ic(g.icon)}<span class="cap">${g.name} ${ic('more').replace('<svg','<svg style="display:inline;vertical-align:-1px"')}</span></button>
+      <div class="menu">${g.items.map(b => btn(b, 'sm', sheet)).join('')}</div></div></div><div class="lab">${g.name}</div></div>`;
+  }
+  return `<div class="grp" data-i="${idx}"><div class="items ${big ? 'big' : ''} ${mode}">${g.items.map(b => btn(b, big ? 'lg' : 'sm', sheet)).join('')}</div><div class="lab">${g.name}</div></div>`;
+}
+
+function draw() {
+  const sheet = $('sheet').checked;
+  $('rib').innerHTML = visible.map((g, i) => groupHtml(g, steps[i], sheet, i)).join('');
+}
+const overflowing = () => $('rib').scrollWidth > $('rib').clientWidth + 1;
+
+/** Pick the next group to give up something: lowest (step - prio), ties go to the right. */
+function nextToShrink() {
+  let best = -1, bestKey = Infinity;
+  visible.forEach((g, i) => {
+    if (steps[i] >= maxStep(g)) return;
+    const key = keyOf(g, steps[i]);
+    if (key <= bestKey) { bestKey = key; best = i; }
+  });
+  return best;
+}
+
+function fit() {
+  const sheet = $('sheet').checked, simple = $('simple').checked;
+  const w = +$('w').value;
+  $('wv').textContent = w + 'px';
+  $('frame').style.width = w + 'px';
+  visible = GROUPS.map(g => ({ ...g, items: g.items.filter(b => !(simple && b[2] === 'soon')) })).filter(g => g.items.length);
+  steps = visible.map(() => 0);
+  draw();
+  let guard = 80;
+  while (overflowing() && guard--) {
+    const i = nextToShrink();
+    if (i < 0) break;
+    steps[i] += 1;
+    draw();
+  }
+  // Grow back: shrinking steps are coarse, so the last one may have freed more
+  // room than it needed. Hand space back one step at a time, most protected
+  // group first, keeping each step only if the row still fits. Repeats until
+  // nothing more fits, so there is no dead space on the right.
+  if (!overflowing()) {
+    const blocked = new Set();
+    for (let guard2 = 200; guard2--;) {
+      let pick = -1, pickKey = -Infinity;
+      visible.forEach((g, i) => {
+        if (steps[i] === 0 || blocked.has(i)) return;
+        const key = keyOf(g, steps[i] - 1);
+        if (key > pickKey) { pickKey = key; pick = i; }
+      });
+      if (pick < 0) break;
+      steps[pick] -= 1;
+      draw();
+      if (overflowing()) { steps[pick] += 1; draw(); blocked.add(pick); }
+      else blocked.clear();
+    }
+  }
+  $('st').innerHTML = `<tr><th>Group</th><th>Priority</th><th>Currently</th></tr>` + visible.map((g, i) =>
+    `<tr><td>${g.name}</td><td>${g.prio > 0 ? 'shrinks early' : g.prio < 0 ? 'protected' : 'normal'}</td><td>${STEP_NAMES[kindOf(g)][steps[i]]}</td></tr>`).join('') +
+    (overflowing() ? `<tr><td colspan="3" style="color:var(--copper)">Still overflowing at this width: nothing left to shrink.</td></tr>` : '');
+}
+
+function toggleMenu(i, e) {
+  e.stopPropagation();
+  const g = document.querySelector(`.grp[data-i="${i}"]`);
+  const was = g.classList.contains('open');
+  document.querySelectorAll('.grp.open').forEach(x => x.classList.remove('open'));
+  g.classList.toggle('open', !was);
+}
+document.addEventListener('click', () => document.querySelectorAll('.grp.open').forEach(x => x.classList.remove('open')));
+['w', 'sheet', 'simple'].forEach(id => $(id).addEventListener('input', fit));
+document.querySelectorAll('[data-w]').forEach(b => b.addEventListener('click', () => { $('w').value = b.dataset.w; fit(); }));
+window.addEventListener('resize', fit);
+document.fonts?.ready.then(fit);
+fit();
+</script>
+</body>
+</html>

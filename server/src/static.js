@@ -27,7 +27,7 @@ const TYPES = new Map(Object.entries({
   ".csv": "text/csv; charset=utf-8",
 }));
 
-export function createStatic(rootDir, { index = "/v2/index.html" } = {}) {
+export function createStatic(rootDir, { index = "/practice/index.html" } = {}) {
   const root = resolve(rootDir);
 
   return async function serve(req, res) {
@@ -38,11 +38,12 @@ export function createStatic(rootDir, { index = "/v2/index.html" } = {}) {
 
     const url = new URL(req.url, "http://localhost");
 
-    // A redirect, not the index's bytes served at "/". The planner loads its
-    // modules, its stylesheet and its type pack by relative URL, and all of
-    // those resolve against the *document's* address: served at "/", the page's
-    // own "./ui.js" becomes "/ui.js" and 404s, which looks like a blank app
-    // with no error rather than a misconfigured route.
+    // A redirect, not the index's bytes served at "/". Both apps load their
+    // modules and stylesheets by relative URL, and those resolve against the
+    // *document's* address: served at "/", the page's own "./app.js" becomes
+    // "/app.js" and 404s, which looks like a blank app with no error rather
+    // than a misconfigured route. The index is practice operations because a
+    // job starts there; the planner is reached from a job.
     if (url.pathname === "/") {
       res.writeHead(302, { Location: index, "Cache-Control": "no-store" }).end();
       return true;

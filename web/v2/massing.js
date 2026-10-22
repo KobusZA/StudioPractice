@@ -1,8 +1,12 @@
 // 3D massing view for the v2 core (Output > Views > 3D).
 //
 // Deliberately independent of the compliance engine (Week 2) and the sheet /
-// PDF system (Week 3): it only extrudes what compile() already emits -
+// PDF system (Week 3): it extrudes what compile() already emits -
 // profileLoops, depth and, since this file needed it, per-object elevation.
+// Service routes are not part of that extrusion. When the Services checkbox
+// is on, they are drawn afterwards from serviceMassingRoutes(): each run is
+// a line at its derived height, in the system's colour, so a pipe inside a
+// wall stays visible.
 // Camera (Output > Views > Camera) is the same extrusion from a standing
 // eye, not a second model. Section (Document > Views > Section) is the same
 // extrusion on a vertical cut, and Elevation (Output > Views > Elevation) is
@@ -21,7 +25,14 @@
 //    alongside this file), so every kind is walked once, keyed by its own z0.
 
 import { roofRidgeAlongX } from "./roof.js";
-import { clipFacesForSection, projectSectionPoint, sectionFrame } from "./section.js";
+import {
+  SECTION_FAR_M,
+  SECTION_U_PAD,
+  clipFacesForSection,
+  projectSectionPoint,
+  sectionDot,
+  sectionFrame,
+} from "./section.js";
 
 /** Tilt down from horizontal, in radians. The opening view stays a 3/4
  *  look so a typical 30° gable still reads as a roof, not an elevation.
@@ -571,6 +582,97 @@ export function groundFacesFromBounds(bounds) {
   return faces;
 }
 
+function finiteBounds(bounds) {
+  return !!bounds && [bounds.minX, bounds.minY, bounds.minZ, bounds.maxX, bounds.maxY, bounds.maxZ].every(Number.isFinite);
+}
+
+function boundsOfPoints(points) {
+  let minX = Infinity, minY = Infinity, minZ = Infinity;
+  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  for (const [x, y, z] of points) {
+    if (![x, y, z].every(Number.isFinite)) continue;
+    minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+    minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+    minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z);
+  }
+  return { minX, minY, minZ, maxX, maxY, maxZ };
+}
+
+function unionBounds(a, b) {
+  if (!finiteBounds(a)) return finiteBounds(b) ? b : null;
+  if (!finiteBounds(b)) return a;
+  return {
+    minX: Math.min(a.minX, b.minX),
+    minY: Math.min(a.minY, b.minY),
+    minZ: Math.min(a.minZ, b.minZ),
+    maxX: Math.max(a.maxX, b.maxX),
+    maxY: Math.max(a.maxY, b.maxY),
+    maxZ: Math.max(a.maxZ, b.maxZ),
+  };
+}
+
+function clipSegmentHalf(a, b, origin, n, keepMin) {
+  const da = sectionDot(a, origin, n);
+  const db = sectionDot(b, origin, n);
+  const ain = da >= keepMin - 1e-6;
+  const bin = db >= keepMin - 1e-6;
+  if (ain && bin) return [a, b];
+  if (!ain && !bin) return null;
+  const denom = db - da;
+  if (!Number.isFinite(denom) || Math.abs(denom) < 1e-12) return ain ? [a, b] : null;
+  const t = (keepMin - da) / denom;
+  const hit = [
+    a[0] + (b[0] - a[0]) * t,
+    a[1] + (b[1] - a[1]) * t,
+    a[2] + (b[2] - a[2]) * t,
+  ];
+  return ain ? [a, hit] : [hit, b];
+}
+
+/**
+ * Keep the part of a service run that a section cut can see: on the look
+ * side, within the drawn length, and no deeper than `far`. An orbit,
+ * elevation or camera view returns the run unchanged.
+ */
+export function clipServiceSegment(a, b, cut) {
+  if (!a || !b || !cut || cut.mode !== "section") return [a, b];
+  const far = Number(cut.far) > 0 ? cut.far : SECTION_FAR_M;
+  const length = Number(cut.length) > 0 ? cut.length : 0;
+  const planes = [
+    [cut.look, 0],
+    [[-cut.look[0], -cut.look[1]], -far],
+    [cut.along, -SECTION_U_PAD],
+    [[-cut.along[0], -cut.along[1]], -(length + SECTION_U_PAD)],
+  ];
+  let seg = [a, b];
+  for (const [n, min] of planes) {
+    if (!n || !Number.isFinite(n[0]) || !Number.isFinite(n[1])) return null;
+    const next = clipSegmentHalf(seg[0], seg[1], cut.origin, n, min);
+    if (!next) return null;
+    seg = next;
+  }
+  return seg;
+}
+
+function serviceRoutesInView(routes, statusFilter, cut) {
+  const filtered = statusFilter === "existing" || statusFilter === "planned"
+    ? routes.filter((route) => route.status === statusFilter)
+    : routes;
+  if (!cut || cut.mode !== "section") return filtered;
+  const kept = [];
+  for (const route of filtered) {
+    const seg = clipServiceSegment(route.a, route.b, cut);
+    if (!seg) continue;
+    kept.push({ ...route, a: seg[0], b: seg[1] });
+  }
+  return kept;
+}
+
+function routeStrokeWidth(diameter, pxPerMetre) {
+  const fromSize = diameter ? diameter * pxPerMetre : 0;
+  return Math.min(9, Math.max(2.4, fromSize));
+}
+
 /** 0 = below grade, 1 = ground plane, 2 = at or above grade. */
 export function massingLayer(face) {
   if (face?.kind === "ground") return 1;
@@ -649,6 +751,8 @@ export function createMassingView({ canvas, emptyEl, captionEl, titleEl, onDraw 
   const cam = createCamera();
   let statusFilter = "both";
   let payload = null;
+  let serviceRoutes = [];
+  let showServices = true;
   let drag = null;
   let reframe = true;
 
@@ -660,6 +764,16 @@ export function createMassingView({ canvas, emptyEl, captionEl, titleEl, onDraw 
 
   function setStatusFilter(filter) {
     statusFilter = filter;
+    draw();
+  }
+
+  function setServices(routes) {
+    serviceRoutes = Array.isArray(routes) ? routes : [];
+    draw();
+  }
+
+  function setShowServices(on) {
+    showServices = Boolean(on);
     draw();
   }
 
@@ -727,7 +841,8 @@ export function createMassingView({ canvas, emptyEl, captionEl, titleEl, onDraw 
     }
 
     const faces = facesFromPayload(payload, statusFilter);
-    if (!faces.length) {
+    const routes = showServices ? serviceRoutesInView(serviceRoutes, statusFilter, cam) : [];
+    if (!faces.length && !routes.length) {
       if (emptyEl) emptyEl.hidden = false;
       if (captionEl) captionEl.textContent = "Draw a room, wall, roof, floor, door or window, then open 3D again.";
       if (typeof onDraw === "function") onDraw(cam, payload);
@@ -744,8 +859,11 @@ export function createMassingView({ canvas, emptyEl, captionEl, titleEl, onDraw 
             : "Drag to orbit · scroll to zoom · hatched plane is ground floor (0 mm)";
     }
 
-    const bounds = boundsOfFaces(faces);
-    if (reframe && !isLook && !isCutView) {
+    const bounds = unionBounds(
+      boundsOfFaces(faces),
+      boundsOfPoints(routes.flatMap((route) => [route.a, route.b])),
+    );
+    if (reframe && !isLook && !isCutView && bounds) {
       frameCamera(cam, bounds);
       reframe = false;
     }
@@ -753,14 +871,17 @@ export function createMassingView({ canvas, emptyEl, captionEl, titleEl, onDraw 
     // Only a section clips: an elevation is viewed from outside the whole
     // model, so nothing needs to be cut away for it to make sense.
     const cutFaces = isSection ? clipFacesForSection(withGround, cam) : withGround;
-    if (isSection && !cutFaces.length) {
+    if (isSection && !cutFaces.length && !routes.length) {
       if (emptyEl) emptyEl.hidden = false;
       if (captionEl) captionEl.textContent = "That cut does not hit the building. Draw the line through the plan.";
       if (typeof onDraw === "function") onDraw(cam, payload);
       return;
     }
     if (isCutView && reframe) {
-      const framed = sectionFrame(cutFaces, cam);
+      const frameFaces = routes.length
+        ? [...cutFaces, { pts: routes.flatMap((route) => [route.a, route.b]) }]
+        : cutFaces;
+      const framed = sectionFrame(frameFaces, cam);
       cam.sectionOu = framed.originU;
       cam.sectionOv = framed.originV;
       cam.sectionScale = Math.min(width, height) / (framed.span * 1.35);
@@ -812,6 +933,18 @@ export function createMassingView({ canvas, emptyEl, captionEl, titleEl, onDraw 
       if (item.face.cut) hatchPolygon(ctx, item.pts, style.stroke);
       if (projected.length < 25000) ctx.stroke();
     }
+    paintServiceRoutes(ctx, routes, (point) => (isLook
+      ? projectLookPoint(point[0], point[1], point[2], cam, cx, cy, height)
+      : isCutView
+        ? projectSectionPoint(point[0], point[1], point[2], cam, cam.sectionOu, cam.sectionOv, sectionScale, cx, cy)
+        : projectPoint(point[0], point[1], point[2], origin, cx, cy, scale, cam)), (pa, pb) => {
+      if (isLook) {
+        const depth = Math.max(LOOK_NEAR, ((pa[2] + pb[2]) / 2));
+        const fov = Number(cam.fov) > 0 ? cam.fov : LOOK_FOV_DEFAULT;
+        return ((height / 2) / Math.tan(fov / 2)) / depth;
+      }
+      return isCutView ? sectionScale : scale;
+    }, isLook);
     if (typeof onDraw === "function") onDraw(cam, payload);
   }
 
@@ -856,5 +989,55 @@ export function createMassingView({ canvas, emptyEl, captionEl, titleEl, onDraw 
     draw();
   }, { passive: false });
 
-  return { setPayload, setStatusFilter, setLook, setSection, setElevation, setOrbit, draw, resize: draw };
+  return {
+    setPayload,
+    setStatusFilter,
+    setServices,
+    setShowServices,
+    setLook,
+    setSection,
+    setElevation,
+    setOrbit,
+    draw,
+    resize: draw,
+  };
+}
+
+/**
+ * Routes paint after the building so a pipe inside a wall stays readable.
+ * A vertical rise often projects to a point; the joint disc is what shows it.
+ * In the camera view a run entirely behind the eye is left out.
+ */
+function paintServiceRoutes(ctx, routes, project, pxPerMetre, isLook) {
+  if (!routes.length) return;
+  ctx.save();
+  ctx.lineCap = "round";
+  const joints = [];
+  for (const route of routes) {
+    const pa = project(route.a);
+    const pb = project(route.b);
+    if (isLook && pa[2] < LOOK_NEAR && pb[2] < LOOK_NEAR) continue;
+    const width = routeStrokeWidth(route.diameter, pxPerMetre(pa, pb));
+    const dash = route.dash === "schematic" ? [2, 5] : route.dash === "existing" ? [10, 4] : [];
+    ctx.setLineDash(dash);
+    ctx.beginPath();
+    ctx.moveTo(pa[0], pa[1]);
+    ctx.lineTo(pb[0], pb[1]);
+    ctx.strokeStyle = "rgba(255, 253, 248, 0.92)";
+    ctx.lineWidth = width + 2.2;
+    ctx.stroke();
+    ctx.strokeStyle = route.colour;
+    ctx.lineWidth = width;
+    ctx.stroke();
+    joints.push([pa, route.colour, width], [pb, route.colour, width]);
+  }
+  ctx.setLineDash([]);
+  for (const [point, colour, width] of joints) {
+    if (isLook && point[2] < LOOK_NEAR) continue;
+    ctx.beginPath();
+    ctx.arc(point[0], point[1], Math.max(2.2, width * 0.55), 0, Math.PI * 2);
+    ctx.fillStyle = colour;
+    ctx.fill();
+  }
+  ctx.restore();
 }

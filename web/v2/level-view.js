@@ -40,6 +40,29 @@ export function ghostContext(levels, activeId) {
   return null;
 }
 
+// What "Show only this level" keeps. The neighbour ghost and the tracing
+// sheet are never part of this cut. A floor or foundation plan keeps the
+// whole storey. A ceiling plan keeps the ceiling and the walls it sits in.
+// A roof plan keeps the roof: the walls and floors of that storey are the
+// floor plan, and leaving them up is what reads as another level.
+
+const CEILING_CUT_ROLES = new Set(["ceiling", "wall", "opening", "beam", "line"]);
+const ROOF_CUT_ROLES = new Set(["roof"]);
+
+/**
+ * Whether `role` is drawn while "Show only this level" is on.
+ * `stationKind` is the house-rail cut: "floor", "foundation", "ceiling", "roof".
+ * Roles: floor, ceiling, roof, room, wall, beam, line, opening, item,
+ * ghost, underlay, site.
+ */
+export function isolateShows(stationKind, role) {
+  if (role === "ghost" || role === "underlay") return false;
+  if (role === "site") return true;
+  if (stationKind === "roof") return ROOF_CUT_ROLES.has(role);
+  if (stationKind === "ceiling") return CEILING_CUT_ROLES.has(role);
+  return true;
+}
+
 // --- "+ Add floor": how many template storeys the level switcher shows ----
 //
 // A new document (or one that has never touched this) shows only the

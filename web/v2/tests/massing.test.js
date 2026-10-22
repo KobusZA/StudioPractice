@@ -8,6 +8,7 @@ import {
   frameCamera,
   groundFacesFromBounds,
   massingLayer,
+  clipServiceSegment,
   facesFromPayload,
   faceStyle,
   hatchPolygon,
@@ -20,6 +21,7 @@ import {
   MASSING_PITCH_MAX,
 } from "../massing.js";
 import { normalizeDoc, rectShape } from "../model.js";
+import { sectionFromClicks } from "../section.js";
 import { normalizePackUnits } from "../schema.js";
 
 const pack = normalizePackUnits(
@@ -157,4 +159,16 @@ test("hatchPolygon skips a near-zero-area (flattened) polygon rather than sprayi
   const ctx = mockCtx();
   hatchPolygon(ctx, [[0, 0], [1, 0], [1, 0.001], [0, 0.001]], "#111");
   assert.equal(ctx.calls.length, 0);
+});
+
+test("a section keeps the service run on the look side and cuts one that crosses", () => {
+  const cut = sectionFromClicks([0, 0], [0, 4]);
+  const kept = clipServiceSegment([-1, 1, 0.4], [-1, 3, 1.2], cut);
+  assert.deepEqual(kept, [[-1, 1, 0.4], [-1, 3, 1.2]]);
+  assert.equal(clipServiceSegment([1, 1, 0.4], [1, 3, 1.2], cut), null);
+  const crossed = clipServiceSegment([-1, 2, 1], [1, 2, 3], cut);
+  assert.ok(Math.abs(crossed[1][0]) < 1e-9);
+  assert.ok(Math.abs(crossed[1][1] - 2) < 1e-9);
+  assert.ok(Math.abs(crossed[1][2] - 2) < 1e-9);
+  assert.equal(clipServiceSegment([-1, 2, 1], [1, 2, 3], { mode: "orbit" })[0][0], -1);
 });

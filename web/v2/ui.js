@@ -19,10 +19,9 @@
 import { complianceGaps, normalizePackUnits, GEOMETRY_LENGTH_KEYS } from "./schema.js";
 import { RULE_PACK, evaluateCompliance, groupFindingsByPart, summarizeFindings } from "./rules.js";
 import { deriveBuildingLine, hitPropertyLine, setBuildingLine, setPropertyLine, setSgReference } from "./site.js?v=20261015-property";
-import { HINTS, firstTabId, renderRibbon } from "./ribbon.js?v=20261015-satellite";
-import { closeOverflowMenus, decorateRibbon, fitRibbon } from "./ribbon-fit.js?v=20261015-satellite";
+import { HINTS, firstTabId, renderRibbon } from "./ribbon.js?v=20261022-ribbon-fit";
+import { closeOverflowMenus, decorateRibbon, fitRibbon } from "./ribbon-fit.js?v=20261022-ribbon-fit";
 import {
-  lookUpLevelId,
   ghostContext,
   MAX_FLOORS_TO_ADD,
   floorsAvailableToAdd as floorsAvailableToAddFor,
@@ -34,6 +33,7 @@ import {
   buildHouseStations,
   inspectorStations,
   selectedInspectorStationId,
+  isolateShows,
 } from "./level-view.js";
 import { isFoundationLevel as levelIsFoundation, placementHintOverride } from "./placement-warn.js";
 import {
@@ -48,7 +48,7 @@ import {
   retypeSelection,
   rotateSelection,
   splitSelection,
-} from "./modify.js";
+} from "./modify.js?v=20261022-wall-loc";
 import {
   calibrate,
   clearUnderlay,
@@ -74,15 +74,20 @@ import {
   MIN_TRACE,
   canCommitLine,
   canCommitRect,
+  centerlineFromLocation,
   chainStart,
+  flipWallLocation,
   hasClickDraft,
+  isFaceLocation,
   lineLength,
+  locationLineOf,
+  normalizeWallLocation,
   rectFromCorners,
   setLineHeading,
   setLineLength,
-} from "./click-draw.js?v=20260921-click-draw";
+} from "./click-draw.js?v=20261022-wall-loc";
 import { area as polyArea, bbox, clipSegToRect, distToSeg, formatLengthMm, headingDeg, parseLengthMm, pointInPoly, roundGrid } from "./geom.js?v=20260915-offset";
-import { SNAP_PIXEL_TOL, GAP_MAX_M, ALIGN_ORIGIN_MAX_M, NICE_MIN_STEP_M, PROBE_VECTORS, applyNicePoint, bestEndpointSnap, collectSnapEdges, collectSnapTargets, isExactPointSnap, nearestAlignments, resolveProbes, snapLengthFrom, snapPoint } from "./snap.js";
+import { SNAP_PIXEL_TOL, GAP_MAX_M, ALIGN_ORIGIN_MAX_M, NICE_MIN_STEP_M, PROBE_VECTORS, applyNicePoint, bestEndpointSnap, collectSnapEdges, collectSnapTargets, isExactPointSnap, nearestAlignments, resolveProbes, snapLengthFrom, snapPoint, snapToFace } from "./snap.js?v=20261022-face-snap";
 import { DEFAULT_ROOF_PITCH, roofGuideLines } from "./roof.js";
 import {
   ATTACHABLE_KINDS,
@@ -102,7 +107,8 @@ import {
   roomPolygon,
   shapePolygon,
 } from "./model.js";
-import { deriveWalls, drawnWallThickness, isStripFooting, skuDrawnHeight, statusVisible } from "./walls.js";
+import { CORNER_JOIN_TOL, deriveWalls, drawnWallThickness, isStripFooting, skuDrawnHeight, statusVisible } from "./walls.js";
+import { findJoinTarget, resolveJoin, sideTowardTarget } from "./wall-join.js?v=20261022-corner-b";
 import {
   openingDraftAt,
   openingOnWall,
@@ -110,7 +116,6 @@ import {
   roomEdgeSegment,
   wallForOpening,
   wallNormal,
-  wallT,
 } from "./openings.js";
 import {
   attachPreview,
@@ -156,10 +161,42 @@ import {
 } from "./sync.js";
 import { CloudError, createCloud, importLocalDocument } from "./cloud.js";
 import {
-  NavigationBlocked, createJob, duplicateJob, jobRowFields, openJob, renameJob, splitLibrary,
+  NavigationBlocked, createJob, duplicateJob, flushForNavigation, jobRowFields, openJob, renameJob, splitLibrary,
 } from "./library.js";
-import { SAMPLE_JOBS, drawingBounds, sampleJobById } from "./samples.js";
+import { drawingBounds } from "./samples.js";
 import { accountCard, formatDate } from "./profile.js";
+import {
+  addRoutePoint,
+  applyDrainageFall,
+  connectNode,
+  createNetwork,
+  createRiser,
+  deleteServiceRefs,
+  liftNode,
+  projectOnEdge,
+  removeServiceNode,
+  splitServiceEdge,
+  disconnectNode,
+  edgeHomeLevel,
+  edgeLevels,
+  modifyRefusal,
+  parseGradient,
+  rehomeConnectedNodes,
+  reverseEdge,
+  routeProfile,
+  serviceMassingRoutes,
+  serviceElementCentre,
+  networkOf,
+  serviceStatus,
+  setEdgeMode,
+  setEdgeSku,
+  setNodeLevel,
+  setNodeOffset,
+} from "./services.js";
+import { SERVICE_SYSTEM_INFO, pruneServices, serviceLayerVisible, serviceSystemsPresent } from "./service-model.js";
+import { serviceInspectorModel, servicePanelHtml } from "./service-panel.js";
+import { profileObstructions } from "./service-obstructions.js";
+import { drawServiceDraft, drawServiceGhost, drawServiceHover, drawServiceLevel, drawServiceProfile, drawServiceSelection } from "./service-render.js";
 
 const GRID = 0.1;
 const HANDLE = 8;
@@ -169,6 +206,8 @@ const el = {
   canvas: document.getElementById("v2-canvas"),
   empty: document.getElementById("v2-empty"),
   legend: document.getElementById("v2-legend"),
+  serviceVis: document.getElementById("v2-service-vis"),
+  serviceVisList: document.getElementById("v2-service-vis-list"),
   skuList: document.getElementById("v2-sku-list"),
   search: document.getElementById("v2-search"),
   packName: document.getElementById("v2-pack-name"),
@@ -184,11 +223,14 @@ const el = {
   scheduleKicker: document.getElementById("v2-schedule-kicker"),
   scheduleBody: document.getElementById("v2-schedule-body"),
   scheduleClose: document.getElementById("v2-schedule-close"),
+  schedulePeek: document.getElementById("v2-schedule-peek"),
   healthDot: document.getElementById("v2-health-dot"),
   healthLabel: document.getElementById("v2-health-label"),
+  aboutCatalogue: document.getElementById("v2-about-catalogue"),
   jobName: document.getElementById("v2-job-name"),
   jobCode: document.getElementById("v2-job-code"),
   practiceLink: document.getElementById("v2-practice-link"),
+  practiceSep: document.getElementById("v2-practice-sep"),
   syncState: document.getElementById("v2-sync-state"),
   conflict: document.getElementById("v2-conflict"),
   conflictText: document.getElementById("v2-conflict-text"),
@@ -273,9 +315,16 @@ const el = {
   cutKind: document.getElementById("v2-cut-kind"),
   levelIsolate: document.getElementById("v2-level-isolate"),
   planOptions: document.getElementById("v2-plan-options"),
+  wallLoc: document.getElementById("v2-wall-loc"),
+  wallCorner: document.getElementById("v2-wall-corner"),
+  wallOpts: document.getElementById("v2-wall-opts"),
   inspectKicker: document.getElementById("v2-inspect-kicker"),
   inspectEmpty: document.getElementById("v2-inspect-empty"),
   inspectFields: document.getElementById("v2-inspect-fields"),
+  serviceFields: document.getElementById("v2-service-fields"),
+  serviceProfileDock: document.getElementById("v2-service-profile-dock"),
+  serviceProfileTitle: document.getElementById("v2-service-profile-title"),
+  serviceProfileCanvas: document.getElementById("v2-service-profile-canvas"),
   ctxProperty: document.getElementById("v2-ctx-property"),
   dockContext: document.getElementById("v2-dock-context"),
   ctxTypePicker: document.getElementById("v2-ctx-type-picker"),
@@ -350,6 +399,7 @@ const el = {
   massPlanWrap: document.getElementById("v2-mass-plan-wrap"),
   massPlanCanvas: document.getElementById("v2-mass-plan-canvas"),
   massViewLabel: document.getElementById("v2-mass-view-label"),
+  massServices: document.getElementById("v2-mass-services"),
   typeDetailOverlay: document.getElementById("v2-type-detail-overlay"),
   typeDetailPanel: document.querySelector("#v2-type-detail-overlay .type-detail-panel"),
   typeDetailName: document.getElementById("v2-type-detail-name"),
@@ -429,6 +479,17 @@ let tool = "select";
 let placeSkuId = null;
 let placeStatus = "planned";
 let planStatusFilter = "both";
+// Systems the user has switched off on the plan. A view choice for this
+// session: the routes stay in the document and come back when switched on.
+const hiddenServiceSystems = new Set();
+let serviceVisKey = "";
+const SERVICE_CHIP = {
+  coldWater: "Cold water",
+  hotWater: "Hot water",
+  drainage: "Drainage",
+  electrical: "Electrical",
+  gas: "Gas",
+};
 let placeRotation = 0;
 let cam = { scale: 48, ox: 80, oy: 60 };
 // Pixels per metre. 3000 is a few millimetres across the screen. 3 is far
@@ -440,6 +501,17 @@ let drag = null;
 // Click–click wall: first click writes the start, the free end follows the
 // pointer with the button up, second click commits and chains from that end.
 let wallDraft = null;
+// Where the line under the cursor sits on the wall being drawn: "center",
+// "exterior" or "interior" (see click-draw.js). The stored segment is always
+// the centreline, and a face choice is kept on it as `location`. Remembered
+// for the session.
+let wallLocation = "center";
+// Who owns the corner square where the wall being drawn meets an existing one:
+// "past", "against" or "center" (see wall-join.js). Remembered for the session.
+let wallCorner = "against";
+// Space on a wall that started against another: the side is chosen from that
+// wall, so this swaps it for the draft instead of changing the setting.
+let wallSideFlip = false;
 // Click–click room/slab/roof rectangle: first click is one corner, second
 // click is the opposite. Not a press-and-hold box.
 let shapeDraft = null;
@@ -480,6 +552,27 @@ let userDimensions = [];
 // plus the candidate under the pointer so the hint can preview what the click
 // will do before it commits anything.
 let attachPick = null;
+// Services > Draw route: the last point placed, while tool === "service-route".
+// Click-click like a wall: each click commits its run and chains from there.
+// `createdStart` / `undoDepth` let Enter or Esc drop a run that never got past
+// its first point instead of leaving a stray node behind.
+let serviceRoute = null;
+// Services > Connect: the route point waiting for a component to be clicked.
+let serviceConnect = null;
+// What the next run is drawn with. Heights are typed, never guessed: the
+// default 0.00 m is shown in the field, and clearing it leaves new points
+// unresolved rather than on the floor.
+const serviceUi = {
+  system: "coldWater", networkId: null, sku: null, offsetText: "0.00", mode: "measured",
+};
+let serviceDockKey = "";
+// Route profile interaction state (see onProfileDown).
+let profileEdgeId = null;
+let profileLayout = null;
+let profileDrag = null;
+let profileHoverGhost = null;
+// null = automatic (Slope for drainage, Step for everything else).
+let profileModePref = null;
 let sizeDraft = null;
 let hover = null;
 let hoverPoint = null;
@@ -518,9 +611,10 @@ let activeLevel = null;
 
 // Off (default): ghost the neighbouring level, like Revit's look-down
 // underlay — or look-up when nothing sits below, so a foundation plan can
-// still see the walls it carries. On: draw only the active level. Hit-testing
-// always stays on the active level either way. The widget checkbox and the
-// ribbon command share this flag.
+// still see the walls it carries. On: this cut only. The neighbour, the
+// tracing sheet, and (on a ceiling or roof cut) the rest of the storey are
+// not drawn. Hit-testing stays on what is drawn. The widget checkbox and
+// the ribbon command share this flag.
 let isolateCurrentLevel = window.localStorage.getItem("v2-level-isolate") === "1";
 
 // Document -> Annotate -> Dimensions: automatic room/overall strings, shown
@@ -594,20 +688,20 @@ async function boot() {
     pack = templatePack;
   } catch (err) {
     el.healthDot.classList.remove("ok");
+    el.healthDot.hidden = false;
+    el.healthDot.title = "The template catalogue did not load.";
     el.healthLabel.textContent = `Pack failed to load: ${err.message}`;
     return;
   }
 
-  // Best-effort: a missing or unreachable rate book means every BOQ line
-  // prices at "-", not that the pack itself failed to load.
-  try {
-    const rateRes = await fetch("../samples/tsp-rates.json");
-    if (rateRes.ok) rateBook = await rateRes.json();
-  } catch {
-    rateBook = null;
-  }
+  await loadRateBook(null);
   el.healthDot.classList.add("ok");
-  el.healthLabel.textContent = `${pack.skus.length} SKUs loaded`;
+  // The count is about the app, not about the job on screen. Once the pack is
+  // in there is nothing to report, so the chrome says nothing: the label is
+  // free for passing messages and the number lives in About.
+  el.healthDot.hidden = true;
+  el.healthLabel.textContent = "";
+  drawPackHealth();
   el.packName.textContent = pack.name;
 
   store.doc.packId = pack.id;
@@ -620,7 +714,7 @@ async function boot() {
       .map((u) => `<option value="${escapeHtml(u.id)}">${escapeHtml(u.label)}</option>`)
       .join("");
   }
-  document.querySelectorAll("[data-density]").forEach((b) => b.classList.toggle("active", b.dataset.density === density));
+  drawDensityButtons();
   drawLevelSwitcher();
   renderGapReport();
   drawRibbon();
@@ -649,6 +743,36 @@ async function boot() {
   // Everything above is the editor, which is the same whoever is signed in.
   // This is what gives it a job to edit.
   await restoreSession();
+}
+
+/**
+ * The prices a BOQ of the open job reads. A job records which book priced it
+ * when it was registered; a job that names none is priced off the firm's
+ * default as it stands today, which is the honest reading of a job opened
+ * before any book was recorded.
+ *
+ * With no job open - signed out, or the standalone web/v2/index.html demo -
+ * this falls back to the sample catalogue, so the editor still prices
+ * something without an account behind it.
+ *
+ * Best-effort throughout: a book that will not load (unreachable, or a role
+ * that is not allowed the firm's cost base) means "-" on every line and no
+ * total, not a failed boot. schedule.js's findRate() already treats a missing
+ * rate that way, and runBoq() says which of the two happened.
+ */
+async function loadRateBook(project) {
+  rateBook = null;
+  try {
+    if (!project) {
+      const res = await fetch("../samples/tsp-rates.json");
+      if (res.ok) rateBook = await res.json();
+      return;
+    }
+    const id = project.rateBookId ?? await cloud.defaultRateBookId();
+    if (id) rateBook = await cloud.rateBook(id);
+  } catch {
+    rateBook = null;
+  }
 }
 
 // --- the account, and the job it owns ---------------------------------
@@ -697,6 +821,13 @@ async function enterApp() {
     const jobs = splitLibrary(projects).jobs;
     setAccountJobCount(jobs.length);
     const requestedId = new URLSearchParams(location.search).get("project");
+    // Nothing to open, and no link to one: a list that says "no drawings" is a
+    // dead end. A job starts in practice operations, so that is where a firm
+    // with no drawings belongs.
+    if (!openDrawingId && !requestedId && !jobs.some((p) => p.drawingId)) {
+      location.replace("/practice/index.html");
+      return;
+    }
     // Cover the editor before the login veil lifts, unless this is a reconnect
     // that already has a job on screen, or a link that is about to open one.
     if (!openDrawingId && !requestedId && el.libraryOverlay) {
@@ -723,11 +854,7 @@ async function enterApp() {
         return;
       }
     }
-    await openLibrary({
-      message: jobs.length
-        ? ""
-        : "No drawings yet. New drawing starts one — it saves to your firm's account as you draw.",
-    });
+    await openLibrary();
   } catch (error) {
     if (error instanceof CloudError && error.authRequired) {
       showAuth({ message: "That session has expired. Sign in again." });
@@ -760,6 +887,10 @@ async function enterApp() {
 function applyOpenedJob({ project, drawing }) {
   openProject = project;
   openDrawingId = drawing.id;
+
+  // Not awaited: nothing on screen reads a price until somebody runs a BOQ,
+  // and the editor must not wait on the firm's price list to open a drawing.
+  loadRateBook(project);
 
   clearUnderlay(store.doc);
   store.doc = normalizeDoc(drawing.doc);
@@ -1155,14 +1286,14 @@ function syncLibrarySurface() {
   if (el.libraryTitle) el.libraryTitle.textContent = home ? "Your drawings" : "Jobs";
   if (el.libraryKicker) {
     el.libraryKicker.hidden = !home;
-    el.libraryKicker.textContent = "Open a drawing, or start a new one.";
+    el.libraryKicker.textContent = "Open a drawing, or start a job.";
   }
   if (el.libraryClose) {
     el.libraryClose.hidden = !openDrawingId;
     el.libraryClose.disabled = !openDrawingId;
-    el.libraryClose.title = openDrawingId ? "" : "Open a drawing or start a new one first.";
+    el.libraryClose.title = openDrawingId ? "" : "Open a drawing first.";
   }
-  if (el.libraryNew) el.libraryNew.textContent = home ? "New drawing" : "New job";
+  if (el.libraryNew) el.libraryNew.textContent = "New job";
 }
 
 /**
@@ -1206,18 +1337,18 @@ function renderLibrary() {
   el.libraryList.innerHTML = "";
   if (el.libraryNew) {
     el.libraryNew.disabled = Boolean(blocked);
-    el.libraryNew.title = blocked || "Start a job and open it.";
+    el.libraryNew.title = blocked || "Jobs are started in practice operations.";
   }
   if (el.libraryClose) {
     el.libraryClose.hidden = !openDrawingId;
     el.libraryClose.disabled = !openDrawingId;
-    el.libraryClose.title = openDrawingId ? "" : "Open a drawing or start a new one first.";
+    el.libraryClose.title = openDrawingId ? "" : "Open a drawing first.";
   }
 
   if (!jobs.length && !deleted.length) {
     const empty = document.createElement("p");
     empty.className = "library-empty hint";
-    empty.textContent = "No drawings on this account yet. Create a sample below, or start a new one.";
+    empty.textContent = "No drawings yet. Start a job in practice operations, then press Start a drawing on it.";
     el.libraryList.appendChild(empty);
   }
 
@@ -1231,52 +1362,6 @@ function renderLibrary() {
     for (const project of deleted) el.libraryList.appendChild(libraryRow(project, blocked));
   }
 
-  el.libraryList.appendChild(sampleJobsSection(blocked));
-}
-
-/**
- * Sample jobs are traced drawings (wall segments, ceiling fills, doors on those
- * walls), created the same way Demo house is: a new row, the open job left alone.
- */
-function sampleJobsSection(blocked) {
-  const wrap = document.createElement("div");
-  wrap.className = "library-samples";
-
-  const heading = document.createElement("p");
-  heading.className = "library-section";
-  heading.textContent = "Sample jobs";
-  wrap.appendChild(heading);
-
-  const hint = document.createElement("p");
-  hint.className = "library-empty hint";
-  hint.textContent = "Traced plans: click a wall, a ceiling or a door. Each Create starts its own job.";
-  wrap.appendChild(hint);
-
-  for (const sample of SAMPLE_JOBS) {
-    const row = document.createElement("div");
-    row.className = "library-row library-sample-row";
-    const main = document.createElement("div");
-    main.className = "library-row-main";
-    const name = document.createElement("span");
-    name.className = "library-row-name";
-    name.textContent = sample.name;
-    const meta = document.createElement("span");
-    meta.className = "library-row-meta";
-    meta.textContent = sample.summary;
-    main.append(name, meta);
-    const actions = document.createElement("div");
-    actions.className = "library-row-actions";
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.textContent = "Create";
-    btn.disabled = Boolean(blocked);
-    btn.title = blocked || `Create ${sample.name} as its own job.`;
-    if (!blocked) btn.addEventListener("click", () => runSampleJob(sample.id));
-    actions.appendChild(btn);
-    row.append(main, actions);
-    wrap.appendChild(row);
-  }
-  return wrap;
 }
 
 function libraryRow(project, blocked) {
@@ -1388,7 +1473,11 @@ function rowActions(project, fields, { isOpen, blocked }) {
 
 // --- the file commands -------------------------------------------------
 
-/** `file-new`. A new row with a new drawing, and a navigation to it. */
+/**
+ * `file-new`. A job starts in practice operations, where it gets a code, a
+ * type, a billing basis and a client; the drawing is attached from there. This
+ * flushes first so leaving cannot drop an unconfirmed change.
+ */
 async function runNewJob() {
   const blocked = connectionBlocked();
   if (blocked) {
@@ -1397,13 +1486,8 @@ async function runNewJob() {
     return;
   }
   await runLibraryCommand(async () => {
-    const doc = emptyDoc();
-    doc.packId = pack.id;
-    await createJob({
-      cloud, sync, doc, packId: pack.id, openDrawingId, apply: applyOpenedJob,
-    });
-    closeLibraryAfterNavigation();
-    setStatusMessage("New job started. It saves as you draw.", "ok");
+    await flushForNavigation(sync);
+    location.assign("/practice/index.html?new=1");
   });
 }
 
@@ -1473,55 +1557,6 @@ async function runRestore(project) {
   await runLibraryCommand(async () => {
     await cloud.restoreProject(project.id);
     await refreshLibrary();
-  });
-}
-
-/**
- * Demo house is a job of its own now. It used to overwrite whatever was open,
- * which is precisely the data loss the library exists to stop.
- */
-async function runDemoHouse() {
-  const blocked = connectionBlocked();
-  if (blocked) {
-    setStatusMessage(blocked, "warn");
-    return;
-  }
-  await runLibraryCommand(async () => {
-    await createJob({
-      cloud,
-      sync,
-      doc: demoDoc(),
-      name: "Demo house",
-      packId: pack.id,
-      openDrawingId,
-      apply: applyOpenedJob,
-    });
-    closeLibraryAfterNavigation();
-    setStatusMessage("Demo house created as its own job. Your other job is untouched.", "ok");
-  });
-}
-
-async function runSampleJob(id) {
-  const sample = sampleJobById(id);
-  if (!sample) return;
-  const blocked = connectionBlocked();
-  if (blocked) {
-    setLibraryMessage(blocked);
-    setStatusMessage(blocked, "warn");
-    return;
-  }
-  await runLibraryCommand(async () => {
-    await createJob({
-      cloud,
-      sync,
-      doc: sample.build(pack),
-      name: sample.name,
-      packId: pack.id,
-      openDrawingId,
-      apply: applyOpenedJob,
-    });
-    closeLibraryAfterNavigation();
-    setStatusMessage(`${sample.name} created as its own job. Your other job is untouched.`, "ok");
   });
 }
 
@@ -1702,6 +1737,7 @@ function drawJobName() {
   if (!el.jobName) return;
   const name = store.doc.name || "";
   if (el.jobName.value !== name) el.jobName.value = name;
+  sizeJobName();
   if (el.jobCode) {
     const code = openProject?.code || "";
     el.jobCode.textContent = code;
@@ -1710,8 +1746,17 @@ function drawJobName() {
   if (el.practiceLink) {
     const id = openProject?.id;
     el.practiceLink.hidden = !id;
+    if (el.practiceSep) el.practiceSep.hidden = !id;
     if (id) el.practiceLink.href = `/practice/index.html?project=${encodeURIComponent(id)}`;
   }
+}
+
+/** Keep the name field as wide as what is in it, so the save state beside it
+ *  stays attached to the name it describes. The CSS min/max still bound it. */
+function sizeJobName() {
+  if (!el.jobName) return;
+  const shown = el.jobName.value || el.jobName.placeholder || "";
+  el.jobName.style.width = `${shown.length + 1}ch`;
 }
 
 function wireJobName() {
@@ -1720,6 +1765,7 @@ function wireJobName() {
     // em-dash for a fact the document does not have.
     const typed = el.jobName.value.trim();
     store.doc.name = typed || null;
+    sizeJobName();
     store.persist();
     drawActiveSheet();
   });
@@ -1810,7 +1856,24 @@ function snapFrom() {
   if (shapeDraft?.x0 != null) return { x: shapeDraft.x0, y: shapeDraft.y0 };
   if (beamStart) return beamStart;
   if (measureDraft?.a) return measureDraft.a;
+  const routeFrom = serviceRouteFrom();
+  if (routeFrom) return { x: routeFrom.x, y: routeFrom.y };
   return null;
+}
+
+/** The start of a two-point line being drawn, whose length label sits on the run. */
+function drawingLineFrom() {
+  if (wallDraft) return { x: wallDraft.x1, y: wallDraft.y1 };
+  if (beamStart) return beamStart;
+  if (lineStart) return lineStart;
+  if (measureDraft?.a) return measureDraft.a;
+  return null;
+}
+
+/** The node a route in progress chains from, or null if it is gone (undo, delete). */
+function serviceRouteFrom() {
+  if (!serviceRoute?.fromNodeId) return null;
+  return (store.doc.serviceNodes || []).find((n) => n.id === serviceRoute.fromNodeId) || null;
 }
 
 /**
@@ -1823,10 +1886,19 @@ function snapFrom() {
  * the pointer before the first click, not only mid-drag.
  */
 function applySnap(wx, wy, exclude) {
-  const targets = collectSnapTargets(store.doc, snapOpts(exclude));
+  let targets = collectSnapTargets(store.doc, snapOpts(exclude));
+  // A face-drawn wall starting on another wall's centreline end would sit half
+  // a thickness across that wall; its face corners are the points that line up.
+  if (tool === "wall" && isFaceLocation(wallLocation)) targets = targets.filter((p) => p.kind !== "endpoint");
   const edges = collectSnapEdges(store.doc, snapOpts(exclude));
   const tol = SNAP_PIXEL_TOL / cam.scale;
-  const result = snapPoint(wx, wy, targets, tol);
+  let result = snapPoint(wx, wy, targets, tol);
+  // A corner wins; failing that, a point anywhere along a wall's face beats a
+  // same-X/Y guide, so a wall can start against the side or end of another.
+  if (!isExactPointSnap(result)) {
+    const onFace = snapToFace(wx, wy, edges, tol);
+    if (onFace.snapped) result = onFace;
+  }
   // An exact join already fully determines the point (both axes locked to
   // the same target corner) - an edge-alignment origin has nothing left to
   // contribute, and showing one anyway would draw a second, unrelated
@@ -1900,7 +1972,7 @@ function snapPreviewTool() {
   return tool === "wall" || tool === "beam" || tool === "room" || tool === "slab"
     || tool === "roof" || tool === "property" || tool === "sg-ref" || tool === "camera" || tool === "section"
     || tool === "callout" || tool === "revision" || tool === "model-line" || tool === "annot-line"
-    || tool === "measure";
+    || tool === "measure" || tool === "service-route";
 }
 
 function itemRect(item, sku) {
@@ -1919,7 +1991,18 @@ function placementStatus() {
   return placeStatus === "existing" ? "existing" : "planned";
 }
 
+function serviceSystemShown(system) {
+  return serviceLayerVisible(system, hiddenServiceSystems);
+}
+
 function planObjectVisible(obj) {
+  // A route point or run has no status of its own: it is its network's.
+  // A system the user has switched off is neither drawn nor pickable.
+  if (obj?.networkId) {
+    const system = networkOf(store.doc, obj.networkId)?.system;
+    if (!serviceSystemShown(system)) return false;
+    return statusVisible(serviceStatus(store.doc, obj), planStatusFilter);
+  }
   return statusVisible(obj?.status, planStatusFilter);
 }
 
@@ -1934,9 +2017,50 @@ function planRefVisible(ref) {
   return true;
 }
 
+/** House-rail cut the plan is actually showing. Empty before the widget
+ * builds; a floor plan is the right default for that moment. */
+function activeStationKind() {
+  return houseStations[activeStationIndex()]?.kind || "floor";
+}
+
+/** Which slice of a storey an object is, for "Show only this level". */
+function objectPlanRole(obj) {
+  if (!obj || typeof obj !== "object") return "wall";
+  if (obj.networkId) return "service";
+  if (obj.shape && obj.use) return "room";
+  if (obj.shape && (obj.form || obj.ridge)) return "roof";
+  if (obj.shape) return skuById(obj.sku)?.category === "ceiling" ? "ceiling" : "floor";
+  if (obj.kind === "model" || obj.kind === "annotation") return "line";
+  if (Number.isFinite(obj.x1) && Number.isFinite(obj.y1)) {
+    const cat = skuById(obj.sku)?.category;
+    return cat === "beam" || cat === "column" ? "beam" : "wall";
+  }
+  if (obj.wallId || Number.isFinite(obj.t)) return "opening";
+  return "item";
+}
+
+/** True when this object is part of the cut on screen. Off, everything on
+ * the active level stays. On, a ceiling or roof cut drops the rest of the
+ * storey. */
+function keptByCut(obj, role = objectPlanRole(obj)) {
+  return !isolateCurrentLevel || isolateShows(activeStationKind(), role);
+}
+
+/** Drawn and pickable on the plan right now: status, active level, and cut. */
+function refShownOnPlan(ref) {
+  const obj = objByRef(ref);
+  if (!obj || !planObjectVisible(obj)) return false;
+  if (ref.kind === "opening") {
+    const wall = wallForOpening(store.doc, pack, wallsCache, obj);
+    if (!wall || wall.level !== activeLevel || !planObjectVisible(wall)) return false;
+    return keptByCut(obj, "opening");
+  }
+  return onActiveLevel(obj) && keptByCut(obj);
+}
+
 function pruneInvisibleSelection() {
   if (!store.selected.length) return;
-  const kept = store.selected.filter(planRefVisible);
+  const kept = store.selected.filter((ref) => planRefVisible(ref) && (!isolateCurrentLevel || refShownOnPlan(ref)));
   if (kept.length === store.selected.length) return;
   if (!kept.length) {
     store.clearSelection();
@@ -1960,7 +2084,15 @@ function segmentCategory(seg) {
 }
 
 function snapOpts(extra = {}) {
-  return { ...extra, include: planObjectVisible, thicknessOf: segmentThickness, categoryOf: segmentCategory };
+  return {
+    ...extra,
+    // Route points are targets for the route tool only; a wall never snaps to a pipe.
+    services: tool === "service-route",
+    include: (obj) => planObjectVisible(obj)
+      && (obj.networkId ? onActiveLevel(obj) : (!isolateCurrentLevel || (onActiveLevel(obj) && keptByCut(obj)))),
+    thicknessOf: segmentThickness,
+    categoryOf: segmentCategory,
+  };
 }
 
 function currentWalls() {
@@ -1970,6 +2102,8 @@ function currentWalls() {
 
 /** True if a shaped/drawn object (room, slab, roof, segment, beam, item) sits on the active level. */
 function onActiveLevel(obj) {
+  // A run belongs to the storeys its ends are on, not to a level of its own.
+  if (obj?.fromNode) return edgeLevels(store.doc, pack, obj).includes(activeLevel);
   return effectiveLevel(obj, pack) === activeLevel;
 }
 
@@ -2620,12 +2754,12 @@ function draw() {
   ctx.clearRect(0, 0, rect.width, rect.height);
   if (!pack) return;
 
-  drawUnderlay(ctx, store.doc, worldToScreen, cam.scale);
+  if (underlayIsVisible()) drawUnderlay(ctx, store.doc, worldToScreen, cam.scale);
   drawGrid(rect);
   drawSiteLines();
   const walls = currentWalls();
   pruneInvisibleSelection();
-  const levelWalls = walls.filter(onActiveLevel);
+  const levelWalls = walls.filter((w) => onActiveLevel(w) && keptByCut(w, "wall"));
 
   ctx.save();
   // While picking an attach target, everything that cannot be picked fades and
@@ -2636,14 +2770,31 @@ function draw() {
     const ghost = ghostContext(pack.levels, activeLevel);
     if (ghost) drawPlanLevel(ghost.levelId, walls, { ghost: true, look: ghost.look });
   }
-  drawPlanLevel(activeLevel, walls);
+  drawPlanLevel(activeLevel, walls, {
+    allow: (role) => !isolateCurrentLevel || isolateShows(activeStationKind(), role),
+  });
   ctx.restore();
   if (attachPick) drawAttachCandidates();
   if (showDimensions) drawDimensions();
   if (tool === "measure") drawUserDimensions();
 
   drawSelectionHighlights(levelWalls);
-  if (hover && !store.isSelected(hover.kind, hover.id) && tool === "select" && !drag) drawHover(hover);
+  const serviceRefs = refsToDraw().filter((r) => (r.kind === "serviceNode" || r.kind === "serviceEdge") && refShownOnPlan(r));
+  if (serviceRefs.length) {
+    drawServiceSelection(ctx, { doc: store.doc, pack, refs: serviceRefs, worldToScreen, color: COLOUR.selection, levelId: activeLevel });
+  }
+  if (hover && refShownOnPlan(hover) && !store.isSelected(hover.kind, hover.id) && tool === "select" && !drag) {
+    if (hover.kind === "serviceNode" || hover.kind === "serviceEdge") drawServiceHover(ctx, { doc: store.doc, ref: hover, worldToScreen, color: COLOUR.hover });
+    else drawHover(hover);
+  }
+  const ghost = serviceGhost();
+  if (ghost) drawServiceGhost(ctx, { x: ghost.x, y: ghost.y, worldToScreen, colour: COLOUR.selection });
+  if (tool === "service-route" && serviceRoute && serviceSystemShown(serviceUi.system)) {
+    const from = serviceRouteFrom();
+    if (from && hoverPoint) {
+      drawServiceDraft(ctx, { from, to: hoverPoint, colour: SERVICE_SYSTEM_INFO[serviceUi.system]?.colour || "#2675b8", worldToScreen });
+    }
+  }
   if (drag?.kind === "marquee") drawMarquee();
   if (wallDraft) drawWallDraft();
   if (shapeDraft) drawShapeDraft();
@@ -2656,6 +2807,7 @@ function draw() {
   if (tool === "callout" && calloutDraft?.a) drawCalloutDraft();
   if (tool === "revision" && revisionCloudDraft?.a) drawRevisionCloudDraft();
   if (tool === "measure" && measureDraft?.a) drawMeasureDraft();
+  drawLocateFlash();
   drawSnapGuide(rect);
   drawEndpointHandles();
   drawPropertyChrome();
@@ -2666,6 +2818,7 @@ function draw() {
 
   el.empty.hidden = shouldHidePlanEmpty();
   el.legend.hidden = !store.hasContent();
+  syncServiceVisibility();
   el.canvasWrap.classList.toggle("tool-opening", tool === "door" || tool === "window");
 }
 
@@ -3016,7 +3169,7 @@ function openingOnLevel(opening, walls, levelId) {
  * reads as context, not as the plan you are editing. Look-up ghosts are
  * wall/beam markers only: a faded thick wall on a foundation cut would
  * read as a second foundation, not as "the wall that sits on this". */
-function drawPlanLevel(levelId, walls, { ghost = false, look = "down" } = {}) {
+function drawPlanLevel(levelId, walls, { ghost = false, look = "down", allow = () => true } = {}) {
   ctx.save();
   if (ghost && look === "up") {
     for (const wall of walls.filter((w) => w.level === levelId && planObjectVisible(w))) drawWall(wall, { marker: true });
@@ -3026,34 +3179,57 @@ function drawPlanLevel(levelId, walls, { ghost = false, look = "down" } = {}) {
   }
   if (ghost) ctx.globalAlpha = 0.28;
   for (const slab of store.doc.slabs.filter((s) => onLevel(s, levelId) && planObjectVisible(s))) {
+    const role = skuById(slab.sku)?.category === "ceiling" ? "ceiling" : "floor";
+    if (!allow(role)) continue;
     drawPolyFill(shapePolygon(slab.shape), COLOUR.slab, statusStroke(objectStatus(slab)));
   }
-  for (const roof of store.doc.roofs.filter((r) => onLevel(r, levelId) && planObjectVisible(r))) {
-    const poly = shapePolygon(roof.shape);
-    drawPolyFill(poly, COLOUR.roof, statusStroke(objectStatus(roof)));
-    drawRoofGuides(bbox(poly), roof.form, roof.ridge);
+  if (allow("roof")) {
+    for (const roof of store.doc.roofs.filter((r) => onLevel(r, levelId) && planObjectVisible(r))) {
+      const poly = shapePolygon(roof.shape);
+      drawPolyFill(poly, COLOUR.roof, statusStroke(objectStatus(roof)));
+      drawRoofGuides(bbox(poly), roof.form, roof.ridge);
+    }
   }
-  for (const room of store.doc.rooms.filter((r) => onLevel(r, levelId) && planObjectVisible(r))) {
-    if (ghost) drawRoomGhost(room);
-    else drawRoom(room);
+  if (allow("room")) {
+    for (const room of store.doc.rooms.filter((r) => onLevel(r, levelId) && planObjectVisible(r))) {
+      if (ghost) drawRoomGhost(room);
+      else drawRoom(room);
+    }
   }
-  for (const wall of walls.filter((w) => w.level === levelId && planObjectVisible(w))) drawWall(wall);
-  for (const beam of store.doc.beams.filter((b) => onLevel(b, levelId) && planObjectVisible(b))) drawBeam(beam);
+  if (allow("wall")) {
+    for (const wall of walls.filter((w) => w.level === levelId && planObjectVisible(w))) drawWall(wall);
+  }
+  if (allow("beam")) {
+    for (const beam of store.doc.beams.filter((b) => onLevel(b, levelId) && planObjectVisible(b))) drawBeam(beam);
+  }
   // A model line ghosts like a wall/beam - it is a modelled fact, even
   // though it is 2D - but an annotation line does not: it is a note about
   // *this* level's plan, not context worth showing while looking at another
   // one, the same reason an item (furniture) is skipped when ghosted below.
-  for (const line of store.doc.lines.filter((l) => onLevel(l, levelId) && planObjectVisible(l))) {
-    if (ghost && line.kind === "annotation") continue;
-    drawLine(line);
+  if (allow("line")) {
+    for (const line of store.doc.lines.filter((l) => onLevel(l, levelId) && planObjectVisible(l))) {
+      if (ghost && line.kind === "annotation") continue;
+      drawLine(line);
+    }
   }
-  if (!ghost) {
+  if (!ghost && allow("item")) {
     for (const item of store.doc.items.filter((i) => onLevel(i, levelId) && planObjectVisible(i))) drawItem(item);
   }
-  for (const opening of store.doc.openings.filter((o) => openingOnLevel(o, walls, levelId) && planObjectVisible(o))) {
-    const wall = wallForOpening(store.doc, pack, walls, opening);
-    if (wall && !planObjectVisible(wall)) continue;
-    drawOpening(opening, walls);
+  if (allow("opening")) {
+    for (const opening of store.doc.openings.filter((o) => openingOnLevel(o, walls, levelId) && planObjectVisible(o))) {
+      const wall = wallForOpening(store.doc, pack, walls, opening);
+      if (wall && !planObjectVisible(wall)) continue;
+      drawOpening(opening, walls);
+    }
+  }
+  // Services last, so a route reads over the walls it runs through. A ghosted
+  // storey shows its runs faded (context for lining this floor up with it); only
+  // the active storey carries points, risers and labels.
+  if (allow("service")) {
+    drawServiceLevel(ctx, {
+      doc: store.doc, pack, levelId, worldToScreen, scale: cam.scale, ghost, visible: planObjectVisible,
+      activeLevel,
+    });
   }
   ctx.restore();
 }
@@ -3160,6 +3336,7 @@ function drawAboveMarker(ax, ay, bx, by) {
 
 function drawOpeningDraft(walls) {
   if (tool !== "door" && tool !== "window") return;
+  if (!keptByCut(null, "opening")) return;
   if (!hoverPoint || !placeSkuId) return;
   const levelWalls = walls.filter(onActiveLevel);
   const draft = openingDraftAt(store.doc, pack, levelWalls, placeSkuId, hoverPoint.x, hoverPoint.y);
@@ -3239,7 +3416,7 @@ function drawOpening(opening, walls, { preview = false } = {}) {
 }
 
 function drawDimensions() {
-  const boxes = store.doc.rooms.filter((r) => onActiveLevel(r) && planObjectVisible(r)).map((r) => bbox(roomPolygon(r)));
+  const boxes = store.doc.rooms.filter((r) => onActiveLevel(r) && planObjectVisible(r) && keptByCut(r, "room")).map((r) => bbox(roomPolygon(r)));
   for (const line of planDimensionLines(boxes)) drawDimensionLine(line);
 }
 
@@ -3408,6 +3585,7 @@ function refsToDraw() {
 
 function drawSelectionHighlights(walls) {
   for (const ref of refsToDraw()) {
+    if (!refShownOnPlan(ref)) continue;
     const obj = objByRef(ref);
     if (!obj) continue;
     ctx.save();
@@ -3424,6 +3602,13 @@ function drawSelectionHighlights(walls) {
       ctx.moveTo(ax, ay);
       ctx.lineTo(bx, by);
       ctx.stroke();
+      if (ref.kind === "segment" && isFaceLocation(obj.location)) {
+        const f = locationLineOf(obj, segmentThickness(obj));
+        ctx.lineWidth = 1.2;
+        ctx.setLineDash([2, 3]);
+        strokeWorldLine(f.x1, f.y1, f.x2, f.y2);
+        ctx.setLineDash([]);
+      }
       drawLengthLabel(obj.x1, obj.y1, obj.x2, obj.y2);
     } else if (ref.kind === "item") {
       const sku = skuById(obj.sku);
@@ -3549,19 +3734,186 @@ function drawRoofGuides(rect, form, ridge) {
   ctx.restore();
 }
 
-function drawWallDraft() {
+/** The location line the cursor is tracking, and the centreline that would be stored. */
+function wallDraftLines() {
+  const a = { x: wallDraft.x1, y: wallDraft.y1 };
+  const b = { x: wallDraft.x2 ?? wallDraft.x1, y: wallDraft.y2 ?? wallDraft.y1 };
+  const thickness = drawnWallThickness(skuById(placeSkuId));
+  const location = effectiveWallLocation(a, b, thickness);
+  const plan = wallJoinPlan(a, b, thickness, centerlineFromLocation(a, b, thickness, location));
+  return { a, b, thickness, location, center: plan.center, moves: plan.moves };
+}
+
+/** Drawn walls of the kind being drawn, on this level, that a new one can join. */
+function wallJoinPool() {
+  const category = skuById(placeSkuId)?.category;
+  return (store.doc.segments || []).filter((s) => onActiveLevel(s) && planObjectVisible(s)
+    && segmentCategory(s) === category);
+}
+
+/**
+ * The face the wall is drawn on. A face-drawn wall that starts on another
+ * wall's end sits against it whichever way it is dragged; everything else
+ * uses the chosen setting. A chain keeps the setting from corner to corner.
+ */
+function effectiveWallLocation(a, b, thickness) {
+  if (!isFaceLocation(wallLocation) || wallDraft?.chained) return wallLocation;
+  const target = findJoinTarget(wallJoinPool(), a, segmentThickness, { reach: thickness });
+  const auto = sideTowardTarget({ start: a, end: b, target });
+  if (!auto) return wallLocation;
+  return wallSideFlip ? flipWallLocation(auto) : auto;
+}
+
+/** True while a face-drawn wall's side is being taken from the wall it started on. */
+function wallStartedAgainstWall() {
+  if (!wallDraft || wallDraft.chained || !isFaceLocation(wallLocation)) return false;
+  const a = { x: wallDraft.x1, y: wallDraft.y1 };
+  const b = { x: wallDraft.x2 ?? wallDraft.x1, y: wallDraft.y2 ?? wallDraft.y1 };
+  const target = findJoinTarget(wallJoinPool(), a, segmentThickness, { reach: drawnWallThickness(skuById(placeSkuId)) });
+  return Boolean(sideTowardTarget({ start: a, end: b, target }));
+}
+
+/** Does the start or end of the wall being drawn, or the pointer, touch another wall's end? */
+function wallCornerRelevant() {
+  if (tool !== "wall") return false;
+  const thickness = drawnWallThickness(skuById(placeSkuId));
+  const pool = wallJoinPool();
+  const touches = (p) => {
+    const target = p && findJoinTarget(pool, p, segmentThickness, { reach: thickness });
+    return Boolean(target && target.end != null);
+  };
+  if (wallDraft) {
+    const a = { x: wallDraft.x1, y: wallDraft.y1 };
+    const b = { x: wallDraft.x2 ?? wallDraft.x1, y: wallDraft.y2 ?? wallDraft.y1 };
+    return touches(a) || (lineLength(a, b) >= MIN_TRACE && touches(b));
+  }
+  return touches(hoverPoint);
+}
+
+/**
+ * While a wall is being drawn, the Draw on / Corner choices sit beside its
+ * start - on the side away from where the line is heading - instead of in the
+ * bar at the top of the plan. Before the first click they stay in the bar.
+ */
+function positionWallOpts() {
+  const box = el.wallOpts;
+  if (!box) return;
+  const floating = tool === "wall" && Boolean(wallDraft) && !box.hidden;
+  box.classList.toggle("floating", floating);
+  if (!floating) {
+    box.style.left = "";
+    box.style.top = "";
+    return;
+  }
+  const rect = el.canvas.getBoundingClientRect();
   const [ax, ay] = worldToScreen(wallDraft.x1, wallDraft.y1);
   const [bx, by] = worldToScreen(wallDraft.x2 ?? wallDraft.x1, wallDraft.y2 ?? wallDraft.y1);
+  const w = box.offsetWidth;
+  const h = box.offsetHeight;
+  const gap = 18;
+  const x = Math.min(Math.max(ax + (bx - ax >= 0 ? -w - gap : gap), 4), Math.max(4, rect.width - w - 4));
+  const y = Math.min(Math.max(ay + (by - ay >= 0 ? -h - gap : gap), 4), Math.max(4, rect.height - h - 4));
+  box.style.left = `${rect.left + x}px`;
+  box.style.top = `${rect.top + y}px`;
+}
+
+/**
+ * The corners a new wall from `a` to `b` makes with drawn walls of the same
+ * kind on this level: its centreline trimmed or extended at either end, and
+ * the existing ends that move to suit. An existing end shared with a third
+ * wall stays put, so a junction is never pulled apart.
+ */
+function wallJoinPlan(a, b, thickness, center) {
+  const plan = { center: { ...center }, moves: [] };
+  if (wallCorner === "center" || lineLength(a, b) < MIN_TRACE) return plan;
+  const pool = wallJoinPool();
+  let startSeg = null;
+  for (const at of ["start", "end"]) {
+    const point = at === "start" ? a : b;
+    const target = findJoinTarget(pool, point, segmentThickness, {
+      reach: thickness,
+      exclude: (s) => s === startSeg,
+    });
+    if (!target) continue;
+    if (at === "start") startSeg = target.seg;
+    const res = resolveJoin({ line: center, thickness, at, target, mode: wallCorner });
+    if (!res) continue;
+    if (at === "start") {
+      plan.center.x1 = res.point.x;
+      plan.center.y1 = res.point.y;
+    } else {
+      plan.center.x2 = res.point.x;
+      plan.center.y2 = res.point.y;
+    }
+    if (res.targetEnd && !endShared(target.seg, target.end)) {
+      plan.moves.push({ seg: target.seg, end: target.end, to: res.targetEnd });
+    }
+  }
+  return plan;
+}
+
+function endShared(seg, end) {
+  const x = end === 2 ? seg.x2 : seg.x1;
+  const y = end === 2 ? seg.y2 : seg.y1;
+  const level = effectiveLevel(seg, pack);
+  return (store.doc.segments || []).some((s) => s !== seg && effectiveLevel(s, pack) === level
+    && (Math.hypot(s.x1 - x, s.y1 - y) <= CORNER_JOIN_TOL || Math.hypot(s.x2 - x, s.y2 - y) <= CORNER_JOIN_TOL));
+}
+
+function drawWallDraft() {
+  const { a, b, thickness, location, center, moves } = wallDraftLines();
+  // An old wall running on to meet this one: show the piece it gains.
+  for (const move of moves) {
+    const from = move.end === 2 ? { x: move.seg.x2, y: move.seg.y2 } : { x: move.seg.x1, y: move.seg.y1 };
+    if (segmentLength(from.x, from.y, move.to.x, move.to.y) < 0.005) continue;
+    ctx.save();
+    ctx.strokeStyle = statusStroke(objectStatus(move.seg));
+    ctx.globalAlpha = 0.45;
+    ctx.lineWidth = Math.max(2, segmentThickness(move.seg) * cam.scale);
+    ctx.lineCap = "butt";
+    strokeWorldLine(from.x, from.y, move.to.x, move.to.y);
+    ctx.restore();
+  }
+  if (segmentLength(center.x1, center.y1, center.x2, center.y2) >= 0.05) {
+    const [cx1, cy1] = worldToScreen(center.x1, center.y1);
+    const [cx2, cy2] = worldToScreen(center.x2, center.y2);
+    ctx.save();
+    ctx.strokeStyle = statusStroke(placementStatus());
+    ctx.globalAlpha = 0.45;
+    ctx.lineWidth = Math.max(2, thickness * cam.scale);
+    ctx.lineCap = "butt";
+    ctx.beginPath();
+    ctx.moveTo(cx1, cy1);
+    ctx.lineTo(cx2, cy2);
+    ctx.stroke();
+    ctx.globalAlpha = 0.9;
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = "#5c2410";
+    for (const face of ["exterior", "interior"]) {
+      const f = locationLineOf(center, thickness, face);
+      strokeWorldLine(f.x1, f.y1, f.x2, f.y2);
+    }
+    ctx.restore();
+  }
+  // The location line: solid when it is a face, so it reads as the edge it is,
+  // dashed when it is the centreline.
+  const face = isFaceLocation(location);
   ctx.save();
   ctx.strokeStyle = "#8d3416";
-  ctx.lineWidth = 3;
-  ctx.setLineDash([6, 4]);
+  ctx.lineWidth = face ? 2.4 : 1.5;
+  ctx.setLineDash(face ? [] : [6, 4]);
+  strokeWorldLine(a.x, a.y, b.x, b.y);
+  ctx.restore();
+  drawLengthLabel(a.x, a.y, b.x, b.y);
+}
+
+function strokeWorldLine(x1, y1, x2, y2) {
+  const [ax, ay] = worldToScreen(x1, y1);
+  const [bx, by] = worldToScreen(x2, y2);
   ctx.beginPath();
   ctx.moveTo(ax, ay);
   ctx.lineTo(bx, by);
   ctx.stroke();
-  ctx.restore();
-  drawLengthLabel(wallDraft.x1, wallDraft.y1, wallDraft.x2 ?? wallDraft.x1, wallDraft.y2 ?? wallDraft.y1);
 }
 
 function segmentLength(x1, y1, x2, y2) {
@@ -3595,7 +3947,7 @@ function drawLengthLabel(x1, y1, x2, y2) {
  * arrowheads at both witnesses, like `<-- 240 mm -->`. `kind` is the
  * measured axis (`h` = east-west gap, `v` = north-south) so the string
  * sits above a horizontal gap and to the left of a vertical one. */
-function drawGapDimension(x1, y1, x2, y2, kind, note = "") {
+function drawGapDimension(x1, y1, x2, y2, kind, note = "", flip = false) {
   const len = segmentLength(x1, y1, x2, y2);
   if (len < 0.005) return;
   const [ax, ay] = worldToScreen(x1, y1);
@@ -3624,6 +3976,10 @@ function drawGapDimension(x1, y1, x2, y2, kind, note = "") {
   } else if (kind === "h") {
     nx = 0;
     ny = -1;
+  }
+  if (flip) {
+    nx = -nx;
+    ny = -ny;
   }
   const ox = nx * off;
   const oy = ny * off;
@@ -3666,7 +4022,7 @@ function drawGapDimension(x1, y1, x2, y2, kind, note = "") {
   ctx.rotate(angle);
   // Tight gaps cannot fit the number between the arrows; park it beside
   // the string (further along the same offset) so the arrows still read.
-  const shift = tight ? -14 : 0;
+  const shift = tight ? (flip ? 14 : -14) : 0;
   ctx.fillStyle = "rgba(244, 237, 225, 0.92)";
   ctx.fillRect(-textW / 2, -8 + shift, textW, 16);
   ctx.fillStyle = "#3a5f7a";
@@ -3964,21 +4320,29 @@ function drawSnapGuide(rect) {
   const pinned = { h: null, v: null };
   for (const probe of g.probes || []) pinned[probeAxis(probe.side)] = probe;
 
-  if (!pinned.h && g.origin && g.dx != null && !g.snapX && Math.abs(g.dx) > minLabel) {
-    drawGapDimension(g.origin.x, g.y, g.x, g.y, "h");
+  // Measured from the run's own start, a distance is the length label already
+  // on the line; along the run from elsewhere, it goes on the far side so the
+  // two strings do not sit on top of each other.
+  const from = drawingLineFrom();
+  const isFrom = (p) => from && Math.hypot(p.x - from.x, p.y - from.y) < 1e-6;
+  const alongH = Boolean(from && Math.abs(from.y - g.y) < 1e-6);
+  const alongV = Boolean(from && Math.abs(from.x - g.x) < 1e-6);
+
+  if (!pinned.h && g.origin && g.dx != null && !g.snapX && Math.abs(g.dx) > minLabel && !isFrom({ x: g.origin.x, y: g.y })) {
+    drawGapDimension(g.origin.x, g.y, g.x, g.y, "h", "", alongH);
   }
-  if (!pinned.v && g.origin && g.dy != null && !g.snapY && Math.abs(g.dy) > minLabel) {
-    drawGapDimension(g.x, g.origin.y, g.x, g.y, "v");
+  if (!pinned.v && g.origin && g.dy != null && !g.snapY && Math.abs(g.dy) > minLabel && !isFrom({ x: g.x, y: g.origin.y })) {
+    drawGapDimension(g.x, g.origin.y, g.x, g.y, "v", "", alongV);
   }
   // The alignment guide itself only says "your X/Y matches something else
   // on the sheet" - it says nothing about *how far* along that line the
   // matched point is (it could be off the top of the current view, as far
   // as the line is drawn). Label that distance whenever it's non-trivial.
-  if (!pinned.v && g.snapX && g.guideXPoint && Math.abs(g.y - g.guideXPoint.y) > minLabel) {
-    drawGapDimension(g.x, g.guideXPoint.y, g.x, g.y, "v", targetNote(g.guideXPoint));
+  if (!pinned.v && g.snapX && g.guideXPoint && Math.abs(g.y - g.guideXPoint.y) > minLabel && !isFrom(g.guideXPoint)) {
+    drawGapDimension(g.x, g.guideXPoint.y, g.x, g.y, "v", targetNote(g.guideXPoint), alongV);
   }
-  if (!pinned.h && g.snapY && g.guideYPoint && Math.abs(g.x - g.guideYPoint.x) > minLabel) {
-    drawGapDimension(g.guideYPoint.x, g.y, g.x, g.y, "h", targetNote(g.guideYPoint));
+  if (!pinned.h && g.snapY && g.guideYPoint && Math.abs(g.x - g.guideYPoint.x) > minLabel && !isFrom(g.guideYPoint)) {
+    drawGapDimension(g.guideYPoint.x, g.y, g.x, g.y, "h", targetNote(g.guideYPoint), alongH);
   }
   for (const kind of ["h", "v"]) {
     const probe = pinned[kind];
@@ -4204,39 +4568,54 @@ function refsInMarquee(box) {
   const test = (b) => (box.crossing ? rectsOverlap(box, b) : rectContains(box, b));
   const hits = [];
   for (const room of store.doc.rooms.filter(onActiveLevel)) {
-    if (!planObjectVisible(room)) continue;
+    if (!planObjectVisible(room) || !keptByCut(room, "room")) continue;
     if (test(bbox(roomPolygon(room)))) hits.push({ kind: "room", id: room.id });
   }
   for (const slab of store.doc.slabs.filter(onActiveLevel)) {
-    if (!planObjectVisible(slab)) continue;
+    if (!planObjectVisible(slab) || !keptByCut(slab)) continue;
     if (test(bbox(shapePolygon(slab.shape)))) hits.push({ kind: "slab", id: slab.id });
   }
   for (const roof of store.doc.roofs.filter(onActiveLevel)) {
-    if (!planObjectVisible(roof)) continue;
+    if (!planObjectVisible(roof) || !keptByCut(roof, "roof")) continue;
     if (test(bbox(shapePolygon(roof.shape)))) hits.push({ kind: "roof", id: roof.id });
   }
   for (const seg of store.doc.segments.filter(onActiveLevel)) {
-    if (!planObjectVisible(seg)) continue;
+    if (!planObjectVisible(seg) || !keptByCut(seg, "wall")) continue;
     const segBox = { x: Math.min(seg.x1, seg.x2), y: Math.min(seg.y1, seg.y2), w: Math.max(0.02, Math.abs(seg.x2 - seg.x1)), h: Math.max(0.02, Math.abs(seg.y2 - seg.y1)) };
     if (test(segBox)) hits.push({ kind: "segment", id: seg.id });
   }
   for (const beam of store.doc.beams.filter(onActiveLevel)) {
-    if (!planObjectVisible(beam)) continue;
+    if (!planObjectVisible(beam) || !keptByCut(beam, "beam")) continue;
     const beamBox = { x: Math.min(beam.x1, beam.x2), y: Math.min(beam.y1, beam.y2), w: Math.max(0.02, Math.abs(beam.x2 - beam.x1)), h: Math.max(0.02, Math.abs(beam.y2 - beam.y1)) };
     if (test(beamBox)) hits.push({ kind: "beam", id: beam.id });
   }
   for (const line of store.doc.lines.filter(onActiveLevel)) {
-    if (!planObjectVisible(line)) continue;
+    if (!planObjectVisible(line) || !keptByCut(line, "line")) continue;
     const lineBox = { x: Math.min(line.x1, line.x2), y: Math.min(line.y1, line.y2), w: Math.max(0.02, Math.abs(line.x2 - line.x1)), h: Math.max(0.02, Math.abs(line.y2 - line.y1)) };
     if (test(lineBox)) hits.push({ kind: "line", id: line.id });
   }
   for (const item of store.doc.items.filter(onActiveLevel)) {
-    if (!planObjectVisible(item)) continue;
+    if (!planObjectVisible(item) || !keptByCut(item, "item")) continue;
     const sku = skuById(item.sku);
     if (sku && test(itemRect(item, sku))) hits.push({ kind: "item", id: item.id });
   }
+  if ((store.doc.serviceNodes || []).length && keptByCut(null, "service")) {
+    const nodes = new Map(store.doc.serviceNodes.map((n) => [n.id, n]));
+    for (const node of store.doc.serviceNodes) {
+      if (!planObjectVisible(node) || !onActiveLevel(node)) continue;
+      if (test({ x: node.x, y: node.y, w: 0.02, h: 0.02 })) hits.push({ kind: "serviceNode", id: node.id });
+    }
+    for (const edge of store.doc.serviceEdges || []) {
+      if (!planObjectVisible(edge) || !onActiveLevel(edge)) continue;
+      const a = nodes.get(edge.fromNode);
+      const b = nodes.get(edge.toNode);
+      if (!a || !b || a.level !== activeLevel || b.level !== activeLevel) continue;
+      const runBox = { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.max(0.02, Math.abs(b.x - a.x)), h: Math.max(0.02, Math.abs(b.y - a.y)) };
+      if (test(runBox)) hits.push({ kind: "serviceEdge", id: edge.id });
+    }
+  }
   for (const opening of store.doc.openings) {
-    if (!planObjectVisible(opening)) continue;
+    if (!planObjectVisible(opening) || !keptByCut(opening, "opening")) continue;
     const wall = wallForOpening(store.doc, pack, wallsCache, opening);
     if (!wall || wall.level !== activeLevel || !planObjectVisible(wall)) continue;
     const [px, py] = anchorPoint(opening, wall);
@@ -4251,6 +4630,7 @@ function refsInMarquee(box) {
 
 /** A hidden sheet is not drawn and must not steal clicks either. */
 function underlayIsVisible() {
+  if (isolateCurrentLevel && !isolateShows(activeStationKind(), "underlay")) return false;
   return Boolean(store.doc.underlay && underlayBitmap() && !store.doc.underlay.hidden);
 }
 
@@ -4303,13 +4683,45 @@ function underlayHandleHit(wx, wy) {
 
 // --- hit testing -----------------------------------------------------------
 
+/** A route point (or riser marker) first, then a run: a point sits on its runs, so it must win. */
+function serviceHit(wx, wy) {
+  if (!(store.doc.serviceNodes || []).length) return null;
+  if (!keptByCut(null, "service")) return null;
+  const nodeTol = 12 / cam.scale;
+  let best = null;
+  let bestD = nodeTol;
+  for (const node of store.doc.serviceNodes) {
+    if (!planObjectVisible(node) || !onActiveLevel(node)) continue;
+    const d = Math.hypot(node.x - wx, node.y - wy);
+    if (d <= bestD) { best = node; bestD = d; }
+  }
+  if (best) return { kind: "serviceNode", id: best.id };
+  const nodes = new Map(store.doc.serviceNodes.map((n) => [n.id, n]));
+  const runTol = 7 / cam.scale;
+  let bestEdge = null;
+  let bestEdgeD = runTol;
+  for (const edge of store.doc.serviceEdges || []) {
+    if (!planObjectVisible(edge) || !onActiveLevel(edge)) continue;
+    const a = nodes.get(edge.fromNode);
+    const b = nodes.get(edge.toNode);
+    // Only the part of a run that is drawn on this storey can be picked here.
+    if (!a || !b || a.level !== activeLevel || b.level !== activeLevel) continue;
+    const d = distToSeg(a.x, a.y, b.x, b.y, wx, wy);
+    if (d <= bestEdgeD) { bestEdge = edge; bestEdgeD = d; }
+  }
+  return bestEdge ? { kind: "serviceEdge", id: bestEdge.id } : null;
+}
+
 function hitTest(wx, wy) {
   const pxTol = 6 / cam.scale;
+
+  const serviceRef = serviceHit(wx, wy);
+  if (serviceRef) return serviceRef;
 
   const items = store.doc.items.filter(onActiveLevel);
   for (let i = items.length - 1; i >= 0; i -= 1) {
     const item = items[i];
-    if (!planObjectVisible(item)) continue;
+    if (!planObjectVisible(item) || !keptByCut(item, "item")) continue;
     const sku = skuById(item.sku);
     if (!sku) continue;
     const box = itemRect(item, sku);
@@ -4319,7 +4731,7 @@ function hitTest(wx, wy) {
   }
   for (let i = store.doc.openings.length - 1; i >= 0; i -= 1) {
     const opening = store.doc.openings[i];
-    if (!planObjectVisible(opening)) continue;
+    if (!planObjectVisible(opening) || !keptByCut(opening, "opening")) continue;
     const wall = wallForOpening(store.doc, pack, wallsCache, opening);
     if (!wall || wall.level !== activeLevel || !planObjectVisible(wall)) continue;
     const [px, py] = anchorPoint(opening, wall);
@@ -4328,7 +4740,7 @@ function hitTest(wx, wy) {
   const beams = store.doc.beams.filter(onActiveLevel);
   for (let i = beams.length - 1; i >= 0; i -= 1) {
     const beam = beams[i];
-    if (!planObjectVisible(beam)) continue;
+    if (!planObjectVisible(beam) || !keptByCut(beam, "beam")) continue;
     const sku = skuById(beam.sku);
     const tol = Math.max(0.15, (sku?.geometry?.width || 0.11) / 2 + 0.05);
     if (distToSeg(beam.x1, beam.y1, beam.x2, beam.y2, wx, wy) < tol) return { kind: "beam", id: beam.id };
@@ -4336,7 +4748,7 @@ function hitTest(wx, wy) {
   const segments = store.doc.segments.filter(onActiveLevel);
   for (let i = segments.length - 1; i >= 0; i -= 1) {
     const seg = segments[i];
-    if (!planObjectVisible(seg)) continue;
+    if (!planObjectVisible(seg) || !keptByCut(seg, "wall")) continue;
     const sku = skuById(seg.sku);
     const tol = Math.max(0.18, drawnWallThickness(sku) / 2 + 0.08);
     if (distToSeg(seg.x1, seg.y1, seg.x2, seg.y2, wx, wy) < tol) return { kind: "segment", id: seg.id };
@@ -4346,13 +4758,13 @@ function hitTest(wx, wy) {
   const lines = store.doc.lines.filter(onActiveLevel);
   for (let i = lines.length - 1; i >= 0; i -= 1) {
     const line = lines[i];
-    if (!planObjectVisible(line)) continue;
+    if (!planObjectVisible(line) || !keptByCut(line, "line")) continue;
     if (distToSeg(line.x1, line.y1, line.x2, line.y2, wx, wy) < 0.15) return { kind: "line", id: line.id };
   }
   const slabs = store.doc.slabs.filter(onActiveLevel);
   for (let i = slabs.length - 1; i >= 0; i -= 1) {
     const slab = slabs[i];
-    if (!planObjectVisible(slab)) continue;
+    if (!planObjectVisible(slab) || !keptByCut(slab)) continue;
     if (pointInPoly(wx, wy, shapePolygon(slab.shape))) return { kind: "slab", id: slab.id };
   }
   // Rooms before roofs: a roof typically envelopes the whole footprint, so
@@ -4361,13 +4773,13 @@ function hitTest(wx, wy) {
   const rooms = store.doc.rooms.filter(onActiveLevel);
   for (let i = rooms.length - 1; i >= 0; i -= 1) {
     const room = rooms[i];
-    if (!planObjectVisible(room)) continue;
+    if (!planObjectVisible(room) || !keptByCut(room, "room")) continue;
     if (pointInPoly(wx, wy, roomPolygon(room))) return { kind: "room", id: room.id };
   }
   const roofs = store.doc.roofs.filter(onActiveLevel);
   for (let i = roofs.length - 1; i >= 0; i -= 1) {
     const roof = roofs[i];
-    if (!planObjectVisible(roof)) continue;
+    if (!planObjectVisible(roof) || !keptByCut(roof, "roof")) continue;
     if (pointInPoly(wx, wy, shapePolygon(roof.shape))) return { kind: "roof", id: roof.id };
   }
   return null;
@@ -5031,10 +5443,24 @@ function updateRibbonHint() {
       : HINTS.dimensions;
     return;
   }
+  if (tool === "service-route" && serviceRoute) {
+    el.ribbonHint.hidden = false;
+    el.ribbonHint.classList.remove("ribbon-hint-warn");
+    el.ribbonHint.textContent = "Click the next point. Enter finishes; Esc drops the route in progress.";
+    return;
+  }
+  if (tool === "service-connect" && serviceConnect) {
+    el.ribbonHint.hidden = false;
+    el.ribbonHint.classList.remove("ribbon-hint-warn");
+    el.ribbonHint.textContent = "Click the component to connect this point to.";
+    return;
+  }
   if (wallDraft) {
     el.ribbonHint.hidden = false;
     el.ribbonHint.classList.remove("ribbon-hint-warn");
-    el.ribbonHint.textContent = "Click to end, or type a length and press Enter. Esc cancels this wall.";
+    el.ribbonHint.textContent = wallLocation === "center"
+      ? "Click to end, or type a length and press Enter. Drawing on the centreline. Esc cancels this wall."
+      : `Click to end, or type a length and press Enter. Drawing on the ${wallLocation} face; Space flips it. Esc cancels this wall.`;
     return;
   }
   if (shapeDraft) {
@@ -5086,12 +5512,12 @@ function ribbonCommandState(item) {
     return {
       active: isolateCurrentLevel,
       title: isolateCurrentLevel
-        ? "Showing this level only. Click to ghost the neighbouring level."
+        ? "Showing this cut only. Click to ghost the neighbouring level again."
         : ghost?.look === "up"
-          ? "Ghosting the walls above. Click to show this level only."
+          ? "Ghosting the walls above. Click to show this cut only."
           : ghost
-            ? "Ghosting the floor below. Click to show this level only."
-            : "Nothing next to this cut to ghost. Click to keep this level only.",
+            ? "Ghosting the floor below. Click to show this cut only."
+            : "Nothing next to this cut to ghost. Click to keep this cut only.",
     };
   }
   // Attach/detach act on a wall or beam, so say which is missing rather than
@@ -5112,6 +5538,25 @@ function ribbonCommandState(item) {
     const category = obj ? skuById(obj.sku)?.category : null;
     if (!category) return { disabled: true, title: "That has no type category to match against." };
     return { title: `Select every other ${CATEGORY_LABEL[category] || category} in the drawing, ready to retype from the palette.` };
+  }
+  if (item.id === "service-route" || item.id === "service-connect" || item.id === "service-node") {
+    return { active: tool === item.id, title: HINTS[item.id] };
+  }
+  if (item.id === "service-rise") {
+    const one = store.selected.length === 1 && store.primary?.kind === "serviceNode";
+    return one ? { title: HINTS[item.id] } : { disabled: true, title: "Select one route point first." };
+  }
+  if (item.id === "service-type") {
+    const any = store.selected.some((r) => r.kind === "serviceEdge");
+    return any ? { title: HINTS[item.id] } : { disabled: true, title: "Select one or more routes first." };
+  }
+  if (item.id === "service-slope") {
+    const drains = store.selected.some((r) => {
+      if (r.kind !== "serviceEdge") return false;
+      const edge = objByRef(r);
+      return (store.doc.serviceNetworks || []).find((n) => n.id === edge?.networkId)?.system === "drainage";
+    });
+    return drains ? { title: HINTS[item.id] } : { disabled: true, title: "Select a drainage run first." };
   }
   if (item.id === "view-camera") {
     return { active: tool === "camera", title: HINTS["view-camera"] };
@@ -5154,6 +5599,9 @@ function onRibbonFunction(item) {
     runCommand(item.command);
     return;
   }
+  if (serviceRoute?.fromNodeId) finishServiceRoute();
+  serviceRoute = null;
+  serviceConnect = null;
   activeFunction = item.id;
   paletteFilter = item.categories || null;
   lastPaletteLabel = item.categories ? item.label : lastPaletteLabel;
@@ -5222,6 +5670,10 @@ function runCommand(name) {
       if (tool === "measure") stopMeasure();
       else startMeasure();
       return;
+    case "service-route": case "service-connect": case "service-node": startServiceTool(name); return;
+    case "service-rise": focusServiceField("rise-delta"); return;
+    case "service-type": focusServiceField("edge-sku"); return;
+    case "service-slope": focusServiceField("fall"); return;
     case "attach": startAttachPick(); return;
     case "detach": runDetach(); return;
     case "select-similar": runSelectSimilar(); return;
@@ -5253,6 +5705,11 @@ const MODIFY_OPS = {
 function modifySelection(op) {
   const run = MODIFY_OPS[op];
   if (!run) return;
+  const refusal = modifyRefusal(store.selected);
+  if (refusal) {
+    setStatusMessage(refusal, "warn");
+    return;
+  }
   store.pushUndo();
   const result = run(store.doc, store.selected, { anchorRef: store.primary });
   if (!result.ok) {
@@ -5277,6 +5734,7 @@ function openMassing(view) {
     syncToolButtons();
     drawRibbon();
   }
+  massView.setServices(serviceMassingRoutes(store.doc, pack));
   if (view?.mode === "look") massView.setLook(view);
   else if (view?.mode === "section") massView.setSection(view);
   else if (view?.mode === "elevation") massView.setElevation(view);
@@ -5652,6 +6110,12 @@ function wireMassing() {
       massView.setStatusFilter(btn.dataset.massStatus || "both");
     });
   });
+  if (el.massServices) {
+    massView.setShowServices(el.massServices.checked);
+    el.massServices.addEventListener("change", () => {
+      massView.setShowServices(el.massServices.checked);
+    });
+  }
   let massResizeFrame = 0;
   const onMassResize = () => {
     cancelAnimationFrame(massResizeFrame);
@@ -6947,11 +7411,37 @@ let statusTimer = null;
 function setStatusMessage(text, tone) {
   el.healthLabel.textContent = text;
   el.healthDot.classList.toggle("ok", tone !== "warn");
+  el.healthDot.title = text;
+  el.healthDot.hidden = false;
   clearTimeout(statusTimer);
   statusTimer = setTimeout(() => {
-    el.healthLabel.textContent = `${pack.skus.length} SKUs loaded`;
+    el.healthLabel.textContent = "";
     el.healthDot.classList.add("ok");
+    el.healthDot.hidden = true;
+    drawPackHealth();
   }, 4000);
+}
+
+/** How many products the loaded template offers. Phrased for the person
+ *  drawing, and kept out of the chrome: About is where it is stated. */
+function drawPackHealth() {
+  const count = pack?.skus?.length || 0;
+  if (el.healthDot) {
+    el.healthDot.title = count
+      ? `${count} products in the template catalogue`
+      : "No catalogue loaded";
+  }
+  if (el.aboutCatalogue) el.aboutCatalogue.textContent = count ? `${count} products` : "Not loaded";
+}
+
+/** The active density, for sighted users and for anything reading the pressed
+ *  state. A class alone left assistive tech unable to report which is on. */
+function drawDensityButtons() {
+  document.querySelectorAll("[data-density]").forEach((b) => {
+    const on = b.dataset.density === density;
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-pressed", on ? "true" : "false");
+  });
 }
 
 // --- toolbar -----------------------------------------------------------
@@ -6973,8 +7463,11 @@ const REVERTIBLE_DRAGS = new Set(["move", "segment-end", "property-vertex", "pro
 function abortClickDraft() {
   if (!hasClickDraft({
     wallDraft, shapeDraft, beamStart, lineStart, siteDraft, cameraDraft, sectionDraft, calloutDraft, revisionCloudDraft, measureDraft, calibration,
+    serviceRoute, serviceConnect,
   })) return false;
-  if (wallDraft) wallDraft = null;
+  if (serviceRoute?.fromNodeId) finishServiceRoute();
+  else if (serviceConnect?.nodeId) serviceConnect = null;
+  else if (wallDraft) wallDraft = null;
   else if (shapeDraft) shapeDraft = null;
   else if (beamStart) beamStart = null;
   else if (lineStart) lineStart = null;
@@ -7024,6 +7517,8 @@ function cancelDrawing() {
   );
 
   drag = null;
+  serviceRoute = null;
+  serviceConnect = null;
   beamStart = null;
   lineStart = null;
   wallDraft = null;
@@ -7075,6 +7570,9 @@ function wireToolbar() {
         drawRibbon();
         renderPalette();
       }
+      if (serviceRoute?.fromNodeId) finishServiceRoute();
+      serviceRoute = null;
+      serviceConnect = null;
       beamStart = null;
       lineStart = null;
       wallDraft = null;
@@ -7107,18 +7605,17 @@ function wireToolbar() {
   document.querySelectorAll("[data-density]").forEach((btn) => {
     btn.addEventListener("click", () => {
       setDensity(btn.dataset.density);
-      document.querySelectorAll("[data-density]").forEach((b) => b.classList.toggle("active", b === btn));
+      drawDensityButtons();
     });
   });
   el.hmRotate?.addEventListener("click", () => runCommand("rotate"));
   el.hmCopy?.addEventListener("click", () => runCommand("copy"));
   el.hmDelete?.addEventListener("click", () => runCommand("delete"));
-  // Three navigations, not three ways of replacing what is on screen. Clear
-  // used to blank the open job and keep its id; New mints a row of its own and
-  // leaves the previous one exactly as it was.
+  // Navigations, not ways of replacing what is on screen. Clear used to blank
+  // the open job and keep its id; New mints a row of its own and leaves the
+  // previous one exactly as it was.
   document.getElementById("v2-new").addEventListener("click", runNewJob);
   document.getElementById("v2-open").addEventListener("click", () => openLibrary());
-  document.getElementById("v2-demo").addEventListener("click", runDemoHouse);
   document.getElementById("v2-compile").addEventListener("click", runCompile);
   wireLevelWidget();
 }
@@ -7336,6 +7833,21 @@ function onPointerDown(ev) {
     finishMeasure(p);
     return;
   }
+  if (tool === "service-route") {
+    underlaySelected = false;
+    clickServicePoint(wx, wy);
+    return;
+  }
+  if (tool === "service-connect") {
+    underlaySelected = false;
+    clickServiceConnect(wx, wy);
+    return;
+  }
+  if (tool === "service-node") {
+    underlaySelected = false;
+    clickServiceNode(wx, wy);
+    return;
+  }
   if (tool === "attach") {
     const target = attachObjectAt(wx, wy);
     if (!target) {
@@ -7396,6 +7908,16 @@ function onPointerDown(ev) {
     return;
   }
 
+  // A ghost node on a selected run: one normal click makes it real, and the new
+  // node can be dragged straight away.
+  const ghost = tool === "select" && !ev.shiftKey ? serviceGhost() : null;
+  if (ghost && commitServiceGhost(ghost)) {
+    store.pushUndo(); // dropped again below if the pointer never moves
+    drag = { kind: "move", snaps: store.snapshotMoveTargets(store.selected), x0: wx, y0: wy, moved: false };
+    el.canvas.setPointerCapture(ev.pointerId);
+    return;
+  }
+
   const hit = hitTest(wx, wy);
   if (hit) {
     if (underlaySelected) drawRibbon();
@@ -7431,11 +7953,243 @@ function onPointerDown(ev) {
   render();
 }
 
+// --- services: draw route / connect ----------------------------------------
+
+/** Arm (or, pressed again, put down) Draw route / Connect. */
+function startServiceTool(name) {
+  if (serviceRoute?.fromNodeId) finishServiceRoute();
+  const off = tool === name;
+  serviceRoute = null;
+  serviceConnect = null;
+  beamStart = null;
+  lineStart = null;
+  wallDraft = null;
+  shapeDraft = null;
+  sizeDraft = null;
+  measureDraft = null;
+  underlaySelected = false;
+  attachPick = null;
+  tool = off ? "select" : name;
+  activeFunction = off ? null : name;
+  if (!off && name === "service-route") showServiceSystem(serviceUi.system);
+  if (!off && name === "service-connect" && store.selected.length === 1 && store.primary?.kind === "serviceNode") {
+    serviceConnect = { nodeId: store.primary.id };
+  }
+  syncToolButtons();
+  drawRibbon();
+  renderPalette();
+  updateRibbonHint();
+  render();
+}
+
+/** "0.30" -> 0.3, "" -> null (not stated), anything else -> undefined (reject). */
+function parseOffsetText(text) {
+  const s = String(text ?? "").trim().replace(",", ".");
+  if (!s) return null;
+  if (!/^[-+]?\d*\.?\d+$/.test(s)) return undefined;
+  return Number(s);
+}
+
+function serviceNodeNear(x, y, tol) {
+  let best = null;
+  let bestD = tol;
+  for (const node of store.doc.serviceNodes || []) {
+    if (node.level !== activeLevel || !planObjectVisible(node)) continue;
+    const d = Math.hypot(node.x - x, node.y - y);
+    if (d <= bestD) { best = node; bestD = d; }
+  }
+  return best;
+}
+
+function clickServicePoint(wx, wy) {
+  const p = applySnap(wx, wy);
+  const offset = parseOffsetText(serviceUi.offsetText);
+  if (offset === undefined) {
+    setStatusMessage("Height must be a number of metres, or blank if it is not known yet.", "warn");
+    return;
+  }
+  if (serviceRoute && !serviceRouteFrom()) serviceRoute = null; // undone or deleted under us
+  const tol = 10 / cam.scale;
+
+  store.pushUndo();
+  const undoDepth = store.undoStack.length;
+  let networkId = serviceRoute?.networkId || null;
+  if (!networkId) {
+    // Starting on an existing point joins that network, whatever the panel says.
+    const near = serviceNodeNear(p.x, p.y, tol);
+    const chosen = (store.doc.serviceNetworks || []).find((n) => n.id === serviceUi.networkId && n.system === serviceUi.system);
+    if (near) networkId = near.networkId;
+    else if (chosen) networkId = chosen.id;
+    else networkId = createNetwork(store.doc, { system: serviceUi.system, status: placeStatus }).id;
+  }
+  const route = {
+    networkId,
+    fromNodeId: serviceRoute?.fromNodeId || null,
+    level: activeLevel,
+    offset,
+    sku: serviceUi.sku || null,
+    mode: serviceUi.mode,
+  };
+  const res = addRoutePoint(store.doc, pack, route, p, { tol });
+  if (!res.ok) {
+    store.undo(); // restores the document (and any network just made)
+    setStatusMessage(res.message, "warn");
+    render();
+    return;
+  }
+  const first = !serviceRoute;
+  serviceRoute = {
+    networkId,
+    fromNodeId: res.nodeId,
+    createdStart: first ? Boolean(res.createdNode) : serviceRoute.createdStart,
+    undoDepth: first ? undoDepth : serviceRoute.undoDepth,
+    clicks: (serviceRoute?.clicks || 0) + 1,
+    lastEdgeId: res.edgeId || serviceRoute?.lastEdgeId || null,
+  };
+  serviceUi.networkId = networkId;
+  if (res.message) setStatusMessage(res.message, "ok");
+  store.persist();
+  snapGuide = null;
+  updateRibbonHint();
+  render();
+}
+
+/**
+ * End the route in progress (Enter, Esc, or switching tool). A start point that
+ * never got a run is removed again rather than left as an orphan, but only while
+ * nothing else has happened since (otherwise it is somebody else's undo entry).
+ */
+function finishServiceRoute() {
+  const r = serviceRoute;
+  serviceRoute = null;
+  snapGuide = null;
+  if (!r) return;
+  if (r.createdStart && r.clicks === 1 && store.undoStack.length === r.undoDepth) {
+    store.undo();
+    return;
+  }
+  if (r.lastEdgeId && (store.doc.serviceEdges || []).some((e) => e.id === r.lastEdgeId)) {
+    store.setSelection([{ kind: "serviceEdge", id: r.lastEdgeId }]);
+  }
+}
+
+function itemAt(wx, wy) {
+  const tol = 6 / cam.scale;
+  const items = store.doc.items.filter(onActiveLevel);
+  for (let i = items.length - 1; i >= 0; i -= 1) {
+    const item = items[i];
+    if (!planObjectVisible(item)) continue;
+    const sku = skuById(item.sku);
+    if (!sku) continue;
+    const box = itemRect(item, sku);
+    if (wx >= box.x - tol && wx <= box.x + box.w + tol && wy >= box.y - tol && wy <= box.y + box.h + tol) return item;
+  }
+  return null;
+}
+
+/**
+ * The ghost node under the pointer: a faint, not-yet-real node on a run, shown
+ * while Add node is armed, or on a run that is already selected. Clicking it
+ * (once) makes it a real node.
+ */
+function serviceGhost() {
+  if (!hoverPoint || drag) return null;
+  if (tool !== "service-node" && tool !== "select") return null;
+  const hit = serviceHit(hoverPoint.x, hoverPoint.y);
+  if (hit?.kind !== "serviceEdge") return null;
+  if (tool === "select" && !store.isSelected("serviceEdge", hit.id)) return null;
+  const p = projectOnEdge(store.doc, hit.id, hoverPoint);
+  return p ? { edgeId: hit.id, x: p.x, y: p.y } : null;
+}
+
+/** Turn a ghost into a real, selected node. */
+function commitServiceGhost(ghost) {
+  store.pushUndo();
+  const res = splitServiceEdge(store.doc, pack, ghost.edgeId, { x: ghost.x, y: ghost.y });
+  if (!res.ok) {
+    store.undo();
+    setStatusMessage(res.message, "warn");
+    return false;
+  }
+  store.persist();
+  store.selectOne({ kind: "serviceNode", id: res.nodeId });
+  serviceDockKey = "";
+  setStatusMessage("Node added. Drag it to move it, or lift it in the profile.", "ok");
+  render();
+  return true;
+}
+
+/**
+ * Services > Add node: click a run to put a node on it (GIS vertex style), click
+ * an existing node to select it. The tool stays armed so several can be added.
+ */
+function clickServiceNode(wx, wy) {
+  const hit = serviceHit(wx, wy);
+  if (hit?.kind === "serviceNode") {
+    store.selectOne(hit);
+    render();
+    return;
+  }
+  if (hit?.kind !== "serviceEdge") {
+    setStatusMessage("Click on a route run to add a node.", "warn");
+    return;
+  }
+  const p = projectOnEdge(store.doc, hit.id, { x: wx, y: wy });
+  commitServiceGhost({ edgeId: hit.id, x: p ? p.x : wx, y: p ? p.y : wy });
+}
+
+/** Services > Connect: pick a route point, then click the component it serves. */
+function clickServiceConnect(wx, wy) {
+  const node = serviceHit(wx, wy);
+  if (node?.kind === "serviceNode") {
+    serviceConnect = { nodeId: node.id };
+    store.selectOne(node);
+    setStatusMessage("Now click the component to connect this point to.", "ok");
+    updateRibbonHint();
+    render();
+    return;
+  }
+  if (!serviceConnect?.nodeId) {
+    setStatusMessage("Click a route point first.", "warn");
+    return;
+  }
+  const item = itemAt(wx, wy);
+  if (!item) {
+    setStatusMessage("Click a placed component on this level.", "warn");
+    return;
+  }
+  store.pushUndo();
+  const res = connectNode(store.doc, pack, serviceConnect.nodeId, item.id);
+  if (!res.ok) {
+    store.undo();
+    setStatusMessage(res.message, "warn");
+    render();
+    return;
+  }
+  store.persist();
+  serviceConnect = null;
+  setStatusMessage("Connected. The point moved onto the component; its height is unchanged.", "ok");
+  updateRibbonHint();
+  render();
+}
+
+/** After a move: a point dragged off its component lets go of it; a moved component takes its points along. */
+function settleServicesAfterMove(snaps) {
+  const movedItems = new Set(snaps.filter((s) => s.ref.kind === "item").map((s) => s.ref.id));
+  for (const s of snaps) {
+    if (s.ref.kind !== "serviceNode") continue;
+    const node = store.doc.serviceNodes.find((n) => n.id === s.ref.id);
+    if (node?.connectedRef && !movedItems.has(node.connectedRef.id)) node.connectedRef = null;
+  }
+  rehomeConnectedNodes(store.doc, pack);
+}
+
 function clickWallPoint(wx, wy) {
   const p = applySnap(wx, wy);
   if (!wallDraft) {
     sizeDraft = { lockW: false, lockH: false, typedW: "", typedH: "", axis: "w" };
     wallDraft = { x1: p.x, y1: p.y, x2: p.x, y2: p.y };
+    wallSideFlip = false;
     updateRibbonHint();
     render();
     return;
@@ -7456,7 +8210,7 @@ function finishWallSegment() {
     return;
   }
   sizeDraft = { lockW: false, lockH: false, typedW: "", typedH: "", axis: "w" };
-  wallDraft = chainStart(end);
+  wallDraft = { ...chainStart(end), chained: true };
   snapGuide = null;
   updateRibbonHint();
   render();
@@ -7618,6 +8372,14 @@ function onPointerMove(ev) {
         };
       }
     }
+    if (drag.snaps.length > 1 && grid) {
+      // Several objects move as one rigid body: round the shared delta once
+      // and apply it exactly. Rounding each coordinate separately shifts
+      // off-grid objects (e.g. walls) by different amounts than the floor.
+      dx = roundGrid(dx, grid);
+      dy = roundGrid(dy, grid);
+      grid = null;
+    }
     store.applyMoveSnapshot(drag.snaps, dx, dy, grid);
     render();
     return;
@@ -7706,6 +8468,7 @@ function onPointerUp(ev) {
     else store.setSelection(hits);
   } else if (drag.kind === "move") {
     if (!drag.moved) store.undoStack.pop(); // no-op click: drop the speculative undo entry
+    else settleServicesAfterMove(drag.snaps);
   } else if (drag.kind === "underlay-move" || drag.kind === "underlay-scale" || drag.kind === "underlay-rotate") {
     if (!drag.moved) store.undoStack.pop(); // no-op click: drop the speculative undo entry
   } else if (drag.kind === "segment-end") {
@@ -7735,13 +8498,46 @@ function deleteSelection() {
   }
   if (!store.selected.length) return;
   store.pushUndo();
-  for (const ref of store.selected) {
+  const isService = (ref) => ref.kind === "serviceNode" || ref.kind === "serviceEdge";
+  // Services clean up after themselves (a deleted point takes its runs, an
+  // emptied network goes), which a bare splice would leave dangling.
+  const serviceSel = store.selected.filter(isService);
+  // Deleting part of a route must not close its profile: remember the route and
+  // the points beside what is deleted, and reselect a surviving run afterwards.
+  const onlyServices = serviceSel.length > 0 && serviceSel.length === store.selected.length;
+  let keepRoute = null;
+  if (onlyServices) {
+    const edgeId = profileEdgeId && (store.doc.serviceEdges || []).some((e) => e.id === profileEdgeId)
+      ? profileEdgeId : serviceProfileEdge();
+    const beside = new Set();
+    const gone = new Set(serviceSel.filter((r) => r.kind === "serviceNode").map((r) => r.id));
+    for (const e of store.doc.serviceEdges || []) {
+      if (gone.has(e.fromNode)) beside.add(e.toNode);
+      if (gone.has(e.toNode)) beside.add(e.fromNode);
+    }
+    keepRoute = {
+      edgeIds: edgeId ? routeProfile(store.doc, pack, edgeId).edgeIds : [],
+      beside,
+    };
+  }
+  // A lone route node dissolves like a GIS vertex: the run heals over it.
+  if (serviceSel.length === 1 && serviceSel[0].kind === "serviceNode") removeServiceNode(store.doc, serviceSel[0].id);
+  else deleteServiceRefs(store.doc, serviceSel);
+  for (const ref of store.selected.filter((r) => !isService(r))) {
     const arr = collectionFor(store.doc, ref.kind);
     const idx = arr?.findIndex((row) => row.id === ref.id) ?? -1;
     if (idx >= 0) arr.splice(idx, 1);
   }
+  // Deleting a component leaves any route point connected to it unconnected.
+  pruneServices(store.doc);
   store.pruneGroups();
   store.clearSelection();
+  if (keepRoute) {
+    const edges = store.doc.serviceEdges || [];
+    const next = edges.find((e) => keepRoute.beside.has(e.fromNode) || keepRoute.beside.has(e.toNode))
+      || edges.find((e) => keepRoute.edgeIds.includes(e.id));
+    if (next) store.setSelection([{ kind: "serviceEdge", id: next.id }]);
+  }
   store.persist();
 }
 
@@ -7778,6 +8574,13 @@ function wireKeyboard() {
         closeCheck();
         return;
       }
+      // Peeking hands the backdrop to the plan, so Escape is the way back:
+      // once to the full table, again to close it.
+      if (el.scheduleOverlay && !el.scheduleOverlay.hidden) {
+        if (schedulePeeking) setSchedulePeek(false);
+        else closeSchedule();
+        return;
+      }
       cancelDrawing();
     } else if (el.typeDetailOverlay && !el.typeDetailOverlay.hidden && (ev.key === "ArrowLeft" || ev.key === "ArrowRight")) {
       // Overlay is open: arrows page through the other options instead of
@@ -7796,6 +8599,25 @@ function wireKeyboard() {
       // Re-resolve from the last pointer position so the new side appears
       // straight away, without waiting for the mouse to twitch.
       if (hoverPoint && (snapPreviewTool() || beamStart || lineStart)) applySnap(hoverPoint.x, hoverPoint.y);
+      render();
+    } else if (ev.key === "Enter" && serviceRoute) {
+      ev.preventDefault();
+      finishServiceRoute();
+      updateRibbonHint();
+      render();
+    } else if (ev.key === " " && tool === "wall") {
+      ev.preventDefault();
+      if (wallStartedAgainstWall()) {
+        // The side comes from the wall it started on: swap it for this wall.
+        wallSideFlip = !wallSideFlip;
+        setStatusMessage("Flipped: the wall now sits on the other side of the line.");
+      } else {
+        wallLocation = flipWallLocation(wallLocation);
+        setStatusMessage(wallLocation === "exterior"
+          ? "Drawing on the exterior face. The wall sits to the right of the line as you draw."
+          : "Drawing on the interior face. The wall sits to the left of the line as you draw.");
+      }
+      updateRibbonHint();
       render();
     } else if (ev.key === "Enter" && wallDraft) {
       ev.preventDefault();
@@ -7892,13 +8714,29 @@ function commitRoof(rect) {
 
 function commitWall(a, b) {
   if (!canCommitLine(a, b)) return false;
+  const thickness = drawnWallThickness(skuById(placeSkuId));
+  const location = effectiveWallLocation(a, b, thickness);
+  const plan = wallJoinPlan(a, b, thickness, centerlineFromLocation(a, b, thickness, location));
+  const line = plan.center;
+  if (lineLength({ x: line.x1, y: line.y1 }, { x: line.x2, y: line.y2 }) < MIN_TRACE) return false;
   store.pushUndo();
+  for (const move of plan.moves) {
+    if (move.end === 2) {
+      move.seg.x2 = move.to.x;
+      move.seg.y2 = move.to.y;
+    } else {
+      move.seg.x1 = move.to.x;
+      move.seg.y1 = move.to.y;
+    }
+  }
   const id = nid("s");
-  store.doc.segments.push({
+  const seg = {
     id, sku: placeSkuId, level: activeLevel,
-    x1: a.x, y1: a.y, x2: b.x, y2: b.y,
+    x1: line.x1, y1: line.y1, x2: line.x2, y2: line.y2,
     status: placementStatus(),
-  });
+  };
+  if (isFaceLocation(location)) seg.location = location;
+  store.doc.segments.push(seg);
   store.selectOne({ kind: "segment", id });
   store.persist();
   return true;
@@ -8095,6 +8933,61 @@ function fillContextTypeSelect(kind, skuId) {
   }
 }
 
+function showServiceSystem(system) {
+  if (!system || !hiddenServiceSystems.delete(system)) return;
+  serviceVisKey = "";
+}
+
+/** The plan's service chips: one per system that has a route, plus All when there is more than one. */
+function syncServiceVisibility() {
+  const box = el.serviceVis;
+  if (!box || !el.serviceVisList) return;
+  const systems = serviceSystemsPresent(store.doc);
+  if (!systems.length) {
+    box.hidden = true;
+    serviceVisKey = "";
+    return;
+  }
+  box.hidden = false;
+  const flags = systems.map((id) => (serviceSystemShown(id) ? "1" : "0")).join("");
+  const key = `${systems.join(",")}:${flags}`;
+  if (key === serviceVisKey) return;
+  serviceVisKey = key;
+  const allOn = systems.every((id) => serviceSystemShown(id));
+  const chips = systems.length > 1
+    ? `<button type="button" data-svc-vis="*" aria-pressed="${allOn}" title="${allOn ? "Hide every service on the plan" : "Show every service on the plan"}">All</button>`
+    : "";
+  el.serviceVisList.innerHTML = chips + systems.map((id) => {
+    const on = serviceSystemShown(id);
+    const name = SERVICE_CHIP[id] || SERVICE_SYSTEM_INFO[id]?.label || "Service";
+    const colour = SERVICE_SYSTEM_INFO[id]?.colour || "#2675b8";
+    return `<button type="button" data-svc-vis="${id}" aria-pressed="${on}" title="${on ? "Hide" : "Show"} ${escapeHtml(name)} on the plan"><i style="background:${colour}"></i>${escapeHtml(name)}</button>`;
+  }).join("");
+}
+
+if (el.serviceVisList) {
+  el.serviceVisList.addEventListener("click", (ev) => {
+    const btn = ev.target.closest("[data-svc-vis]");
+    if (!btn) return;
+    const id = btn.dataset.svcVis;
+    const systems = serviceSystemsPresent(store.doc);
+    if (id === "*") {
+      const allOn = systems.every((s) => serviceSystemShown(s));
+      for (const s of systems) {
+        if (allOn) hiddenServiceSystems.add(s);
+        else hiddenServiceSystems.delete(s);
+      }
+    } else if (hiddenServiceSystems.has(id)) {
+      hiddenServiceSystems.delete(id);
+    } else {
+      hiddenServiceSystems.add(id);
+    }
+    serviceVisKey = "";
+    pruneInvisibleSelection();
+    render();
+  });
+}
+
 function syncPlanFilterButtons() {
   document.querySelectorAll(".planner-tools [data-plan-status]").forEach((b) => {
     b.classList.toggle("active", b.dataset.planStatus === planStatusFilter);
@@ -8132,8 +9025,431 @@ function syncObjectLevel(obj) {
   if (document.activeElement !== el.ctxOLevel) el.ctxOLevel.value = id;
 }
 
+// --- services dock ---------------------------------------------------------
+
+const isServiceRef = (r) => r.kind === "serviceNode" || r.kind === "serviceEdge";
+
+/** True while the dock should be the services panel rather than the type picker. */
+function serviceDockActive() {
+  if (!el.serviceFields || wallDraft) return false;
+  if (tool === "service-route" || tool === "service-connect" || tool === "service-node") return true;
+  return store.selected.length > 0 && store.selected.every(isServiceRef);
+}
+
+/**
+ * The edge whose route the profile should show: the selected run, else a run
+ * touching the selected node, else the run just drawn. Null hides the profile.
+ */
+function serviceProfileEdge() {
+  const edges = store.doc.serviceEdges || [];
+  const sel = store.selected.filter(isServiceRef);
+  const run = sel.find((r) => r.kind === "serviceEdge");
+  if (run && edges.some((e) => e.id === run.id)) return run.id;
+  const node = sel.find((r) => r.kind === "serviceNode");
+  if (node) {
+    // Prefer a plan run over a riser leg, so the profile has length to show.
+    const touching = edges.filter((e) => e.fromNode === node.id || e.toNode === node.id);
+    const nodes = new Map((store.doc.serviceNodes || []).map((n) => [n.id, n]));
+    const plan = touching.find((e) => {
+      const a = nodes.get(e.fromNode);
+      const b = nodes.get(e.toNode);
+      return a && b && Math.hypot(a.x - b.x, a.y - b.y) > 1e-4;
+    });
+    return (plan || touching[0])?.id || null;
+  }
+  if (!sel.length && serviceRoute?.lastEdgeId && edges.some((e) => e.id === serviceRoute.lastEdgeId)) {
+    return serviceRoute.lastEdgeId;
+  }
+  return null;
+}
+
+/** Show, hide and redraw the route profile under the plan. Runs every render. */
+function syncServiceProfileDock() {
+  const dock = el.serviceProfileDock;
+  if (!dock) return;
+  const edgeId = serviceDockActive() ? serviceProfileEdge() : null;
+  const edge = edgeId ? (store.doc.serviceEdges || []).find((e) => e.id === edgeId) : null;
+  if (!edge) {
+    setHidden(dock, true);
+    return;
+  }
+  const network = (store.doc.serviceNetworks || []).find((n) => n.id === edge.networkId);
+  setHidden(dock, false);
+  fitServiceProfileHeight();
+  if (el.serviceProfileTitle) {
+    el.serviceProfileTitle.textContent = `Route profile · ${network?.name || "Route"} · height against distance along the plan`;
+  }
+  profileEdgeId = edge.id;
+  syncProfileModeButtons();
+  const profile = routeProfile(store.doc, pack, edge.id);
+  profileLayout = drawServiceProfile(el.serviceProfileCanvas, profile, {
+    obstructions: profileObstructions(store.doc, pack, profile),
+    storeyHeight: pack?.system?.wallHeight || 2.8,
+    colour: SERVICE_SYSTEM_INFO[network?.system]?.colour,
+    drag: profileDrag?.moved ? { nodeId: profileDrag.nodeId, z: profileDrag.z, mode: profileDrag.mode } : null,
+    hoverGhost: profileHoverGhost,
+    selectedNodeIds: store.selected.filter((r) => r.kind === "serviceNode").map((r) => r.id),
+    selectionColour: COLOUR.selection,
+  });
+  // The canvas wrap's ResizeObserver re-measures the plan when the dock opens.
+}
+
+// Route profile editing. Heights are only ever changed as a vertical step (a rise
+// or drop at one point), never by tilting a run, so the profile keeps the 90
+// degree corners the mock draws. A ghost node (dashed, mid-run) is made real by
+// one click; a real node is lifted by dragging it up or down.
+const PROFILE_HIT = 10;
+const LIFT_STEP = 0.05;
+const SLOPE_STEP = 0.01;
+
+/** Step (a 90 degree rise) or Slope (only this node's height), for the route shown. */
+function profileMode() {
+  if (profileModePref) return profileModePref;
+  const edge = (store.doc.serviceEdges || []).find((e) => e.id === profileEdgeId);
+  const system = (store.doc.serviceNetworks || []).find((n) => n.id === edge?.networkId)?.system;
+  return system === "drainage" ? "slope" : "step";
+}
+
+function syncProfileModeButtons() {
+  const mode = profileMode();
+  document.querySelectorAll("[data-profile-mode]").forEach((b) => {
+    b.classList.toggle("active", b.dataset.profileMode === mode);
+    b.setAttribute("aria-pressed", String(b.dataset.profileMode === mode));
+  });
+}
+
+document.querySelectorAll("[data-profile-mode]").forEach((b) => {
+  b.addEventListener("click", () => {
+    profileModePref = b.dataset.profileMode;
+    render();
+  });
+});
+
+function profilePointer(ev) {
+  const rect = el.serviceProfileCanvas.getBoundingClientRect();
+  return { x: ev.clientX - rect.left, y: ev.clientY - rect.top };
+}
+
+function profileHit(p) {
+  if (!profileLayout) return null;
+  let best = null;
+  let bestD = PROFILE_HIT;
+  for (const n of profileLayout.nodes) {
+    const d = Math.hypot(n.px - p.x, n.py - p.y);
+    if (d <= bestD) { best = { kind: "node", ...n }; bestD = d; }
+  }
+  if (best) return best;
+  for (const g of profileLayout.ghosts) {
+    const d = Math.hypot(g.px - p.x, g.py - p.y);
+    if (d <= bestD) { best = { kind: "ghost", ...g }; bestD = d; }
+  }
+  return best;
+}
+
+function onProfileDown(ev) {
+  if (ev.button !== 0) return;
+  const hit = profileHit(profilePointer(ev));
+  if (!hit) return;
+  if (hit.kind === "ghost") {
+    const centre = serviceElementCentre(store.doc, { kind: "serviceEdge", id: hit.edgeId });
+    if (!centre) return;
+    const res = mutateServices(() => splitServiceEdge(store.doc, pack, hit.edgeId, centre));
+    if (res?.ok) store.setSelection([{ kind: "serviceNode", id: res.nodeId }]);
+    profileHoverGhost = null;
+    render();
+    return;
+  }
+  store.selectOne({ kind: "serviceNode", id: hit.nodeId });
+  const base = profileMode();
+  const mode = ev.shiftKey ? (base === "slope" ? "step" : "slope") : base;
+  profileDrag = { nodeId: hit.nodeId, z0: hit.z, z: hit.z, startY: profilePointer(ev).y, moved: false, mode };
+  el.serviceProfileCanvas.setPointerCapture(ev.pointerId);
+  render();
+}
+
+function onProfileMove(ev) {
+  const p = profilePointer(ev);
+  if (profileDrag) {
+    if (Math.abs(p.y - profileDrag.startY) > 4) profileDrag.moved = true;
+    if (profileDrag.moved && profileLayout) {
+      const raw = Math.min(profileLayout.zHi, Math.max(profileLayout.zLo, profileLayout.zAt(p.y)));
+      const q = profileDrag.mode === "slope" ? SLOPE_STEP : LIFT_STEP;
+      profileDrag.z = profileDrag.z0 + Math.round((raw - profileDrag.z0) / q) * q;
+    }
+    render();
+    return;
+  }
+  const hit = profileHit(p);
+  const ghostId = hit?.kind === "ghost" ? hit.edgeId : null;
+  el.serviceProfileCanvas.style.cursor = hit?.kind === "node" ? "ns-resize" : hit ? "copy" : "default";
+  if (ghostId !== profileHoverGhost) {
+    profileHoverGhost = ghostId;
+    render();
+  }
+}
+
+function onProfileUp() {
+  const d = profileDrag;
+  profileDrag = null;
+  if (!d) return;
+  const delta = d.z - d.z0;
+  const min = (d.mode === "slope" ? SLOPE_STEP : LIFT_STEP) / 2;
+  if (d.moved && Math.abs(delta) >= min) {
+    const res = mutateServices(() => {
+      if (d.mode !== "slope") return liftNode(store.doc, pack, d.nodeId, delta, profileEdgeId);
+      const n = store.doc.serviceNodes.find((x) => x.id === d.nodeId);
+      if (!n || n.offset === null) return { ok: false, message: "This node has no stated height. Set its offset first." };
+      return setNodeOffset(store.doc, d.nodeId, Math.round((n.offset + delta) * 1000) / 1000);
+    });
+    if (res?.ok) store.setSelection([{ kind: "serviceNode", id: res.nodeId || d.nodeId }]);
+  }
+  render();
+}
+
+if (el.serviceProfileCanvas) {
+  el.serviceProfileCanvas.addEventListener("pointerdown", onProfileDown);
+  el.serviceProfileCanvas.addEventListener("pointermove", onProfileMove);
+  el.serviceProfileCanvas.addEventListener("pointerup", onProfileUp);
+  el.serviceProfileCanvas.addEventListener("pointercancel", () => { profileDrag = null; render(); });
+  el.serviceProfileCanvas.addEventListener("pointerleave", () => {
+    if (profileDrag || profileHoverGhost === null) return;
+    profileHoverGhost = null;
+    render();
+  });
+}
+
+// The profile's top edge sets its height. Dragging up grows it (the plan gives
+// up the space); the canvas is flex:1, so the next render redraws the plot to
+// the new client height. A floor keeps the header and a usable plot; a ceiling
+// leaves the plan enough room to keep drawing.
+const PROFILE_HEIGHT_KEY = "v2-profile-height";
+const PROFILE_MIN = 148;
+const PROFILE_PLAN_MIN = 180;
+
+function fitServiceProfileHeight(px) {
+  const dock = el.serviceProfileDock;
+  if (!dock) return 0;
+  let h = px;
+  if (!Number.isFinite(h) || h <= 0) h = parseFloat(dock.style.height) || 190;
+  const parentH = dock.parentElement?.clientHeight || 0;
+  if (parentH >= PROFILE_MIN + 40) {
+    const room = parentH - PROFILE_PLAN_MIN;
+    h = Math.min(Math.max(h, PROFILE_MIN), Math.max(PROFILE_MIN, room));
+  } else {
+    h = Math.max(h, PROFILE_MIN);
+  }
+  h = Math.round(h);
+  if (dock.style.height !== `${h}px`) dock.style.height = `${h}px`;
+  return h;
+}
+
+function bindServiceProfileResize() {
+  const handle = document.getElementById("v2-resize-profile");
+  const dock = el.serviceProfileDock;
+  if (!handle || !dock) return;
+  let frame = 0;
+  const remembered = Number(window.localStorage.getItem(PROFILE_HEIGHT_KEY));
+  if (Number.isFinite(remembered) && remembered > 0) dock.style.height = `${Math.round(remembered)}px`;
+  const apply = (px, { store = false } = {}) => {
+    const h = fitServiceProfileHeight(px);
+    if (store && h > 0) window.localStorage.setItem(PROFILE_HEIGHT_KEY, String(h));
+    if (frame) return;
+    frame = requestAnimationFrame(() => {
+      frame = 0;
+      render();
+    });
+  };
+  handle.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    handle.classList.add("is-dragging");
+    handle.setPointerCapture(e.pointerId);
+    const startY = e.clientY;
+    const startH = dock.getBoundingClientRect().height || parseFloat(dock.style.height) || 190;
+    const onMove = (ev) => apply(startH - (ev.clientY - startY));
+    const onUp = () => {
+      handle.classList.remove("is-dragging");
+      handle.removeEventListener("pointermove", onMove);
+      handle.removeEventListener("pointerup", onUp);
+      handle.removeEventListener("pointercancel", onUp);
+      const h = Math.round(dock.getBoundingClientRect().height);
+      if (h > 0) window.localStorage.setItem(PROFILE_HEIGHT_KEY, String(h));
+    };
+    handle.addEventListener("pointermove", onMove);
+    handle.addEventListener("pointerup", onUp);
+    handle.addEventListener("pointercancel", onUp);
+  });
+  handle.addEventListener("keydown", (e) => {
+    const h = dock.getBoundingClientRect().height || parseFloat(dock.style.height) || 190;
+    if (e.key === "ArrowUp") apply(h + 24, { store: true });
+    else if (e.key === "ArrowDown") apply(h - 24, { store: true });
+    else return;
+    e.preventDefault();
+  });
+}
+
+bindServiceProfileResize();
+
+function syncServiceDock() {
+  const refs = store.selected.filter(isServiceRef);
+  const model = serviceInspectorModel(store.doc, pack, refs);
+  const connectHint = tool === "service-connect"
+    ? (serviceConnect ? "Click the component to connect this point to." : "Click a route point, then the component it serves.")
+    : "";
+  const html = servicePanelHtml({
+    doc: store.doc, pack, ui: serviceUi, model, showRoute: tool === "service-route", connectHint,
+  });
+  const focused = el.serviceFields.contains(document.activeElement) && document.activeElement !== el.serviceFields;
+  setHidden(el.serviceFields, false);
+  if (html === serviceDockKey || focused) return;
+  el.serviceFields.innerHTML = html;
+  serviceDockKey = html;
+}
+
+/** Run one document edit as a single undo step; a refusal leaves no trace. */
+function mutateServices(fn) {
+  const sel = store.selected.slice();
+  const primary = store.primary;
+  store.pushUndo();
+  const res = fn();
+  if (res && res.ok === false) {
+    store.undo();
+    store.setSelection(sel, primary);
+    setStatusMessage(res.message, "warn");
+  } else {
+    store.persist();
+    if (res?.message) setStatusMessage(res.message, "ok");
+  }
+  serviceDockKey = "";
+  if (el.serviceFields.contains(document.activeElement)) document.activeElement.blur();
+  render();
+  return res;
+}
+
+function focusServiceField(name) {
+  const input = el.serviceFields?.querySelector(`[data-svc="${name}"]`);
+  if (input) input.focus();
+  else setStatusMessage("Select the route point or run first, then use the inspector.", "warn");
+}
+
+function numberOrNull(text) {
+  const v = parseOffsetText(text);
+  return v === undefined ? NaN : v;
+}
+
+function onServiceControl(ev) {
+  const target = ev.target.closest?.("[data-svc]");
+  if (!target) return;
+  const name = target.dataset.svc;
+  const value = target.value;
+  const sel = store.selected.filter(isServiceRef);
+  const nodeId = sel.find((r) => r.kind === "serviceNode")?.id;
+  const edgeIds = sel.filter((r) => r.kind === "serviceEdge").map((r) => r.id);
+  const field = (n) => el.serviceFields.querySelector(`[data-svc="${n}"]`);
+  const isClick = ev.type === "click";
+  const isInput = ev.type === "input";
+
+  // Draw settings: remembered, applied to the next run drawn.
+  if (name === "offset") {
+    if (isInput) serviceUi.offsetText = value;
+    return;
+  }
+  if (isInput || (isClick && target.tagName !== "BUTTON")) return;
+  switch (name) {
+    case "system":
+      serviceUi.system = value;
+      serviceUi.networkId = null;
+      serviceUi.sku = null;
+      serviceDockKey = "";
+      showServiceSystem(value);
+      target.blur();
+      render();
+      return;
+    case "network": serviceUi.networkId = value || null; return;
+    case "sku": serviceUi.sku = value || null; return;
+    case "mode": serviceUi.mode = value === "schematic" ? "schematic" : "measured"; return;
+    case "node-level": mutateServices(() => setNodeLevel(store.doc, pack, nodeId, value)); return;
+    case "node-offset": {
+      const v = numberOrNull(value);
+      if (Number.isNaN(v)) { setStatusMessage("Offset must be a number of metres.", "warn"); return; }
+      mutateServices(() => setNodeOffset(store.doc, nodeId, v));
+      return;
+    }
+    case "end-offset": {
+      const v = numberOrNull(value);
+      if (Number.isNaN(v)) { setStatusMessage("Offset must be a number of metres.", "warn"); return; }
+      mutateServices(() => setNodeOffset(store.doc, target.dataset.node, v));
+      return;
+    }
+    case "disconnect": mutateServices(() => disconnectNode(store.doc, nodeId)); return;
+    case "rise": {
+      const mag = Number(String(field("rise-delta")?.value || "").trim().replace(",", "."));
+      const delta = mag * Number(target.dataset.dir || 1);
+      const res = mutateServices(() => createRiser(store.doc, pack, nodeId, { delta }));
+      if (res?.ok) store.setSelection([{ kind: "serviceNode", id: res.nodeId }]);
+      render();
+      return;
+    }
+    case "rise-level-go": {
+      const levelId = field("rise-level")?.value;
+      const off = numberOrNull(field("rise-offset")?.value);
+      if (Number.isNaN(off) || off === null) { setStatusMessage("Enter the offset on that level, in metres.", "warn"); return; }
+      const connectItemId = field("rise-item")?.value || null;
+      const res = mutateServices(() => createRiser(store.doc, pack, nodeId, { level: levelId, offset: off, connectItemId }));
+      if (res?.ok) store.setSelection([{ kind: "serviceNode", id: res.nodeId }]);
+      render();
+      return;
+    }
+    case "rise-level": {
+      // The component choice follows the level chosen: a connection is on one storey.
+      const items = JSON.parse(field("rise-item")?.dataset.items || "[]").filter((i) => i.level === value);
+      const select = field("rise-item");
+      if (select) {
+        select.innerHTML = `<option value="">None</option>${items.map((i) => `<option value="${escapeHtml(i.id)}">${escapeHtml(i.label)}</option>`).join("")}`;
+      }
+      return;
+    }
+    case "edge-sku": mutateServices(() => setEdgeSku(store.doc, edgeIds, value)); return;
+    case "edge-mode": mutateServices(() => setEdgeMode(store.doc, edgeIds, value)); return;
+    case "reverse": mutateServices(() => reverseEdge(store.doc, edgeIds[0])); return;
+    case "fall-apply": {
+      const g = parseGradient(field("fall")?.value);
+      if (g === null) { setStatusMessage("Enter a fall such as 1:60 or 1.7%.", "warn"); return; }
+      mutateServices(() => applyDrainageFall(store.doc, pack, edgeIds[0], g));
+      return;
+    }
+    default:
+  }
+}
+
+if (el.serviceFields) {
+  el.serviceFields.addEventListener("change", onServiceControl);
+  el.serviceFields.addEventListener("input", onServiceControl);
+  el.serviceFields.addEventListener("click", onServiceControl);
+}
+
 function syncPlanContext() {
   syncPlanFilterButtons();
+  syncServiceProfileDock();
+  if (serviceDockActive()) {
+    if (el.dockContext) el.dockContext.dataset.state = "edit";
+    setHidden(el.ctxTypePicker, true);
+    setHidden(el.inspectFields, true);
+    setHidden(el.planOptions, true);
+    setHidden(el.ctxProperty, true);
+    setHidden(el.inspectEmpty, true);
+    setTypeFlyoutOpen(false);
+    prevDockState = "edit";
+    planContextKey = "";
+    if (el.paletteTitle) el.paletteTitle.textContent = "Services";
+    const first = store.selected.find(isServiceRef);
+    const firstObj = first ? objByRef(first) : null;
+    const network = firstObj && (store.doc.serviceNetworks || []).find((n) => n.id === firstObj.networkId);
+    syncInspectKicker(network ? network.name : (tool === "service-route" ? "Draw route" : "Services"));
+    syncServiceDock();
+    return;
+  }
+  setHidden(el.serviceFields, true);
   const draft = Boolean(wallDraft);
   const refs = store.selected;
   const ref = !draft && refs.length === 1 ? store.primary : null;
@@ -8199,7 +9515,27 @@ function syncPlanContext() {
     syncInspectKicker("");
   }
 
-  setHidden(el.planOptions, !showGeom);
+  const placingWall = tool === "wall";
+  setHidden(el.planOptions, !showGeom && !placingWall);
+  setHidden(el.wallLoc, !placingWall);
+  if (placingWall && el.wallLoc) {
+    for (const btn of el.wallLoc.querySelectorAll("[data-wall-loc]")) {
+      const on = btn.dataset.wallLoc === wallLocation;
+      btn.classList.toggle("active", on);
+      btn.setAttribute("aria-pressed", on ? "true" : "false");
+    }
+  }
+  setHidden(el.wallOpts, !placingWall);
+  // Corner only matters where a wall meets another wall's end.
+  setHidden(el.wallCorner, !(placingWall && wallCornerRelevant()));
+  positionWallOpts();
+  if (placingWall && el.wallCorner) {
+    for (const btn of el.wallCorner.querySelectorAll("[data-wall-corner]")) {
+      const on = btn.dataset.wallCorner === wallCorner;
+      btn.classList.toggle("active", on);
+      btn.setAttribute("aria-pressed", on ? "true" : "false");
+    }
+  }
   setHidden(el.inspectFields, !showInspect && !creating && !editingProperty);
   setHidden(el.ctxProperty, !editingProperty);
   setHidden(el.inspectEmpty, dockState !== "empty");
@@ -8297,6 +9633,22 @@ el.ctxLen?.addEventListener("change", (ev) => {
   store.pushUndo();
   setSegmentLength(sel.obj, parseLengthInput(ev.target.value, segmentLength(sel.obj.x1, sel.obj.y1, sel.obj.x2, sel.obj.y2)));
   store.persist();
+  render();
+});
+
+el.wallLoc?.addEventListener("click", (ev) => {
+  const btn = ev.target.closest("[data-wall-loc]");
+  if (!btn || tool !== "wall") return;
+  wallLocation = normalizeWallLocation(btn.dataset.wallLoc);
+  wallSideFlip = false;
+  updateRibbonHint();
+  render();
+});
+
+el.wallCorner?.addEventListener("click", (ev) => {
+  const btn = ev.target.closest("[data-wall-corner]");
+  if (!btn || tool !== "wall") return;
+  wallCorner = btn.dataset.wallCorner;
   render();
 });
 
@@ -8552,7 +9904,7 @@ function runCompile() {
   openCheck();
   el.compilePanel.hidden = false;
   // The panel is shared with the IFC export, which renames it while it owns it.
-  el.compilePanel.querySelector("h2").textContent = "Compile result";
+  el.compilePanel.querySelector("h2").textContent = "Take-off result";
   const walls = out.walls || [];
   const external = walls.filter((w) => w.external).length;
   const doors = out.instances.filter((r) => r.category === "Doors").length;
@@ -8594,9 +9946,21 @@ function runCompile() {
 // Every rolled-up line expands to the individual elements behind it, and
 // every element with a selection kind (schedule.js/compile.js's `row.kind` -
 // null for a room-derived wall or a recipe-implied quantity nobody drew) can
-// be located: switch to its level, select it, and pan the plan to it.
+// be located: switch to its level, select it, and pan the plan to it. A line
+// can also locate everything behind it at once ("Show all"), which is the
+// question a rolled-up quantity raises - where is my 42 m of 110 wall, not
+// where is the third piece of it.
+//
+// Locating does not close the panel. It switches the overlay to `peek` (see
+// v2.css), which docks it to one side and lets the backdrop pass clicks
+// through, so the plan and the line that sent you there stay on one screen.
 
 let scheduleRowsCache = [];
+// Which rolled-up lines are expanded, keyed by groupByModel's own key (model,
+// falling back to category) rather than row index: re-running the compile
+// re-sorts and re-numbers the rows, and an index would re-open the wrong one.
+let scheduleOpenGroups = new Set();
+let schedulePeeking = false;
 
 /** shared money formatter for the priced BOQ view - ZAR unless the loaded
  *  rate book states otherwise. */
@@ -8615,8 +9979,27 @@ function levelName(levelId) {
   return (pack?.levels || []).find((l) => l.id === levelId)?.name || levelId;
 }
 
+/** Stable identity of a rolled-up line across recompiles - the same key
+ *  schedule.js's groupByModel() groups on. */
+function scheduleGroupKey(row) {
+  return row.model || row.category || "unmodelled";
+}
+
+/** The drawn elements behind a line, as selection refs. Elements with no
+ *  `kind` (a room-derived wall, a recipe-implied quantity) are not refs to
+ *  anything and are dropped. */
+function scheduleGroupRefs(row) {
+  return (row?.elements || [])
+    .filter((element) => element.kind)
+    .map((element) => ({ kind: element.kind, id: element.id }));
+}
+
 function elementRowHtml(groupIndex, element, elementIndex) {
-  const label = `${element.id}${element.status ? ` · ${element.status}` : ""}`;
+  const detail = [
+    Number.isFinite(element.angle) ? `${element.angle.toFixed(0)}°` : null,
+    element.gradient || null,
+  ].filter(Boolean).join(" · ");
+  const label = `${element.id}${element.status ? ` · ${element.status}` : ""}${detail ? ` · ${detail}` : ""}`;
   const locatable = Boolean(element.kind);
   return `
     <div class="schedule-element">
@@ -8631,10 +10014,11 @@ function elementRowHtml(groupIndex, element, elementIndex) {
 
 function scheduleRowsHtml(rows, { priced }) {
   const symbol = rateBook?.symbol || "R";
-  const colspan = priced ? 7 : 5;
+  // Full column count, so the expanded element list spans the whole table.
+  const colspan = priced ? 9 : 7;
   const head = priced
-    ? `<tr><th></th><th>Model</th><th class="wrap">Description</th><th>Category</th><th class="num">Qty</th><th>Unit</th><th class="num">Rate</th><th class="num">Amount</th></tr>`
-    : `<tr><th></th><th>Model</th><th class="wrap">Description</th><th>Category</th><th class="num">Qty</th><th>Unit</th></tr>`;
+    ? `<tr><th></th><th>Model</th><th class="wrap">Description</th><th>Category</th><th class="num">Qty</th><th>Unit</th><th class="num">Rate</th><th class="num">Amount</th><th></th></tr>`
+    : `<tr><th></th><th>Model</th><th class="wrap">Description</th><th>Category</th><th class="num">Qty</th><th>Unit</th><th></th></tr>`;
   const body = rows.map((row, i) => {
     const first = `
       <td class="schedule-caret">▸</td>
@@ -8648,12 +10032,22 @@ function scheduleRowsHtml(rows, { priced }) {
       <td class="num">${row.priced ? money(row.rate, symbol) : "—"}</td>
       <td class="num">${row.priced ? money(row.amount, symbol) : "—"}</td>`
       : "";
+    const refCount = scheduleGroupRefs(row).length;
+    const planCell = `
+      <td class="schedule-plan-cell">
+        <button type="button" class="schedule-locate schedule-locate-all" data-group="${i}"
+          ${refCount ? "" : "disabled"}
+          title="${refCount ? "Select every drawn element on this line and frame them on the plan" : "Nothing drawn on this line to select"}">
+          Show all${refCount ? ` (${refCount})` : ""}
+        </button>
+      </td>`;
     const elements = (row.elements || [])
-      .map((el, j) => elementRowHtml(i, el, j))
+      .map((element, j) => elementRowHtml(i, element, j))
       .join("");
+    const open = scheduleOpenGroups.has(scheduleGroupKey(row));
     return `
-      <tr class="schedule-group-row" data-group="${i}">${first}${priceCells}</tr>
-      <tr class="schedule-elements-row" data-group="${i}" hidden>
+      <tr class="schedule-group-row${open ? " open" : ""}" data-group="${i}">${first}${priceCells}${planCell}</tr>
+      <tr class="schedule-elements-row" data-group="${i}"${open ? "" : " hidden"}>
         <td colspan="${colspan}"><div class="schedule-elements">${elements || '<p class="hint">Nothing drawn against this line yet.</p>'}</div></td>
       </tr>`;
   }).join("");
@@ -8663,18 +10057,50 @@ function scheduleRowsHtml(rows, { priced }) {
   return `<table class="cost-table"><thead>${head}</thead><tbody>${body}${foot}</tbody></table>`;
 }
 
+/** "from 1 March 2026", or nothing for a book with no date (the sample file has none). */
+function rateBookEffective() {
+  const from = rateBook?.effectiveFrom;
+  if (!from) return "";
+  const date = new Date(from);
+  return Number.isNaN(date.getTime())
+    ? `from ${from}`
+    : `from ${date.toLocaleDateString("en-ZA", { day: "numeric", month: "long", year: "numeric" })}`;
+}
+
 function openSchedule(title, rows, { priced }) {
   scheduleRowsCache = rows;
   if (el.scheduleOverlay) el.scheduleOverlay.hidden = false;
   if (el.scheduleTitle) el.scheduleTitle.textContent = title;
-  if (el.scheduleKicker) el.scheduleKicker.textContent = `${rows.length} lines`;
+  // Which price list produced these figures, beside the line count: a priced
+  // schedule that does not say what it was priced against is not evidence of
+  // anything.
+  if (el.scheduleKicker) {
+    el.scheduleKicker.textContent = [
+      `${rows.length} lines`,
+      ...(priced ? [rateBook?.name, rateBookEffective()] : []),
+    ].filter(Boolean).join(" · ");
+  }
   if (el.scheduleBody) {
     el.scheduleBody.innerHTML = `<div class="table-wrap">${scheduleRowsHtml(rows, { priced })}</div>`;
   }
+  // Re-opening the schedule from the ribbon is a fresh read of the drawing,
+  // so it comes back full-screen; peek is a state locating puts it into.
+  setSchedulePeek(false);
 }
 
 function closeSchedule() {
   if (el.scheduleOverlay) el.scheduleOverlay.hidden = true;
+  setSchedulePeek(false);
+  clearLocateFlash();
+}
+
+/** Full-screen table <-> docked beside the plan. The only reason the panel
+ *  has two sizes: a schedule is read full-width, but a located element is
+ *  looked at on the plan. */
+function setSchedulePeek(on) {
+  schedulePeeking = Boolean(on);
+  el.scheduleOverlay?.classList.toggle("peek", schedulePeeking);
+  if (el.schedulePeek) el.schedulePeek.textContent = schedulePeeking ? "Full table" : "Peek plan";
 }
 
 function runBoq() {
@@ -8682,8 +10108,10 @@ function runBoq() {
   if (!out) return;
   const rows = boqRows(out, rateBook);
   const unpriced = rows.filter((r) => !r.priced).length;
+  const derived = rows.filter((r) => r.derived).length;
   openSchedule("BOQ — bill of quantities", rows, { priced: true });
   const warnings = [
+    derived ? `${derived} fitting ${derived === 1 ? "line is" : "lines are"} counted from the route's bends. The template names no fitting type for ${derived === 1 ? "it" : "them"}, so price by the line's code.` : null,
     !rateBook ? 'No rate book loaded — every line prices at "—".' : null,
     rateBook && unpriced ? `${unpriced} of ${rows.length} lines have no rate on file and price at "—".` : null,
   ].filter(Boolean);
@@ -8709,7 +10137,7 @@ function runBom() {
 /** Centre of a doc entity in plan coordinates, or null when its kind has no
  *  plan geometry of its own to pan to (should not happen for a `kind` that
  *  passed the `locatable` check, but a stale reference is still possible). */
-function elementCenter(ref, obj) {
+function elementCenter(ref, obj, walls = null) {
   switch (ref.kind) {
     case "room": return roomCentroid(obj);
     case "slab": case "roof": {
@@ -8723,67 +10151,247 @@ function elementCenter(ref, obj) {
     case "item": case "stair":
       return Number.isFinite(obj.x) && Number.isFinite(obj.y) ? { x: obj.x, y: obj.y } : null;
     case "opening": {
-      const walls = deriveWalls(store.doc, pack);
-      const wall = wallForOpening(store.doc, pack, walls, obj);
+      const wall = wallForOpening(store.doc, pack, walls || deriveWalls(store.doc, pack), obj);
       if (!wall) return null;
       const placed = openingOnWall(store.doc, pack, obj, wall);
       return { x: (placed.a.x + placed.b.x) / 2, y: (placed.a.y + placed.b.y) / 2 };
     }
+    case "serviceNode": case "serviceEdge":
+      return serviceElementCentre(store.doc, ref);
     default: return null;
   }
 }
 
-/** Output > Schedules > (expand a line) > Show on plan. Switches to the
- *  element's level if needed, selects it, pans the canvas to it, and closes
- *  the schedule overlay so the result is what the click was for. */
-function locateScheduleElement(ref) {
-  const obj = objectByRef(store.doc, ref);
-  if (!obj) {
-    setStatusMessage("That element is no longer in the drawing.", "warn");
+/** Plan extent of a doc entity as a point list, so framing a selection fits
+ *  the whole of a long wall rather than centring on its midpoint. Falls back
+ *  to the centre for kinds with no cheap outline of their own. */
+function elementExtent(ref, obj, walls = null) {
+  switch (ref.kind) {
+    case "room": case "slab": case "roof": {
+      const poly = shapePolygon(obj.shape);
+      if (poly.length >= 3) return poly.map(([x, y]) => ({ x, y }));
+      break;
+    }
+    case "segment": case "beam": case "line":
+      return [{ x: obj.x1, y: obj.y1 }, { x: obj.x2, y: obj.y2 }];
+    default: break;
+  }
+  const center = elementCenter(ref, obj, walls);
+  return center ? [center] : [];
+}
+
+/** The storey a located element lives on, by the same rules the plan draws
+ *  it with: an opening belongs to its host wall, a service run to the level
+ *  it leaves from. */
+function elementLevel(ref, obj, walls = null) {
+  if (ref.kind === "opening") {
+    return wallForOpening(store.doc, pack, walls || deriveWalls(store.doc, pack), obj)?.level || null;
+  }
+  if (ref.kind === "serviceEdge") return edgeHomeLevel(store.doc, pack, obj);
+  return effectiveLevel(obj, pack) || null;
+}
+
+/** Put a set of plan points on screen, padded. One point keeps the old
+ *  close-in behaviour (the element is already the right size); several get
+ *  fitted, which is what makes "Show all" readable for a whole wall type. */
+function framePlanPoints(points) {
+  if (!points.length || !el.canvas) return;
+  const rect = el.canvas.getBoundingClientRect();
+  if (rect.width < 8 || rect.height < 8) return;
+  // While peeking, the docked panel sits over the right of the canvas.
+  // Framing into the full width would put the located element underneath it.
+  const panel = schedulePeeking ? el.scheduleOverlay?.querySelector(".schedule-panel") : null;
+  let viewW = rect.width;
+  if (panel) {
+    const p = panel.getBoundingClientRect();
+    if (p.left < rect.right && p.right > rect.left) {
+      viewW = Math.max(160, p.left - rect.left - 12);
+    }
+  }
+  const xs = points.map((p) => p.x);
+  const ys = points.map((p) => p.y);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  if (points.length === 1 || (maxX - minX < 0.5 && maxY - minY < 0.5)) {
+    cam.scale = Math.max(cam.scale, 90);
+  } else {
+    const pad = 1.4;
+    const w = maxX - minX + pad * 2;
+    const h = maxY - minY + pad * 2;
+    cam.scale = Math.min(90, Math.max(MIN_VIEW_SCALE, Math.min(viewW / w, rect.height / h)));
+  }
+  cam.ox = viewW / 2 - ((minX + maxX) / 2) * cam.scale;
+  cam.oy = rect.height / 2 - ((minY + maxY) / 2) * cam.scale;
+}
+
+// A located element is selected, but on a busy plan a selection outline is
+// not enough to answer "which one did I just click". The flash is a short
+// pulsing ring over each located element, drawn on top of everything and
+// gone within the second - a pointer, not a state.
+const LOCATE_FLASH_MS = 1100;
+let locateFlash = null;
+let locateFlashFrame = 0;
+
+function clearLocateFlash() {
+  if (locateFlashFrame) cancelAnimationFrame(locateFlashFrame);
+  locateFlashFrame = 0;
+  locateFlash = null;
+}
+
+function startLocateFlash(points, levelId) {
+  clearLocateFlash();
+  if (!points.length) return;
+  locateFlash = { points, levelId, start: performance.now() };
+  const step = () => {
+    if (!locateFlash) return;
+    if (performance.now() - locateFlash.start >= LOCATE_FLASH_MS) {
+      locateFlash = null;
+      locateFlashFrame = 0;
+      render();
+      return;
+    }
+    locateFlashFrame = requestAnimationFrame(step);
+    render();
+  };
+  locateFlashFrame = requestAnimationFrame(step);
+}
+
+function drawLocateFlash() {
+  if (!locateFlash || locateFlash.levelId !== activeLevel) return;
+  const t = (performance.now() - locateFlash.start) / LOCATE_FLASH_MS;
+  if (t >= 1) return;
+  // Two pulses over the life of the flash, fading out as it goes.
+  const pulse = Math.abs(Math.sin(t * Math.PI * 2));
+  ctx.save();
+  ctx.strokeStyle = COLOUR.hover;
+  ctx.globalAlpha = (1 - t) * (0.35 + 0.65 * pulse);
+  ctx.lineWidth = 2.4;
+  ctx.setLineDash([]);
+  for (const p of locateFlash.points) {
+    const [sx, sy] = worldToScreen(p.x, p.y);
+    ctx.beginPath();
+    ctx.arc(sx, sy, 10 + 16 * pulse, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/**
+ * Output > Schedules > Show on plan / Show all. Selects every ref it can
+ * still find, switches to the storey most of them are on, frames them, and
+ * flashes them. The schedule stays open in peek mode: the point of clicking
+ * a schedule line is to compare the line with the plan, and closing the
+ * table to show the plan loses half of that.
+ *
+ * Refs on other storeys stay selected (selection is not level-scoped) but
+ * are not drawn, so the count that is actually on screen is reported rather
+ * than left for the user to notice.
+ */
+function locateScheduleRefs(refs, label) {
+  const found = refs
+    .map((ref) => ({ ref, obj: objectByRef(store.doc, ref) }))
+    .filter((entry) => entry.obj);
+  if (!found.length) {
+    setStatusMessage(
+      refs.length === 1
+        ? "That element is no longer in the drawing."
+        : "None of those elements are in the drawing any more.",
+      "warn",
+    );
     return;
   }
-  const objLevel = ref.kind === "opening"
-    ? wallForOpening(store.doc, pack, deriveWalls(store.doc, pack), obj)?.level
-    : effectiveLevel(obj, pack);
-  if (objLevel && objLevel !== activeLevel) {
-    activeLevel = objLevel;
+  // Openings have no level or position of their own - both come from the
+  // host wall - so derive the wall set once for the whole batch rather than
+  // once per opening.
+  const walls = found.some((entry) => entry.ref.kind === "opening")
+    ? deriveWalls(store.doc, pack)
+    : null;
+
+  // Whichever storey holds most of them: for a type spanning a stack, that
+  // is the one worth looking at first.
+  const byLevel = new Map();
+  for (const entry of found) {
+    entry.level = elementLevel(entry.ref, entry.obj, walls);
+    if (!entry.level) continue;
+    byLevel.set(entry.level, (byLevel.get(entry.level) || 0) + 1);
+  }
+  let target = activeLevel;
+  if (!byLevel.has(activeLevel) && byLevel.size) {
+    target = [...byLevel.entries()].sort((a, b) => b[1] - a[1])[0][0];
+  }
+  if (target && target !== activeLevel) {
+    activeLevel = target;
     drawLevelSwitcher();
   }
-  const center = elementCenter(ref, obj);
-  if (center && el.canvas) {
-    const rect = el.canvas.getBoundingClientRect();
-    cam.scale = Math.max(cam.scale, 90);
-    cam.ox = rect.width / 2 - center.x * cam.scale;
-    cam.oy = rect.height / 2 - center.y * cam.scale;
-  }
-  store.setSelection([ref], ref);
-  closeSchedule();
+
+  // Peek first: it decides how much of the canvas the panel leaves, which
+  // is what the framing below has to centre into.
+  setSchedulePeek(true);
+  const onLevel = found.filter((entry) => !entry.level || entry.level === activeLevel);
+  const extent = onLevel.flatMap((entry) => elementExtent(entry.ref, entry.obj, walls));
+  framePlanPoints(extent);
+  const centres = onLevel
+    .map((entry) => elementCenter(entry.ref, entry.obj, walls))
+    .filter(Boolean);
+
+  const selection = found.map((entry) => entry.ref);
+  store.setSelection(selection, selection[0]);
+  startLocateFlash(centres, activeLevel);
+
+  const elsewhere = found.length - onLevel.length;
+  const what = label ? ` of ${label}` : "";
+  setStatusMessage(
+    found.length === 1
+      ? `Showing ${found[0].ref.kind} ${found[0].ref.id} on ${levelName(activeLevel)}.`
+      : `Selected ${found.length} element${found.length === 1 ? "" : "s"}${what}. ${onLevel.length} shown on ${levelName(activeLevel)}${elsewhere ? `, ${elsewhere} on other storeys` : ""}.`,
+    "ok",
+  );
   drawRibbon();
   render();
 }
 
+function toggleScheduleGroup(groupRow) {
+  const row = scheduleRowsCache[Number(groupRow.dataset.group)];
+  const elementsRow = el.scheduleBody.querySelector(
+    `.schedule-elements-row[data-group="${groupRow.dataset.group}"]`,
+  );
+  if (!elementsRow) return;
+  elementsRow.hidden = !elementsRow.hidden;
+  groupRow.classList.toggle("open", !elementsRow.hidden);
+  if (!row) return;
+  const key = scheduleGroupKey(row);
+  if (elementsRow.hidden) scheduleOpenGroups.delete(key);
+  else scheduleOpenGroups.add(key);
+}
+
 function wireSchedule() {
   el.scheduleClose?.addEventListener("click", closeSchedule);
+  el.schedulePeek?.addEventListener("click", () => setSchedulePeek(!schedulePeeking));
   el.scheduleOverlay?.addEventListener("click", (event) => {
-    if (event.target === el.scheduleOverlay) closeSchedule();
+    // In peek mode the backdrop is not there to be dismissed - it is the plan.
+    if (event.target === el.scheduleOverlay && !schedulePeeking) closeSchedule();
   });
   el.scheduleBody?.addEventListener("click", (event) => {
+    const allBtn = event.target.closest(".schedule-locate-all");
+    if (allBtn) {
+      if (allBtn.disabled) return;
+      const row = scheduleRowsCache[Number(allBtn.dataset.group)];
+      const refs = scheduleGroupRefs(row);
+      if (refs.length) locateScheduleRefs(refs, row.model || row.category || null);
+      return;
+    }
     const locateBtn = event.target.closest(".schedule-locate");
     if (locateBtn) {
       if (locateBtn.disabled) return;
       const row = scheduleRowsCache[Number(locateBtn.dataset.group)];
       const element = row?.elements?.[Number(locateBtn.dataset.element)];
-      if (element?.kind) locateScheduleElement({ kind: element.kind, id: element.id });
+      if (element?.kind) locateScheduleRefs([{ kind: element.kind, id: element.id }], null);
       return;
     }
     const groupRow = event.target.closest(".schedule-group-row");
-    if (groupRow) {
-      const elementsRow = el.scheduleBody.querySelector(
-        `.schedule-elements-row[data-group="${groupRow.dataset.group}"]`,
-      );
-      if (elementsRow) elementsRow.hidden = !elementsRow.hidden;
-      groupRow.classList.toggle("open", elementsRow && !elementsRow.hidden);
-    }
+    if (groupRow) toggleScheduleGroup(groupRow);
   });
 }
 
@@ -8867,108 +10475,4 @@ function runExportIfc() {
   showExportPanel("IFC export", text ? fileName : "not exported", report, `
     <p class="hint"><strong>This is not a .rvt.</strong> File → Open → Project will not load it. Use File → Open → IFC, then File → Save As a project.</p>
   `);
-}
-
-// --- demo doc ------------------------------------------------------------
-
-/**
- * The demo geometry as a document, built and returned rather than installed.
- *
- * It used to be written straight into `store.doc`, keeping the open job's
- * drawing id so it replaced that job's contents - which is the data loss §5 was
- * written about. Now runDemoHouse() hands this to createJob() and the demo lands
- * in a row of its own, with the id `emptyDoc()` minted for it.
- */
-function demoDoc() {
-  const wallSku = pack.system.defaultWallSku;
-  const floorSku = pack.system.defaultFloorSku;
-  const roofSku = pack.system.defaultRoofSku;
-  const level = pack.system.defaultLevel;
-  const upperLevel = lookUpLevelId(pack.levels, level);
-
-  const doc = {
-    ...emptyDoc(),
-    // Named, so the title block prints something real - and because the job's
-    // own name follows the document's, this names the row too.
-    name: "Demo house",
-    packId: pack.id,
-    rooms: [
-      {
-        id: nid("r"), name: "Bathroom", use: "bathroom", level, wallSku, floorSku,
-        status: "existing", shape: rectShape(0, 0, 4, 3),
-      },
-      {
-        // L-shaped bedroom: a rectangle union, the shape v1 could never draw.
-        id: nid("r"), name: "Bedroom", use: "bedroom", level, wallSku, floorSku,
-        status: "planned",
-        shape: { kind: "rects", rects: [{ x: 4, y: 0, w: 4, h: 3 }, { x: 4, y: 3, w: 3, h: 3 }] },
-      },
-    ],
-    segments: [
-      { id: nid("s"), sku: skuByCategory("foundation"), level, x1: 0, y1: -0.4, x2: 7, y2: -0.4, status: "existing" },
-    ],
-    openings: [
-      { id: nid("o"), sku: skuByCategory("door"), roomId: null, wallId: null, t: 0.5, swing: 1, status: "planned" },
-      { id: nid("o"), sku: skuByCategory("window"), roomId: null, wallId: null, t: 0.5, swing: 1, status: "planned" },
-    ],
-    slabs: [
-      { id: nid("sl"), sku: floorSku, level, status: "planned", shape: rectShape(7.2, 0, 2, 2.4) },
-    ],
-    roofs: [
-      { id: nid("rf"), sku: roofSku, level, form: "gable", pitch: 30, ridge: "long", status: "planned", shape: rectShape(-0.4, -0.4, 8, 6.8) },
-    ],
-    items: [
-      { id: nid("i"), sku: skuByCategory("sanitary"), level, x: 0.4, y: 2.35, rotation: 0, status: "existing" },
-      { id: nid("i"), sku: skuByCategory("electrical"), level, x: 5.5, y: 0.4, rotation: 0, status: "planned" },
-    ],
-    beams: [],
-    groups: [],
-  };
-
-  // A second-storey room over the same footprint - the everyday case the
-  // level switcher exists for. Without it, ground- and first-floor walls
-  // sharing a footprint would merge into one "shared" wall spanning two
-  // storeys instead of drawing as two separate levels.
-  if (upperLevel) {
-    doc.rooms.push({
-      id: nid("r"), name: "Landing", use: "other", level: upperLevel, wallSku, floorSku,
-      status: "planned", shape: rectShape(0, 0, 4, 3),
-    });
-  }
-
-  // Anchor the door on the shared wall between the two rooms, and the window
-  // on the bedroom's south external wall - resolved live from the geometry
-  // rather than hardcoded, so it survives the L-shape's exact edge indices.
-  const walls = deriveWalls(doc, pack);
-  const shared = walls.find((w) => w.shared);
-  const bedroom = doc.rooms[1];
-  if (shared) {
-    doc.openings[0].wallId = shared.id;
-    doc.openings[0].t = wallT(shared, shared.x1 + (shared.x2 - shared.x1) * 0.5, shared.y1 + (shared.y2 - shared.y1) * 0.5);
-  }
-  const southEdgeIndex = southMostEdgeIndex(bedroom);
-  doc.openings[1].roomId = bedroom.id;
-  doc.openings[1].edgeIndex = southEdgeIndex;
-  doc.openings[1].t = 0.5;
-
-  return doc;
-}
-
-function southMostEdgeIndex(room) {
-  const poly = roomPolygon(room);
-  let best = 0;
-  let bestY = Infinity;
-  poly.forEach(([, y1], i) => {
-    const [, y2] = poly[(i + 1) % poly.length];
-    const midY = (y1 + y2) / 2;
-    if (Math.abs(y1 - y2) < 1e-6 && midY < bestY) {
-      bestY = midY;
-      best = i;
-    }
-  });
-  return best;
-}
-
-function skuByCategory(cat) {
-  return pack.skus.find((s) => s.category === cat)?.id || pack.skus[0].id;
 }

@@ -10,12 +10,12 @@
 // ribbon-item that does not already have one, and gives each group an
 // overflow button (a dropdown trigger) for when the group has to collapse.
 //
-// fitRibbon() runs after decoration, and again on resize: it walks the
-// groups right-to-left, shrinking each from large -> stack -> icon ->
-// collapsed until the row fits on one line, or there is nothing left to
-// shrink. It always resets every group to "large" first, so it is safe to
-// call repeatedly (tab switches, a sheet loading and changing which items
-// show, window resize) without compounding a previous shrink.
+// fitRibbon() runs after decoration, and again on resize: it steps groups
+// down their ladders (comfort first, then size, then captions, then a
+// dropdown) in priority order until the row fits on one line, then hands
+// space back so nothing is left empty. It always starts from the best look,
+// so it is safe to call repeatedly (tab switches, a sheet loading and
+// changing which items show, window resize) without compounding a shrink.
 
 const GLYPHS = {
   generic: '<rect x="5" y="5" width="14" height="14" rx="2"/>',
@@ -46,6 +46,13 @@ const GLYPHS = {
   plumbing: '<path d="M8 4v6a4 4 0 008 0V4M12 14v6"/>',
   waterheater: '<rect x="7" y="4" width="10" height="16" rx="3"/><path d="M12 9v4"/>',
   drainage: '<path d="M4 6h16M6 6v6a6 6 0 0012 0V6"/>',
+  "service-place": '<circle cx="12" cy="12" r="5"/><path d="M12 3v4M12 17v4M3 12h4M17 12h4"/>',
+  "service-route": '<path d="M4 18h8V8h8"/><circle cx="4" cy="18" r="1.6"/><circle cx="20" cy="8" r="1.6"/>',
+  "service-node": '<path d="M3 17l7-6 11 3"/><circle cx="3" cy="17" r="1.6"/><circle cx="21" cy="14" r="1.6"/><circle cx="10" cy="11" r="2.4"/>',
+  "service-rise": '<path d="M12 20V6M7 11l5-5 5 5"/><path d="M5 20h14"/>',
+  "service-connect": '<circle cx="7" cy="12" r="3"/><circle cx="17" cy="12" r="3"/><path d="M10 12h4"/>',
+  "service-type": '<path d="M4 8h16M4 16h16"/><circle cx="12" cy="12" r="3"/>',
+  "service-slope": '<path d="M4 8l16 8"/><path d="M4 8v8h16"/>',
   furniture: '<path d="M5 11h14v8H5zM5 11V8h14v3M9 19v2M15 19v2"/>',
   casework: '<rect x="4" y="5" width="16" height="15"/><path d="M12 5v15M4 12h16"/>',
   rooms: '<rect x="4" y="5" width="16" height="14"/><path d="M4 10h16"/>',
@@ -123,7 +130,6 @@ export function closeOverflowMenus(except) {
 export function decorateRibbon(functionsEl) {
   if (!functionsEl) return;
   for (const group of functionsEl.querySelectorAll(":scope > .ribbon-group")) {
-    group.dataset.scale = "large";
     for (const btn of group.querySelectorAll(".ribbon-item")) {
       if (btn.querySelector(".glyph")) continue;
       const id = btn.dataset.function || "generic";
@@ -148,6 +154,132 @@ export function decorateRibbon(functionsEl) {
   }
 }
 
+// --- Fitting -----------------------------------------------------------
+//
+// Every group has a "kind" (set by renderRibbon from what is in it) and a
+// ladder of steps for that kind. Step 0 is the best look; each step gives up
+// a little more. Comfort (row height, padding, column width) goes before
+// button size, captions go before the buttons, and a dropdown is the last
+// resort. CSS reads the attributes below, so this module owns the ladder and
+// v2.css owns what each attribute looks like.
+//
+//   data-big       "1" = large icon-over-caption buttons (kind "large")
+//   data-comfort   "comfy" | "narrow" | "tight"   (small buttons)
+//   data-anchors   "side" | "stack"               (kind "mixed")
+//   data-anchor-comfort  "comfy" | "tight"        (kind "mixed")
+//   data-icons     "" | "rest" | "all"            (captions hidden)
+//   data-scale     "collapsed"                    (group folds into a dropdown)
+
+export const LADDERS = {
+  // 1-2 commands: large buttons, then stacked small ones, then icons.
+  large: [
+    { big: "1", comfort: "comfy" },
+    { big: "1", comfort: "tight" },
+    { big: "0", comfort: "tight" },
+    { big: "0", comfort: "tight", icons: "all" },
+  ],
+  // 3+ commands: always a three-row grid.
+  stack: [
+    { comfort: "comfy" },
+    { comfort: "narrow" },
+    { comfort: "tight" },
+    { comfort: "tight", icons: "all" },
+    { collapsed: true },
+  ],
+  // Anchor buttons (e.g. PDF / image, Satellite) plus smaller ones. The
+  // anchors sit side by side only when there is room, then stack.
+  mixed: [
+    { anchors: "side", anchorComfort: "comfy", comfort: "comfy" },
+    { anchors: "stack", anchorComfort: "comfy", comfort: "comfy" },
+    { anchors: "stack", anchorComfort: "comfy", comfort: "narrow" },
+    { anchors: "stack", anchorComfort: "comfy", comfort: "tight" },
+    { anchors: "stack", anchorComfort: "comfy", comfort: "tight", icons: "rest" },
+    { anchors: "stack", anchorComfort: "tight", comfort: "tight", icons: "rest" },
+    { anchors: "stack", anchorComfort: "tight", comfort: "tight", icons: "all" },
+    { collapsed: true },
+  ],
+};
+
+const ATTRS = ["big", "comfort", "anchors", "anchorComfort", "icons"];
+
+/** Lowest key shrinks first. Mixed groups give up side-by-side anchors and
+ * their small buttons early, and their anchors' comfort late. */
+export function shrinkKey(kind, prio, step) {
+  if (kind === "mixed") return step < 5 ? step - 3 : step - 2;
+  return step - prio;
+}
+
+export function maxStep(kind) {
+  return (LADDERS[kind] || LADDERS.stack).length - 1;
+}
+
+/**
+ * Decide each group's step. Pure: `groups` is [{ kind, prio }] and `fits(steps)`
+ * answers whether the row fits at those steps, so this can be tested without
+ * a browser.
+ *
+ * 1. Shrink one step at a time, always the group with the lowest shrinkKey
+ *    (ties go to the rightmost), until the row fits.
+ * 2. Grow back: a step is coarse and can free more room than it needed, so
+ *    hand steps back, most recently favoured group first, keeping each only
+ *    if the row still fits. That removes dead space on the right.
+ */
+export function planSteps(groups, fits) {
+  const steps = groups.map(() => 0);
+  let guard = 400;
+  while (!fits(steps) && guard-- > 0) {
+    let pick = -1;
+    let pickKey = Infinity;
+    groups.forEach((g, i) => {
+      if (steps[i] >= maxStep(g.kind)) return;
+      const key = shrinkKey(g.kind, g.prio, steps[i]);
+      if (key <= pickKey) {
+        pickKey = key;
+        pick = i;
+      }
+    });
+    if (pick < 0) return steps; // nothing left to shrink
+    steps[pick] += 1;
+  }
+  if (!fits(steps)) return steps;
+
+  const blocked = new Set();
+  for (let g2 = 400; g2-- > 0;) {
+    let pick = -1;
+    let pickKey = -Infinity;
+    groups.forEach((g, i) => {
+      if (steps[i] === 0 || blocked.has(i)) return;
+      const key = shrinkKey(g.kind, g.prio, steps[i] - 1);
+      if (key > pickKey) {
+        pickKey = key;
+        pick = i;
+      }
+    });
+    if (pick < 0) break;
+    steps[pick] -= 1;
+    if (fits(steps)) blocked.clear();
+    else {
+      steps[pick] += 1;
+      blocked.add(pick);
+    }
+  }
+  return steps;
+}
+
+function applyStep(group, step) {
+  const kind = group.dataset.kind || "stack";
+  const ladder = LADDERS[kind] || LADDERS.stack;
+  const s = ladder[Math.min(step, ladder.length - 1)];
+  for (const a of ATTRS) delete group.dataset[a];
+  delete group.dataset.scale;
+  group.dataset.step = String(step);
+  if (s.collapsed) {
+    group.dataset.scale = "collapsed";
+    return;
+  }
+  for (const a of ATTRS) if (s[a]) group.dataset[a] = s[a];
+}
+
 function overflowing(el) {
   const groups = [...el.querySelectorAll(":scope > .ribbon-group")];
   if (!groups.length) return false;
@@ -156,42 +288,23 @@ function overflowing(el) {
   return lastBox.right > parentBox.right + 2;
 }
 
-function compactRight(groups, from, to) {
-  for (let i = groups.length - 1; i >= 0; i -= 1) {
-    if (groups[i].dataset.scale === from) {
-      groups[i].dataset.scale = to;
-      return true;
-    }
-  }
-  return false;
-}
-
-/** Fold an icon-scale group into its dropdown, but only if that group is
- * wide enough (4+ items) for the fold to actually save row width. */
-function collapseWideIconGroup(groups) {
-  for (let i = groups.length - 1; i >= 1; i -= 1) {
-    const g = groups[i];
-    if (g.dataset.scale !== "icon") continue;
-    if (g.querySelectorAll(".ribbon-item").length < 4) continue;
-    g.dataset.scale = "collapsed";
-    return true;
-  }
-  return false;
-}
-
 /**
- * Shrink groups right-to-left until the row fits on one line: large -> stack
- * (three rows, smaller glyph, caption still visible) -> icon (caption
- * hidden) -> collapsed (folds into a dropdown). Call after every render and
- * on window resize.
+ * Fit the active tab's groups on one line, using `planSteps`. Call after every
+ * render and on window resize. It always starts from step 0, so repeated
+ * calls (tab switches, a sheet loading, resizes) never compound.
  */
 export function fitRibbon(el) {
   if (!el || el.hidden || !el.offsetParent) return;
   closeOverflowMenus();
   const groups = [...el.querySelectorAll(":scope > .ribbon-group")];
   if (!groups.length) return;
-  for (const g of groups) g.dataset.scale = "large";
-  while (overflowing(el) && compactRight(groups, "large", "stack")) { /* shrink rightmost first */ }
-  while (overflowing(el) && compactRight(groups, "stack", "icon")) { /* then icons only */ }
-  while (overflowing(el) && collapseWideIconGroup(groups)) { /* dropdown only if it saves width */ }
+  const plan = groups.map((g) => ({ kind: g.dataset.kind || "stack", prio: Number(g.dataset.prio) || 0 }));
+  const fits = (steps) => {
+    steps.forEach((s, i) => applyStep(groups[i], s));
+    return !overflowing(el);
+  };
+  const steps = planSteps(plan, fits);
+  // The last probe may not be the chosen plan, so apply it explicitly.
+  steps.forEach((s, i) => applyStep(groups[i], s));
 }
+

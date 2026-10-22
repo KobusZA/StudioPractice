@@ -89,6 +89,16 @@ export function createApi(pool, options = {}, env = process.env) {
     ["PUT", "/api/fee-templates/:code", handlePutFeeTemplate],
     ["POST", "/api/fee-templates/:code/reset", handleResetFeeTemplate],
 
+    // What a BOQ prices a drawing against. Read by the planner when a job is
+    // opened, written only by an owner (the store refuses anyone else).
+    ["GET", "/api/rate-books", handleListRateBooks],
+    ["POST", "/api/rate-books", handleCreateRateBook],
+    ["GET", "/api/rate-books/:id", handleGetRateBook],
+    ["PUT", "/api/rate-books/:id", handlePutRateBook],
+    ["POST", "/api/rate-books/:id/duplicate", handleDuplicateRateBook],
+    ["POST", "/api/rate-books/:id/default", handleSetDefaultRateBook],
+    ["DELETE", "/api/rate-books/:id", handleDeleteRateBook],
+
     ["GET", "/api/org/settings", handleGetOrgSettings],
     ["PUT", "/api/org/settings", handlePutOrgSettings],
 
@@ -578,6 +588,68 @@ async function handleResetFeeTemplate({ req, res, pool, params }) {
   ));
   if (!template) throw new HttpError(404, "No such project type");
   sendJson(res, 200, { template });
+}
+
+// --- the rate book -----------------------------------------------------------
+
+async function handleListRateBooks({ req, res, pool }) {
+  const store = await requireStore(pool, req);
+  sendJson(res, 200, { rateBooks: await store.listRateBooks() });
+}
+
+async function handleGetRateBook({ req, res, pool, params }) {
+  const store = await requireStore(pool, req);
+  const rateBook = await store.getRateBook(params.id);
+  if (!rateBook) throw new HttpError(404, "No such rate book");
+  sendJson(res, 200, { rateBook });
+}
+
+async function handleCreateRateBook({ req, res, pool }) {
+  const session = await requireSession(pool, req);
+  const body = (await readJsonBody(req)) || {};
+  const rateBook = await withTransaction(pool, (client) => (
+    openStore(client, session).createRateBook(body)
+  ));
+  sendJson(res, 201, { rateBook });
+}
+
+/** Owner-only (the store refuses anyone else): replaces a book's lines. */
+async function handlePutRateBook({ req, res, pool, params }) {
+  const session = await requireSession(pool, req);
+  const body = (await readJsonBody(req)) || {};
+  const rateBook = await withTransaction(pool, (client) => (
+    openStore(client, session).replaceRateBook(params.id, body)
+  ));
+  if (!rateBook) throw new HttpError(404, "No such rate book");
+  sendJson(res, 200, { rateBook });
+}
+
+async function handleDuplicateRateBook({ req, res, pool, params }) {
+  const session = await requireSession(pool, req);
+  const body = (await readJsonBody(req)) || {};
+  const rateBook = await withTransaction(pool, (client) => (
+    openStore(client, session).duplicateRateBook(params.id, body)
+  ));
+  if (!rateBook) throw new HttpError(404, "No such rate book");
+  sendJson(res, 201, { rateBook });
+}
+
+async function handleSetDefaultRateBook({ req, res, pool, params }) {
+  const session = await requireSession(pool, req);
+  const rateBooks = await withTransaction(pool, (client) => (
+    openStore(client, session).setDefaultRateBook(params.id)
+  ));
+  if (!rateBooks) throw new HttpError(404, "No such rate book");
+  sendJson(res, 200, { rateBooks });
+}
+
+async function handleDeleteRateBook({ req, res, pool, params }) {
+  const session = await requireSession(pool, req);
+  const deleted = await withTransaction(pool, (client) => (
+    openStore(client, session).deleteRateBook(params.id)
+  ));
+  if (!deleted) throw new HttpError(404, "No such rate book");
+  sendJson(res, 200, deleted);
 }
 
 // --- the firm's letterhead ---------------------------------------------------

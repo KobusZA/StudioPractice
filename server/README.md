@@ -17,7 +17,7 @@ would put a half-configured server in front of real work. When a host is named,
 ```sh
 cd server
 docker compose up -d --build
-# http://localhost:8080/  -> 302 to /v2/index.html
+# http://localhost:8080/  -> 302 to /practice/index.html
 ```
 
 `app` builds from the repository root (`docker build -f server/Dockerfile ..`),
@@ -98,11 +98,11 @@ them as already allocated.
 
 After `docker compose up -d --build`, or after any deploy:
 
-1. `curl -i http://localhost:8080/` → `302` to `/v2/index.html`. The index is a
-   redirect and not bytes served at `/`, because the planner loads its modules,
-   its stylesheet and its type pack by relative URL: served at `/`, its own
-   `./ui.js` and `../samples/tsp-pack.json` resolve one directory too high and
-   404, which looks like a blank app with no error.
+1. `curl -i http://localhost:8080/` → `302` to `/practice/index.html`. The index
+   is a redirect and not bytes served at `/`, because both apps load their
+   modules and stylesheets by relative URL: served at `/`, the page's own
+   `./app.js` resolves one directory too high and 404s, which looks like a
+   blank app with no error.
 2. `http://localhost:8080/v2/index.html` in a browser → the pack loads and the
    status line reads "*N* SKUs loaded".
 3. `curl http://localhost:8080/api/auth/session` → `{"signedIn":false}`.

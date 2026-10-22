@@ -5,6 +5,7 @@ import {
   lookDownLevelId,
   lookUpLevelId,
   ghostContext,
+  isolateShows,
   MAX_FLOORS_TO_ADD,
   floorsAvailableToAdd,
   canAddFloor,
@@ -58,6 +59,37 @@ test("unordered pack levels still sort by elevation", () => {
 test("an unknown or empty stack has nothing to ghost", () => {
   assert.equal(lookDownLevelId(levels, "missing"), null);
   assert.equal(lookDownLevelId([], "01 GFL"), null);
+});
+
+test("show-only-this-level drops the neighbour and the tracing sheet on every cut", () => {
+  for (const kind of ["floor", "foundation", "ceiling", "roof"]) {
+    assert.equal(isolateShows(kind, "ghost"), false);
+    assert.equal(isolateShows(kind, "underlay"), false);
+    assert.equal(isolateShows(kind, "site"), true);
+  }
+});
+
+test("a floor plan keeps the whole storey when showing only this level", () => {
+  for (const role of ["floor", "ceiling", "roof", "room", "wall", "beam", "line", "opening", "item"]) {
+    assert.equal(isolateShows("floor", role), true);
+    assert.equal(isolateShows("foundation", role), true);
+  }
+});
+
+test("a ceiling plan keeps the ceiling and its walls, not the floor or the roof", () => {
+  for (const role of ["ceiling", "wall", "opening", "beam", "line"]) {
+    assert.equal(isolateShows("ceiling", role), true);
+  }
+  for (const role of ["floor", "roof", "room", "item"]) {
+    assert.equal(isolateShows("ceiling", role), false);
+  }
+});
+
+test("a roof plan keeps only the roof", () => {
+  assert.equal(isolateShows("roof", "roof"), true);
+  for (const role of ["floor", "ceiling", "room", "wall", "beam", "line", "opening", "item"]) {
+    assert.equal(isolateShows("roof", role), false);
+  }
 });
 
 test("this-level-only is a ribbon command, not a drawing tool", () => {

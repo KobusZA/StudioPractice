@@ -65,6 +65,19 @@ export const api = {
   putFeeTemplate: (code, body) => call("PUT", `/api/fee-templates/${encodeURIComponent(code)}`, body),
   resetFeeTemplate: (code) => call("POST", `/api/fee-templates/${encodeURIComponent(code)}/reset`, {}),
 
+  // What a BOQ prices a drawing against. Owner-only server-side; the nav item
+  // is hidden for anyone else, see app.js's `isOwner()`.
+  listRateBooks: () => call("GET", "/api/rate-books"),
+  rateBook: (id) => call("GET", `/api/rate-books/${encodeURIComponent(id)}`),
+  createRateBook: (body) => call("POST", "/api/rate-books", body),
+  // Replace-all: a price list is reissued, not patched line by line.
+  putRateBook: (id, body) => call("PUT", `/api/rate-books/${encodeURIComponent(id)}`, body),
+  duplicateRateBook: (id, body) => (
+    call("POST", `/api/rate-books/${encodeURIComponent(id)}/duplicate`, body)
+  ),
+  setDefaultRateBook: (id) => call("POST", `/api/rate-books/${encodeURIComponent(id)}/default`, {}),
+  deleteRateBook: (id) => call("DELETE", `/api/rate-books/${encodeURIComponent(id)}`),
+
   listRegister: () => call("GET", "/api/register"),
   getRegisterProject: (id) => call("GET", `/api/register/${encodeURIComponent(id)}`),
   createRegisterProject: (body) => call("POST", "/api/register", body),

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Getting started — StudioPractice</title>
+  <title>Getting started — Get to the drawing — StudioPractice</title>
   <link rel="icon" href="../logo.png" type="image/png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -63,84 +63,43 @@
       font-weight: 600;
     }
     .go:hover { background: var(--copper-dark); }
+    .next { margin-top: 36px; }
     footer { width: min(880px, calc(100% - 40px)); margin: 12px auto 64px; color: var(--muted); font-size: 15px; }
   </style>
 </head>
 <body>
   <header>
-    <p class="part">StudioPractice</p>
-    <h1>Getting started</h1>
-    <p class="lead">A first look, on your own firm. Draw one room, see what an hour costs against a fee, and add a person. About five minutes.</p>
-    <a class="go" href="../v2/index.html">Open the drawing app</a>
+    <p class="part">Getting started · Part 1 of 2</p>
+    <h1>Get to the drawing</h1>
+    <p class="lead">A drawing belongs to a job. The job only needs a code. Fees, time and people can wait. When the plan is open, go on to <a href="draw.html">Part 2, Draw</a>.</p>
+    <a class="go" href="../practice/index.html">Open StudioPractice</a>
   </header>
   <main>
-    <h2>Draw</h2>
-
     <section class="step">
       <h3>1. Create the firm</h3>
-      <p>On the sign-in screen, choose <b>Create an account</b>. Enter an email, a password of at least 10 characters, and a firm name. That creates the firm and signs you in. You are the owner.</p>
+      <p>On the sign-in screen, choose <b>Create a firm</b>. Enter an email, a password of at least 10 characters, and a firm name. That creates the firm and signs you in. You are the owner. The practice page is empty until the first job exists.</p>
       <figure class="card">
-        <img src="images/01-create-account.png" alt="Create an account form, with email, password, and firm name" />
+        <img src="images/01-create-firm.png" alt="Create a firm, with email, password, and firm name" />
       </figure>
     </section>
 
     <section class="step">
-      <h3>2. Start a drawing</h3>
-      <p>You land on <b>Your drawings</b>. Press <b>New drawing</b>. The plan opens empty, with the ribbon along the top and <b>Saved</b> in the status line.</p>
-      <figure class="card">
-        <img src="images/02-your-drawings.png" alt="Your drawings, with a New drawing button and no jobs yet" />
-      </figure>
+      <h3>2. Name a job</h3>
+      <p>Press <b>New job</b>. The first step asks for a project code. A description is optional. On the later steps, <b>Not classified yet</b> and <b>Not decided yet</b> are finished answers, and the client can be blank. Press <b>Create job</b>.</p>
       <figure>
-        <img src="images/03-empty-plan.png" alt="Empty plan. The ribbon has Walls, and the status line says Saved." />
+        <img src="images/02-new-job.jpg" alt="New job, first step. Project code G001 and description One room." />
       </figure>
     </section>
 
     <section class="step">
-      <h3>3. Draw one room</h3>
-      <p>On the Draw ribbon, pick <b>Walls</b>. Click one corner, then the next, and keep going until you click the first corner again. Press Escape when the room is closed. Wait until the status line says <b>Saved</b>, then reload the page. The room is still there.</p>
+      <h3>3. Start a drawing</h3>
+      <p>The job opens on its overview. In the header, press <b>Start a drawing</b>. The plan opens empty. The job code sits beside the name, <b>Saved</b> is next to it, and <b>Back to overview</b> returns you here. Switch the <b>Toolbar</b> to <b>Full</b> for the drawing steps.</p>
       <figure>
-        <img src="images/04-room.png" alt="A four-wall room on the plan, with Saved in the status line" />
+        <img src="images/03-start-drawing.jpg" alt="Job G001 One room, with Start a drawing in the header." />
       </figure>
     </section>
 
-    <h2>Cost</h2>
-    <p>Practice operations uses the same email and password. This is where a job gets a fee, and where time is priced.</p>
-    <a class="go" href="../practice/index.html">Open practice</a>
-
-    <section class="step">
-      <h3>4. Open a job that already has a fee</h3>
-      <p>Press <b>New job</b>. Give it a code, choose <b>Rezoning</b>, and choose <b>Fixed fee</b>. Rezoning copies a fee schedule of R 74 500. The overview shows that figure as Quoted, and Captured at R 0 until somebody logs time.</p>
-      <figure>
-        <img src="images/05-overview.png" alt="Job overview for a rezoning. Quoted is R 74 500 and captured is R 0." />
-      </figure>
-    </section>
-
-    <section class="step">
-      <h3>5. Log an hour</h3>
-      <p>Open the <b>Time</b> tab. Enter 60 minutes and a description. Leave pricing on the quarter-hour ladder. Before you save, the line under the form shows what the hour is worth: R 1 920, and the burn against the fee.</p>
-      <figure>
-        <img src="images/06-time.png" alt="Time form with 60 minutes. The preview reads R 1 920, burn 2.6 percent." />
-      </figure>
-    </section>
-
-    <section class="step">
-      <h3>6. See it against the fee</h3>
-      <p>Press <b>Log it</b>, then go back to <b>Overview</b>. Captured is now R 1 920, which is 2.6% of the fee. The warning says the hour has been captured and nothing has been certified yet.</p>
-      <figure>
-        <img src="images/07-burn.png" alt="Overview after the hour. Captured is R 1 920, 2.6 percent of the R 74 500 fee." />
-      </figure>
-    </section>
-
-    <h2>People</h2>
-
-    <section class="step">
-      <h3>7. Add someone</h3>
-      <p>Open <b>Team</b>, then <b>People</b>, then <b>Add team member</b>. Enter their email, a password of at least 10 characters, and a name. Leave the role as <b>Employee</b>. There is no email invite: you give them the password yourself.</p>
-      <p>An employee can open jobs and log time. Fees, billed amounts, and this Team page stay with the owner. The grid on the form shows that before you press <b>Add</b>.</p>
-      <figure>
-        <img src="images/08-team.png" alt="Add team member form. Employee can log time and see hours. Owner can also see fees and manage the team." />
-      </figure>
-    </section>
+    <p class="next"><a class="go" href="draw.html">Part 2 — Draw</a></p>
   </main>
   <footer>When something on these screens does not match what you see, that is the thing to report.</footer>
 </body>

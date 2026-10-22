@@ -67,6 +67,9 @@ function groupByModel(instances) {
         type: row.type || "",
         unit: row.unit || "ea",
         rateRef: row.rateRef ?? null,
+        // A line compile.js derived (a bend counted from the route, with no
+        // fitting type in the template) rather than one the drawing placed.
+        derived: Boolean(row.derived),
         count: 0,
         length: 0,
         area: 0,
@@ -79,6 +82,9 @@ function groupByModel(instances) {
     group.length += row.length || 0;
     group.area += row.area || 0;
     group.volume += row.volume || 0;
+    // Material wastage on a measured length (compile.js: only where the SKU
+    // states a wasteFactor). Kept beside `length`, never inside it.
+    if (Number.isFinite(row.orderLength)) group.orderLength = (group.orderLength || 0) + row.orderLength;
     if (row.elementId) {
       group.elements.push({
         id: row.elementId,
@@ -89,6 +95,9 @@ function groupByModel(instances) {
         area: row.area || 0,
         volume: row.volume || 0,
         count: row.count || 0,
+        // Only where the row states them: a bend's deflection, a run's grade.
+        ...(Number.isFinite(row.angle) ? { angle: row.angle } : {}),
+        ...(row.gradient ? { gradient: row.gradient } : {}),
       });
     }
   }
@@ -105,6 +114,9 @@ export function bomRows(compiled) {
       ...group,
       description: `${group.family} ${group.type}`.trim(),
       qty: qtyForUnit(group, group.unit),
+      // What to order once the SKU's wastage is added to the measured qty.
+      // Present only when a SKU states a wasteFactor; qty stays measured.
+      ...(group.orderLength !== undefined && group.unit === "m" ? { orderQty: group.orderLength } : {}),
     }))
     .sort(sortByCategoryModel);
 }

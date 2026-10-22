@@ -252,7 +252,7 @@ function html(ctx) {
   const ready = Boolean(draft.phases) && !draft.loading;
   return `
     <div class="tpl">
-      <h1>Fee templates</h1>
+      <h1>Quote templates</h1>
       <p class="note-line">What a new job of each type is quoted from. A job copies its template
         when it is registered, so changing a template never changes a job that already exists.
         Leave a phase's fee blank and it is worth the sum of its tasks; type one and it is worth
@@ -360,7 +360,7 @@ export async function mountTemplateEditor(host, ctx) {
   if (!draft.code || !ctx.projectTypes.some((type) => type.code === draft.code)) {
     const first = ctx.projectTypes.find((type) => !type.isPlaceholder) ?? ctx.projectTypes[0];
     if (!first) {
-      host.innerHTML = `<div class="tpl"><h1>Fee templates</h1><p class="note-line">No project types.</p></div>`;
+      host.innerHTML = `<div class="tpl"><h1>Quote templates</h1><p class="note-line">No project types.</p></div>`;
       return;
     }
     host.innerHTML = html({ ...ctx });

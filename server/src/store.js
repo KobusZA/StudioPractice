@@ -14,7 +14,7 @@
 // auth.js. Soft delete is the only delete: `deleted_at is null` is part of
 // every predicate below, and no statement here is a DELETE.
 
-import { DEFAULT_PROJECT_TYPES, DEFAULT_RATE_BANDS } from "./defaults.js";
+import { DEFAULT_PROJECT_TYPES, DEFAULT_RATE_BANDS, DEFAULT_RATE_BOOK } from "./defaults.js";
 import { FEE_TEMPLATES, pctSplit, templateTotal } from "./fee-templates.js";
 import { certificateUnits, priceEntry, toCents } from "./pricing.js";
 import { sid } from "./ids.js";
@@ -307,7 +307,8 @@ export function openStore(queryable, { orgId, userId, role }) {
 
     async getProject(projectId) {
       const { rows } = await q(
-        `select id, name, code, opened_at, offline_pinned_at, updated_at, created_at, deleted_at
+        `select id, name, code, rate_book_id, opened_at, offline_pinned_at,
+                updated_at, created_at, deleted_at
            from project
           where id = $1 and org_id = $2 and deleted_at is null`,
         [projectId, orgId],
@@ -610,7 +611,30 @@ export function openStore(queryable, { orgId, userId, role }) {
           [sid("rb"), orgId, band.code, band.label, band.hourlyRate, userId],
         );
       }
+      await this.seedRateBook();
       await this.seedFeeTemplates();
+    },
+
+    /**
+     * The catalogue the drawing app used to fetch off disk, as the firm's own
+     * first rate book. Its lines go in only when the book itself was inserted:
+     * the book conflicts on its name, a line has nothing to conflict on, and
+     * re-running this against a firm that has since edited its prices must not
+     * put the demo numbers back underneath them.
+     */
+    async seedRateBook() {
+      const { rows } = await q(
+        `insert into rate_book (id, org_id, name, currency, symbol, note, is_default, created_by)
+              values ($1, $2, $3, $4, $5, $6, true, $7)
+           on conflict do nothing
+        returning id`,
+        [
+          sid("rbk"), orgId, DEFAULT_RATE_BOOK.name, DEFAULT_RATE_BOOK.currency,
+          DEFAULT_RATE_BOOK.symbol, DEFAULT_RATE_BOOK.note, userId,
+        ],
+      );
+      if (!rows[0]) return;
+      await insertRateLines(q, rows[0].id, normaliseRateLines(DEFAULT_RATE_BOOK), userId);
     },
 
     /**
@@ -835,6 +859,223 @@ export function openStore(queryable, { orgId, userId, role }) {
       }));
     },
 
+    // --- the rate book ------------------------------------------------------
+    //
+    // What a BOQ prices a drawing against. Cost-tier throughout: these are the
+    // numbers the firm builds at, so the read is gated the same way a tariff
+    // band's hourly rate is and the write needs an owner on top of a nav item
+    // that is hidden for anybody else.
+    //
+    // A book is edited as one document, like a fee template, because that is
+    // what it is: a price list is reissued, not patched line by line.
+
+    async listRateBooks() {
+      requireCapability("canViewCost", "only an owner can see the firm's rate book");
+      const { rows } = await q(
+        `select rb.id, rb.name, rb.currency, rb.symbol, rb.effective_from, rb.is_default,
+                rb.note, rb.updated_at,
+                count(rbl.id) filter (where rbl.deleted_at is null) as lines,
+                count(p.id) filter (where p.deleted_at is null)     as projects
+           from rate_book rb
+           left join rate_book_line rbl on rbl.rate_book_id = rb.id
+           left join project p on p.rate_book_id = rb.id
+          where rb.org_id = $1 and rb.deleted_at is null
+          group by rb.id
+          order by rb.is_default desc, rb.effective_from desc, rb.name`,
+        [orgId],
+      );
+      return rows.map((row) => ({
+        ...rateBookHeader(row),
+        lines: Number(row.lines),
+        // How many jobs are pinned to this book, which is what decides whether
+        // it can be deleted. Carried on the row so the page can say so before
+        // somebody presses the button.
+        projects: Number(row.projects),
+      }));
+    },
+
+    /**
+     * A book and its lines, in exactly the shape web/v2/schedule.js's
+     * findRate() consumes. Ordered by category then model so a fallback reads
+     * above the SKUs it stands in for.
+     */
+    async getRateBook(rateBookId) {
+      requireCapability("canViewCost", "only an owner can see the firm's rate book");
+      const { rows } = await q(
+        `select id, name, currency, symbol, effective_from, is_default, note, updated_at
+           from rate_book
+          where id = $1 and org_id = $2 and deleted_at is null`,
+        [rateBookId, orgId],
+      );
+      if (!rows[0]) return null;
+      const { rows: lines } = await q(
+        `select model, category, description, unit, rate
+           from rate_book_line
+          where rate_book_id = $1 and deleted_at is null
+          order by coalesce(category, ''), coalesce(model, ''), seq`,
+        [rateBookId],
+      );
+      return {
+        ...rateBookHeader(rows[0]),
+        rates: lines.map((line) => ({
+          model: line.model ?? null,
+          category: line.category ?? null,
+          description: line.description ?? null,
+          unit: line.unit,
+          rate: num(line.rate),
+        })),
+      };
+    },
+
+    async createRateBook(input) {
+      requireCapability("canViewCost", "only an owner can edit the firm's rate book");
+      const header = normaliseRateBookHeader(input);
+      const rateBookId = sid("rbk");
+      try {
+        await q(
+          `insert into rate_book (id, org_id, name, currency, symbol, effective_from, note, created_by)
+                values ($1, $2, $3, $4, $5, coalesce($6::date, current_date), $7, $8)`,
+          [
+            rateBookId, orgId, header.name, header.currency, header.symbol,
+            header.effectiveFrom, header.note, userId,
+          ],
+        );
+      } catch (error) {
+        if (error.code === "23505") throw new ValidationError(`a rate book called "${header.name}" already exists`);
+        throw error;
+      }
+      return this.getRateBook(rateBookId);
+    },
+
+    /**
+     * Whole-document replace, the way replaceFeeTemplate is. Every line is
+     * validated before any row is rewritten, so a bad unit refuses the write
+     * and leaves the book that was there priced exactly as it was.
+     *
+     * The old lines are soft-deleted rather than removed: a job quoted off
+     * this book last month was quoted off those numbers.
+     */
+    async replaceRateBook(rateBookId, input) {
+      requireCapability("canViewCost", "only an owner can edit the firm's rate book");
+      const { rows } = await q(
+        `select id from rate_book where id = $1 and org_id = $2 and deleted_at is null`,
+        [rateBookId, orgId],
+      );
+      if (!rows[0]) return null;
+      const header = normaliseRateBookHeader(input);
+      const lines = normaliseRateLines(input);
+
+      await q(
+        `update rate_book_line set deleted_at = now()
+          where rate_book_id = $1 and deleted_at is null`,
+        [rateBookId],
+      );
+      await insertRateLines(q, rateBookId, lines, userId);
+      try {
+        await q(
+          `update rate_book
+              set name = $2, currency = $3, symbol = $4,
+                  effective_from = coalesce($5::date, effective_from),
+                  note = $6, updated_at = now()
+            where id = $1`,
+          [rateBookId, header.name, header.currency, header.symbol, header.effectiveFrom, header.note],
+        );
+      } catch (error) {
+        if (error.code === "23505") throw new ValidationError(`a rate book called "${header.name}" already exists`);
+        throw error;
+      }
+      return this.getRateBook(rateBookId);
+    },
+
+    /**
+     * Next year's prices are this year's book copied and edited, never typed
+     * over the old one: the jobs that were quoted off it still point at it and
+     * have to stay readable.
+     */
+    async duplicateRateBook(rateBookId, { name, effectiveFrom } = {}) {
+      requireCapability("canViewCost", "only an owner can edit the firm's rate book");
+      const source = await this.getRateBook(rateBookId);
+      if (!source) return null;
+      const copy = await this.createRateBook({
+        name: trimmed(name) || `${source.name} (copy)`,
+        currency: source.currency,
+        symbol: source.symbol,
+        effectiveFrom,
+        note: source.note,
+      });
+      await insertRateLines(q, copy.id, normaliseRateLines(source), userId);
+      return this.getRateBook(copy.id);
+    },
+
+    /** Soft, and refused while a job is priced against it. */
+    async deleteRateBook(rateBookId) {
+      requireCapability("canViewCost", "only an owner can edit the firm's rate book");
+      const { rows } = await q(
+        `select rb.id,
+                count(p.id) filter (where p.deleted_at is null) as projects
+           from rate_book rb
+           left join project p on p.rate_book_id = rb.id
+          where rb.id = $1 and rb.org_id = $2 and rb.deleted_at is null
+          group by rb.id`,
+        [rateBookId, orgId],
+      );
+      if (!rows[0]) return null;
+      if (Number(rows[0].projects) > 0) {
+        throw new ValidationError(
+          `${Number(rows[0].projects)} job${Number(rows[0].projects) === 1 ? " is" : "s are"} priced against this book. Duplicate it and edit the copy instead.`,
+        );
+      }
+      await q(
+        `update rate_book_line set deleted_at = now()
+          where rate_book_id = $1 and deleted_at is null`,
+        [rateBookId],
+      );
+      await q(`update rate_book set deleted_at = now(), updated_at = now() where id = $1`, [rateBookId]);
+      return { id: rateBookId };
+    },
+
+    /** Exactly one per firm: the book a job registered today is priced against. */
+    async setDefaultRateBook(rateBookId) {
+      requireCapability("canViewCost", "only an owner can edit the firm's rate book");
+      const { rows } = await q(
+        `select id from rate_book where id = $1 and org_id = $2 and deleted_at is null`,
+        [rateBookId, orgId],
+      );
+      if (!rows[0]) return null;
+      await q(
+        `update rate_book set is_default = (id = $2), updated_at = now()
+          where org_id = $1 and deleted_at is null and is_default <> (id = $2)`,
+        [orgId, rateBookId],
+      );
+      return this.listRateBooks();
+    },
+
+    /** The book a job registered right now is priced against, or null. */
+    async defaultRateBookId() {
+      const { rows } = await q(
+        `select id from rate_book
+          where org_id = $1 and deleted_at is null and is_default
+          order by effective_from desc limit 1`,
+        [orgId],
+      );
+      return rows[0]?.id ?? null;
+    },
+
+    /**
+     * A rate book id arriving on a register form. The foreign key alone would
+     * accept another firm's book, so the scope is checked here the way every
+     * other read in this file is.
+     */
+    async checkedRateBookId(rateBookId) {
+      if (rateBookId === undefined || rateBookId === null) return rateBookId;
+      const { rows } = await q(
+        `select id from rate_book where id = $1 and org_id = $2 and deleted_at is null`,
+        [rateBookId, orgId],
+      );
+      if (!rows[0]) throw new ValidationError("no such rate book");
+      return rows[0].id;
+    },
+
     /**
      * The register. Carries each job's money with it, because a list of jobs
      * with no realisation on it is the spreadsheet's view - you have to open
@@ -914,22 +1155,27 @@ export function openStore(queryable, { orgId, userId, role }) {
       const clean = registerFields(fields);
       if (!clean.code && !allowMissingCode) throw new ValidationError("a project code is required");
       const projectId = fields.projectId || sid("prj");
+      // Which book prices this job, recorded now rather than read at BOQ time:
+      // the firm's default moves when prices escalate, and a job quoted in
+      // March was quoted off March's numbers.
+      const rateBookId = await this.checkedRateBookId(clean.rateBookId)
+        ?? await this.defaultRateBookId();
       try {
         const { rows } = await q(
           `insert into project (
              id, org_id, name, opened_at, created_by,
              code, client_name, client_email, client_cell, client_address,
              property_description, type_code, budget_estimate, billing_basis,
-             lead_user_id, status, fee_ceiling, projected_cost
+             lead_user_id, status, fee_ceiling, projected_cost, rate_book_id
            ) values ($1, $2, $3, coalesce($4, now()), $5,
-                     $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+                     $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
         returning id`,
           [
             projectId, orgId, clean.name, clean.openedAt, userId,
             clean.code, clean.clientName, clean.clientEmail, clean.clientCell,
             clean.clientAddress, clean.propertyDescription, clean.typeCode,
             clean.budgetEstimate, clean.billingBasis, clean.leadUserId,
-            clean.status || "open", clean.feeCeiling, clean.projectedCost,
+            clean.status || "open", clean.feeCeiling, clean.projectedCost, rateBookId,
           ],
         );
         // The task list and the fee schedule are cloned from the same template
@@ -959,6 +1205,7 @@ export function openStore(queryable, { orgId, userId, role }) {
         billing_basis: clean.billingBasis, lead_user_id: clean.leadUserId,
         status: clean.status, opened_at: clean.openedAt,
         fee_ceiling: clean.feeCeiling, projected_cost: clean.projectedCost,
+        rate_book_id: await this.checkedRateBookId(clean.rateBookId),
       };
       const sets = [];
       const params = [projectId, orgId];
@@ -2204,7 +2451,8 @@ const PHASE_LATERAL = `
 const REGISTER_COLUMNS = `
   p.id, p.code, p.name, p.client_name, p.client_email, p.client_cell,
   p.client_address, p.property_description, p.type_code, p.budget_estimate,
-  p.projected_cost, p.template_quote, p.billing_basis, p.fee_ceiling, p.lead_user_id, p.status, p.opened_at, p.updated_at,
+  p.projected_cost, p.template_quote, p.billing_basis, p.fee_ceiling, p.lead_user_id,
+  p.rate_book_id, p.status, p.opened_at, p.updated_at,
   p.created_at, p.deleted_at, d.id as drawing_id,
   time_totals.captured, time_totals.captured_minutes,
   time_totals.uncertified_captured, time_totals.broken_rows,
@@ -2274,6 +2522,108 @@ function normaliseTemplateInput(input) {
 }
 
 /**
+ * Exactly what qtyForUnit() in web/v2/schedule.js measures. A unit outside
+ * this list does not fail a BOQ - it quietly prices per item, so a wall would
+ * be quoted as one thing rather than as cubic metres of masonry.
+ */
+const RATE_UNITS = ["ea", "m", "m2", "m3"];
+
+/** A price on a rate book line. Required, unlike a template fee: a line with no number is not a price. */
+function rateAmount(value, what) {
+  if (value === null || value === undefined || value === "") {
+    throw new ValidationError(`${what} needs a rate`);
+  }
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new ValidationError(`${what} must be a number of rand, zero or more`);
+  }
+  return Math.round(parsed * 100) / 100;
+}
+
+/** The book's own particulars. Currency and symbol default to the firm's. */
+function normaliseRateBookHeader(input) {
+  const name = trimmed(input?.name);
+  if (!name) throw new ValidationError("a rate book needs a name");
+  return {
+    name,
+    currency: trimmed(input.currency) || "ZAR",
+    symbol: trimmed(input.symbol) || "R",
+    // Null leaves the column to its default on insert and unchanged on
+    // replace: an editor that does not render the date must not reset it.
+    effectiveFrom: trimmed(input.effectiveFrom),
+    note: trimmed(input.note),
+  };
+}
+
+/**
+ * Validate an edited book into the line rows. A line prices either one SKU or
+ * a whole category, never neither: a row with no model and no category can
+ * never be found by findRate(), so it would be a price that silently applies
+ * to nothing.
+ *
+ * Duplicates are refused here rather than left to the unique index, because
+ * the answer a user needs is which code they typed twice.
+ */
+function normaliseRateLines(input) {
+  if (!input || !Array.isArray(input.rates)) {
+    throw new ValidationError("a rate book is a list of rates");
+  }
+  const seen = new Set();
+  return input.rates.map((line, index) => {
+    const model = trimmed(line?.model);
+    const category = trimmed(line?.category);
+    if (!model && !category) {
+      throw new ValidationError(`line ${index + 1} needs either a model or a category`);
+    }
+    const what = model ? `the rate for ${model}` : `the ${category} fallback rate`;
+    const unit = trimmed(line.unit);
+    if (!RATE_UNITS.includes(unit)) {
+      throw new ValidationError(`${what} must be priced per ${RATE_UNITS.join(", ")}`);
+    }
+    const key = model ? `model:${model.toUpperCase()}` : `category:${category.toUpperCase()}`;
+    if (seen.has(key)) throw new ValidationError(`${model || category} is priced twice in this book`);
+    seen.add(key);
+    return {
+      model,
+      // A category on a SKU line only groups the editor's list. findRate()
+      // reads a category as a price only off a line with no model of its own,
+      // so a SKU can sit under "Doors" without becoming the Doors fallback.
+      category,
+      description: trimmed(line.description),
+      unit,
+      rate: rateAmount(line.rate, what),
+    };
+  });
+}
+
+async function insertRateLines(q, rateBookId, lines, userId) {
+  for (const [index, line] of lines.entries()) {
+    await q(
+      `insert into rate_book_line (
+         id, rate_book_id, seq, model, category, description, unit, rate, created_by
+       ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [
+        sid("rbl"), rateBookId, index + 1, line.model, line.category,
+        line.description, line.unit, line.rate, userId,
+      ],
+    );
+  }
+}
+
+function rateBookHeader(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    currency: row.currency,
+    symbol: row.symbol,
+    effectiveFrom: row.effective_from,
+    isDefault: row.is_default,
+    note: row.note ?? null,
+    updatedAt: row.updated_at ?? null,
+  };
+}
+
+/**
  * A cost share typed into the template editor: blank is "not said", otherwise a
  * fraction of the fee from 0 to 1. Rejected rather than clamped, because 65
  * typed where 0.65 was meant would otherwise be stored as a cost of 6 500%.
@@ -2330,6 +2680,7 @@ function registerFields(fields, { partial = false } = {}) {
       ? (fields.feeCeiling === true || fields.feeCeiling === "true" || fields.feeCeiling === "on")
       : (partial ? undefined : false),
     leadUserId: text("leadUserId"),
+    rateBookId: text("rateBookId"),
     status: text("status"),
     openedAt: text("openedAt"),
     budgetEstimate: money("budgetEstimate"),
@@ -2353,6 +2704,10 @@ function registerRow(row, capabilities = capabilitiesFor("owner")) {
     billingBasis: row.billing_basis ?? null,
     feeCeiling: Boolean(row.fee_ceiling),
     leadUserId: row.lead_user_id ?? null,
+    // Which rate book a BOQ of this job prices against. Null is "the firm's
+    // default as it stands today", which is what an older job honestly is -
+    // nothing recorded a book for it, and naming one now would invent one.
+    rateBookId: row.rate_book_id ?? null,
     status: row.status ?? null,
     openedAt: row.opened_at ?? null,
     updatedAt: row.updated_at ?? null,
@@ -2637,6 +2992,10 @@ function projectSummary(row) {
     // the register gave it a code. The chrome prints it beside the drawing name.
     code: row.code ?? null,
     erf: row.erf ?? null,
+    // The book a BOQ of this drawing prices against. Null means the planner
+    // should ask for the firm's default rather than that there is no price
+    // list; see applyOpenedJob() in web/v2/ui.js.
+    rateBookId: row.rate_book_id ?? null,
     openedAt: row.opened_at ?? null,
     offlinePinnedAt: row.offline_pinned_at ?? null,
     updatedAt: row.updated_at ?? null,

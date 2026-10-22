@@ -229,6 +229,15 @@ export function collectSnapTargets(doc, opts = {}) {
     if (!snapIncluded(room, opts)) continue;
     for (const [x, y] of roomPolygon(room)) points.push({ x, y, kind: "corner" });
   }
+  // Route points are snap targets only to the service tools (`opts.services`):
+  // a wall should not be drawn onto a pipe. Routes snap to each other's points
+  // through here, and to walls and corners through the passes above.
+  if (opts.services) {
+    for (const node of doc.serviceNodes || []) {
+      if (!snapIncluded(node, opts)) continue;
+      points.push({ x: node.x, y: node.y, kind: "endpoint", category: "service" });
+    }
+  }
   for (const slab of doc.slabs || []) {
     if (!snapIncluded(slab, opts)) continue;
     for (const [x, y] of shapePolygon(slab.shape)) points.push({ x, y, kind: "corner" });
@@ -249,16 +258,34 @@ function pushPolyEdges(edges, poly) {
 }
 
 /**
+ * The outline of a segment's drawn thickness: both long faces and both end
+ * faces, each tagged `kind: "face"`. Empty when there is no thickness.
+ */
+export function faceEdges(seg, thickness, category = null) {
+  const [a, b, c, d] = faceCorners(seg, thickness, category);
+  if (!a) return [];
+  // faceCorners gives start(+n), start(-n), end(+n), end(-n).
+  const edge = (p, q) => ({ x1: p.x, y1: p.y, x2: q.x, y2: q.y, kind: "face", category });
+  return [edge(a, c), edge(b, d), edge(a, b), edge(c, d)];
+}
+
+/**
  * Wall/beam/room/slab/roof edges, so a gap label can measure to the face of
- * a wall rather than only to a corner that happens to share an X or Y.
+ * a wall rather than only to a corner that happens to share an X or Y. With
+ * `thicknessOf`, a wall contributes the faces you can see rather than its
+ * centreline.
  */
 export function collectSnapEdges(doc, opts = {}) {
   const excludeSegmentIds = opts.excludeSegmentIds || new Set();
   const excludeBeamIds = opts.excludeBeamIds || new Set();
+  const thicknessOf = opts.thicknessOf || null;
+  const categoryOf = opts.categoryOf || null;
   const edges = [];
   for (const seg of doc.segments || []) {
     if (excludeSegmentIds.has(seg.id) || !snapIncluded(seg, opts)) continue;
-    edges.push({ x1: seg.x1, y1: seg.y1, x2: seg.x2, y2: seg.y2 });
+    const faces = thicknessOf ? faceEdges(seg, thicknessOf(seg), categoryOf ? categoryOf(seg) : null) : [];
+    if (faces.length) edges.push(...faces);
+    else edges.push({ x1: seg.x1, y1: seg.y1, x2: seg.x2, y2: seg.y2 });
   }
   for (const beam of doc.beams || []) {
     if (excludeBeamIds.has(beam.id) || !snapIncluded(beam, opts)) continue;
@@ -352,6 +379,27 @@ export function snapPoint(x, y, targets, tolWorld) {
     };
   }
   return { x, y, guideX: null, guideY: null, guideXPoint: null, guideYPoint: null, snapped: false };
+}
+
+/**
+ * Land on a wall face anywhere along it, not only at its corners: the nearest
+ * point on any `kind: "face"` edge within `tolWorld`, shaped like an exact
+ * point join so callers treat it the same way. Not snapped when none is close.
+ */
+export function snapToFace(x, y, edges, tolWorld) {
+  let best = null;
+  let bestD = tolWorld;
+  for (const edge of edges) {
+    if (edge.kind !== "face") continue;
+    const p = closestOnSeg(edge, x, y);
+    const d = Math.hypot(p.x - x, p.y - y);
+    if (d < bestD) {
+      bestD = d;
+      best = { x: p.x, y: p.y, kind: "face", category: edge.category ?? null };
+    }
+  }
+  if (!best) return { x, y, guideX: null, guideY: null, guideXPoint: null, guideYPoint: null, snapped: false };
+  return { x: best.x, y: best.y, guideX: best.x, guideY: best.y, guideXPoint: best, guideYPoint: best, snapped: true };
 }
 
 /**

@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>2.5D services routing mock — StudioPractice</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,560&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #e8e2d8;
+      --paper: #fffdf8;
+      --ink: #1a1612;
+      --soft: #665d52;
+      --muted: #91877b;
+      --line: rgba(26, 22, 18, 0.14);
+      --line-strong: rgba(26, 22, 18, 0.25);
+      --copper: #b2451e;
+      --service: #2675b8;
+      --service-soft: #dcecf8;
+      --shadow: 0 12px 35px rgba(45, 36, 27, 0.11);
+      --font: "Source Sans 3", "Segoe UI", sans-serif;
+      --display: Fraunces, Georgia, serif;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: var(--font);
+      font-size: 15px;
+    }
+    button { font: inherit; color: inherit; }
+    button:focus-visible { outline: 2px solid var(--service); outline-offset: 2px; }
+
+    .app {
+      min-height: 100%;
+      display: grid;
+      grid-template-rows: auto auto 1fr;
+    }
+    .topbar {
+      height: 56px;
+      padding: 0 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #1d1915;
+      color: #fffdf8;
+    }
+    .brand, .top-actions, .crumbs, .seg, .tool-strip, .metric-line {
+      display: flex;
+      align-items: center;
+    }
+    .brand { gap: 10px; }
+    .brand-mark {
+      width: 25px;
+      height: 25px;
+      display: grid;
+      place-items: center;
+      border: 1px solid rgba(255,255,255,.38);
+      border-radius: 50%;
+      font-family: var(--display);
+      font-size: 13px;
+    }
+    .brand strong { font-family: var(--display); font-weight: 560; font-size: 18px; }
+    .crumbs { gap: 8px; color: rgba(255,255,255,.58); }
+    .crumbs b { color: rgba(255,255,255,.9); font-weight: 600; }
+    .mock-chip {
+      padding: 3px 8px;
+      border: 1px solid rgba(255,255,255,.25);
+      border-radius: 999px;
+      color: rgba(255,255,255,.65);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+    }
+    .top-actions { gap: 9px; }
+    .saved { color: #b8d4bd; font-size: 13px; }
+    .top-actions button {
+      border: 1px solid rgba(255,255,255,.2);
+      background: transparent;
+      color: white;
+      border-radius: 4px;
+      padding: 6px 10px;
+    }
+
+    .ribbon {
+      min-height: 72px;
+      display: flex;
+      align-items: stretch;
+      padding: 8px 16px;
+      background: #f8f4ed;
+      border-bottom: 1px solid var(--line);
+      box-shadow: 0 2px 8px rgba(45, 36, 27, 0.06);
+      z-index: 2;
+    }
+    .ribbon-group {
+      padding: 0 15px;
+      border-right: 1px solid var(--line);
+      display: grid;
+      grid-template-rows: 1fr auto;
+    }
+    .ribbon-group:first-child { padding-left: 0; }
+    .ribbon-group > small {
+      text-align: center;
+      color: var(--muted);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+    }
+    .tool-strip { gap: 5px; }
+    .tool {
+      min-width: 62px;
+      height: 43px;
+      border: 1px solid transparent;
+      background: transparent;
+      border-radius: 4px;
+      display: grid;
+      place-items: center;
+      line-height: 1.05;
+      cursor: pointer;
+    }
+    .tool:hover { background: rgba(178, 69, 30, .06); }
+    .tool.active {
+      color: var(--copper);
+      border-color: rgba(178, 69, 30, .35);
+      background: rgba(178, 69, 30, .07);
+    }
+    .tool i { font-style: normal; font-size: 18px; }
+    .tool span { font-size: 12px; }
+
+    .workspace {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: 220px minmax(520px, 1fr) 282px;
+      gap: 1px;
+      background: var(--line);
+    }
+    .sidebar, .inspector {
+      min-height: 0;
+      overflow: auto;
+      background: #f8f4ed;
+    }
+    .sidebar { padding: 18px 13px; }
+    .inspector { padding: 18px; }
+    .sidebar h2, .inspector h2 {
+      margin: 0 0 4px;
+      font: 560 21px/1.2 var(--display);
+    }
+    .subtle { margin: 0 0 16px; color: var(--soft); font-size: 13px; }
+
+    .system-list { display: grid; gap: 5px; }
+    .system {
+      width: 100%;
+      display: grid;
+      grid-template-columns: 12px 1fr auto;
+      gap: 9px;
+      align-items: center;
+      padding: 10px;
+      border: 1px solid transparent;
+      border-radius: 5px;
+      background: transparent;
+      text-align: left;
+      cursor: pointer;
+    }
+    .system:hover { background: rgba(26,22,18,.04); }
+    .system.active { background: var(--paper); border-color: var(--line-strong); box-shadow: 0 2px 7px rgba(45,36,27,.06); }
+    .swatch { width: 10px; height: 10px; border-radius: 50%; background: var(--swatch); }
+    .system small { color: var(--muted); }
+    .layer-note {
+      margin-top: 20px;
+      padding: 12px;
+      background: #eee8de;
+      border-radius: 5px;
+      color: var(--soft);
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    .stage {
+      position: relative;
+      min-width: 0;
+      min-height: 0;
+      padding: 18px;
+      background-color: #d9d4cc;
+      background-image: radial-gradient(rgba(26,22,18,.12) .7px, transparent .7px);
+      background-size: 12px 12px;
+      overflow: auto;
+    }
+    .stage-head {
+      max-width: 1000px;
+      margin: 0 auto 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .cut-label { font-weight: 600; }
+    .cut-label small { display: block; color: var(--soft); font-weight: 400; }
+    .seg {
+      padding: 2px;
+      background: rgba(255,253,248,.72);
+      border: 1px solid var(--line);
+      border-radius: 5px;
+    }
+    .seg button {
+      padding: 5px 10px;
+      border: 0;
+      border-radius: 3px;
+      background: transparent;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .seg button.active { background: var(--ink); color: white; }
+
+    .drawing-stack {
+      max-width: 1000px;
+      margin: auto;
+      display: grid;
+      grid-template-rows: minmax(390px, 1fr) 160px;
+      gap: 10px;
+    }
+    .drawing-card {
+      position: relative;
+      min-height: 0;
+      background: var(--paper);
+      border: 1px solid var(--line-strong);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+    .drawing-card svg { width: 100%; height: 100%; display: block; }
+    .drawing-title {
+      position: absolute;
+      top: 12px;
+      left: 14px;
+      z-index: 1;
+      padding: 5px 8px;
+      background: rgba(255,253,248,.9);
+      border: 1px solid var(--line);
+      border-radius: 3px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .profile-card[hidden] { display: none; }
+    .route-segment {
+      stroke: var(--service);
+      stroke-width: 8;
+      stroke-linecap: round;
+      fill: none;
+      cursor: pointer;
+      transition: opacity .15s, stroke-width .15s;
+    }
+    .route-segment:hover, .route-segment.selected { stroke-width: 12; }
+    .route-segment.dimmed { opacity: .22; }
+    .route-node { fill: var(--paper); stroke: var(--service); stroke-width: 4; }
+    .vertical-marker circle { fill: var(--service); }
+    .vertical-marker text { fill: white; font: 600 18px var(--font); }
+    .vertical-ring { fill: none; stroke: var(--service); stroke-width: 2; opacity: .34; }
+    .plan-wall { stroke: #3b342d; stroke-width: 13; fill: none; stroke-linecap: square; }
+    .fixture { fill: none; stroke: #6f675e; stroke-width: 2; }
+    .plan-label { fill: #8a8074; font: 13px var(--font); letter-spacing: .06em; }
+    .route-label { fill: var(--service); font: 600 12px var(--font); }
+    .profile-grid { stroke: #d9d2c8; stroke-width: 1; }
+    .profile-ground { stroke: #4a4239; stroke-width: 2; }
+    .profile-route { fill: none; stroke: var(--service); stroke-width: 6; stroke-linejoin: round; stroke-linecap: round; }
+    .profile-fill { fill: var(--service-soft); opacity: .65; }
+
+    .route-callout {
+      position: absolute;
+      right: 18px;
+      bottom: 18px;
+      width: 190px;
+      padding: 11px 12px;
+      background: rgba(255,253,248,.94);
+      border: 1px solid var(--line-strong);
+      border-radius: 4px;
+      box-shadow: 0 6px 18px rgba(45,36,27,.1);
+    }
+    .route-callout strong { display: block; }
+    .route-callout span { color: var(--soft); font-size: 12px; }
+
+    .field-block { padding: 14px 0; border-bottom: 1px solid var(--line); }
+    .field-block:first-of-type { padding-top: 8px; }
+    .field-block label {
+      display: block;
+      margin-bottom: 5px;
+      color: var(--soft);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+    }
+    .field-value {
+      width: 100%;
+      padding: 8px 9px;
+      background: var(--paper);
+      border: 1px solid var(--line-strong);
+      border-radius: 4px;
+    }
+    .metric-line { justify-content: space-between; margin: 5px 0; }
+    .metric-line span { color: var(--soft); }
+    .metric-line strong { font-variant-numeric: tabular-nums; }
+    .accent { color: var(--service); }
+    .bom {
+      margin-top: 16px;
+      padding: 14px;
+      background: var(--paper);
+      border: 1px solid var(--line-strong);
+      border-radius: 5px;
+    }
+    .bom h3 { margin: 0 0 8px; font: 560 17px var(--display); }
+    .bom .total {
+      margin-top: 9px;
+      padding-top: 9px;
+      border-top: 1px solid var(--line);
+      font-size: 17px;
+    }
+    .check {
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+      margin-top: 14px;
+      color: var(--soft);
+      font-size: 12px;
+      line-height: 1.35;
+    }
+    .check input { accent-color: var(--service); }
+    .inspector-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 16px; }
+    .inspector-actions button {
+      padding: 8px;
+      border: 1px solid var(--line-strong);
+      border-radius: 4px;
+      background: var(--paper);
+      cursor: pointer;
+    }
+    .inspector-actions button.primary { color: white; border-color: var(--service); background: var(--service); }
+
+    @media (max-width: 980px) {
+      .workspace { grid-template-columns: 180px minmax(480px, 1fr); }
+      .inspector { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+    }
+    @media (max-width: 720px) {
+      .workspace { display: block; }
+      .sidebar { display: none; }
+      .stage { padding: 10px; }
+      .drawing-stack { grid-template-rows: 360px 150px; }
+      .ribbon-group:not(:first-child) { display: none; }
+      .crumbs { display: none; }
+      .inspector { display: block; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark">SP</span>
+        <strong>StudioPractice</strong>
+        <span class="crumbs"><span>/</span><b>House 014</b><span>/</span>Services</span>
+        <span class="mock-chip">Concept mock</span>
+      </div>
+      <div class="top-actions">
+        <span class="saved">Estimate updated</span>
+        <button type="button">Close mock</button>
+      </div>
+    </header>
+
+    <nav class="ribbon" aria-label="Service drawing tools">
+      <div class="ribbon-group">
+        <div class="tool-strip">
+          <button class="tool active" type="button"><i>╱</i><span>Route</span></button>
+          <button class="tool" id="add-rise" type="button"><i>↥</i><span>Rise / drop</span></button>
+          <button class="tool" type="button"><i>⊕</i><span>Connect</span></button>
+        </div>
+        <small>Draw</small>
+      </div>
+      <div class="ribbon-group">
+        <div class="tool-strip">
+          <button class="tool" type="button"><i>⌁</i><span>Offset</span></button>
+          <button class="tool" type="button"><i>∠</i><span>Slope</span></button>
+          <button class="tool" type="button"><i>⌀</i><span>Size</span></button>
+        </div>
+        <small>Route properties</small>
+      </div>
+      <div class="ribbon-group">
+        <div class="tool-strip">
+          <button class="tool" type="button"><i>◉</i><span>Fitting</span></button>
+          <button class="tool" type="button"><i>⊣</i><span>Valve</span></button>
+          <button class="tool" type="button"><i>◎</i><span>Inspect</span></button>
+        </div>
+        <small>Components</small>
+      </div>
+    </nav>
+
+    <main class="workspace">
+      <aside class="sidebar">
+        <h2>Services</h2>
+        <p class="subtle">Show and edit one network at a time.</p>
+        <div class="system-list">
+          <button class="system active" type="button" data-system="Cold water" data-colour="#2675b8" data-soft="#dcecf8" data-size="22 mm">
+            <i class="swatch" style="--swatch:#2675b8"></i><span>Cold water</span><small>17.0 m</small>
+          </button>
+          <button class="system" type="button" data-system="Hot water" data-colour="#c95735" data-soft="#f5dfd8" data-size="22 mm">
+            <i class="swatch" style="--swatch:#c95735"></i><span>Hot water</span><small>12.6 m</small>
+          </button>
+          <button class="system" type="button" data-system="Drainage" data-colour="#796548" data-soft="#ebe4d9" data-size="110 mm">
+            <i class="swatch" style="--swatch:#796548"></i><span>Drainage</span><small>21.4 m</small>
+          </button>
+          <button class="system" type="button" data-system="Electrical" data-colour="#d79c20" data-soft="#f8edce" data-size="20 mm conduit">
+            <i class="swatch" style="--swatch:#d79c20"></i><span>Electrical</span><small>28.3 m</small>
+          </button>
+          <button class="system" type="button" data-system="Gas" data-colour="#8d5aa7" data-soft="#eadff0" data-size="15 mm">
+            <i class="swatch" style="--swatch:#8d5aa7"></i><span>Gas</span><small>8.7 m</small>
+          </button>
+        </div>
+        <div class="layer-note">
+          <b>2.5D means:</b> draw normally in plan, then assign height only where the route rises, drops or changes level.
+        </div>
+      </aside>
+
+      <section class="stage">
+        <div class="stage-head">
+          <div class="cut-label">01 Ground floor <small>Plan cut + route profile</small></div>
+          <div class="seg" aria-label="View mode">
+            <button type="button" data-view="plan">Plan</button>
+            <button type="button" class="active" data-view="split">Plan + profile</button>
+          </div>
+        </div>
+
+        <div class="drawing-stack">
+          <div class="drawing-card">
+            <span class="drawing-title">Plan · route position in X and Y</span>
+            <svg viewBox="0 0 800 500" role="img" aria-label="House plan with a cold-water route and a rise marker">
+              <path class="plan-wall" d="M100 75H700V425H100V75M390 75V425M100 250H390M390 300H700" />
+              <path class="fixture" d="M620 93h48v35h-48z M632 100h24v19h-24z" />
+              <path class="fixture" d="M510 330h75v48h-75z M525 341h45v26h-45z" />
+              <path class="fixture" d="M140 291h45v70h-45z M149 301h27v26h-27z" />
+              <text class="plan-label" x="210" y="170">LIVING</text>
+              <text class="plan-label" x="475" y="180">KITCHEN</text>
+              <text class="plan-label" x="185" y="345">BATH</text>
+              <text class="plan-label" x="500" y="395">UTILITY</text>
+
+              <path class="route-segment" data-seg="1" d="M55 445H230" />
+              <path class="route-segment" data-seg="2" d="M230 445V375" />
+              <path class="route-segment" data-seg="3" d="M230 375H535V354" />
+              <path class="route-segment" data-seg="5" d="M535 354H560" />
+              <circle class="route-node" cx="55" cy="445" r="7" />
+              <circle class="route-node" cx="230" cy="375" r="6" />
+              <circle class="route-node" cx="535" cy="354" r="6" />
+
+              <g class="vertical-marker" transform="translate(535 354)">
+                <circle class="vertical-ring" r="22" />
+                <circle r="14" />
+                <text text-anchor="middle" dominant-baseline="central">↑</text>
+              </g>
+              <text class="route-label" x="548" y="340">R1 · +2.40 m</text>
+              <text class="route-label" x="42" y="472">METER</text>
+              <text class="route-label" x="570" y="358">WH-01</text>
+            </svg>
+            <div class="route-callout">
+              <strong id="callout-name">Cold water · CW-01</strong>
+              <span>Click a blue segment to inspect it. The arrow is a vertical rise at one plan point.</span>
+            </div>
+          </div>
+
+          <div class="drawing-card profile-card" id="profile-card">
+            <span class="drawing-title">Route profile · stored Z values</span>
+            <svg viewBox="0 0 800 180" role="img" aria-label="Profile of the route showing its vertical rise">
+              <path class="profile-grid" d="M40 40H770M40 80H770M40 120H770M40 160H770" />
+              <path class="profile-ground" d="M40 145H770" />
+              <path class="profile-fill" id="profile-fill" d="M50 135H590V50H745V145H50Z" />
+              <path class="profile-route" id="profile-route" d="M50 135H590V50H745" />
+              <text class="plan-label" x="48" y="170">Meter · +0.30</text>
+              <text class="plan-label" x="568" y="35">Rise +2.40 m</text>
+              <text class="plan-label" x="680" y="35">WH-01 · +2.70</text>
+            </svg>
+          </div>
+        </div>
+      </section>
+
+      <aside class="inspector">
+        <div>
+          <h2 id="inspector-title">Cold water route</h2>
+          <p class="subtle">CW-01 · Estimated route</p>
+
+          <div class="field-block">
+            <label>Pipe / containment type</label>
+            <div class="field-value" id="size-value">22 mm</div>
+          </div>
+          <div class="field-block">
+            <label>Selected segment</label>
+            <div class="metric-line"><span>Plan length</span><strong id="plan-length">6.00 m</strong></div>
+            <div class="metric-line"><span>Start elevation</span><strong id="start-z">+0.30 m</strong></div>
+            <div class="metric-line"><span>End elevation</span><strong id="end-z">+0.30 m</strong></div>
+            <div class="metric-line"><span>True length</span><strong class="accent" id="true-length">6.00 m</strong></div>
+          </div>
+          <label class="check">
+            <input id="include-rise" type="checkbox" checked />
+            <span><b>Include R1 vertical rise</b><br />2.40 m is visible as a symbol in plan and measurable in the route profile.</span>
+          </label>
+        </div>
+
+        <div>
+          <div class="bom">
+            <h3>Live material estimate</h3>
+            <div class="metric-line"><span>Horizontal route</span><strong>14.60 m</strong></div>
+            <div class="metric-line"><span>Vertical rises</span><strong id="rise-total">2.40 m</strong></div>
+            <div class="metric-line"><span>Elbows</span><strong>4 ea</strong></div>
+            <div class="metric-line"><span>Isolation valve</span><strong>1 ea</strong></div>
+            <div class="metric-line total"><span>Measured length</span><strong id="route-total">17.00 m</strong></div>
+            <div class="metric-line"><span>+ 5% cutting allowance</span><strong id="order-total">17.85 m</strong></div>
+          </div>
+          <div class="inspector-actions">
+            <button type="button">Route table</button>
+            <button class="primary" type="button">Finish route</button>
+          </div>
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <script>
+    const root = document.documentElement;
+    const profileCard = document.getElementById("profile-card");
+    const includeRise = document.getElementById("include-rise");
+    const addRise = document.getElementById("add-rise");
+    const segments = [...document.querySelectorAll(".route-segment")];
+    const segmentData = {
+      1: { plan: "3.60 m", start: "+0.30 m", end: "+0.30 m", true: "3.60 m" },
+      2: { plan: "2.80 m", start: "+0.30 m", end: "+0.30 m", true: "2.80 m" },
+      3: { plan: "6.00 m", start: "+0.30 m", end: "+0.30 m", true: "6.00 m" },
+      5: { plan: "2.20 m", start: "+2.70 m", end: "+2.70 m", true: "2.20 m" }
+    };
+
+    function selectSegment(id) {
+      segments.forEach((segment) => {
+        segment.classList.toggle("selected", segment.dataset.seg === id);
+        segment.classList.toggle("dimmed", segment.dataset.seg !== id);
+      });
+      const data = segmentData[id];
+      document.getElementById("plan-length").textContent = data.plan;
+      document.getElementById("start-z").textContent = data.start;
+      document.getElementById("end-z").textContent = data.end;
+      document.getElementById("true-length").textContent = data.true;
+    }
+
+    segments.forEach((segment) => segment.addEventListener("click", () => selectSegment(segment.dataset.seg)));
+    selectSegment("3");
+
+    document.querySelectorAll("[data-view]").forEach((button) => {
+      button.addEventListener("click", () => {
+        document.querySelectorAll("[data-view]").forEach((item) => item.classList.remove("active"));
+        button.classList.add("active");
+        profileCard.hidden = button.dataset.view === "plan";
+        document.querySelector(".drawing-stack").style.gridTemplateRows =
+          button.dataset.view === "plan" ? "minmax(540px, 1fr)" : "minmax(390px, 1fr) 160px";
+      });
+    });
+
+    function updateRise() {
+      const on = includeRise.checked;
+      document.querySelector(".vertical-marker").style.display = on ? "" : "none";
+      document.querySelectorAll(".route-label").forEach((label) => {
+        if (label.textContent.includes("R1")) label.style.display = on ? "" : "none";
+      });
+      document.getElementById("profile-route").setAttribute("d", on ? "M50 135H590V50H745" : "M50 135H745");
+      document.getElementById("profile-fill").setAttribute("d", on ? "M50 135H590V50H745V145H50Z" : "M50 135H745V145H50Z");
+      document.getElementById("rise-total").textContent = on ? "2.40 m" : "0.00 m";
+      document.getElementById("route-total").textContent = on ? "17.00 m" : "14.60 m";
+      document.getElementById("order-total").textContent = on ? "17.85 m" : "15.33 m";
+      addRise.classList.toggle("active", on);
+    }
+    includeRise.addEventListener("change", updateRise);
+    addRise.addEventListener("click", () => {
+      includeRise.checked = !includeRise.checked;
+      updateRise();
+    });
+    updateRise();
+
+    document.querySelectorAll(".system").forEach((button) => {
+      button.addEventListener("click", () => {
+        document.querySelectorAll(".system").forEach((item) => item.classList.remove("active"));
+        button.classList.add("active");
+        root.style.setProperty("--service", button.dataset.colour);
+        root.style.setProperty("--service-soft", button.dataset.soft);
+        document.getElementById("inspector-title").textContent = `${button.dataset.system} route`;
+        document.getElementById("size-value").textContent = button.dataset.size;
+        document.getElementById("callout-name").textContent = `${button.dataset.system} · CW-01`;
+      });
+    });
+  </script>
+</body>
+</html>

@@ -1,4 +1,4 @@
-﻿// Team: the owner's view of what every person did, on which jobs, and what it
+// Team: the owner's view of what every person did, on which jobs, and what it
 // was worth. Owner-only (the server refuses anyone else, and the nav button is
 // absent for them).
 //
@@ -190,7 +190,7 @@ function paintRoster(host) {
   const today = todayIso();
   host.innerHTML = `
     <div class="tpl team">
-      <h1>Team</h1>
+      <h1>People</h1>
       ${tabsHtml()}
       <p class="note-line">Everyone in the firm. Only owners can see this page, the personal details on it,
         or add and remove people.</p>
@@ -369,7 +369,7 @@ function paint(host) {
 
   host.innerHTML = `
     <div class="tpl team">
-      <h1>Team</h1>
+      <h1>People</h1>
       ${tabsHtml()}
       <p class="note-line">What everybody did, on which jobs, and what it was worth. Value is
         <b>captured</b> (hours &times; rate when logged), not money received. Utilisation is logged hours

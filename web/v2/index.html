@@ -8,48 +8,52 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,560&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="./v2.css" />
+  <link rel="stylesheet" href="./v2.css?v=20261022-wall-float" />
 </head>
 <body class="auth-pending">
   <div class="chrome">
-    <header class="topbar" title="Part 3 — v2 core preview">
+    <header class="topbar">
+      <!-- Logo only. The product name does not need to outrank the drawing's
+           own name, and the build phase belongs in About, not in the chrome. -->
       <button type="button" class="brand" id="v2-about-open" title="About StudioPractice">
-        <div class="brand-mark">
-          <img class="brand-logo" src="../logo.png" alt="" />
-        </div>
-        <span class="brand-name">StudioPractice</span>
-        <p class="visually-hidden">Part 3 — v2 core preview</p>
+        <span class="brand-mark">
+          <img class="brand-logo" src="../logo.png" alt="StudioPractice" />
+        </span>
       </button>
-      <div class="status">
-        <span class="dot" id="v2-health-dot"></span>
-        <span id="v2-health-label">Loading pack…</span>
-        <span class="status-sep" aria-hidden="true">·</span>
+      <!-- The open job, in reading order: which job, what it is called, and
+           whether what is on screen has been written anywhere. The app's own
+           status trails it, because it is about the app and not the drawing. -->
+      <div class="doc">
+        <!-- Leaving the screen is navigation, not status, so it sits at the
+             far left where back belongs rather than in among the state. -->
+        <a class="practice-link" id="v2-practice-link" hidden
+           title="The job's overview in Practice operations, where this drawing was started from."><span
+             aria-hidden="true">←</span> Back to overview</a>
+        <span class="bar-sep" id="v2-practice-sep" aria-hidden="true" hidden></span>
         <span class="job-code" id="v2-job-code" hidden></span>
         <label class="visually-hidden" for="v2-job-name">Job name</label>
         <input id="v2-job-name" class="job-name" type="text" placeholder="Name this job"
                autocomplete="off" spellcheck="false" maxlength="120" />
-        <a class="practice-link" id="v2-practice-link" hidden>Back to job</a>
-        <span class="sync-state" id="v2-sync-state" data-kind="saved">Saved</span>
-      </div>
-      <!-- The row moved under us. Both choices are the user's; nothing is
-           merged, and nothing is picked by default. -->
-      <div class="conflict-bar" id="v2-conflict" hidden>
-        <span id="v2-conflict-text">This drawing changed somewhere else.</span>
-        <button type="button" id="v2-conflict-theirs">Reload theirs</button>
-        <button type="button" id="v2-conflict-mine">Overwrite with mine</button>
+        <span class="sync-state" id="v2-sync-state" data-kind="saved" role="status">Saved</span>
+        <span class="status">
+          <!-- The dot is only shown when there is something to report. A
+               permanent green light says nothing and still draws the eye. -->
+          <span class="dot" id="v2-health-dot" hidden></span>
+          <span id="v2-health-label" role="status"></span>
+        </span>
       </div>
       <div class="actions">
-        <div class="seg" role="group" aria-label="Ribbon density">
-          <button type="button" data-density="simple" class="active">Simple</button>
-          <button type="button" data-density="full">Full</button>
-        </div>
         <!-- File commands. There is no Save and no Save As: the open job is
              already saved, and each of these navigates to a different row
              rather than replacing what is on screen. -->
         <button type="button" id="v2-new">New</button>
         <button type="button" id="v2-open">Open</button>
-        <button type="button" id="v2-demo">Demo house</button>
-        <button type="button" class="primary" id="v2-compile">Compile</button>
+        <!-- Leaving this job and acting on it are different things, and the
+             primary button should not sit flush against the two that navigate
+             away from the drawing. -->
+        <span class="bar-sep" aria-hidden="true"></span>
+        <button type="button" class="primary" id="v2-compile"
+                title="Read the drawing: rooms, walls, openings and the quantities they imply.">Take off</button>
         <div class="account" id="v2-account" hidden>
           <button type="button" class="account-btn" id="v2-account-open"
                   aria-haspopup="dialog" aria-expanded="false" aria-controls="v2-account-overlay"
@@ -59,8 +63,27 @@
         </div>
       </div>
     </header>
+    <!-- The row moved under us. Both choices are the user's; nothing is
+         merged, and nothing is picked by default. Kept outside the topbar
+         grid so that showing it cannot shuffle the file commands while the
+         user is deciding which copy to keep. -->
+    <div class="conflict-bar" id="v2-conflict" hidden>
+      <span id="v2-conflict-text">This drawing changed somewhere else.</span>
+      <button type="button" id="v2-conflict-theirs">Reload theirs</button>
+      <button type="button" id="v2-conflict-mine">Overwrite with mine</button>
+    </div>
     <nav class="ribbon" aria-label="Toolbars">
-      <div class="tabs ribbon-tabs" id="v2-ribbon-tabs"></div>
+      <!-- Density sits with the ribbon it changes, not with the file commands. -->
+      <div class="ribbon-tabrow">
+        <div class="tabs ribbon-tabs" id="v2-ribbon-tabs"></div>
+        <div class="ribbon-density">
+          <span class="ribbon-density-label" id="v2-density-label">Toolbar</span>
+          <div class="seg" role="group" aria-labelledby="v2-density-label">
+            <button type="button" data-density="simple" class="active" aria-pressed="true">Simple</button>
+            <button type="button" data-density="full" aria-pressed="false">Full</button>
+          </div>
+        </div>
+      </div>
       <div class="ribbon-functions" id="v2-ribbon-functions"></div>
     </nav>
   </div>
@@ -75,7 +98,7 @@
             <span id="v2-cut-elev">—</span>
             <span class="level-kind-chip" id="v2-cut-kind">—</span>
           </p>
-          <label class="level-isolate" title="Show only what sits on this level. Off ghosts the neighbouring level.">
+          <label class="level-isolate" title="Show only this cut. Off ghosts the neighbouring level and keeps the tracing sheet.">
             <input type="checkbox" id="v2-level-isolate" />
             Show only this level
           </label>
@@ -90,6 +113,7 @@
           <button type="button" class="panel-resize panel-resize-levels" id="v2-resize-levels"
                   aria-label="Resize levels panel" title="Drag to resize" tabindex="0"></button>
         </aside>
+        <div class="plan-column" id="v2-plan-column">
         <div class="canvas-wrap planner-canvas-wrap" id="v2-canvas-wrap">
         <div class="planner-tools plan-float-tools" role="toolbar" aria-label="Plan tools">
           <button type="button" data-tool="select" class="active">Select</button>
@@ -109,6 +133,24 @@
         <div class="canvas-status">
           <p class="ribbon-hint" id="v2-ribbon-hint" hidden></p>
           <div class="plan-options" id="v2-plan-options" hidden>
+            <div class="wall-opts" id="v2-wall-opts" hidden>
+            <div class="plan-loc" id="v2-wall-loc" hidden>
+              <span>Draw on</span>
+              <div class="seg" role="group" aria-label="Draw on">
+                <button type="button" data-wall-loc="center" class="active" aria-pressed="true" title="The line you draw is the middle of the wall.">Centreline</button>
+                <button type="button" data-wall-loc="exterior" aria-pressed="false" title="The line you draw is the outside face. Draw clockwise and the wall sits inside the line. Space flips.">Exterior face</button>
+                <button type="button" data-wall-loc="interior" aria-pressed="false" title="The line you draw is the inside face. Draw clockwise and the wall sits outside the line. Space flips.">Interior face</button>
+              </div>
+            </div>
+            <div class="plan-loc" id="v2-wall-corner" hidden>
+              <span>Corner</span>
+              <div class="seg" role="group" aria-label="Corner">
+                <button type="button" data-wall-corner="past" aria-pressed="false" title="Starting or ending on another wall's end: the new wall runs past it to its far face, and the other wall stops against the new one.">Past old wall</button>
+                <button type="button" data-wall-corner="against" class="active" aria-pressed="true" title="Starting or ending on another wall's end: the new wall stops against its side, and the other wall runs on to cover the corner.">Against old wall</button>
+                <button type="button" data-wall-corner="center" aria-pressed="false" title="Nothing is trimmed or extended: the walls meet on the line you drew.">On the line</button>
+              </div>
+            </div>
+            </div>
             <label id="v2-ctx-len-wrap">Length
               <span class="plan-context-field">
                 <input id="v2-ctx-len" type="text" inputmode="decimal" autocomplete="off" />
@@ -137,7 +179,11 @@
         </div>
         <div class="empty" id="v2-empty">
           <h3>Nothing drawn</h3>
-          <p>Pick Walls, Doors or another tool on the ribbon, then a type from the list. Open → Sample jobs creates a traced plan you can click — walls, ceilings and doors — or use Demo house for the small two-room seed.</p>
+          <p>Pick Walls, Doors or another tool on the ribbon, then a type from the list.</p>
+        </div>
+        <div class="svc-vis" id="v2-service-vis" hidden>
+          <span class="svc-vis-label">Services</span>
+          <div class="svc-vis-list" id="v2-service-vis-list" role="group" aria-label="Show services on the plan"></div>
         </div>
         <div class="legend" id="v2-legend" hidden>
           <span class="existing"><i></i>Existing</span>
@@ -241,6 +287,22 @@
           <button type="button" id="v2-attach-cancel">Cancel</button>
         </div>
       </div>
+      <!-- Route profile: sits under the plan, as in the services mock, and
+           follows whichever route or node is selected. Drawn by ui.js.
+           The top edge is a height handle; the canvas fills whatever is left. -->
+      <div class="svc-profile-dock" id="v2-service-profile-dock" hidden>
+        <button type="button" class="svc-profile-resize" id="v2-resize-profile"
+                aria-label="Resize route profile" title="Drag to change height" tabindex="0"></button>
+        <div class="svc-profile-head">
+          <p class="svc-profile-title" id="v2-service-profile-title">Route profile</p>
+          <span class="svc-profile-mode" role="group" aria-label="Drag a node in the profile to">
+            <button type="button" data-profile-mode="step" title="Dragging a node makes a vertical rise or drop (90 degrees). Hold Shift to use Slope for one drag.">Step</button>
+            <button type="button" data-profile-mode="slope" title="Dragging a node changes only its height, so the runs beside it slope (use for drainage falls). Hold Shift to use Step for one drag.">Slope</button>
+          </span>
+        </div>
+        <canvas id="v2-service-profile-canvas"></canvas>
+      </div>
+      </div>
       </div>
     </section>
 
@@ -322,6 +384,11 @@
           </div>
           <button type="button" id="v2-ctx-flip" hidden>Flip swing</button>
         </div>
+        <!-- 2.5D services: route settings while Draw route is armed, and the
+             properties of a selected route point or run. Rendered by
+             service-panel.js; it replaces the type picker and the object
+             fields while it is showing, rather than sitting among them. -->
+        <div class="planner-fields svc-fields" id="v2-service-fields" hidden></div>
       </div>
     </aside>
   </main>
@@ -360,7 +427,7 @@
         </section>
         <section class="panel" id="v2-compile-panel" hidden>
           <header>
-            <h2>Compile result</h2>
+            <h2>Take-off result</h2>
             <span id="v2-compile-kicker">—</span>
           </header>
           <div class="planner-fields" id="v2-compile-out"></div>
@@ -378,6 +445,7 @@
       <header>
         <h2 id="v2-schedule-title">Schedule</h2>
         <span id="v2-schedule-kicker">—</span>
+        <button type="button" id="v2-schedule-peek">Peek plan</button>
         <button type="button" id="v2-schedule-close">Close</button>
       </header>
       <div class="schedule-body" id="v2-schedule-body"></div>
@@ -393,6 +461,10 @@
           <button type="button" data-mass-status="existing">Existing</button>
           <button type="button" data-mass-status="planned">Planned</button>
         </div>
+        <label class="mass-services" title="Hot water, cold water, drainage, electrical and gas. Drawn in each system's colour, including vertical rises. A run with no height set is left out.">
+          <input type="checkbox" id="v2-mass-services" checked />
+          Services
+        </label>
         <span id="v2-mass-caption">Drag to orbit · scroll to zoom</span>
         <button type="button" id="v2-mass-generate">Generate model</button>
         <button type="button" id="v2-mass-show-3d" hidden>Show 3D</button>
@@ -637,9 +709,9 @@
       <header>
         <div class="library-heading">
           <h2 id="v2-library-title">Jobs</h2>
-          <p class="library-kicker" id="v2-library-kicker">Open a drawing, or start a new one.</p>
+          <p class="library-kicker" id="v2-library-kicker">Open a drawing, or start a job.</p>
         </div>
-        <button type="button" class="primary" id="v2-library-new">New drawing</button>
+        <button type="button" class="primary" id="v2-library-new">New job</button>
         <button type="button" id="v2-library-signout">Sign out</button>
         <button type="button" id="v2-library-close">Close</button>
       </header>
@@ -724,6 +796,20 @@
               <span class="about-info-value">Proprietary</span>
             </div>
           </div>
+          <!-- The catalogue count lives here rather than in the chrome: it says
+               something about the app, not about the job on screen. -->
+          <div class="about-info-item">
+            <div class="about-info-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+              </svg>
+            </div>
+            <div class="about-info-content">
+              <span class="about-info-label">Catalogue</span>
+              <span class="about-info-value" id="v2-about-catalogue">Loading…</span>
+            </div>
+          </div>
         </div>
         <div class="about-description">
           <p>StudioPractice helps a builder get to four things: a plan, a price, a picture, and a permit. Draw the job, price it, show the client what it will look like, and produce the compliance documentation the municipality asks for. Types, levels, sheets and title blocks come from the firm’s Revit template. Unknown facts stay unknown — they are asked for, never guessed.</p>
@@ -798,6 +884,6 @@
     </form>
   </div>
 
-  <script type="module" src="./ui.js?v=20261015-property"></script>
+  <script type="module" src="./ui.js?v=20261022-wall-float"></script>
 </body>
 </html>

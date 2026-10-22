@@ -46,13 +46,9 @@
          inside Register; a navigation element that is also the master list
          leaves the firm-wide view nowhere to be. -->
     <nav class="nav" id="nav" aria-label="Practice operations">
-      <button type="button" data-view="practice">Practice</button>
-      <button type="button" data-view="register">Register</button>
-      <button type="button" data-view="time">My time</button>
-      <!-- Owner-only; renderChrome() reveals it. Absent, not greyed. -->
-      <button type="button" data-view="team" id="nav-team" hidden>Team</button>
-      <button type="button" data-view="templates" id="nav-templates" hidden>Fee templates</button>
-      <button type="button" data-view="firm" id="nav-firm" hidden>Firm details</button>
+      <button type="button" data-view="practice" title="Firm-wide dashboard">Overview</button>
+      <button type="button" data-view="register" title="Every job, in one list">Jobs</button>
+      <button type="button" data-view="time" title="Your hours across all jobs">Timesheet</button>
     </nav>
     <div class="spacer"></div>
     <!-- Sticky selection: the job you were last in stays reachable in one
@@ -62,6 +58,19 @@
     <button class="btn btn-sm" id="current-job" hidden></button>
     <button class="btn btn-sm" id="switch-job" hidden>Switch job <kbd>Ctrl K</kbd></button>
     <button class="btn btn-sm btn-primary" id="new-project">New job</button>
+    <!-- Set-up-once pages, owner-only; renderChrome() reveals the menu.
+         Kept out of #nav so the main bar is only daily-use destinations. -->
+    <div class="settings" id="settings" hidden>
+      <button class="btn btn-sm" type="button" id="settings-toggle" aria-haspopup="true" aria-expanded="false">Settings &#9662;</button>
+      <div class="settings-menu" id="settings-menu" role="menu" hidden>
+        <button type="button" role="menuitem" data-view="team">People<small>Staff and access</small></button>
+        <button type="button" role="menuitem" data-view="templates" id="nav-templates">Quote templates<small>What each kind of job is quoted from</small></button>
+        <button type="button" role="menuitem" data-view="rates" id="nav-rates">
+          Rate book<small>What a BOQ prices a drawing against</small>
+        </button>
+        <button type="button" role="menuitem" data-view="firm" id="nav-firm">Invoice details<small>Letterhead and banking on certificates</small></button>
+      </div>
+    </div>
     <span class="who" id="who"></span>
     <button class="btn btn-sm" id="sign-out">Sign out</button>
   </div>

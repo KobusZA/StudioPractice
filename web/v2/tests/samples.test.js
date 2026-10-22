@@ -32,7 +32,7 @@ function ceilingSlabs(doc) {
   return (doc.slabs || []).filter((s) => skuById(pack, s.sku)?.category === "ceiling");
 }
 
-test("Open lists three named sample jobs", () => {
+test("three named sample drawings still compile as fixtures", () => {
   assert.deepEqual(SAMPLE_JOBS.map((j) => j.name), [
     "Sea Point duplex",
     "Observatory warehouse",

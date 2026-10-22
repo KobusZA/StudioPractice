@@ -20,8 +20,10 @@ export const RIBBON = [
       {
         label: "Add drawing",
         items: [
-          { id: "underlay", label: "PDF / image", command: "underlay" },
-          { id: "satellite", label: "Satellite", command: "satellite" },
+          // `anchor` items are the group's lead buttons: they render large,
+          // stacked or side by side depending on room (see ribbon-fit.js).
+          { id: "underlay", label: "PDF / image", command: "underlay", anchor: true },
+          { id: "satellite", label: "Satellite", command: "satellite", anchor: true },
           { id: "underlay-adjust", label: "Adjust", command: "underlay-adjust" },
           { id: "calibrate", label: "Set scale", command: "calibrate" },
           { id: "underlay-toggle", label: "Hide", command: "underlay-toggle" },
@@ -90,6 +92,16 @@ export const RIBBON = [
           { id: "plumbing", label: "Plumbing", tool: "place", categories: ["sanitary"] },
           { id: "waterheater", label: "Water heating", tool: "place", categories: ["waterheater"] },
           { id: "drainage", label: "Drainage", tool: "place", categories: ["drainage"] },
+          // 2.5D routing (Full only - Simple's Services group is unchanged).
+          // Place component is the same click-to-place as the four above,
+          // across every service category; the rest draw and edit routes.
+          { id: "service-place", label: "Place component", tool: "place", categories: ["electrical", "sanitary", "waterheater", "drainage"] },
+          { id: "service-route", label: "Draw route", command: "service-route" },
+          { id: "service-node", label: "Add node", command: "service-node" },
+          { id: "service-rise", label: "Rise / drop", command: "service-rise" },
+          { id: "service-connect", label: "Connect", command: "service-connect" },
+          { id: "service-type", label: "Change size / type", command: "service-type" },
+          { id: "service-slope", label: "Drainage slope", command: "service-slope" },
         ],
       },
       {
@@ -277,10 +289,10 @@ export const HINTS = {
   "underlay-adjust": "Drag the sheet to move, a corner to resize, the top handle to rotate.",
   "underlay-toggle": "Hide the sheet without removing it.",
   "underlay-off": "Remove the sheet from the plan.",
-  "level-isolate": "Show only this level. Off ghosts the neighbouring level: the floor below, or the walls above when you are on a foundation.",
-  walls: "Click to start a wall, click again to end. Esc to stop.",
-  boundary: "Click to start a boundary wall, click again to end. Esc to stop.",
-  foundations: "Click to start a foundation, click again to end. Esc to stop.",
+  "level-isolate": "Show only this cut. A ceiling plan keeps the ceiling and walls; a roof plan keeps the roof. Off ghosts the neighbouring level and shows the tracing sheet.",
+  walls: "Click to start a wall, click again to end. Draw on the centreline or a face. Space flips the face. Esc to stop.",
+  boundary: "Click to start a boundary wall, click again to end. Draw on the centreline or a face. Space flips the face. Esc to stop.",
+  foundations: "Click to start a foundation, click again to end. Draw on the centreline or a face. Space flips the face. Esc to stop.",
   floors: "Click around a room to draw a floor slab.",
   roofs: "Click around the outline to draw a roof.",
   ceilings: "Draws at floor-to-ceiling height above this level, not at floor level.",
@@ -291,6 +303,13 @@ export const HINTS = {
   plumbing: "Click to place sanitary ware.",
   waterheater: "Click to place a water heater.",
   drainage: "Click to place a drainage fitting.",
+  "service-place": "Click to place a service component: a fitting, sanitary ware, water heater or drainage fitting.",
+  "service-route": "Click to start a route, click to add points. Enter or Esc finishes. Click an existing point to join it.",
+  "service-node": "Click on a route run to add a node there. Drag a node to move it; select it and press Delete to remove it (the run joins up). Use Rise / drop on a node to change its height.",
+  "service-rise": "Select a route point, then rise or drop it to a new height or level.",
+  "service-connect": "Select a route point, then click a placed component to connect it. The point moves onto the component.",
+  "service-type": "Select one or more routes, then pick a size or type in the inspector.",
+  "service-slope": "Select drainage runs, then set the fall. Flow runs from the first point to the second.",
   furniture: "Click to place a piece of furniture.",
   casework: "Click to place casework.",
   rooms: "Click inside enclosed walls to tag a room.",
@@ -313,6 +332,21 @@ export const HINTS = {
   sheets: "Manage print sheets (A0–A4) and their title blocks.",
   "export-dxf": "Download a DXF. In Revit: open the template, then Insert → Link CAD (not File → Open).",
   "export-ifc": "Download an IFC. File → Open will ignore it unless you pick Open → IFC, then Save As a project.",
+};
+
+/**
+ * How many steps ahead of the others a group gives up size when the window is
+ * too narrow (see ribbon-fit.js). Positive = shrinks early (set up once per
+ * job); negative = protected (drawn all day). Unlisted groups are 0.
+ */
+const GROUP_PRIORITY = {
+  "Add drawing": 2,
+  Sheet: 2,
+  Levels: 1,
+  Walls: -1,
+  Ceilings: 1,
+  Structure: 1,
+  Components: 1,
 };
 
 /**
@@ -443,13 +477,27 @@ export function renderRibbon(tabsEl, functionsEl, state) {
   for (const group of tab.groups) {
     const wrap = document.createElement("div");
     wrap.className = "ribbon-group";
+    // How the group lays out (and how ribbon-fit.js shrinks it) follows from
+    // what is in it: anchors -> "mixed", 1-2 commands -> "large", else "stack".
+    const hasAnchors = group.items.some((it) => it.anchor);
+    wrap.dataset.kind = hasAnchors ? "mixed" : group.items.length <= 2 ? "large" : "stack";
+    wrap.dataset.prio = String(GROUP_PRIORITY[group.label] ?? 0);
 
     const items = document.createElement("div");
     items.className = "ribbon-group-items";
+    let anchorsEl = null;
+    let restEl = null;
+    if (hasAnchors) {
+      anchorsEl = document.createElement("div");
+      anchorsEl.className = "ribbon-anchors";
+      restEl = document.createElement("div");
+      restEl.className = "ribbon-rest";
+      items.append(anchorsEl, restEl);
+    }
     for (const item of group.items) {
       const btn = document.createElement("button");
       btn.type = "button";
-      btn.className = "ribbon-item";
+      btn.className = item.anchor ? "ribbon-item anchor" : "ribbon-item";
       btn.dataset.function = item.id;
 
       const extra = state.commandState?.(item) || {};
@@ -474,7 +522,7 @@ export function renderRibbon(tabsEl, functionsEl, state) {
         }
         btn.addEventListener("click", () => state.onFunction(item));
       }
-      items.appendChild(btn);
+      (hasAnchors ? (item.anchor ? anchorsEl : restEl) : items).appendChild(btn);
     }
 
     const label = document.createElement("span");

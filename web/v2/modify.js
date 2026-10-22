@@ -18,6 +18,7 @@ import {
   objectLabel,
   resolvedBase,
 } from "./compile.js";
+import { mirroredWallLocation, rethickenAboutLocation } from "./click-draw.js?v=20261022-wall-loc";
 import { bbox, roundGrid } from "./geom.js";
 import {
   ATTACHABLE_KINDS,
@@ -30,6 +31,7 @@ import {
   shapeRects,
   uniqueRefs,
 } from "./model.js";
+import { drawnWallThickness } from "./walls.js";
 
 const SHAPED = new Set(["room", "slab", "roof"]);
 // Every endpoint-geometry kind: rotate/mirror/copy/align/split/cut/join all
@@ -150,6 +152,7 @@ export function mirrorSelection(doc, refs, { axis = "v" } = {}) {
     }
     // A door's swing is handed, so mirroring the plan must swap it.
     if (ref.kind === "opening" && obj.swing !== undefined) obj.swing = -obj.swing;
+    if (ref.kind === "segment" && obj.location) obj.location = mirroredWallLocation(obj.location);
   }
   return done(`Mirrored ${rows.length} object${rows.length === 1 ? "" : "s"} about the ${axis === "h" ? "horizontal" : "vertical"} centre.`);
 }
@@ -173,13 +176,13 @@ export function copySelection(doc, refs, { dx = null, dy = 0 } = {}) {
     if (SHAPED.has(ref.kind)) {
       copy.shape = translateAny(copy.shape, offsetX, dy);
     } else if (ENDPOINTED.has(ref.kind)) {
-      copy.x1 = roundGrid(copy.x1 + offsetX);
-      copy.y1 = roundGrid(copy.y1 + dy);
-      copy.x2 = roundGrid(copy.x2 + offsetX);
-      copy.y2 = roundGrid(copy.y2 + dy);
+      copy.x1 = copy.x1 + offsetX;
+      copy.y1 = copy.y1 + dy;
+      copy.x2 = copy.x2 + offsetX;
+      copy.y2 = copy.y2 + dy;
     } else if (copy.x !== undefined) {
-      copy.x = roundGrid(copy.x + offsetX);
-      copy.y = roundGrid(copy.y + dy);
+      copy.x = copy.x + offsetX;
+      copy.y = copy.y + dy;
     } else {
       // An opening is anchored to a host, not to coordinates, so a blind copy
       // would land on the same spot on the same wall.
@@ -194,7 +197,7 @@ export function copySelection(doc, refs, { dx = null, dy = 0 } = {}) {
 }
 
 function translateAny(shape, dx, dy) {
-  const move = (x, y) => [roundGrid(x + dx), roundGrid(y + dy)];
+  const move = (x, y) => [x + dx, y + dy];
   return rotateShape(shape, move);
 }
 
@@ -233,13 +236,13 @@ export function alignSelection(doc, refs, { edge = "left", anchorRef = null } = 
 function translateObject(ref, obj, dx, dy) {
   if (SHAPED.has(ref.kind)) obj.shape = translateAny(obj.shape, dx, dy);
   else if (ENDPOINTED.has(ref.kind)) {
-    obj.x1 = roundGrid(obj.x1 + dx);
-    obj.y1 = roundGrid(obj.y1 + dy);
-    obj.x2 = roundGrid(obj.x2 + dx);
-    obj.y2 = roundGrid(obj.y2 + dy);
+    obj.x1 = obj.x1 + dx;
+    obj.y1 = obj.y1 + dy;
+    obj.x2 = obj.x2 + dx;
+    obj.y2 = obj.y2 + dy;
   } else if (obj.x !== undefined) {
-    obj.x = roundGrid(obj.x + dx);
-    obj.y = roundGrid(obj.y + dy);
+    obj.x = obj.x + dx;
+    obj.y = obj.y + dy;
   }
 }
 
@@ -418,6 +421,9 @@ export function retypeSelection(doc, refs, sku, { skuById = () => null } = {}) {
   for (const row of rows) {
     const field = retypeField(row.ref, row.obj, sku, skuById);
     if (!field) { skipped.push(row); continue; }
+    if (row.ref.kind === "segment") {
+      rethickenAboutLocation(row.obj, drawnWallThickness(skuById(row.obj.sku)), drawnWallThickness(sku));
+    }
     row.obj[field] = sku.id;
     retyped.push(row);
   }

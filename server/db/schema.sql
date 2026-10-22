@@ -572,3 +572,68 @@ alter table write_down add constraint write_down_reason_code_check
 -- renegotiated when scope moves and some time-and-materials jobs carry a
 -- not-to-exceed, and only the firm knows which this is.
 alter table project add column if not exists fee_ceiling boolean not null default false;
+
+-- What a BOQ prices a drawing against. The drawing app measures quantities and
+-- joins them against a book of rates, and until now that book was a file in the
+-- repository: one mock catalogue, in rand, shared by every firm and every job.
+--
+-- A separate document rather than prices inside the pack or the saved drawing
+-- (web/v2/SCHEMA.md #4). Pricing escalates far more often than the catalogue of
+-- what can be drawn, and several books coexist - a client's negotiated rates,
+-- last year's, next year's - so a drawing carries a reference and the money
+-- lives here.
+create table if not exists rate_book (
+  id              text primary key,
+  org_id          text not null references org (id),
+  name            text not null,
+  currency        text not null default 'ZAR',
+  symbol          text not null default 'R',
+  effective_from  date not null default current_date,
+  is_default      boolean not null default false,
+  note            text,
+  created_by      text not null,
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now(),
+  deleted_at      timestamptz
+);
+
+create unique index if not exists rate_book_name_live
+  on rate_book (org_id, upper(btrim(name))) where deleted_at is null;
+
+-- One line prices one thing. `model` is a SKU id from the pack; a line with no
+-- model is the category's fallback, used when the SKU itself has no price of
+-- its own (schedule.js's findRate() tries the SKU first, the category second).
+--
+-- The `unit` list is exactly what qtyForUnit() in web/v2/schedule.js reads. A
+-- unit outside it would not fail: it would silently measure as a count, and a
+-- wall priced per item is a number nobody would question until it was built.
+create table if not exists rate_book_line (
+  id            text primary key,
+  rate_book_id  text not null references rate_book (id),
+  seq           integer not null,
+  model         text,
+  category      text,
+  description   text,
+  unit          text not null check (unit in ('ea', 'm', 'm2', 'm3')),
+  rate          numeric(14, 2) not null check (rate >= 0),
+  created_by    text not null,
+  created_at    timestamptz not null default now(),
+  deleted_at    timestamptz
+);
+
+-- One book cannot price the same SKU twice, or state two fallbacks for one
+-- category. A BOQ that picks whichever row the planner happened to return
+-- first is a quote nobody can reproduce.
+create unique index if not exists rate_book_line_model_live
+  on rate_book_line (rate_book_id, upper(btrim(model)))
+  where deleted_at is null and model is not null;
+
+create unique index if not exists rate_book_line_category_live
+  on rate_book_line (rate_book_id, upper(btrim(category)))
+  where deleted_at is null and model is null and category is not null;
+
+-- Which book priced this job. Null is "the firm's default as it stands today"
+-- and is what every job registered before this column existed stays: that job
+-- genuinely was not priced against a recorded book, and naming one now would
+-- claim a provenance the record does not have.
+alter table project add column if not exists rate_book_id text references rate_book (id);

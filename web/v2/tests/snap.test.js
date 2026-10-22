@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { emptyDoc, rectShape } from "../model.js";
-import { ALIGN_ORIGIN_MAX_M, GAP_MAX_M, applyNicePoint, bestEndpointSnap, collectSnapEdges, collectSnapTargets, faceCorners, isExactPointSnap, nearestAlignments, probeAlongEdge, probeAlongOccupiedEdge, probeDirection, resolveProbes, snapCoord, snapLengthFrom, snapNiceDelta, snapPoint } from "../snap.js";
+import { ALIGN_ORIGIN_MAX_M, GAP_MAX_M, applyNicePoint, bestEndpointSnap, collectSnapEdges, collectSnapTargets, faceCorners, faceEdges, isExactPointSnap, nearestAlignments, probeAlongEdge, probeAlongOccupiedEdge, probeDirection, resolveProbes, snapCoord, snapLengthFrom, snapNiceDelta, snapPoint, snapToFace } from "../snap.js";
 
 function docWithWall(x1, y1, x2, y2, id = "s1") {
   const doc = emptyDoc();
@@ -212,6 +212,40 @@ test("collectSnapEdges includes room sides", () => {
   doc.rooms.push({ id: "r1", shape: rectShape(0, 0, 4, 3) });
   const edges = collectSnapEdges(doc);
   assert.equal(edges.length, 4);
+});
+
+test("with a thickness, a wall contributes its four faces as edges, not its centreline", () => {
+  const doc = emptyDoc();
+  doc.segments.push({ id: "s1", sku: "W", x1: 0, y1: 0, x2: 0, y2: 4 });
+  const edges = collectSnapEdges(doc, { thicknessOf: () => 0.22, categoryOf: () => "wall" });
+  assert.equal(edges.length, 4);
+  assert.ok(edges.every((e) => e.kind === "face" && e.category === "wall"));
+  const xs = edges.flatMap((e) => [e.x1, e.x2]);
+  assert.ok(xs.every((x) => Math.abs(Math.abs(x) - 0.11) < 1e-9), "every face is half a thickness off the centreline");
+});
+
+test("snapToFace lands on the side of a wall partway along it", () => {
+  const edges = faceEdges({ x1: 0, y1: 0, x2: 0, y2: 4 }, 0.22, "wall");
+  const s = snapToFace(0.15, 2.3, edges, 0.1);
+  assert.equal(s.snapped, true);
+  assert.ok(Math.abs(s.x - 0.11) < 1e-9);
+  assert.ok(Math.abs(s.y - 2.3) < 1e-9);
+  assert.equal(isExactPointSnap(s), true);
+  assert.equal(s.guideXPoint.kind, "face");
+});
+
+test("snapToFace lands on the end of a wall, so a wall can start below it", () => {
+  const edges = faceEdges({ x1: 0, y1: 0, x2: 0, y2: 4 }, 0.22, "wall");
+  const s = snapToFace(0.05, 4.04, edges, 0.1);
+  assert.equal(s.snapped, true);
+  assert.ok(Math.abs(s.y - 4) < 1e-9);
+  assert.ok(Math.abs(s.x - 0.05) < 1e-9);
+});
+
+test("snapToFace ignores centreline edges and anything out of reach", () => {
+  assert.equal(snapToFace(0.01, 1, [{ x1: 0, y1: 0, x2: 0, y2: 4 }], 0.1).snapped, false);
+  const edges = faceEdges({ x1: 0, y1: 0, x2: 0, y2: 4 }, 0.22);
+  assert.equal(snapToFace(1, 2, edges, 0.1).snapped, false);
 });
 
 test("probeDirection measures each side of a point independently", () => {

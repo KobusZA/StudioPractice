@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Getting started — Draw — StudioPractice</title>
+  <link rel="icon" href="../logo.png" type="image/png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,560&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #efe8dc;
+      --paper: #fffdf8;
+      --ink: #1a1612;
+      --soft: #5c5348;
+      --muted: #8a8074;
+      --line: rgba(26, 22, 18, 0.12);
+      --copper: #b2451e;
+      --copper-dark: #8d3416;
+      --font: "Source Sans 3", "Segoe UI", sans-serif;
+      --display: Fraunces, Georgia, serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: var(--font);
+      font-size: 18px;
+      line-height: 1.5;
+    }
+    header, main { width: min(880px, calc(100% - 40px)); margin: 0 auto; }
+    header { padding: 48px 0 8px; }
+    h1, h2, h3 { font-family: var(--display); font-weight: 560; letter-spacing: -0.01em; }
+    h1 { font-size: 44px; line-height: 1.1; margin: 0 0 12px; }
+    h2 { font-size: 28px; margin: 48px 0 8px; }
+    h3 { font-size: 22px; margin: 0 0 6px; }
+    p { margin: 0 0 14px; }
+    a { color: var(--copper-dark); }
+    .lead { font-size: 20px; color: var(--soft); max-width: 38em; }
+    .part { color: var(--copper); font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; margin: 0 0 4px; }
+    .step { margin: 28px 0 8px; }
+    .step p { color: var(--soft); }
+    figure {
+      margin: 0 0 8px;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    figure img { display: block; width: 100%; height: auto; }
+    .go {
+      display: inline-block;
+      margin: 4px 0 8px;
+      padding: 8px 14px;
+      background: var(--copper);
+      color: #fffdf8;
+      text-decoration: none;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+    .go:hover { background: var(--copper-dark); }
+    footer { width: min(880px, calc(100% - 40px)); margin: 12px auto 64px; color: var(--muted); font-size: 15px; }
+    footer a { color: var(--muted); }
+  </style>
+</head>
+<body>
+  <header>
+    <p class="part">Getting started · Part 2 of 2</p>
+    <h1>Draw</h1>
+    <p class="lead">Switch to <b>Full</b>. Load a PDF, set its scale, then draw the walls and the openings over it. If the plan is not open yet, start with <a href="index.html">Part 1, Get to the drawing</a>.</p>
+  </header>
+  <main>
+    <section class="step">
+      <h3>1. Switch to Full</h3>
+      <p><b>Toolbar: Simple | Full</b> sits at the right-hand end of the tab row. Full is the whole menu. The tabs are <b>Build</b>, <b>Document</b>, <b>Site &amp; modify</b>, <b>Output</b>, and <b>Check</b>. A grey button is not built yet; hover it and the tooltip says why. The plan starts on <b>Build</b>. The left side is the <b>active cut</b>, which starts on <b>01 GFL · floor</b>. An empty plan says <b>Nothing drawn</b>.</p>
+      <figure>
+        <img src="images/08-full-menu.png" alt="Full is selected. The Build tab shows PDF / image, Walls, Doors, Windows, and the other groups. The plan says Nothing drawn." />
+      </figure>
+    </section>
+
+    <section class="step">
+      <h3>2. Load a PDF and set the scale</h3>
+      <p>Press <b>PDF / image</b> and choose the file. The first page lands on the plan, and <b>Set scale</b> opens. Click two points a known distance apart. The length it shows is a guess from the current scale. Type the real distance in millimetres and press <b>Set scale</b>. Drag a corner if you would rather resize the sheet by eye. <b>Adjust</b>, <b>Hide</b>, and <b>Remove</b> are in the same <b>Add drawing</b> group. <b>DWG</b> and <b>CAD</b> are still grey.</p>
+      <figure>
+        <img src="images/09-set-scale.png" alt="A ground-floor PDF on the plan. Set scale is on, with two points joined and a real-distance field." />
+      </figure>
+    </section>
+
+    <section class="step">
+      <h3>3. Pick Walls, then a type</h3>
+      <p>Press <b>Walls</b>. The type list opens with a wall already chosen — masonry, 110&nbsp;mm, with plaster. Pick another row for a different thickness. The hint over the plan reads: click to start a wall, click again to end, Esc to stop.</p>
+      <figure>
+        <img src="images/10-wall-type.png" alt="Walls is on in the Full ribbon, and the type list shows masonry walls at 110 mm and 220 mm." />
+      </figure>
+    </section>
+
+    <section class="step">
+      <h3>4. Draw the walls over the sheet</h3>
+      <p>Click once where the wall starts, then move. <b>Length</b> and <b>Angle</b> follow the pointer. Type a length in millimetres and press Enter, or click the end. <b>Width</b> and <b>Height</b> belong to the type — thickness and storey height — and are the size of the wall, not the room. The next wall starts where this one ended. Click the first corner again to close the room. The line is copper because it is <b>Planned</b>.</p>
+      <figure>
+        <img src="images/11-wall-length.png" alt="A 4000 mm wall in progress along the top of the ground-floor PDF. Length is 4000, angle is 0." />
+      </figure>
+    </section>
+
+    <section class="step">
+      <h3>5. A door and a window</h3>
+      <p>Press <b>Doors</b> and click a wall. The swing is the dashed arc. Press <b>Windows</b> and click a wall. The opening breaks the wall line. Press Escape when you want to stop placing. Wait until the status line says <b>Saved</b>, then reload. The sheet, the walls, and the openings are still there. <b>Undo</b> is on the plan.</p>
+      <figure>
+        <img src="images/12-door-window.png" alt="Walls traced over the ground-floor PDF, with a door swing and a window in the top wall." />
+      </figure>
+    </section>
+
+    <section class="step">
+      <h3>6. The rest of Full</h3>
+      <p><b>Document</b> is next: <b>Room</b>, model and annotation lines, <b>Dimensions</b>, a revision cloud, <b>Section</b> and <b>Elevation</b>, and <b>Project information</b>. <b>Site &amp; modify</b> holds rotate, copy, and delete once something is selected. <b>Output</b> is the 3D view, the bill of quantities, and sheets. <b>Check</b> runs the compliance tests. Grey buttons stay on the ribbon so the ones still to come are visible.</p>
+      <figure>
+        <img src="images/13-document.png" alt="The Document tab: Room, lines, Dimensions, revision cloud, Section, Elevation, and Project information, with the traced room still on the plan." />
+      </figure>
+    </section>
+  </main>
+  <footer><a href="index.html">Part 1 — Get to the drawing</a></footer>
+</body>
+</html>

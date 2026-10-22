@@ -268,6 +268,37 @@ test("retype on an opening only accepts a SKU of the same category as its own", 
   assert.equal(doc.openings[0].sku, "D2");
 });
 
+const THICK = { T110: 0.11, T220: 0.22 };
+function thickSkuById(id) {
+  return THICK[id] ? { id, category: "wall", name: id, geometry: { thickness: THICK[id] } } : null;
+}
+
+test("retype keeps a face-drawn wall's face where it was drawn", () => {
+  // Drawn left to right on the exterior face at y = 0: the 110 mm wall's
+  // centreline sits 55 mm below that face.
+  const doc = docWith({ segments: [{ ...wall("w1", 0, 0.055, 4, 0.055, "T110"), location: "exterior" }] });
+  retypeSelection(doc, [ref("segment", "w1")], thickSkuById("T220"), { skuById: thickSkuById });
+  const seg = doc.segments[0];
+  assert.equal(seg.sku, "T220");
+  assert.ok(Math.abs(seg.y1 - 0.11) < 1e-9 && Math.abs(seg.y2 - 0.11) < 1e-9, `centreline at ${seg.y1}`);
+  assert.equal(seg.x1, 0);
+  assert.equal(seg.x2, 4);
+});
+
+test("retype grows a centreline wall both ways, as before", () => {
+  const doc = docWith({ segments: [wall("w1", 0, 1, 4, 1, "T110")] });
+  retypeSelection(doc, [ref("segment", "w1")], thickSkuById("T220"), { skuById: thickSkuById });
+  assert.equal(doc.segments[0].y1, 1);
+  assert.equal(doc.segments[0].y2, 1);
+});
+
+test("mirroring swaps the name of the face a wall was drawn on", () => {
+  const doc = docWith({ segments: [{ ...wall("w1", 0, 0, 4, 0), location: "exterior" }, wall("w2", 0, 2, 4, 2)] });
+  mirrorSelection(doc, [ref("segment", "w1"), ref("segment", "w2")], { axis: "h" });
+  assert.equal(doc.segments[0].location, "interior");
+  assert.equal(doc.segments[1].location, undefined);
+});
+
 // --- attach base -----------------------------------------------------------
 
 /** A foundation and two walls on it, all on the ground level. */

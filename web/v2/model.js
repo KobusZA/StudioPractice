@@ -20,6 +20,7 @@ import {
   unionRectsOuter,
 } from "./geom.js";
 import { normalizeSatelliteUnderlay } from "./satellite.js";
+import { expandServiceRefs, normalizeServices } from "./service-model.js";
 
 export const DOC_SCHEMA = "sp.doc/2";
 export const DOC_STORE_KEY = "sp-planner-document-v2";
@@ -34,6 +35,10 @@ export const ENTITY_KINDS = [
   "beam",
   "stair",
   "line",
+  // 2.5D services (service-model.js). A network is not selectable - it is a
+  // grouping, not a thing on the plan - so only nodes and edges have refs.
+  "serviceNode",
+  "serviceEdge",
 ];
 
 /**
@@ -112,6 +117,12 @@ export function emptyDoc() {
     // Document > Lines (`model-lines`/`annot-lines`) - see LINE_KINDS above
     // for why one array serves both ribbon buttons.
     lines: [],
+    // 2.5D service routing - see service-model.js. Normalised, not nested:
+    // a route that rises through three storeys is one network whose nodes
+    // carry their own level, not three per-level copies.
+    serviceNetworks: [],
+    serviceNodes: [],
+    serviceEdges: [],
     groups: [],
     sheets: [],
     // Named section cuts (section.js's `createSection`). Every use of the
@@ -329,6 +340,8 @@ const KIND_TO_ARRAY = {
   beam: "beams",
   stair: "stairs",
   line: "lines",
+  serviceNode: "serviceNodes",
+  serviceEdge: "serviceEdges",
 };
 
 export function collectionFor(doc, kind) {
@@ -595,7 +608,9 @@ export class PlanStore {
   // moving ---------------------------------------------------------------
   snapshotMoveTargets(refs) {
     const snaps = [];
-    for (const ref of uniqueRefs(refs)) {
+    // A service edge moves its two nodes and a node moves its whole riser
+    // column, so a riser is never left standing in two places.
+    for (const ref of expandServiceRefs(this.doc, uniqueRefs(refs))) {
       const obj = objectByRef(this.doc, ref);
       if (!obj) continue;
       if (obj.shape) snaps.push({ ref, shape: clone(obj.shape) });
@@ -652,6 +667,9 @@ const JOB_CONTENT_ARRAYS = [
   "beams",
   "stairs",
   "lines",
+  "serviceNetworks",
+  "serviceNodes",
+  "serviceEdges",
   "sheets",
   "levels",
   "revisionClouds",
@@ -763,6 +781,7 @@ export function normalizeDoc(raw) {
       };
     })
     .filter(Boolean);
+  Object.assign(doc, normalizeServices(raw, { itemIds: new Set(doc.items.map((i) => i.id)) }));
   doc.groups = Array.isArray(raw.groups) ? raw.groups : [];
   doc.sheets = Array.isArray(raw.sheets) ? raw.sheets : [];
   // A malformed section (missing a cut vector, a non-finite length) is

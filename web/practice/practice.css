@@ -92,7 +92,29 @@ kbd {
   background: var(--copper); border-color: var(--copper-dark); color: #fff; cursor: default;
 }
 #current-job.is-here .muted { color: rgba(255, 255, 255, 0.85); }
-.nav button.is-parent { border-bottom: 2px dotted var(--copper); }
+/* Inside a job: Jobs is the lit parent, everything else steps back. */
+.nav.in-job button { opacity: 0.55; }
+.nav.in-job button:hover { opacity: 1; }
+.nav button.is-parent { opacity: 1; color: var(--copper-dark); border-bottom: 2px solid var(--copper); }
+
+/* Settings menu: owner-only, set-up-once pages. */
+.settings { position: relative; }
+.settings-toggle[aria-current="page"], #settings-toggle[aria-current="page"] {
+  border-color: var(--copper); color: var(--copper-dark);
+}
+.settings-menu {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 50; min-width: 240px;
+  background: var(--bg-elevated); border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-sm); box-shadow: 0 6px 18px rgba(26, 22, 18, 0.14);
+  padding: 4px; display: flex; flex-direction: column;
+}
+.settings-menu[hidden] { display: none; }
+.settings-menu button {
+  border: 0; background: transparent; text-align: left; padding: 7px 10px;
+  font-size: 13px; font-weight: 600; border-radius: 2px; cursor: pointer;
+}
+.settings-menu button:hover { background: var(--bg-hover); }
+.settings-menu small { display: block; font-weight: 400; font-size: 11px; color: var(--ink-muted); }
 
 /* --- layout ------------------------------------------------------------- */
 
@@ -109,7 +131,17 @@ kbd {
 
 .main { overflow-y: auto; min-height: 0; }
 .wrap { width: min(1180px, calc(100% - 44px)); margin: 0 auto; }
-.proj-head { padding: 16px 22px 0; }
+/* A tinted band with a copper top edge: the job page looks like a place you
+   have entered, where the overview and list screens stay neutral. */
+.proj-head {
+  padding: 14px 22px 0; border-top: 3px solid var(--copper);
+  background: color-mix(in srgb, var(--copper) 11%, var(--bg-elevated));
+}
+.proj-head h1 .job-code {
+  display: inline-block; vertical-align: middle; margin-right: 10px; padding: 2px 8px;
+  font-family: inherit; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em;
+  color: #fff; background: var(--copper); border-radius: var(--radius-sm);
+}
 .crumbs { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; font-size: 12px; }
 .crumbs button {
   border: 0; background: transparent; padding: 2px 5px; margin-left: -5px;
@@ -131,12 +163,28 @@ kbd {
 .proj-head-drawing { position: relative; display: flex; flex-direction: column; align-items: flex-end;
   /* Pull the thumbnail up beside the breadcrumb row so its top edge lines up with "← Register". */
   margin-top: -27px; }
-/* The open button sits on the thumbnail rather than under it. */
-.proj-head-drawing > .btn {
+/* The open button sits on the thumbnail rather than under it. Only when
+   there is a thumbnail: with none (a job that has no drawing yet) the button
+   stays in the flow, otherwise it floats out of an empty box and up under
+   the topbar. */
+.proj-head-drawing > .dwg + .btn {
   position: absolute; right: 6px; bottom: 6px; box-shadow: 0 1px 4px rgba(0,0,0,.25);
 }
+.proj-head-drawing > .btn:only-child { margin-top: 27px; }
 .dwg figcaption:empty { display: none; }
 .proj-head-drawing .dwg-md figcaption { display: none; }
+/* Log time beside the drawing, bottom-aligned with its button. */
+.proj-head-side { display: flex; align-items: flex-end; gap: 10px; flex-shrink: 0; }
+/* Tabs sit inside the tinted header band, edge to edge, so they read as the
+   way around this job rather than as one more section below it. */
+.proj-head .tabs { margin: 0 -22px; }
+
+/* A button that reads as a link: "Add client", "+ task", "Expand all". */
+.link-btn {
+  border: 0; background: transparent; padding: 0; font: inherit; font-weight: 600;
+  color: var(--copper-dark); cursor: pointer;
+}
+.link-btn:hover { text-decoration: underline; text-underline-offset: 2px; }
 
 /* --- the drawing, at a glance ------------------------------------------- */
 
@@ -220,7 +268,11 @@ h3.sec small {
 
 /* A count that nobody can act on is a poster. Every risk tile is the entry
    point to the register filtered to exactly the jobs it counted. */
-button.kpi { width: 100%; text-align: left; font: inherit; }
+button.kpi {
+  width: 100%; text-align: left; font: inherit;
+  /* A button centres its content vertically; a tile beside a plain one must not. */
+  display: flex; flex-direction: column; justify-content: flex-start;
+}
 button.kpi:hover { border-color: var(--copper); background: var(--bg-hover); }
 button.kpi:disabled { cursor: default; }
 button.kpi:disabled:hover { border-color: var(--hairline-strong); background: var(--bg-elevated); }
@@ -399,6 +451,35 @@ table.grid tr.done td:first-child { color: var(--ok); }
 table.grid tr.done { background: var(--ok-tint); }
 table.grid td select { height: 24px; padding: 0 4px; font-size: 11.5px; border: 1px solid var(--hairline-strong); background: var(--bg-primary); border-radius: var(--radius-sm); }
 .task-note { font-size: 11px; color: var(--ink-muted); margin-top: 2px; }
+
+h3.sec.sec-with-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.sec-actions { display: flex; align-items: center; gap: 12px; font-family: var(--font-ui); font-size: 12px; }
+.add-task-form { margin-bottom: 12px; }
+
+/* One collapsible group per phase. The header row is the toggle; the "+ task"
+   link on its right opens the add form with that phase filled in. */
+table.task-table tr.phase-row td { padding: 0; }
+.task-table .group-toggle {
+  display: inline-flex; align-items: baseline; gap: 8px; padding: 7px 10px;
+  border: 0; background: transparent; font: inherit; color: inherit;
+  text-transform: inherit; letter-spacing: inherit; cursor: pointer; text-align: left;
+}
+.task-table .caret::before { content: "\25B8"; display: inline-block; width: 10px; color: var(--ink-muted); }
+.task-table .group-toggle[aria-expanded="true"] .caret::before { content: "\25BE"; }
+.task-table .group-evi {
+  font-weight: 500; text-transform: none; letter-spacing: 0; color: var(--ink-muted);
+}
+.task-table .group-add {
+  float: right; padding: 7px 10px; font-size: 11.5px; text-transform: none; letter-spacing: 0;
+}
+.task-table tr.phase-row.current td { box-shadow: inset 3px 0 0 var(--copper); }
+.task-table tr.phase-row.current .group-toggle { color: var(--copper-dark); }
+.task-table tbody tr.phase-row:hover { background: transparent; }
+/* "Log time" is on every row, faded except on the one being pointed at, so
+   twenty-one buttons do not stand in a column competing with the status. */
+.task-table .task-log { opacity: 0.4; transition: opacity 0.12s; }
+.task-table tr:hover .task-log, .task-table .task-log:focus-visible { opacity: 1; }
+@media (hover: none) { .task-table .task-log { opacity: 1; } }
 
 .task-picker { display: grid; gap: 4px; max-height: 260px; overflow-y: auto; }
 .task-pick {
@@ -612,6 +693,20 @@ td.feebar-cell { width: 240px; min-width: 200px; }
   background: var(--bg-elevated); border: 1px dashed var(--hairline-strong);
   border-radius: var(--radius-md); line-height: 1.6;
 }
+h4.form-group {
+  margin: 16px 0 8px; padding-bottom: 4px; font-size: 11px; font-weight: 600;
+  letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-muted);
+  border-bottom: 1px solid var(--hairline-strong);
+}
+h4.form-group:first-child { margin-top: 0; }
+.hint {
+  display: inline-grid; place-items: center; width: 14px; height: 14px; margin-left: 4px;
+  border-radius: 50%; font-size: 10px; font-weight: 600; cursor: help;
+  color: var(--ink-muted); border: 1px solid var(--hairline-strong);
+}
+.sticky-actions {
+  position: sticky; bottom: 0; padding: 10px 0; background: var(--bg-elevated, #fff);
+}
 .note-line { margin: 8px 0 0; font-size: 11.5px; color: var(--ink-muted); line-height: 1.5; }
 
 .toast {
@@ -797,6 +892,7 @@ td.feebar-cell { width: 240px; min-width: 200px; }
 .mt-composer { margin-top: 10px; }
 .mt-composer .fields { grid-template-columns: minmax(200px, 1.6fr) repeat(3, minmax(90px, 0.6fr)) minmax(140px, 1fr); }
 .mt-more[hidden], #mt-phase-free[hidden] { display: none; }
+.mt-more .note-line { margin: 6px 0 0; }
 .mt-more { margin-top: 8px; }
 #mt-phase-free { margin-top: 6px; }
 .client-tag { display: block; min-height: 1.2em; margin-top: 3px; font-size: 12px; color: var(--ink-muted); }

@@ -108,6 +108,24 @@ export function createCloud({
       return call("POST", `/api/projects/${encodeURIComponent(projectId)}/restore`);
     },
 
+    // --- the rate book --------------------------------------------------
+
+    /**
+     * What a BOQ prices this job's drawing against. Rates are referenced, never
+     * embedded in the pack or the saved document (SCHEMA.md #4), so this is a
+     * separate read rather than part of the drawing.
+     */
+    async rateBook(rateBookId) {
+      const body = await call("GET", `/api/rate-books/${encodeURIComponent(rateBookId)}`);
+      return body?.rateBook ?? null;
+    },
+
+    /** The book a job registered today would be priced against, or null. */
+    async defaultRateBookId() {
+      const body = await call("GET", "/api/rate-books");
+      return (body?.rateBooks ?? []).find((book) => book.isDefault)?.id ?? null;
+    },
+
     /** Snapshot in, photorealistic visualization out. The key stays on the server. */
     async visualize({ image }) {
       const body = await call("POST", "/api/visualize", { image });

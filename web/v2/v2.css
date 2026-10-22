@@ -107,6 +107,7 @@ body {
 }
 
 .brand-mark {
+  display: block;
   width: 48px;
   height: 48px;
   border-radius: 50%;
@@ -417,6 +418,73 @@ canvas {
   height: 2px;
   width: 14px;
   background-image: repeating-linear-gradient(90deg, var(--copper) 0 6px, transparent 6px 10px);
+}
+
+/* Show/hide for service runs. Sits above the existing/planned legend, and
+   drops to the corner when that legend is not on screen. */
+.svc-vis {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  max-width: calc(100% - 24px);
+  background: rgba(251, 247, 240, 0.94);
+  border: 1px solid var(--line);
+  padding: 5px 8px;
+  font-size: 0.75rem;
+}
+
+.canvas-wrap:has(.legend:not([hidden])) .svc-vis {
+  bottom: 46px;
+}
+
+.svc-vis[hidden] {
+  display: none !important;
+}
+
+.svc-vis-label {
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.svc-vis-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.svc-vis-list button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  border: 1px solid transparent;
+  background: transparent;
+  font: inherit;
+  font-size: 0.75rem;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.svc-vis-list button i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.svc-vis-list button[aria-pressed="true"] {
+  border-color: var(--line);
+  background: #fff;
+}
+
+.svc-vis-list button[aria-pressed="false"] {
+  opacity: 0.45;
+  text-decoration: line-through;
 }
 
 .storey-list {
@@ -1288,15 +1356,35 @@ tbody tr:hover { background: rgba(26, 22, 18, 0.04); }
   transition: transform 0.18s ease;
 }
 
+/* The app's own health, trailing the job it is secondary to. Usually just the
+   dot; the label beside it is where passing messages land. */
 .chrome .status {
   font-size: 0.74rem;
   min-width: 0;
+  margin-left: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .chrome .actions {
   flex-wrap: nowrap;
   gap: 6px;
   align-items: center;
+  padding-left: 12px;
+  border-left: 1px solid var(--line);
+}
+
+/* Hairline between two groups that sit in the same flex row. */
+.chrome .bar-sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 4px;
+  background: var(--line);
+  flex-shrink: 0;
+}
+
+.chrome .bar-sep[hidden] {
+  display: none;
 }
 
 /* Account: avatar in the chrome opens a full-screen page over the drawing. */
@@ -1610,13 +1698,22 @@ tbody tr:hover { background: rgba(26, 22, 18, 0.04); }
 /* The job's name and its save state, in the chrome, because the title block
    prints doc.name and there has to be somewhere to type it. The sync state sits
    beside it deliberately: the name identifies which job is open and the state
-   says whether what is on screen has been written anywhere. */
-.chrome .status-sep {
-  opacity: 0.4;
+   says whether what is on screen has been written anywhere.
+
+   The three zones of the bar (brand / this job / commands) are separated by a
+   hairline rather than left to run together, because they are about three
+   different things. */
+.chrome .doc {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding-left: 14px;
+  border-left: 1px solid var(--line);
 }
 
 .chrome .job-code {
-  font-size: 0.72rem;
+  font-size: 0.78rem;
   font-weight: 700;
   letter-spacing: 0.04em;
   color: var(--copper);
@@ -1629,6 +1726,9 @@ tbody tr:hover { background: rgba(26, 22, 18, 0.04); }
 }
 
 .chrome .practice-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
   font-size: 0.72rem;
   font-weight: 600;
   color: inherit;
@@ -1642,20 +1742,31 @@ tbody tr:hover { background: rgba(26, 22, 18, 0.04); }
   text-decoration: underline;
 }
 
+/* The name of the job is the most important thing in the bar, so it is also
+   the largest. The dotted underline is there from the start: borderless-until-
+   hover read as static text and nobody found it. */
 .chrome .job-name {
+  /* Width tracks the text (sizeJobName). An input at its intrinsic width left
+     a block of empty field between the name and "Saved", which read as the
+     save state belonging to nothing. */
+  width: 13ch;
   min-width: 8ch;
-  max-width: 26ch;
+  max-width: 32ch;
   padding: 2px 6px;
   border: 1px solid transparent;
+  border-bottom: 1px dotted color-mix(in srgb, currentColor 35%, transparent);
   border-radius: 4px;
   background: transparent;
-  color: inherit;
+  color: var(--ink);
   font: inherit;
-  font-size: 0.78rem;
+  font-size: 0.95rem;
+  text-overflow: ellipsis;
 }
 
-.chrome .job-name:hover {
+.chrome .job-name:hover,
+.chrome .job-name:focus {
   border-color: color-mix(in srgb, currentColor 25%, transparent);
+  border-bottom-style: solid;
 }
 
 .chrome .job-name:focus-visible {
@@ -1680,12 +1791,13 @@ tbody tr:hover { background: rgba(26, 22, 18, 0.04); }
 
 /* The row moved under us. Deliberately loud, deliberately two buttons, and
    deliberately no default: picking one for the user is the silent merge the
-   plan refuses. */
+   plan refuses. A full-width strip under the topbar, not a cell inside it, so
+   the file commands stay where the user last saw them. */
 .conflict-bar {
-  grid-column: 1 / -1;
   display: flex;
   align-items: center;
   gap: 10px;
+  margin: 0 14px 6px;
   padding: 6px 10px;
   border-radius: 4px;
   background: color-mix(in srgb, var(--copper) 16%, transparent);
@@ -2068,8 +2180,20 @@ body.library-home {
   }
 }
 
+/* Narrow: the app's own status line goes first. Hiding the whole block took
+   the job's name and the conflict warning with it, which is the opposite of
+   what has to survive. */
 @media (max-width: 720px) {
-  .chrome .status {
+  .chrome .doc .status {
+    display: none;
+  }
+
+  .chrome .job-name {
+    font-size: 0.86rem;
+    max-width: 18ch;
+  }
+
+  .ribbon-density-label {
     display: none;
   }
 }
@@ -2105,6 +2229,113 @@ body.library-home {
 .stage-row .planner-canvas-wrap {
   flex: 1;
   min-width: 0;
+}
+
+/* Plan on top, route profile underneath (the services mock's layout). */
+.plan-column {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.svc-profile-dock {
+  position: relative;
+  flex: 0 0 auto;
+  height: 190px;
+  display: flex;
+  flex-direction: column;
+  padding: 6px 12px 10px;
+  background: #f8f4ed;
+  border-top: 1px solid var(--line-strong, rgba(26, 22, 18, 0.25));
+}
+
+.svc-profile-resize {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -5px;
+  height: 10px;
+  z-index: 4;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: ns-resize;
+  touch-action: none;
+}
+
+.svc-profile-resize::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 3px;
+  width: 36px;
+  height: 3px;
+  margin-left: -18px;
+  border-radius: 2px;
+  background: rgba(26, 22, 18, 0.28);
+}
+
+.svc-profile-resize:hover::after,
+.svc-profile-resize:focus-visible::after,
+.svc-profile-resize.is-dragging::after {
+  background: var(--copper, #b2451e);
+  left: 0;
+  width: 100%;
+  margin-left: 0;
+  border-radius: 0;
+}
+
+.svc-profile-resize:focus-visible { outline: none; }
+
+.svc-profile-dock[hidden] {
+  display: none;
+}
+
+.svc-profile-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.svc-profile-mode {
+  display: inline-flex;
+  border: 1px solid var(--line-strong, rgba(26, 22, 18, 0.25));
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.svc-profile-mode button {
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 2px 10px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.svc-profile-mode button.active {
+  background: var(--ink, #1a1612);
+  color: #fff;
+}
+
+.svc-profile-title {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--soft, #665d52);
+}
+
+.svc-profile-dock canvas {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  border: 1px solid var(--line, rgba(26, 22, 18, 0.14));
+  border-radius: 4px;
+  background: #fffdf8;
 }
 
 .level-widget {
@@ -2297,9 +2528,40 @@ body.library-home {
   background: var(--paper-2);
 }
 
-.ribbon-tabs {
+/* Tabs on the left, the density switch on the right: it changes this row, so
+   it lives on this row. */
+.ribbon-tabrow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   border-bottom: 1px solid var(--line);
   padding: 0 18px;
+}
+
+.ribbon-tabs {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border-bottom: none;
+}
+
+.ribbon-density {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.ribbon-density-label {
+  font-size: 0.66rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.ribbon-density .seg button {
+  padding: 3px 9px;
+  font-size: 0.72rem;
 }
 
 /* Shrink-to-width row: groups never wrap to a second line or grow a
@@ -2408,8 +2670,8 @@ body.library-home {
 
 .ribbon-item .glyph,
 .ribbon-overflow-btn .glyph {
-  width: 30px;
-  height: 30px;
+  width: var(--lgi);
+  height: var(--lgi);
   flex-shrink: 0;
 }
 
@@ -2420,45 +2682,165 @@ body.library-home {
   text-overflow: ellipsis;
 }
 
-.ribbon-group[data-scale="stack"] .ribbon-group-items {
-  display: grid;
-  grid-auto-flow: column;
-  grid-template-rows: repeat(3, 1fr);
-  gap: 0 2px;
+/* ---- Sizing steps -------------------------------------------------------
+   ribbon-fit.js sets these data attributes on each .ribbon-group (see the
+   LADDERS table there); this block says what each one looks like.
+   Comfort (row height, padding, column width) is given up before button
+   size, captions before the buttons, and a dropdown comes last. */
+.ribbon-group {
+  --row: 24px;
+  --ico: 16px;
+  --colw: 92px;
+  --lgw: 56px;
+  --lgi: 28px;
+  --fs: 0.74rem;
 }
 
-.ribbon-group[data-scale="stack"] .ribbon-item {
+.ribbon-group[data-comfort="narrow"] {
+  --colw: 0px;
+}
+
+.ribbon-group[data-comfort="tight"] {
+  --row: 19px;
+  --ico: 13px;
+  --colw: 0px;
+  --lgw: 48px;
+  --lgi: 24px;
+  --fs: 0.7rem;
+}
+
+/* Large buttons (kind "large" at its first two steps, and mixed anchors
+   side by side) keep the default icon-over-caption .ribbon-item look. */
+.ribbon-group[data-kind="large"] .ribbon-item,
+.ribbon-anchors .ribbon-item {
+  min-width: var(--lgw);
+  font-weight: 600;
+}
+
+/* Small buttons: a three-row grid of icon + caption rows. This is every
+   "stack" group, a "large" group once it stacks, and a mixed group's rest. */
+.ribbon-group[data-kind="stack"] .ribbon-group-items,
+.ribbon-group[data-kind="large"][data-big="0"] .ribbon-group-items,
+.ribbon-rest {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(3, var(--row));
+  gap: 0 2px;
+  align-content: center;
+}
+
+.ribbon-group[data-kind="stack"] .ribbon-item,
+.ribbon-group[data-kind="large"][data-big="0"] .ribbon-item,
+.ribbon-rest .ribbon-item {
   flex-direction: row;
   justify-content: flex-start;
-  min-width: 0;
-  padding: 1px 6px;
+  height: var(--row);
+  min-width: var(--colw);
+  padding: 0 8px;
+  gap: 6px;
+  font-size: var(--fs);
+  font-weight: 400;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.ribbon-group[data-kind="stack"] .ribbon-item .glyph,
+.ribbon-group[data-kind="large"][data-big="0"] .ribbon-item .glyph,
+.ribbon-rest .ribbon-item .glyph {
+  width: var(--ico);
+  height: var(--ico);
+}
+
+.ribbon-group[data-kind="stack"] .ribbon-item .caption,
+.ribbon-group[data-kind="large"][data-big="0"] .ribbon-item .caption,
+.ribbon-rest .ribbon-item .caption {
+  max-width: none;
+}
+
+/* Tight small buttons trade padding for width. */
+.ribbon-group[data-comfort="tight"] .ribbon-item {
+  padding-left: 5px;
+  padding-right: 5px;
   gap: 4px;
 }
 
-.ribbon-group[data-scale="stack"] .glyph {
-  width: 14px;
-  height: 14px;
+/* Mixed: anchors beside a small-button grid. */
+.ribbon-group[data-kind="mixed"] .ribbon-group-items {
+  display: flex;
+  gap: 4px;
+  align-items: stretch;
 }
 
-.ribbon-group[data-scale="icon"] .ribbon-group-items {
-  display: grid;
-  grid-auto-flow: column;
-  grid-template-rows: repeat(3, 1fr);
-  gap: 0 2px;
+.ribbon-anchors {
+  display: flex;
+  gap: 2px;
 }
 
-.ribbon-group[data-scale="icon"] .ribbon-item {
-  min-width: 28px;
-  padding: 2px 4px;
+.ribbon-rest {
+  align-self: center;
 }
 
-.ribbon-group[data-scale="icon"] .caption {
+.ribbon-rest:empty {
   display: none;
 }
 
-.ribbon-group[data-scale="icon"] .glyph {
+/* Anchors stacked: two medium buttons one above the other. */
+.ribbon-group[data-anchors="stack"] .ribbon-anchors {
+  display: grid;
+  grid-template-rows: repeat(2, 1fr);
+}
+
+.ribbon-group[data-anchors="stack"] .ribbon-anchors .ribbon-item {
+  flex-direction: row;
+  justify-content: flex-start;
+  min-width: 104px;
+  min-height: 0;
+  padding: 0 10px;
+  gap: 8px;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.ribbon-group[data-anchors="stack"] .ribbon-anchors .ribbon-item .glyph {
+  width: 20px;
+  height: 20px;
+}
+
+.ribbon-group[data-anchor-comfort="tight"] .ribbon-anchors .ribbon-item {
+  min-width: 0;
+  padding: 0 7px;
+  gap: 5px;
+  font-size: 0.72rem;
+}
+
+.ribbon-group[data-anchor-comfort="tight"] .ribbon-anchors .ribbon-item .glyph {
   width: 16px;
   height: 16px;
+}
+
+/* Icons only: captions are dropped and buttons shrink to their glyph. The
+   anchors' stacked sizing above is more specific, hence !important. */
+.ribbon-group[data-icons="all"] .caption,
+.ribbon-group[data-icons="rest"] .ribbon-rest .caption {
+  display: none;
+}
+
+.ribbon-group[data-icons="all"] .ribbon-item,
+.ribbon-group[data-icons="rest"] .ribbon-rest .ribbon-item {
+  min-width: 0 !important;
+  padding: 0 6px !important;
+}
+
+.ribbon-group[data-icons="all"] .ribbon-item .glyph,
+.ribbon-group[data-icons="rest"] .ribbon-rest .ribbon-item .glyph {
+  width: 16px !important;
+  height: 16px !important;
+}
+
+/* A collapsed group lists its items as one flat menu, whatever the kind. */
+.ribbon-group[data-scale="collapsed"] .ribbon-anchors,
+.ribbon-group[data-scale="collapsed"] .ribbon-rest {
+  display: contents;
 }
 
 .ribbon-group[data-scale="collapsed"] .ribbon-group-items {
@@ -2668,7 +3050,8 @@ body.library-home {
   pointer-events: auto;
 }
 
-.plan-options[hidden] {
+.plan-options[hidden],
+.plan-options [hidden] {
   display: none !important;
 }
 
@@ -2714,6 +3097,53 @@ body.library-home {
 .plan-options .plan-context-field span {
   font-size: 0.7rem;
   color: var(--ink-soft);
+}
+
+.plan-loc {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.wall-opts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+}
+
+/* While a wall is being drawn the choices sit beside its start (placed from
+   ui.js), so the eye does not have to leave the line to change them. */
+.wall-opts.floating {
+  position: fixed;
+  z-index: 30;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 8px;
+  background: rgba(243, 238, 228, 0.96);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  pointer-events: auto;
+}
+
+.wall-opts.floating .plan-loc {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.plan-loc[hidden] {
+  display: none !important;
+}
+
+.plan-loc .seg button {
+  padding: 2px 8px;
+  font-size: 0.72rem;
 }
 
 /* Merged Types + Inspector dock: one panel, three states
@@ -3340,6 +3770,28 @@ body.library-home {
   margin-right: auto;
 }
 
+#v2-mass-caption {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mass-services {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.mass-services input {
+  margin: 0;
+}
+
 .mass-panel .canvas-wrap {
   flex: 1;
 }
@@ -3720,6 +4172,26 @@ body.library-home {
   display: none !important;
 }
 
+/* Peek: "Show on plan" needs the plan visible, and a modal over the whole
+   canvas cannot give it. Rather than closing the schedule to reveal the
+   highlight (and losing the line the user was reading), the panel docks to
+   one side and the backdrop stops swallowing clicks, so locating an element
+   and reading the line it came from are the same screen. */
+.schedule-overlay.peek {
+  background: transparent;
+  pointer-events: none;
+  justify-content: flex-end;
+  align-items: stretch;
+  padding: 12px;
+}
+
+.schedule-overlay.peek .schedule-panel {
+  pointer-events: auto;
+  width: min(440px, 100%);
+  height: 100%;
+  box-shadow: 0 10px 30px rgba(20, 18, 15, 0.26);
+}
+
 .schedule-panel {
   width: min(960px, 100%);
   height: min(760px, 100%);
@@ -3812,6 +4284,18 @@ body.library-home {
 .schedule-locate:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+/* "Show all" on the rolled-up line: every drawn element behind it at once,
+   which is the question a schedule line actually raises ("where is my 42 m
+   of 110 wall?"), not "where is the third one". */
+.schedule-locate-all {
+  white-space: nowrap;
+}
+
+.schedule-plan-cell {
+  text-align: right;
+  white-space: nowrap;
 }
 
 /* Sheets: Output > Print > Sheets. A0-A4 title blocks; see sheets.js for the
@@ -4524,17 +5008,64 @@ body.library-home .library-foot {
   opacity: 0.5;
 }
 
-.library-samples {
+.library-foot {
+  margin: 12px 0 0;
+}
+
+/* --- 2.5D services dock (service-panel.js) --------------------------------
+   Same field language as the rest of the Inspector; the only new ideas are a
+   block per concern and a collapsible route profile (the mock's lower panel). */
+.svc-fields[hidden] {
+  display: none !important;
+}
+
+.svc-fields .svc-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line, rgba(26, 22, 18, 0.14));
+}
+
+.svc-fields .svc-block h3 {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.svc-fields .svc-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.svc-fields .svc-buttons button {
+  flex: 1;
+}
+
+.svc-fields .svc-true strong {
+  color: #2675b8;
+}
+
+.svc-fields .svc-ends {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.svc-fields .svc-ends > div {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin-top: 8px;
 }
 
-.library-sample-row .library-row-main {
-  cursor: default;
+.svc-fields .svc-ends > div > span {
+  font-size: var(--label-size);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
 }
 
-.library-foot {
-  margin: 12px 0 0;
+.svc-fields .warn {
+  margin: 0;
+  color: #8d3416;
+  font-size: 0.82rem;
 }

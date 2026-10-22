@@ -10,6 +10,7 @@
 import { ApiError, api } from "./api.js";
 import { drawPreview } from "./preview.js";
 import { mountTemplateEditor } from "./settings.js";
+import { mountRateBook } from "./rates.js";
 import { mountFirmSettings } from "./firm.js";
 import { mountTeam } from "./team.js";
 
@@ -46,6 +47,15 @@ const state = {
   openCertificate: null,
   feeSchedule: null,
   tasks: [],
+  // Task-list UI on the job page, reset when the job changes: which phase
+  // groups are expanded (null until first drawn, then a Set of phase keys),
+  // and the phase the add-a-task form is open under (null when closed).
+  taskGroupsOpen: null,
+  addTask: null,
+  // What a task's "Log time" pre-fills on the Time tab, and whether that
+  // form's prints / travel / pricing row is showing.
+  timePrefill: null,
+  jobTimeMore: false,
   monthEntries: [],
   signUpMode: false,
   returnView: null,
@@ -57,6 +67,9 @@ const state = {
   orgSettings: null,
   // Staff, for the certificate's "whose time" filter (owner only).
   team: [],
+  // The firm's rate books, for the register form's "what prices this job"
+  // picker. Owner only; a BOQ's prices are cost-tier money.
+  rateBooks: [],
 };
 
 const el = (id) => document.getElementById(id);
@@ -69,7 +82,7 @@ const el = (id) => document.getElementById(id);
  * What this helper is for is the other half: hiding the *write* forms
  * (start a certificate, add a line, write a schedule) that would otherwise
  * sit on screen and 403 the moment somebody without the capability submits
- * them - "hide, don't disable" (PERMISSIONS-PROPOSAL.md Â§"web/practice/").
+ * them - "hide, don't disable" (PERMISSIONS-PROPOSAL.md §"web/practice/").
  */
 function canViewBilled() {
   return Boolean(state.session?.capabilities?.canViewBilled);
@@ -492,13 +505,13 @@ function registerHtml() {
     return `<tr class="row-link${flagged ? " flagged" : ""}" data-project="${esc(project.id)}">
       <td><span class="code-cell">${esc(project.code || "no code")}</span></td>
       <td>${esc(project.name || "Untitled")}</td>
-      <td>${esc(project.clientName || "â€”")}</td>
-      <td>${esc(type?.name || project.typeCode || "â€”")}</td>
+      <td>${esc(project.clientName || "—")}</td>
+      <td>${esc(type?.name || project.typeCode || "—")}</td>
       <td>${project.currentPhase
     ? `${esc(project.currentPhase)}<em>${dayCount(daysSince(project.phaseSince))}</em>`
     : '<span class="pill flat">not stated</span>'}</td>
       <td>${project.status === "open" ? "open"
-    : `<span class="pill warn">${esc(String(project.status || "â€”").replace(/_/g, " "))}</span>`}</td>
+    : `<span class="pill warn">${esc(String(project.status || "—").replace(/_/g, " "))}</span>`}</td>
       ${canViewBilled() ? `
       <td class="num">${money(f.quoted)}</td>
       <td class="num">${money(f.captured)}</td>` : ""}
@@ -510,7 +523,7 @@ function registerHtml() {
   }).join("");
 
   return `
-    <h3 class="sec">Register <small>${rows.length} of ${state.projects.length} jobs</small></h3>
+    <h3 class="sec">All jobs <small>${rows.length} of ${state.projects.length} jobs</small></h3>
     <div class="toolbar">
       <input type="search" id="register-query" value="${esc(state.registerQuery)}"
              placeholder="Code, description or client" aria-label="Search the register" />
@@ -544,15 +557,17 @@ function renderChrome() {
     button.setAttribute("aria-current", button.dataset.view === state.view ? "page" : "false");
   }
   el("switch-job").hidden = state.projects.length < 2 || state.view === "new";
-  el("nav-templates").hidden = !isOwner();
-  el("nav-firm").hidden = !isOwner();
-  el("nav-team").hidden = !isOwner();
+  el("settings").hidden = !isOwner();
+  el("settings-menu").hidden = true;
+  el("settings-toggle").setAttribute("aria-expanded", "false");
+  const inSettings = ["team", "templates", "rates", "firm"].includes(state.view);
+  el("settings-toggle").setAttribute("aria-current", inSettings ? "page" : "false");
 
   // The sticky-selection pill: shows the job `selectedId` still points at,
   // whenever that job is not the one already on screen. Selecting a
   // different job (register row, switcher, KPI drill-through) overwrites
   // `selectedId`, so this always follows the most recent choice rather than
-  // the first one â€” the same behaviour Vantagepoint documents for its hub.
+  // the first one — the same behaviour Vantagepoint documents for its hub.
   const pill = el("current-job");
   const job = selected();
   const inJob = state.view === "job" && Boolean(job);
@@ -563,6 +578,7 @@ function renderChrome() {
   pill.classList.toggle("is-here", inJob);
   pill.setAttribute("aria-current", inJob ? "page" : "false");
   el("nav").querySelector('[data-view="register"]')?.classList.toggle("is-parent", inJob);
+  el("nav").classList.toggle("in-job", inJob);
   if (inJob) {
     pill.innerHTML = `${esc(job.code || "no code")} <span class="muted">${esc(job.name || "Untitled")}</span>`;
     pill.title = "You are in this job";
@@ -605,7 +621,7 @@ function renderMain() {
     const pending = mt.fresh ? null : capturePendingEdits(main);
     mt.fresh = false;
     main.innerHTML = `<div class="panel wrap">${myTimeHtml()}</div>`;
-    if (pending) restorePendingEdits(main, pending);
+    restorePendingEdits(main, pending ?? { values: {}, scope: null }, draftScope());
     const composerForm = main.querySelector('[data-form="mytime"]');
     if (composerForm) {
       syncMyTimeProject(composerForm);
@@ -659,6 +675,22 @@ function renderMain() {
     syncAddress();
     return;
   }
+  if (state.view === "rates") {
+    // Owner-only; a non-owner who types ?view=rates lands on the register.
+    if (!isOwner()) {
+      state.view = "register";
+      renderMain();
+      return;
+    }
+    let host = main.querySelector("#rates-host");
+    if (!host) {
+      main.innerHTML = `<div class="panel wrap" id="rates-host"></div>`;
+      host = main.querySelector("#rates-host");
+    }
+    mountRateBook(host, { toast });
+    syncAddress();
+    return;
+  }
   const project = selected();
   if (!project) {
     state.view = "register";
@@ -669,7 +701,7 @@ function renderMain() {
   const drawingLabel = project.drawingId ? "Open drawing" : "Start a drawing";
   // Ticking one task's status, striking another, or any other action on this
   // page calls renderMain() to pick up the change, and renderMain() rebuilds
-  // the whole job view from `state` â€” which knows nothing about a keystroke
+  // the whole job view from `state` — which knows nothing about a keystroke
   // nobody has submitted yet. Without capturing it first, typing into "Add a
   // task" or the Register form and then, say, striking an unrelated task
   // makes the field you were mid-sentence in "snap back" to empty.
@@ -677,40 +709,49 @@ function renderMain() {
   main.innerHTML = `
     <div class="proj-head">
       <nav class="crumbs" aria-label="Breadcrumb">
-        <button type="button" data-action="go-register">&larr; Register</button>
-        <span class="crumb-code">${esc(project.code || "NO CODE")}</span>
+        <button type="button" data-action="go-register" title="Back to the list of all jobs">&lsaquo; All jobs</button>
       </nav>
       <div class="proj-head-row">
         <div>
-          <h1>${esc(project.name || "Untitled")}</h1>
+          <h1><span class="job-code">${esc(project.code || "NO CODE")}</span>${esc(project.name || "Untitled")}</h1>
           <div class="facts">
-            <span>Client <b>${esc(project.clientName || "â€”")}</b></span>
-            <span>Type <b>${esc(type?.name || project.typeCode || "â€”")}</b></span>
-            <span>Basis <b>${project.billingBasis === "time_and_materials" ? "Time &amp; materials" : project.billingBasis === "fixed_fee" ? "Fixed fee" : "â€”"}${
+            <span>Client ${project.clientName
+    ? `<b>${esc(project.clientName)}</b>`
+    : '<button type="button" class="link-btn" data-action="open-details">Add client</button>'}</span>
+            <span>Type <b>${esc(type?.name || project.typeCode || "—")}</b></span>
+            <span>Basis <b>${project.billingBasis === "time_and_materials" ? "Time &amp; materials" : project.billingBasis === "fixed_fee" ? "Fixed fee" : "—"}${
   project.feeCeiling && canViewBilled() ? ' <span class="pill warn" title="Billing stops at the quoted fee">ceiling</span>' : ""}</b></span>
-            <span>Status <b>${esc(project.status || "â€”")}</b></span>
+            <span>Status <b>${esc(project.status || "—")}</b></span>
           </div>
         </div>
-        <div class="proj-head-drawing">
-          ${previewHtml(project, { size: "md", opens: "drawing" })}
-          <button class="btn btn-sm" type="button" data-action="drawing">${drawingLabel}</button>
+        <div class="proj-head-side">
+          <button class="btn btn-sm btn-primary" type="button" data-action="log-time">Log time</button>
+          <div class="proj-head-drawing">
+            ${previewHtml(project, { size: "md", opens: "drawing" })}
+            <button class="btn btn-sm" type="button" data-action="drawing">${drawingLabel}</button>
+          </div>
         </div>
       </div>
-      ${phaseStripHtml(project)}
-    </div>
-    <div class="tabs">
-      ${TABS.map(([tab, label]) => `
-        <button data-tab="${tab}" aria-selected="${state.tab === tab}">${label}</button>`).join("")}
+      <div class="tabs">
+        ${TABS.map(([tab, label]) => `
+          <button data-tab="${tab}" aria-selected="${state.tab === tab}">${label}</button>`).join("")}
+      </div>
     </div>
     <div class="panel">${
       state.tab === "schedule" ? feeScheduleHtml(project)
         : state.tab === "time" ? timeHtml(project)
           : state.tab === "certificates" ? certificatesHtml(project)
-            : overviewHtml(project)
+            : state.tab === "details" ? detailsHtml(project)
+              : overviewHtml(project)
     }</div>`;
-  restorePendingEdits(main, pending);
+  restorePendingEdits(main, pending, draftScope());
   paintPreviews();
   syncAddress();
+}
+
+/** Which screen a typed-but-unsent draft belongs to; see restorePendingEdits. */
+function draftScope() {
+  return state.view === "job" ? `job:${state.selectedId}` : state.view;
 }
 
 /**
@@ -722,8 +763,11 @@ function renderMain() {
  */
 const DRAFT_FIELD_IDS = [
   "nt-description", "nt-phase", "nt-fee",
-  "f-code", "f-name", "f-type", "f-basis", "f-budget", "f-status",
-  "f-client", "f-email", "f-cell", "f-address", "f-property",
+  "f-code", "f-name", "f-type", "f-basis", "f-rate-book", "f-budget", "f-status",
+  "f-client", "f-email", "f-cell", "f-address", "f-property", "f-projected-cost",
+  // The job's Time tab.
+  "t-date", "t-start", "t-end", "t-minutes", "t-activity", "t-rule", "t-band",
+  "t-phase", "t-prints", "t-travel", "t-description",
   // The My time composer. The phase select and its freehand box are not here:
   // they are kept in `state.myTime.draft`, because their options arrive after
   // the render and a restored value would have nothing to match.
@@ -731,13 +775,21 @@ const DRAFT_FIELD_IDS = [
   "mt-description", "mt-prints", "mt-travel", "mt-rule", "mt-band",
 ];
 
+/** Typed into since it was rendered, as opposed to showing what `state` drew. */
+function isEdited(field) {
+  if (field instanceof HTMLSelectElement) {
+    return [...field.options].some((option) => option.selected !== option.defaultSelected);
+  }
+  return field.value !== field.defaultValue;
+}
+
 function capturePendingEdits(main) {
   const values = {};
   for (const id of DRAFT_FIELD_IDS) {
     const field = main.querySelector(`#${id}`);
-    if (field) values[id] = field.value;
+    if (field && isEdited(field)) values[id] = field.value;
   }
-  const snapshot = { values };
+  const snapshot = { values, scope: main.dataset.draftScope ?? null };
   const active = document.activeElement;
   if (active && DRAFT_FIELD_IDS.includes(active.id)) {
     snapshot.focusId = active.id;
@@ -749,7 +801,14 @@ function capturePendingEdits(main) {
   return snapshot;
 }
 
-function restorePendingEdits(main, snapshot) {
+/**
+ * Only onto the screen the draft was typed on. Opening another job re-renders
+ * the same field IDs, and putting the last job's code, type and billing basis
+ * into this one's Register form would have them saved over it on the next Save.
+ */
+function restorePendingEdits(main, snapshot, scope) {
+  main.dataset.draftScope = scope;
+  if (snapshot.scope !== scope) return;
   for (const [id, value] of Object.entries(snapshot.values)) {
     const field = main.querySelector(`#${id}`);
     if (field && field.value !== value) field.value = value;
@@ -843,6 +902,9 @@ function syncAddress() {
   } else if (state.view === "templates") {
     url.searchParams.delete("project");
     url.searchParams.set("view", "templates");
+  } else if (state.view === "rates") {
+    url.searchParams.delete("project");
+    url.searchParams.set("view", "rates");
   } else if (state.view === "time" || state.view === "firm" || state.view === "team") {
     url.searchParams.delete("project");
     url.searchParams.set("view", state.view);
@@ -856,7 +918,12 @@ function syncAddress() {
 
 /** One path into a job, so "recently opened" is always true. */
 async function openJob(id, { tab } = {}) {
-  if (state.selectedId !== id) state.selectedPhaseRef = null;
+  if (state.selectedId !== id) {
+    state.selectedPhaseRef = null;
+    state.taskGroupsOpen = null;
+    state.addTask = null;
+    state.timePrefill = null;
+  }
   state.selectedId = id;
   state.view = "job";
   if (tab) state.tab = tab;
@@ -1065,8 +1132,7 @@ function phaseStripHtml(project) {
       ${current
     ? `<p>In <b>${esc(current)}</b>${days === null ? "" : ` for ${dayCount(days)}`}${
       currentListed ? "" : ' <span class="pill warn">not on the fee schedule</span>'}</p>`
-    : `<p class="unstated">Nobody has said. A job with no phase recorded is not
-         phase&nbsp;one &mdash; it is a job whose position nobody has stated.</p>`}
+    : `<p class="unstated">Not recorded yet</p>`}
     </div>
     ${phases.length ? `<ol class="phase-steps">${steps}</ol>` : ""}
     ${phasePickerHtml(project, phases)}
@@ -1099,16 +1165,14 @@ function phasePickerHtml(project, phases) {
         </div>
         <div class="field wide">
           <label for="ph-note">Note</label>
-          <input id="ph-note" name="note" placeholder="Optional â€” why it moved" />
+          <input id="ph-note" name="note" placeholder="Optional — why it moved" />
         </div>
       </div>
       <div class="actions">
         <button class="btn btn-primary" type="submit">Record it</button>
         <button class="btn" type="button" data-action="phase-cancel">Cancel</button>
       </div>
-      <p class="note-line">Recorded, not overwritten. Going back to an earlier phase is
-        another entry &mdash; &ldquo;council sent it back in August&rdquo; is the fact a fee
-        query turns on, and a column that only held the latest value would lose it.</p>
+      <p class="note-line">Each move is kept as a dated entry, so going back a phase does not erase the earlier one.</p>
     </form>`;
 }
 
@@ -1202,6 +1266,7 @@ const TABS = [
   ["schedule", "Fee schedule"],
   ["time", "Time"],
   ["certificates", "Certificates"],
+  ["details", "Details"],
 ];
 
 /**
@@ -1216,9 +1281,12 @@ const TABS = [
 function practiceHtml() {
   const jobs = state.projects;
   if (!jobs.length) {
-    return `<div class="empty">No jobs yet.<br />
-      A job needs only a code to exist &mdash; client, type, fee and drawing can all arrive later.
-      Press <b>New job</b> and it will walk through each of those choices.</div>`;
+    return `<div class="empty">
+      <h3>Welcome. Start with your first job.</h3>
+      A job is one piece of work for one client. It needs only a code to exist.<br />
+      Then, from the job: set its fee, log time against it, and, if you need one, start a drawing.<br /><br />
+      <button class="btn btn-primary" type="button" data-action="new-job-empty">Create your first job</button>
+    </div>`;
   }
   const open = jobs.filter((p) => p.status === "open");
   const overFee = jobs.filter(REGISTER_FILTERS.over.match);
@@ -1314,7 +1382,7 @@ function practiceHtml() {
         <tr class="row-link" data-project="${esc(project.id)}">
           <td><span class="code-cell">${esc(project.code || "no code")}</span></td>
           <td>${esc(project.name || "Untitled")}</td>
-          <td>${esc(project.clientName || "â€”")}</td>
+          <td>${esc(project.clientName || "—")}</td>
           <td class="num">${project.financials.burn === null ? "&mdash;"
     : `<span class="real ${project.financials.burn > 1 ? "bad" : "flat"}">${percent(project.financials.burn)}</span>`}</td>
         </tr>`).join("")}</tbody></table>` : ""}`;
@@ -1427,7 +1495,7 @@ function readyToInvoiceHtml() {
     return `<tr>
         <td><span class="code-cell">${esc(project.code || "no code")}</span></td>
         <td>${esc(project.name || "Untitled")}</td>
-        <td>${esc(project.clientName || "â€”")}</td>
+        <td>${esc(project.clientName || "—")}</td>
         <td>${project.billingBasis === "time_and_materials" ? "T&amp;M" : "Fixed fee"}${
   project.feeCeiling
     ? `<br /><span class="pill warn" title="Draft it pulls every hour, then proposes writing down what is past the ceiling">ceiling${
@@ -1576,7 +1644,7 @@ function feeScheduleHtml(project) {
 
   return `
     <h3 class="sec">Fee schedule
-      <small>${lines.length ? "the agreed breakdown, against what has been claimed under it â€” click a phase to see its time"
+      <small>${lines.length ? "the agreed breakdown, against what has been claimed under it — click a phase to see its time"
     : "nothing agreed yet"}</small>
     </h3>
     ${lines.length ? `
@@ -1875,7 +1943,7 @@ function feeBar(f, { size = "full", basis = null, linkTab = false, gapNote = tru
   const segment = ([key, label, tab, why]) => {
     if (!s[key]) return "";
     const amount = money(s[key]);
-    const title = key === "writtenDown" ? writeDownTitle(f) : `${label} ${amount} â€” ${why}`;
+    const title = key === "writtenDown" ? writeDownTitle(f) : `${label} ${amount} — ${why}`;
     const attrs = `class="fseg fseg-${key}" style="flex-basis:${width(s[key])}" title="${esc(title)}"`;
     return linkTab
       ? `<button type="button" ${attrs} data-open-tab="${tab}"><span class="sr-only">${esc(title)}</span></button>`
@@ -1944,13 +2012,20 @@ function templateDrift(f) {
 
 function overviewHtml(project) {
   const f = project.financials;
+  // Before any hour or certificate the bar is one solid "not yet earned"
+  // segment, saying in colour what the Quoted tile already says in numbers.
+  const untouched = !f.capturedMinutes && !f.certifiedGross && !f.draftGross;
+  const warnings = warningsFor(project);
   return `
-    <h3 class="sec">Where this job stands
-      <small>${canViewBilled()
-    ? "the full width is the quote &mdash; click a segment for the rows behind it"
-    : "hours and progress; the money is an owner's to see"}</small>
+    ${phaseStripHtml(project)}
+
+    <h3 class="sec">Fee
+      <small>${!canViewBilled()
+    ? "hours and progress; the money is an owner's to see"
+    : untouched ? "nothing logged or billed yet"
+      : "the full width is the quote &mdash; click a segment for the rows behind it"}</small>
     </h3>
-    ${feeBar(f, { basis: project.billingBasis, linkTab: true })}
+    ${untouched && feeSegments(f) ? "" : feeBar(f, { basis: project.billingBasis, linkTab: true })}
 
     <div class="kpis">
       <div class="kpi${f.quoted === null ? " dim" : ""}">
@@ -1962,33 +2037,36 @@ function overviewHtml(project) {
       ? `Fee schedule, ${f.scheduleLines} phase${f.scheduleLines === 1 ? "" : "s"}${templateDrift(f)}`
       : "Register budget estimate &mdash; no fee schedule yet"}</div>
       </div>
-      <div class="kpi${f.burn !== null && f.burn > 1 ? " flag" : ""}">
+      <button type="button" class="kpi${f.burn !== null && f.burn > 1 ? " flag" : ""}" data-open-tab="time"
+              title="The hours behind this figure">
         <div class="lbl">Captured</div>
         <div class="val">${money(f.captured)}</div>
-        <div class="sub">${duration(f.capturedMinutes)} logged${f.burn === null ? "" : ` &middot; ${percent(f.burn)} of fee`}</div>
-      </div>
+        <div class="sub">${f.capturedMinutes
+    ? `${duration(f.capturedMinutes)} logged${f.burn === null ? "" : ` &middot; ${percent(f.burn)} of fee`}`
+    : "No time logged yet"}</div>
+      </button>
       ${canViewBilled() ? `
       <div class="kpi${f.projectedProfit === null ? " dim" : (f.projectedProfit < 0 ? " flag" : "")}">
         <div class="lbl">Projected profit</div>
         <div class="val">${money(f.projectedProfit)}</div>
         <div class="sub">${f.projectedCost === null
-    ? "No projected cost entered &mdash; set one under Register below"
+    ? "No projected cost entered &mdash; set one under Details"
     : f.projectedProfit === null
       ? `Cost ${money(f.projectedCost)}; no quote to measure it against`
       : `${percent(f.projectedMargin)} margin &middot; quote less projected cost of ${money(f.projectedCost)}`}</div>
       </div>` : ""}
     </div>
-    ${canViewBilled() ? `
-    <p class="note-line">Billed, written down and realisation are read off the bar above rather
-      than repeated here as separate tiles. They are slices of one quote, and four tiles in a row
-      left the arithmetic between them to whoever was looking.</p>` : ""}
 
+    ${warnings.length ? `
     <h3 class="sec">Warnings <small>derived from the numbers, not typed by anyone</small></h3>
-    ${warningsHtml(warningsFor(project))}
+    ${warningsHtml(warnings)}` : ""}
 
-    ${tasksHtml(project)}
+    ${tasksHtml(project)}`;
+}
 
-    <h3 class="sec">Register</h3>
+function detailsHtml(project) {
+  return `
+    <h3 class="sec">Details <small>the register entry: job, billing and client</small></h3>
     ${registerFormHtml(project)}`;
 }
 
@@ -2026,6 +2104,7 @@ function tasksHtml(project) {
   const seen = new Set();
   const phaseSuggestions = [
     ...(state.feeSchedule?.lines || []).map((line) => line.label),
+    ...(state.phases?.phases || []).map((phase) => phase.ref),
     ...tasks.map((t) => t.phaseLabel),
   ].filter((label) => {
     const key = label && label.trim().toLowerCase();
@@ -2034,19 +2113,23 @@ function tasksHtml(project) {
     return true;
   });
 
-  const addForm = `
-    <form class="form" data-form="add-task" data-project="${esc(project.id)}" style="margin-top:10px">
+  // Adding a task is rare next to ticking one off, so the form stays shut
+  // until asked for - except on an empty list, where it is the only thing to do.
+  const formOpen = state.addTask !== null || !tasks.length;
+  const addForm = !formOpen ? "" : `
+    <form class="form add-task-form" data-form="add-task" data-project="${esc(project.id)}">
       <div class="fields">
         <div class="field wide">
-          <label for="nt-description">Add a task</label>
+          <label for="nt-description">New task</label>
           <input id="nt-description" name="description" required autocomplete="off"
                  data-lpignore="true" data-1p-ignore data-bwignore data-protonpass-ignore="true"
-                 placeholder="Respond to the environmental department complaint" />
+                 placeholder="What needs doing" />
         </div>
         <div class="field">
           <label for="nt-phase">Phase</label>
           <div class="combo">
             <input id="nt-phase" name="phaseLabel" placeholder="Optional" autocomplete="off"
+                   value="${esc(state.addTask?.phase || "")}"
                    data-combo-input data-lpignore="true" data-1p-ignore data-bwignore
                    data-protonpass-ignore="true" />
             <ul class="combo-menu" data-combo-menu hidden>
@@ -2062,68 +2145,112 @@ function tasksHtml(project) {
                  data-protonpass-ignore="true" />
         </div>` : ""}
       </div>
-      <div class="actions"><button class="btn" type="submit">Add task</button></div>
+      <div class="actions">
+        <button class="btn btn-primary" type="submit">Add task</button>
+        ${tasks.length ? '<button class="btn" type="button" data-action="add-task-cancel">Cancel</button>' : ""}
+      </div>
     </form>`;
 
   if (!tasks.length) {
     return `
       <h3 class="sec">Tasks</h3>
       <div class="empty">${type?.isPlaceholder
-    ? `${esc(type.name)} is a registered type with no fee template behind it, so this job
-         started with an empty list. That is the finished state for it, not a gap &mdash;
-         add the tasks this particular job needs.`
+    ? `No tasks yet. ${esc(type.name)} has no fee template, so add the tasks this job needs.`
     : "No task list on this job. Tasks are cloned from the project type's fee template when "
       + "the job is registered; this one had no type, or none with a template."}</div>
       ${addForm}`;
   }
 
-  let currentPhase = null;
-  const rows = tasks.map((task) => {
-    const header = task.phaseLabel !== currentPhase
-      ? `<tr class="phase-row"><td colspan="${showFee ? 5 : 4}">${esc(task.phaseLabel || "No phase")}</td></tr>`
-      : "";
-    currentPhase = task.phaseLabel;
+  // One group per phase, in the order the list has them. The phase the job is
+  // recorded in starts open; failing that, the first with work still left.
+  const groups = [];
+  for (const task of tasks) {
+    const key = phaseKey(task.phaseLabel);
+    let group = groups.find((g) => g.key === key);
+    if (!group) groups.push(group = { key, label: task.phaseLabel, tasks: [] });
+    group.tasks.push(task);
+  }
+  if (!state.taskGroupsOpen) {
+    const current = groups.find((g) => samePhase(g.label, state.phases?.current));
+    const live = groups.find((g) => g.tasks.some((t) => t.status === "not_started" || t.status === "in_progress"));
+    state.taskGroupsOpen = new Set([(current ?? live ?? groups[0]).key]);
+  }
+
+  // Columns that would be a dash or "not billed" on every row are left out:
+  // the fee is quoted per phase, and shows on the phase's own header.
+  const feeColumn = showFee && tasks.some((t) => t.defaultFee !== null);
+  const billedColumn = tasks.some((t) => t.certificateId);
+  const columns = 3 + Number(feeColumn) + Number(billedColumn);
+  const phaseFee = (label) => state.phases?.phases.find((p) => samePhase(p.ref, label))?.quoted ?? null;
+
+  const rowHtml = (task) => {
     const struckRow = task.status === "not_required";
-    const doneRow = task.status === "done";
-    const rowClass = struckRow ? "struck" : doneRow ? "done" : "";
-    return `${header}
+    const rowClass = struckRow ? "struck" : task.status === "done" ? "done" : "";
+    return `
       <tr${rowClass ? ` class="${rowClass}"` : ""}>
         <td>${esc(task.description)}
           ${task.templateTaskId === null ? ' <span class="pill flat">added</span>' : ""}
           ${task.note ? `<div class="task-note">${esc(task.note)}</div>` : ""}</td>
-        ${showFee ? `<td class="num">${task.defaultFee === null ? "&mdash;" : money(task.defaultFee)}</td>` : ""}
-        <td>${task.certificateId
+        ${feeColumn ? `<td class="num">${task.defaultFee === null ? "&mdash;" : money(task.defaultFee)}</td>` : ""}
+        ${billedColumn ? `<td>${task.certificateId
     ? `<span class="pill ${task.certificateStatus === "issued" ? "ok" : "flat"}">${
       task.certificateStatus === "issued" ? "billed" : "on a draft"}</span>`
-    : '<span class="pill flat">not billed</span>'}</td>
+    : ""}</td>` : ""}
         <td>
-          <select data-action="task-status" data-task="${esc(task.id)}">
+          <select data-action="task-status" data-task="${esc(task.id)}" aria-label="Status">
             ${Object.entries(TASK_STATUS_LABELS).map(([value, label]) => `
               <option value="${esc(value)}"${task.status === value ? " selected" : ""}>${label}</option>`).join("")}
           </select>
         </td>
-        <td class="num">${struckRow
-    ? `<button class="btn btn-sm" data-action="unstrike-task" data-task="${esc(task.id)}">Restore</button>`
-    : `<button class="btn btn-sm" data-action="strike-task" data-task="${esc(task.id)}">Strike</button>`}</td>
+        <td class="num">${struckRow ? "" : `<button class="btn btn-sm task-log" type="button"
+            data-action="log-time" data-log-phase="${esc(task.phaseLabel || "")}"
+            data-log-desc="${esc(task.description)}">Log time</button>`}</td>
       </tr>`;
-  }).join("");
+  };
 
+  const groupHtml = (group) => {
+    const open = state.taskGroupsOpen.has(group.key);
+    const live = group.tasks.filter((t) => t.status !== "not_required");
+    const doneCount = live.filter((t) => t.status === "done").length;
+    const fee = showFee ? phaseFee(group.label) : null;
+    const current = samePhase(group.label, state.phases?.current);
+    return `
+      <tbody class="task-group">
+        <tr class="phase-row${current ? " current" : ""}"><td colspan="${columns}">
+          <button type="button" class="group-toggle" data-action="toggle-task-group"
+                  data-group="${esc(group.key)}" aria-expanded="${open}">
+            <span class="caret" aria-hidden="true"></span>${esc(group.label || "No phase")}
+            <span class="group-evi">${doneCount}/${live.length} done${
+  fee === null ? "" : ` &middot; ${money(fee)}`}${current ? " &middot; current" : ""}</span>
+          </button>
+          <button type="button" class="link-btn group-add" data-action="add-task-open"
+                  data-group-label="${esc(group.label || "")}">+ task</button>
+        </td></tr>
+        ${open ? group.tasks.map(rowHtml).join("") : ""}
+      </tbody>`;
+  };
+
+  const allOpen = groups.every((g) => state.taskGroupsOpen.has(g.key));
   return `
-    <h3 class="sec">Tasks
-      <small>${fromTemplate} from the ${esc(type?.name || project.typeCode || "job's")} template${
+    <h3 class="sec sec-with-actions">
+      <span>Tasks
+        <small>${fromTemplate} from the ${esc(type?.name || project.typeCode || "job's")} template${
   added ? ` &middot; ${added} added` : ""}
-        &middot; ${done} done${struck ? ` &middot; ${struck} struck` : ""}</small>
+          &middot; ${done} done${struck ? ` &middot; ${struck} struck` : ""}</small></span>
+      <span class="sec-actions">
+        ${groups.length > 1 ? `<button type="button" class="link-btn" data-action="toggle-all-task-groups">${
+  allOpen ? "Collapse all" : "Expand all"}</button>` : ""}
+        ${state.addTask === null ? '<button type="button" class="btn btn-sm" data-action="add-task-open">+ Add task</button>' : ""}
+      </span>
     </h3>
-    <div class="scroller"><table class="grid">
+    ${addForm}
+    <table class="grid task-table">
       <thead><tr>
-        <th>Task</th>${showFee ? '<th class="num">Fee</th>' : ""}<th>Billed</th><th>Status</th><th></th>
+        <th>Task</th>${feeColumn ? '<th class="num">Fee</th>' : ""}${billedColumn ? "<th>Billed</th>" : ""}
+        <th>Status</th><th></th>
       </tr></thead>
-      <tbody>${rows}</tbody>
-    </table></div>
-    <p class="note-line">A struck task stays on the list. Deleting it would lose the only record
-      that somebody looked at it and decided it was not needed &mdash; which is the question
-      asked when the fee is queried.</p>
-    ${addForm}`;
+      ${groups.map(groupHtml).join("")}
+    </table>`;
 }
 
 function registerFormHtml(project) {
@@ -2138,6 +2265,7 @@ function registerFormHtml(project) {
 
   return `
     <form class="form" data-form="update" data-project="${esc(project.id)}">
+      <h4 class="form-group">Job</h4>
       <div class="fields">
         <div class="field">
           <label for="f-code">Project code</label>
@@ -2156,6 +2284,18 @@ function registerFormHtml(project) {
           </select>
         </div>
         <div class="field">
+          <label for="f-status">Status</label>
+          <select id="f-status" name="status">
+            ${(state.reference?.projectStatuses || ["open"]).map((status) => `
+              <option value="${esc(status)}"${(project?.status ?? "open") === status ? " selected" : ""}>
+                ${esc(status.replace(/_/g, " "))}
+              </option>`).join("")}
+          </select>
+        </div>
+      </div>
+      <h4 class="form-group">Billing</h4>
+      <div class="fields">
+        <div class="field">
           <label for="f-basis">Billing basis</label>
           <select id="f-basis" name="billingBasis">
             <option value="">Not decided</option>
@@ -2163,26 +2303,36 @@ function registerFormHtml(project) {
             <option value="time_and_materials"${project?.billingBasis === "time_and_materials" ? " selected" : ""}>Time &amp; materials</option>
           </select>
         </div>
+        ${isOwner() ? `
+        <div class="field">
+          <label for="f-rate-book">Rate book
+            <span class="hint" tabindex="0" title="What a BOQ of this job's drawing prices against. Editing that book later does not re-price a job already quoted; a new year's prices are a new book.">?</span></label>
+          <select id="f-rate-book" name="rateBookId">
+            <option value="">The firm's default, as it stands</option>
+            ${state.rateBooks.map((book) => `
+              <option value="${esc(book.id)}"${book.id === project?.rateBookId ? " selected" : ""}>
+                ${esc(book.name)}${book.isDefault ? " (default)" : ""}
+              </option>`).join("")}
+          </select>
+        </div>` : ""}
         ${canViewBilled() && project ? `
         <div class="field">
           <label for="f-ceiling">Fee ceiling</label>
           <label class="check"><input id="f-ceiling" name="feeCeiling" type="checkbox"${project.feeCeiling ? " checked" : ""} />
-            Billing stops at the quoted fee</label>
-          <small class="muted">Hours past it stay on the record and are written down as
-            &ldquo;fee ceiling&rdquo;. A certificate that would go past it will not issue.</small>
+            Billing stops at the quoted fee
+            <span class="hint" tabindex="0" title="Hours past the ceiling stay on the record and are written down as &quot;fee ceiling&quot;. A certificate that would go past it will not issue.">?</span></label>
         </div>` : ""}
         ${canViewBilled() ? `
         <div class="field">
           <label for="f-budget">Budget estimate</label>
           <input id="f-budget" name="budgetEstimate" type="number" step="0.01" min="0"
-                 value="${project?.budgetEstimate ?? ""}" placeholder="Leave blank if none" />
+                 value="${project?.budgetEstimate ?? ""}" />
         </div>
         <div class="field">
-          <label for="f-projected-cost">Projected cost</label>
+          <label for="f-projected-cost">Projected cost
+            <span class="hint" tabindex="0" title="Everything the job is expected to cost the firm: staff, consultants, printing, fees you carry. Profit and margin are worked out against the quote.">?</span></label>
           <input id="f-projected-cost" name="projectedCost" type="number" step="0.01" min="0"
-                 value="${project?.projectedCost ?? ""}" placeholder="Leave blank if not costed" />
-          <small class="muted">Everything the job is expected to cost the firm: staff, consultants,
-            printing, fees you carry. Profit and margin are worked out against the quote.</small>
+                 value="${project?.projectedCost ?? ""}" />
         </div>` : `
         <!-- Left out of the form entirely, not just disabled: a blank number
              field and a real figure this role cannot see both submit as "",
@@ -2192,15 +2342,9 @@ function registerFormHtml(project) {
              that wipes out an owner's real budget estimate. Leaving the
              field name out of the form means it is absent from the submit,
              not blank, and updateRegisterProject() skips absent fields. -->`}
-        <div class="field">
-          <label for="f-status">Status</label>
-          <select id="f-status" name="status">
-            ${(state.reference?.projectStatuses || ["open"]).map((status) => `
-              <option value="${esc(status)}"${(project?.status ?? "open") === status ? " selected" : ""}>
-                ${esc(status.replace(/_/g, " "))}
-              </option>`).join("")}
-          </select>
-        </div>
+      </div>
+      <h4 class="form-group">Client</h4>
+      <div class="fields">
         <div class="field">
           <label for="f-client">Client</label>
           <input id="f-client" name="clientName" value="${value("clientName")}" />
@@ -2222,12 +2366,10 @@ function registerFormHtml(project) {
           <input id="f-property" name="propertyDescription" value="${value("propertyDescription")}" />
         </div>
       </div>
-      <div class="actions">
+      <div class="actions sticky-actions">
         <button class="btn btn-primary" type="submit">Save</button>
       </div>
-      <p class="note-line">A project code is unique within the firm, compared ignoring case and
-        surrounding spaces &mdash; the source workbook carried <code>P078</code> twice and
-        <code>C036&nbsp;</code> beside <code>CO36.9</code>.</p>
+      <p class="note-line">Project codes are unique within the firm, ignoring case and surrounding spaces.</p>
     </form>`;
 }
 
@@ -2237,7 +2379,7 @@ function registerFormHtml(project) {
  * matters is whether a task list and a fee schedule are copied, and of what.
  */
 const TYPE_GUIDE = {
-  STRATAREPORT: "Copies one phase and its three tasks â€” council documents, the title deed, external reports â€” and a fee schedule of that single line.",
+  STRATAREPORT: "Copies one phase and its three tasks — council documents, the title deed, external reports — and a fee schedule of that single line.",
   "CONSENT USE": "Copies five phases, from inception to promulgation, with their tasks and a fee schedule that matches them.",
   REZONING: "Copies five phases, from inception to promulgation, with their tasks and a fee schedule that matches them.",
   "REMOVAL OF RESTRICTIONS": "Copies eight phases, from the briefing through the approval formalities, with their tasks and a matching fee schedule.",
@@ -2355,10 +2497,10 @@ function compactChoice(field, value, checked, name, tag) {
  * repeat almost word for word.
  */
 const TYPE_TAG = {
-  STRATAREPORT: "1 phase Â· 3 tasks",
-  "CONSENT USE": "5 phases Â· Inception â†’ Promulgation",
-  REZONING: "5 phases Â· Inception â†’ Promulgation",
-  "REMOVAL OF RESTRICTIONS": "8 phases Â· Briefing â†’ Approval formalities",
+  STRATAREPORT: "1 phase · 3 tasks",
+  "CONSENT USE": "5 phases · Inception ? Promulgation",
+  REZONING: "5 phases · Inception ? Promulgation",
+  "REMOVAL OF RESTRICTIONS": "8 phases · Briefing ? Approval formalities",
   "TOWNSHIP establishment": "5 stages + sundries",
 };
 
@@ -2466,7 +2608,7 @@ function roadmapBodyHtml(job) {
   const code = job.typeCode || "";
   const roadmap = job.roadmap?.typeCode === code ? job.roadmap : null;
   if (!roadmap || roadmap.loading) {
-    return `<p class="note-line">Loading the sequenceâ€¦</p>`;
+    return `<p class="note-line">Loading the sequence…</p>`;
   }
   if (roadmap.error) {
     return `<p class="note-line">The sequence could not be loaded. The type can still be chosen;
@@ -2529,7 +2671,7 @@ function ensureRoadmap() {
 
 function budgetNote(basis) {
   if (basis === "fixed_fee") {
-    return "On a fixed fee this is a working figure. The moment a fee schedule exists â€” including one just copied from the type â€” burn is measured against the schedule, and a disagreement with this estimate is shown rather than smoothed over.";
+    return "On a fixed fee this is a working figure. The moment a fee schedule exists — including one just copied from the type — burn is measured against the schedule, and a disagreement with this estimate is shown rather than smoothed over.";
   }
   if (basis === "time_and_materials") {
     return "Time and materials often opens with no budget. Leave this blank when there isn't one. Blank is not zero: zero would say the fee is already spent, and every hour after it would read as an overrun.";
@@ -2562,7 +2704,7 @@ function composerBillingStep(job) {
                value="${esc(job.projectedCost)}" placeholder="Leave blank to use the type's usual" />
       </div>
       <p class="note-line">What you expect the job to cost the firm, all in. If the type has a
-        usual cost share set under Fee templates, a job starts from that and this can stay blank;
+        usual cost share set under Settings > Quote templates, a job starts from that and this can stay blank;
         otherwise leave it blank and cost the job later from its page.</p>` : ""}
     </div>`;
 }
@@ -2572,7 +2714,7 @@ function composerClientStep(job) {
   const basis = job.billingBasis === "fixed_fee" ? "Fixed fee"
     : job.billingBasis === "time_and_materials" ? "Time & materials"
       : "Basis not decided";
-  const row = (label, value) => `<div><dt>${label}</dt><dd>${value || "â€”"}</dd></div>`;
+  const row = (label, value) => `<div><dt>${label}</dt><dd>${value || "—"}</dd></div>`;
   return `
     <dl class="composer-summary">
       ${row("Code", esc(job.code))}
@@ -2702,8 +2844,12 @@ function timeHtml(project) {
   const f = project.financials;
   const bands = state.reference?.rateBands || [];
   const activities = state.reference?.activityTypes || [];
+  const prefill = state.timePrefill;
+  const phaseRefs = (state.phases?.phases || []).map((phase) => phase.ref);
   return `
-    <h3 class="sec">Log time <small>captured value is written once and never edited</small></h3>
+    <h3 class="sec">Log time <small>${prefill?.description
+    ? `for &ldquo;${esc(prefill.description)}&rdquo;`
+    : "captured value is written once and never edited"}</small></h3>
     <form class="form" data-form="time" data-project="${esc(project.id)}">
       <div class="fields">
         <div class="field">
@@ -2729,53 +2875,65 @@ function timeHtml(project) {
           </select>
         </div>
         <div class="field">
-          <label for="t-rule">Pricing</label>
-          <select id="t-rule" name="pricingRule">
-            <option value="tier_1920">Quarter-hour ladder (R480)</option>
-            <option value="linear_32">Linear (R32 a minute)</option>
-            <option value="band_hourly">Tariff band</option>
-          </select>
-        </div>
-        <div class="field">
-          <label for="t-band">Band</label>
-          <select id="t-band" name="rateBandCode">
-            ${bands.map((b) => `<option value="${esc(b.code)}">${esc(b.code)} &middot; ${esc(b.label)} &middot; ${money(b.hourlyRate)}</option>`).join("")}
-          </select>
-        </div>
-        <div class="field">
-          <label for="t-phase">Phase or task</label>
-          <input id="t-phase" name="phaseRef" placeholder="Optional"
-                 value="${esc(state.selectedPhaseRef || "")}" />
-        </div>
-        <div class="field">
-          <label for="t-prints">A4 prints</label>
-          <input id="t-prints" name="printsQty" type="number" min="0" step="1" placeholder="Optional" />
-        </div>
-        <div class="field">
-          <label for="t-travel">Travel km</label>
-          <input id="t-travel" name="travelKm" type="number" min="0" step="0.1" placeholder="Optional" />
+          <label for="t-phase">Phase</label>
+          <div class="combo">
+            <input id="t-phase" name="phaseRef" placeholder="Optional" autocomplete="off"
+                   value="${esc(prefill?.phaseRef ?? state.selectedPhaseRef ?? "")}"
+                   data-combo-input data-lpignore="true" data-1p-ignore data-bwignore
+                   data-protonpass-ignore="true" />
+            <ul class="combo-menu" data-combo-menu hidden>
+              ${phaseRefs.map((ref) => `<li data-value="${esc(ref)}">${esc(ref)}</li>`).join("")}
+            </ul>
+          </div>
         </div>
         <div class="field wide">
           <label for="t-description">Description on the certificate</label>
           <input id="t-description" name="description" required
+                 value="${esc(prefill?.description || "")}"
                  placeholder="What the client will read, not &quot;Phone call&quot;" />
         </div>
+      </div>
+      <div class="mt-more" id="t-more"${state.jobTimeMore ? "" : " hidden"}>
+        <div class="fields">
+          <div class="field">
+            <label for="t-prints">A4 prints</label>
+            <input id="t-prints" name="printsQty" type="number" min="0" step="1" placeholder="Optional" />
+          </div>
+          <div class="field">
+            <label for="t-travel">Travel km</label>
+            <input id="t-travel" name="travelKm" type="number" min="0" step="0.1" placeholder="Optional" />
+          </div>
+          <div class="field">
+            <label for="t-rule">Pricing</label>
+            <select id="t-rule" name="pricingRule">
+              <option value="tier_1920">Quarter-hour ladder (R480)</option>
+              <option value="linear_32">Linear (R32 a minute)</option>
+              <option value="band_hourly">Tariff band</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="t-band">Band</label>
+            <select id="t-band" name="rateBandCode">
+              ${bands.map((b) => `<option value="${esc(b.code)}">${esc(b.code)} &middot; ${esc(b.label)} &middot; ${money(b.hourlyRate)}</option>`).join("")}
+            </select>
+          </div>
+        </div>
+        <p class="note-line">Prints and kilometres are counted on the row but not priced yet.</p>
       </div>
       <div class="preview" id="time-preview">
         <span>Enter a duration to see what it is worth.</span>
       </div>
       <div class="actions">
         <button class="btn btn-primary" type="submit">Log it</button>
+        <button class="btn btn-sm" type="button" data-action="t-more">${state.jobTimeMore
+    ? "Hide prints / travel / pricing" : "+ prints / travel / pricing"}</button>
+        ${prefill ? '<button class="btn btn-sm" type="button" data-action="t-clear-prefill">Clear task</button>' : ""}
         <div class="spacer"></div>
         <span class="note-line" style="margin:0">${canViewBilled()
     ? `Captured ${money(f.captured)} of ${f.quoted === null ? "an unquoted fee" : money(f.quoted)}`
     : `${duration(f.capturedMinutes)} captured so far`}</span>
       </div>
     </form>
-    <p class="note-line">Prints and kilometres are recorded against the row but carry no
-      money yet: they are quantities waiting on a unit rate, not a priced line. The workbook
-      asked for both too, told everyone its macro billed them, and never read either column
-      &mdash; so counting them here and saying so is already further than that went.</p>
 
     ${state.selectedPhaseRef ? `
       <div class="phase-filter-banner">
@@ -2828,8 +2986,8 @@ function timeHtml(project) {
         cannot be withdrawn &mdash; that is a credit, not a deletion.</p>`
     : state.selectedPhaseRef
       ? `<div class="empty">No time logged with a phase matching <b>${esc(state.selectedPhaseRef)}</b>.<br />
-          Time is only tagged to a phase when the "Phase or task" field on the log form is
-          typed to match the fee schedule's label exactly &mdash; free text, not a picklist.</div>`
+          Time is only tagged to a phase when the Phase field on the log form matches the
+          fee schedule's label &mdash; pick it from the suggestions to be sure.</div>`
       : `<div class="empty">No time logged against this job.<br />
         Captured value is what the work actually cost the firm, whatever is eventually billed.</div>`}`;
     })()}`;
@@ -2850,7 +3008,7 @@ function certificatesHtml(project) {
         <tbody>${state.certificates.map((c) => `
           <tr>
             <td>${c.seq}</td>
-            <td>${c.periodStart || c.periodEnd ? `${esc(c.periodStart || "â€¦")} &ndash; ${esc(c.periodEnd || "â€¦")}` : "&mdash;"}</td>
+            <td>${c.periodStart || c.periodEnd ? `${esc(c.periodStart || "…")} &ndash; ${esc(c.periodEnd || "…")}` : "&mdash;"}</td>
             <td><span class="pill ${c.status === "issued" ? "ok" : "flat"}">${esc(c.status)}</span></td>
             <td class="num">${money(c.subtotal)}</td>
             <td class="num">${c.writtenDown ? money(c.writtenDown) : "&mdash;"}</td>
@@ -2884,14 +3042,14 @@ function certificateHeadHtml(certificate) {
   const lines = (org?.addressLines || "").split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   const dated = draft ? "Draft" : (certificate.issuedAt || "").slice(0, 10);
   const period = certificate.periodStart || certificate.periodEnd
-    ? `${certificate.periodStart || "â€¦"} to ${certificate.periodEnd || "â€¦"}` : null;
+    ? `${certificate.periodStart || "…"} to ${certificate.periodEnd || "…"}` : null;
   const gap = (text) => `<span class="cert-gap">${esc(text)}</span>`;
   return `
     <header class="cert-head">
       <div class="cert-firm">
         <div class="cert-firm-name">${name ? esc(name) : gap("Firm name not entered")}</div>
         ${lines.length ? lines.map((l) => `<div>${esc(l)}</div>`).join("")
-    : gap("Address not entered (Firm details)")}
+    : gap("Address not entered (Settings > Invoice details)")}
         <div>${org?.vatNumber ? `VAT no. ${esc(org.vatNumber)}` : gap("VAT number not entered")}${
   org?.companyReg ? ` &nbsp;&middot;&nbsp; Reg no. ${esc(org.companyReg)}` : ""}</div>
       </div>
@@ -2947,7 +3105,7 @@ function certificateFootHtml() {
           <div>${esc(org.bankName || "")}${org.bankBranch ? `, ${esc(org.bankBranch)}` : ""}</div>
           <div>Branch code ${org.bankBranchCode ? esc(org.bankBranchCode) : gap("not entered")}</div>
           <div>Account ${org.bankAccountNo ? esc(org.bankAccountNo) : gap("not entered")}</div>`
-    : gap("Banking details not entered (Firm details)")}
+    : gap("Banking details not entered (Settings > Invoice details)")}
       </div>
       <div>
         <div class="cert-foot-h">Contact</div>
@@ -3421,7 +3579,7 @@ function myTimeHtml() {
   return `
     <div class="mt-head">
       <div>
-        <h1>My time</h1>
+        <h1>Timesheet</h1>
         <p class="note-line">${isOwner() && person && mt.personId !== state.session.userId
     ? `${esc(person.email)}'s log` : "Your log"} across every job, the last ${MY_TIME_DAYS} days.
           A wrong row is withdrawn, not corrected.</p>
@@ -3562,6 +3720,7 @@ async function loadProjects({ initial = false } = {}) {
         : wanted === "firm" && isOwner() ? "firm"
         : wanted === "team" && isOwner() ? "team"
         : wanted === "templates" && isOwner() ? "templates"
+        : wanted === "rates" && isOwner() ? "rates"
         : "practice";
     }
   } else if (state.view === "job" && !projects.some((p) => p.id === state.selectedId)) {
@@ -3599,8 +3758,8 @@ async function loadTab() {
   const project = state.view === "job" ? selected() : null;
   if (!project) return;
   if (project.drawingId) await loadPreviews();
-  // The phase strip sits in the header, above the tabs, so it is loaded for
-  // every tab rather than by whichever one happens to want it.
+  // The phase list feeds the Overview strip and task groups and the Time
+  // tab's phase suggestions, so it is loaded for every tab.
   state.phases = (await api.phases(project.id).catch(() => null));
   if (state.tab === "overview") {
     state.tasks = (await api.listTasks(project.id)).tasks;
@@ -3624,6 +3783,10 @@ async function loadTab() {
       && !state.certificates.some((c) => c.id === state.openCertificate.id)) {
       state.openCertificate = null;
     }
+  } else if (state.tab === "details" && isOwner() && !state.rateBooks.length) {
+    // The register form's rate-book picker. Left out of the form entirely for
+    // anyone else, for the same reason the budget field is.
+    state.rateBooks = (await api.listRateBooks().catch(() => ({ rateBooks: [] }))).rateBooks;
   }
 }
 
@@ -3721,6 +3884,68 @@ function updatePreview(form) {
     ${tail}${phaseTail}`;
 }
 
+async function showTab(tab, focusId) {
+  state.tab = tab;
+  await loadTab();
+  renderMain();
+  if (focusId) el(focusId)?.focus();
+}
+
+/** The job page's own buttons. True when the click was one of them. */
+async function jobPageAction(event) {
+  const button = event.target.closest("[data-action]");
+  const action = button?.dataset;
+  if (!action) return false;
+  switch (action.action) {
+    case "log-time":
+      // From a task row: its phase and wording, ready to edit. From the
+      // header: a blank row, whatever a previous task left behind.
+      state.timePrefill = "logDesc" in action
+        ? { phaseRef: action.logPhase || null, description: action.logDesc }
+        : null;
+      await showTab("time", "t-minutes");
+      return true;
+    case "t-clear-prefill":
+      state.timePrefill = null;
+      renderMain();
+      return true;
+    case "t-more": {
+      state.jobTimeMore = !state.jobTimeMore;
+      const more = el("t-more");
+      if (more) more.hidden = !state.jobTimeMore;
+      button.textContent = state.jobTimeMore ? "Hide prints / travel / pricing" : "+ prints / travel / pricing";
+      return true;
+    }
+    case "open-details":
+      await showTab("details", "f-client");
+      return true;
+    case "toggle-task-group":
+      if (state.taskGroupsOpen?.has(action.group)) state.taskGroupsOpen.delete(action.group);
+      else (state.taskGroupsOpen ||= new Set()).add(action.group);
+      renderMain();
+      return true;
+    case "toggle-all-task-groups": {
+      const keys = [...new Set(state.tasks.map((task) => phaseKey(task.phaseLabel)))];
+      const allOpen = keys.every((key) => state.taskGroupsOpen?.has(key));
+      state.taskGroupsOpen = new Set(allOpen ? [] : keys);
+      renderMain();
+      return true;
+    }
+    case "add-task-open":
+      state.addTask = { phase: action.groupLabel || "" };
+      if (action.groupLabel) (state.taskGroupsOpen ||= new Set()).add(phaseKey(action.groupLabel));
+      renderMain();
+      el("nt-description")?.focus();
+      return true;
+    case "add-task-cancel":
+      state.addTask = null;
+      renderMain();
+      return true;
+    default:
+      return false;
+  }
+}
+
 function wireGate() {
   el("gate-toggle").addEventListener("click", () => {
     state.signUpMode = !state.signUpMode;
@@ -3810,6 +4035,26 @@ function wireApp() {
   el("nav").addEventListener("click", (event) => {
     const button = event.target.closest("[data-view]");
     if (button) goView(button.dataset.view);
+  });
+
+  const settingsMenu = el("settings-menu");
+  const setSettingsOpen = (open) => {
+    settingsMenu.hidden = !open;
+    el("settings-toggle").setAttribute("aria-expanded", String(open));
+  };
+  el("settings-toggle").addEventListener("click", (event) => {
+    event.stopPropagation();
+    setSettingsOpen(settingsMenu.hidden);
+  });
+  settingsMenu.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-view]");
+    if (!button) return;
+    setSettingsOpen(false);
+    goView(button.dataset.view);
+  });
+  document.addEventListener("click", () => setSettingsOpen(false));
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") setSettingsOpen(false);
   });
 
   el("switch-job").addEventListener("click", () => openSwitcher());
@@ -3916,6 +4161,9 @@ function wireApp() {
       renderMain();
       return;
     }
+    // Job-page controls, some inside a form that carries `data-project` - read
+    // before the row handler below takes the click as "open this job".
+    if (state.view === "job" && await jobPageAction(event)) return;
     // A phase step is a button inside the header, and must be read before the
     // generic row handler: it is not a way of opening a different job.
     const step = event.target.closest("[data-phase]");
@@ -3935,7 +4183,7 @@ function wireApp() {
     }
     // A fee-schedule row: drill into that phase's own time, on the Time tab,
     // without moving the job (unlike `data-phase` above, this reads nothing
-    // and writes nothing â€” it is a lens, not a fact recorded on the job).
+    // and writes nothing — it is a lens, not a fact recorded on the job).
     const phaseFilter = event.target.closest("[data-phase-filter]");
     if (phaseFilter) {
       state.selectedPhaseRef = phaseFilter.dataset.phaseFilter;
@@ -4025,6 +4273,7 @@ function wireApp() {
     if (!action) return;
 
     if (action.action === "go-register") return goView("register");
+    if (action.action === "new-job-empty") return openNewJob();
     if (action.action === "phase-picker" || action.action === "phase-cancel") {
       state.phasePicker = action.action === "phase-picker";
       renderMain();
@@ -4061,12 +4310,6 @@ function wireApp() {
       // end, and "remove every phase" is what saving an empty schedule means.
       if (rows.children.length > 1) event.target.closest(".schedule-row").remove();
       else for (const input of rows.querySelectorAll("input")) input.value = "";
-    } else if (action.action === "strike-task" || action.action === "unstrike-task") {
-      const status = action.action === "strike-task" ? "not_required" : "not_started";
-      const result = await attempt(() => api.updateTask(action.task, { status }));
-      if (!result) return;
-      state.tasks = result.tasks;
-      renderMain();
     } else if (action.action === "apply-ceiling") {
       const result = await attempt(() => api.addWriteDown(action.certificate, {
         amount: Number(action.amount),
@@ -4189,6 +4432,14 @@ function wireApp() {
       }
       return;
     }
+    if (target.id === "t-activity" && /print|travel/i.test(target.value) && !state.jobTimeMore) {
+      state.jobTimeMore = true;
+      const more = el("t-more");
+      if (more) more.hidden = false;
+      const toggle = main.querySelector('[data-action="t-more"]');
+      if (toggle) toggle.textContent = "Hide prints / travel / pricing";
+      return;
+    }
     const select = event.target.closest('[data-action="task-status"]');
     if (!select) return;
     const result = await attempt(() => api.updateTask(select.dataset.task, {
@@ -4250,6 +4501,9 @@ function wireApp() {
         rateBandCode: values.pricingRule === "band_hourly" ? values.rateBandCode : null,
       }));
       if (!result) return;
+      state.timePrefill = null;
+      // Back to the rendered values, so the re-render does not keep this row as a draft.
+      form.reset();
       const burn = result.financials.burn;
       toast(burn !== null && burn > 1
         ? `Logged. This job is now at ${percent(burn)} of its fee.`
@@ -4271,6 +4525,9 @@ function wireApp() {
       }));
       if (!result) return;
       state.tasks = result.tasks;
+      state.addTask = null;
+      form.reset();
+      (state.taskGroupsOpen ||= new Set()).add(phaseKey(values.phaseLabel));
       toast("Task added");
       renderMain();
     } else if (kind === "lines-from-tasks") {
@@ -4315,11 +4572,20 @@ function wireApp() {
 async function start() {
   el("gate").hidden = true;
   el("app").hidden = false;
-  el("who").textContent = `${state.session.email} Â· ${state.session.orgName || "â€”"}`;
+  el("who").textContent = `${state.session.email} · ${state.session.orgName || "—"}`;
   state.reference = await api.reference();
   await loadProjects({ initial: true });
   await loadTab();
   renderMain();
+  // The drawing app's New button lands here: a job is made in the register,
+  // never as a side effect of opening a blank plan.
+  const params = new URLSearchParams(location.search);
+  if (params.get("new") === "1") {
+    params.delete("new");
+    const rest = params.toString();
+    history.replaceState(null, "", `${location.pathname}${rest ? `?${rest}` : ""}`);
+    openNewJob();
+  }
 }
 
 async function boot() {
