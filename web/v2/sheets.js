@@ -77,7 +77,7 @@ function nextSheetNumber(sheets) {
 /** `size` must be one of `SHEET_SIZES`; anything else is refused rather than
  * silently falling back, the same "never a plausible default" rule the SKU
  * pack applies to compliance facts. */
-export function createSheet(doc, { size = "A1", name, number } = {}) {
+export function createSheet(doc, { size = "A1", name, number, level = null } = {}) {
   if (!PAPER_SIZES[size]) return { ok: false, reason: `unknown paper size "${size}"` };
   const sheets = ensureSheets(doc);
   const sheet = {
@@ -96,6 +96,9 @@ export function createSheet(doc, { size = "A1", name, number } = {}) {
     // elevation (elevation.js's `doc.elevations`) or a named callout
     // (callout.js's `doc.callouts`) instead.
     view: { kind: "plan" },
+    // Which storey a plan or callout viewport draws. Null means every storey
+    // at once, which is how sheets saved before this field existed still open.
+    planLevel: level || null,
     revisions: [],
   };
   sheets.push(sheet);
@@ -221,6 +224,36 @@ export function recommendedScale(sheet, planExtentMeters) {
  * otherwise the auto-fit recommendation for what is actually drawn. */
 export function sheetScale(sheet, planExtentMeters, preferredScale) {
   return sheet?.scaleOverride || preferredScale || recommendedScale(sheet, planExtentMeters);
+}
+
+/**
+ * The sketch forms that belong to one storey. `level` null keeps everything,
+ * which is the unsplit sheet. A room's sketch id is the room id, not its
+ * floor-finish row, so rooms are matched from `payload.rooms` and everything
+ * else from the instance that carries the same element id.
+ */
+export function planFormsForLevel(payload, level) {
+  const forms = payload?.sketchForms || [];
+  if (!level) return forms;
+  const ids = new Set();
+  for (const room of payload?.rooms || []) if (room.level === level) ids.add(room.id);
+  for (const row of payload?.instances || []) {
+    if (row.level === level && row.elementId) ids.add(row.elementId);
+  }
+  return forms.filter((form) => ids.has(form.elementId));
+}
+
+/** Round bar length, in metres, that prints between 20 mm and 55 mm at 1:n. */
+export function scaleBarMetres(scaleN) {
+  const n = Number(scaleN);
+  if (!(n > 0)) return null;
+  const lengths = [1, 2, 5, 10, 20, 50, 100, 200];
+  let pick = null;
+  for (const metres of lengths) {
+    const mm = (metres * 1000) / n;
+    if (mm >= 20 && mm <= 55) pick = metres;
+  }
+  return pick || lengths[0];
 }
 
 export function formatScale(n) {

@@ -345,8 +345,11 @@ belong to one printed drawing, not to the SKU catalog or the rule pack.
   scratch value a firm can renumber after the fact.
 - **One fixed viewport per sheet, drawn schematically.** The Sheets panel
   (`ui.js`) draws the chosen view into the drawable area at the sheet's
-  scale: the plan (walls as centrelines, rooms as outline only - no openings,
-  no dimensions, no per-level split), a named section (`doc.sections`,
+  scale: the plan (walls as centrelines, rooms with their name and area, openings,
+  the dimensions placed on that storey, and — on a plan, not a callout — the
+  property and building lines, a north point and a scale bar; `planLevel`
+  draws one storey instead of every storey at once, and an unset `planLevel`
+  still draws them all), a named section (`doc.sections`,
   `sheets.js`'s `sheetView()`), drawn from the same clipped, extruded faces
   and poché the interactive Section view uses (`massing.js`'s
   `faceStyle()`/`hatchPolygon()`, exported for exactly this), a named
@@ -414,9 +417,9 @@ belong to one printed drawing, not to the SKU catalog or the rule pack.
   even though it is flat - and prints on a sheet's plan/callout viewport; an
   annotation line does neither: it is a drafting mark on this drawing only,
   the same distinction Revit draws between a Model Line and a Detail Line.
-  Neither compiles into a 3D face, a schedule row, or the DXF/IFC export -
-  compile.js never reads `doc.lines`, and wiring either kind into the
-  Exchange exports is a separate, later decision, not a silently dropped one.
+  Neither compiles into a 3D face or a schedule row — compile.js never reads
+  `doc.lines`. The DXF and IFC exports write model lines and leave annotation
+  lines out, and the export report names the annotation lines it left behind.
   Because both kinds are just endpoint geometry with no SKU, `modify.js`'s
   rotate/mirror/copy/align/split/cut/join all work on a line for free via its
   existing `ENDPOINTED` set (now `segment | beam | line`); attach/detach stay

@@ -111,7 +111,17 @@ function roomClassLabel(room) {
 
 function checkPartC(compiled, rules, findings) {
   for (const room of compiled.rooms) {
-    if (rules.partC.minDimensionClasses.includes(room.use)) {
+    // The rule pack is keyed by SANS class ("habitable", "toilet"), not by the
+    // finer room use ("living", "wc"), so every lookup goes through sansClass.
+    if (room.sansClass === "other" && room.use === "other") {
+      push(findings, {
+        part: "C", code: "room-use-unset", severity: "unknown",
+        subject: roomClassLabel(room), roomId: room.id,
+        message: `${roomClassLabel(room)}: room use has not been set, so no Part C or Part O check can run. Pick a use in the inspector.`,
+      });
+      continue;
+    }
+    if (rules.partC.minDimensionClasses.includes(room.sansClass)) {
       const min = rules.partC.minDimension;
       if (room.minDimension < min) {
         push(findings, {
@@ -131,7 +141,7 @@ function checkPartC(compiled, rules, findings) {
       }
     }
 
-    const minHeight = rules.partC.minHeightByClass[room.use];
+    const minHeight = rules.partC.minHeightByClass[room.sansClass];
     if (minHeight === undefined) continue;
     if (room.ceilingHeight === null || room.ceilingHeight === undefined) {
       push(findings, {
@@ -207,7 +217,7 @@ function roomLightVentFacts(doc, pack, walls) {
 function checkPartO(doc, pack, compiled, walls, rules, findings) {
   const facts = roomLightVentFacts(doc, pack, walls);
   for (const room of compiled.rooms) {
-    const thresholds = rules.partO.byClass[room.use];
+    const thresholds = rules.partO.byClass[room.sansClass];
     if (!thresholds) continue;
     const f = facts.get(room.id) || { glazedArea: 0, openableArea: 0, lightUnknown: false, ventUnknown: false };
 

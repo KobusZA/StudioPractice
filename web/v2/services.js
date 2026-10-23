@@ -181,6 +181,17 @@ export function serviceMassingRoutes(doc, pack) {
   return routes;
 }
 
+/** One 3D point per service node, so a BOQ fitting (bend) can be pointed at. */
+export function serviceMassingNodes(doc, pack) {
+  const out = [];
+  for (const node of doc.serviceNodes || []) {
+    const z = nodeAbsoluteZ(pack, node);
+    if (z === null || z === undefined || !Number.isFinite(z)) continue;
+    out.push({ id: node.id, status: serviceStatus(doc, node), p: [node.x, node.y, z] });
+  }
+  return out;
+}
+
 /** Levels an edge touches, lower end first when heights allow. */
 export function edgeLevels(doc, pack, edge) {
   const m = edgeMeasure(doc, pack, edge);
@@ -422,6 +433,7 @@ export function addRoutePoint(doc, pack, route, point, { tol = REUSE_TOL } = {})
       toNode: node.id,
       sku: route.sku ?? null,
       mode: route.mode === "schematic" ? "schematic" : "measured",
+      ...(route.chase === true ? { chase: true } : {}),
     });
   }
   return { ok: true, message: "", nodeId: node.id, edgeId, createdNode: !existing };
@@ -534,6 +546,51 @@ export function liftNode(doc, pack, nodeId, delta, routeEdgeId) {
 }
 
 /**
+ * Lift (or lower) one whole run, however it is connected. An end with nothing
+ * else on it simply moves up with the run. An end that other plan runs meet is
+ * left where it is and a vertical step joins it to the lifted end, so the
+ * neighbours keep their height. An end already on a riser makes that riser
+ * taller or shorter.
+ */
+export function liftRun(doc, pack, edgeId, delta) {
+  ensureArrays(doc);
+  const edge = doc.serviceEdges.find((e) => e.id === edgeId);
+  if (!edge) return fail("Select a route run first.");
+  if (!isNum(delta) || Math.abs(delta) < 1e-6) return fail("That is the same height.");
+  const nodes = nodeMap(doc);
+  const a = nodes.get(edge.fromNode);
+  const b = nodes.get(edge.toNode);
+  if (!a || !b) return fail("That run has lost an end.");
+  if (isRiserPair(a, b)) return fail("That is a rise. Lift its top point instead.");
+  if (!isNum(a.offset) || !isNum(b.offset)) return fail("This run has no stated height. Set its offset first.");
+  const touching = (n) => doc.serviceEdges.filter((e) => e.id !== edge.id && (e.fromNode === n.id || e.toNode === n.id));
+  for (const [n, key] of [[a, "fromNode"], [b, "toNode"]]) {
+    const others = touching(n);
+    const planOthers = others.filter((e) => {
+      const o = nodes.get(e.fromNode === n.id ? e.toNode : e.fromNode);
+      return o && !isRiserPair(n, o);
+    });
+    if (planOthers.length && !others.some((e) => {
+      const o = nodes.get(e.fromNode === n.id ? e.toNode : e.fromNode);
+      return o && isRiserPair(n, o);
+    })) {
+      const lifted = {
+        id: nid("sv"), networkId: n.networkId, x: n.x, y: n.y, level: n.level,
+        offset: n.offset + delta, connectedRef: null,
+      };
+      doc.serviceNodes.push(lifted);
+      edge[key] = lifted.id;
+      doc.serviceEdges.push({
+        id: nid("se"), networkId: n.networkId, fromNode: n.id, toNode: lifted.id, sku: edge.sku, mode: "measured",
+      });
+    } else {
+      n.offset += delta;
+    }
+  }
+  return { ok: true, message: `Run ${delta > 0 ? "raised" : "lowered"} by ${Math.abs(delta).toFixed(2)} m.`, nodeId: null, createdNode: false };
+}
+
+/**
  * Add a node part-way along a run, as a GIS vertex tool does: the run is split
  * in two at the point on it nearest `point`, both halves keep its type, mode and
  * direction. The new node's height continues the run (straight-line between the
@@ -571,6 +628,7 @@ export function splitServiceEdge(doc, pack, edgeId, point) {
   doc.serviceNodes.push(node);
   const second = {
     id: nid("se"), networkId: edge.networkId, fromNode: node.id, toNode: b.id, sku: edge.sku, mode: edge.mode,
+    ...(edge.chase === true ? { chase: true } : {}),
   };
   edge.toNode = node.id;
   doc.serviceEdges.push(second);
@@ -777,6 +835,20 @@ export function setEdgeMode(doc, edgeIds, mode) {
     n += 1;
   }
   return n ? { ok: true, message: "" } : fail("Select a route first.");
+}
+
+/** Say whether runs sit in a chase or cavity (true) or are ordinary runs (false). */
+export function setEdgeChase(doc, edgeIds, chase) {
+  let n = 0;
+  for (const edge of doc.serviceEdges || []) {
+    if (!edgeIds.includes(edge.id)) continue;
+    if (chase) edge.chase = true;
+    else delete edge.chase;
+    n += 1;
+  }
+  return n
+    ? { ok: true, message: chase ? "Marked as in a chase." : "No longer marked as in a chase." }
+    : fail("Select a route first.");
 }
 
 /** Flow direction is from -> to; reversing swaps the ends. */

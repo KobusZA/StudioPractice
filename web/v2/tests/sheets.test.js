@@ -11,7 +11,9 @@ import {
   formatScale,
   latestRevision,
   paperSizeMm,
+  planFormsForLevel,
   recommendedScale,
+  scaleBarMetres,
   removeSheet,
   revisionLetter,
   sheetById,
@@ -47,6 +49,38 @@ test("createSheet defaults to A1, a fresh name and an incrementing sheet number"
   assert.equal(first.sheet.size, "A1");
   assert.notEqual(first.sheet.number, second.sheet.number);
   assert.equal(doc.sheets.length, 2);
+});
+
+test("createSheet records the storey a new plan sheet should draw", () => {
+  const doc = emptyDoc();
+  const { sheet } = createSheet(doc, { level: "L1" });
+  assert.equal(sheet.planLevel, "L1");
+  assert.equal(createSheet(doc, {}).sheet.planLevel, null);
+});
+
+test("planFormsForLevel keeps only the chosen storey, and everything when unset", () => {
+  const payload = {
+    rooms: [{ id: "r1", level: "GF" }, { id: "r2", level: "L1" }],
+    instances: [
+      { elementId: "w1", level: "GF" },
+      { elementId: "w2", level: "L1" },
+      { elementId: "F1", level: "GF" },
+    ],
+    sketchForms: [
+      { elementId: "r1", kind: "Room" },
+      { elementId: "r2", kind: "Room" },
+      { elementId: "w1", kind: "Wall" },
+      { elementId: "w2", kind: "Wall" },
+    ],
+  };
+  assert.deepEqual(planFormsForLevel(payload, "GF").map((f) => f.elementId), ["r1", "w1"]);
+  assert.equal(planFormsForLevel(payload, null).length, 4);
+});
+
+test("scaleBarMetres picks a round length that prints between 20 mm and 55 mm", () => {
+  assert.equal(scaleBarMetres(100), 5); // 50 mm at 1:100
+  assert.equal(scaleBarMetres(50), 2); // 40 mm at 1:50
+  assert.equal(scaleBarMetres(0), null);
 });
 
 test("createSheet accepts an explicit name and number", () => {

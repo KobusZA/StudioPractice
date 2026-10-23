@@ -8,6 +8,7 @@ import {
   canCommitRect,
   centerlineFromLocation,
   chainStart,
+  cycleWallLocation,
   flipWallLocation,
   hasClickDraft,
   isFaceLocation,
@@ -137,6 +138,12 @@ test("space swaps the two faces, and the first press leaves the centreline for t
   assert.equal(flipWallLocation("exterior"), "interior");
   assert.equal(flipWallLocation("interior"), "exterior");
   assert.equal(flipWallLocation("nope"), "exterior");
+});
+
+test("space cycles centreline, exterior, interior", () => {
+  assert.equal(cycleWallLocation("center"), "exterior");
+  assert.equal(cycleWallLocation("exterior"), "interior");
+  assert.equal(cycleWallLocation("interior"), "center");
 });
 
 test("typed length scales along the current heading", () => {

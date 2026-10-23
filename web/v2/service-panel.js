@@ -13,6 +13,7 @@
 
 import { effectiveLevel } from "./model.js";
 import { SERVICE_SYSTEMS, SERVICE_SYSTEM_INFO } from "./service-model.js";
+import { clearanceText, pipeRadius, runWallRelation } from "./service-walls.js";
 import {
   drainageReport,
   edgeMeasure,
@@ -79,7 +80,7 @@ function endInfo(pack, node) {
  * `mode` is "none" (no service selected), "node" (one route point) or "edges"
  * (one or more runs; a mixed selection with a point and a run reads as edges).
  */
-export function serviceInspectorModel(doc, pack, refs) {
+export function serviceInspectorModel(doc, pack, refs, ctx = null) {
   const nodes = nodeMap(doc);
   const nodeRefs = refs.filter((r) => r.kind === "serviceNode");
   const edgeRefs = refs.filter((r) => r.kind === "serviceEdge");
@@ -125,6 +126,8 @@ export function serviceInspectorModel(doc, pack, refs) {
       system,
       skuId: skuIds.size === 1 ? [...skuIds][0] : null,
       edgeMode: modes.size === 1 ? [...modes][0] : null,
+      // true / false when every selected run agrees, null when they differ.
+      chase: new Set(edges.map((e) => e.chase === true)).size === 1 ? edges[0].chase === true : null,
       skuOptions: system ? serviceSkuChoices(pack, system) : [],
       single: null,
       drainage: null,
@@ -148,6 +151,7 @@ export function serviceInspectorModel(doc, pack, refs) {
         sku,
         skuLabel: skuLabel(sku),
         networkLevels: networkLevels(doc, pack, e.networkId).map((id) => levelNameOf(pack, id)),
+        wall: wallInfo(pack, e, m, ctx),
       };
       if (system === "drainage" && m) {
         const minGradient = sku?.compliance?.minGradient;
@@ -161,6 +165,38 @@ export function serviceInspectorModel(doc, pack, refs) {
     return model;
   }
   return { mode: "none" };
+}
+
+/**
+ * The wall a single run sits alongside, for the inspector: the clearance from
+ * the pipe's edge to the face (what Revit's temporary dimension edits), and
+ * whether the run is an obstruction or an accepted chase.
+ */
+function wallInfo(pack, edge, m, ctx) {
+  if (!ctx?.walls?.length || m.vertical || m.levelFrom !== ctx.levelId || m.levelTo !== ctx.levelId) return null;
+  const rel = runWallRelation(ctx.walls, m.from, m.to, pipeRadius(pack, edge));
+  if (!rel) return null;
+  const chase = edge.chase === true;
+  let tone = "";
+  let message = "";
+  if (rel.state === "inside") {
+    tone = chase ? "ok" : "warn";
+    message = chase ? "In a chase: flagged as in the wall." : "Inside the wall with no chase: an obstruction. Tick “In chase / cavity” if that is intended.";
+  } else if (rel.state === "partial") {
+    tone = chase ? "amber" : "warn";
+    message = chase ? "Marked as a chase, but only part of the pipe is in the wall. A chase must hold the whole pipe." : "Cuts across a wall face: an obstruction.";
+  } else if (chase) {
+    tone = "amber";
+    message = "Marked as a chase, but the run is not in a wall.";
+  }
+  return {
+    state: rel.state,
+    text: clearanceText(rel),
+    clearanceMm: rel.state === "clear" ? Math.round(rel.clearance * 1000) : null,
+    measuredToLine: rel.radius === null,
+    tone,
+    message,
+  };
 }
 
 /** Per-network totals for the idle panel, from the same take-off the BOM uses. */
@@ -208,6 +244,9 @@ export function routeSettingsHtml(doc, pack, ui) {
       ${skus.length ? "" : `<p class="hint">The template has no length-measured ${esc(SERVICE_SYSTEM_INFO[ui.system].label.toLowerCase())} types. Runs can still be drawn; they stay uncounted until a type is chosen.</p>`}
       ${field("Height above level datum", `<span class="plan-context-field"><input data-svc="offset" type="text" inputmode="decimal" autocomplete="off" value="${esc(ui.offsetText)}" /><span>m</span></span>`)}
       ${field("Quantities", `<select data-svc="mode">${options([{ id: "measured", label: "Include in BoQ" }, { id: "schematic", label: "Exclude from BoQ (shown only)" }], ui.mode)}</select>`)}
+      ${field("Beside walls", `<select data-svc="just-mode">${options([{ id: "off", label: "Free (no wall offset)" }, { id: "clear", label: "Clear of the wall face" }, { id: "centre", label: "In the wall (chase)" }], ui.justMode || "off")}</select>`)}
+      ${ui.justMode === "clear" ? field("Pipe edge to wall face", `<span class="plan-context-field"><input data-svc="just-offset" type="text" inputmode="decimal" autocomplete="off" value="${esc(ui.justOffsetText ?? "150")}" /><span>mm</span></span>`) : ""}
+      ${ui.justMode === "centre" ? `<p class="hint">A click only lands on a wall's centreline, and the run is marked as in a chase. A click off a wall does nothing. The wall has to be thick enough to hold the pipe.</p>` : ""}
     </section>`;
 }
 
@@ -253,6 +292,20 @@ function edgesHtml(model) {
     field("Type", `<select data-svc="edge-sku">${options(typeOpts, model.skuId || "", { blank: model.skuId === null ? "Mixed types" : "No type chosen" })}</select>`),
     field("Quantities", `<select data-svc="edge-mode">${options([{ id: "measured", label: "Include in BoQ" }, { id: "schematic", label: "Exclude from BoQ (shown only)" }], model.edgeMode || "", { blank: model.edgeMode === null ? "Mixed" : null })}</select>`),
   );
+  parts.push(
+    `<label class="svc-field svc-check"><input type="checkbox" data-svc="edge-chase"${model.chase ? " checked" : ""} /><span>In chase / cavity${model.chase === null ? " (mixed)" : ""}</span></label>`,
+  );
+  if (s?.wall) {
+    const w = s.wall;
+    parts.push(
+      readout("Wall alongside", w.text),
+      w.clearanceMm === null
+        ? ""
+        : field("Clearance to wall face", `<span class="plan-context-field"><input data-svc="edge-clearance" type="text" inputmode="decimal" autocomplete="off" value="${w.clearanceMm}" /><span>mm</span></span>`),
+      w.clearanceMm !== null && w.measuredToLine ? `<p class="hint">This type states no pipe size, so the gap is measured from the centreline.</p>` : "",
+      w.message ? `<p class="${w.tone === "ok" ? "hint" : "warn"}">${w.tone === "ok" ? "" : "⚠ "}${esc(w.message)}</p>` : "",
+    );
+  }
   if (s) {
     parts.push(
       `<div class="svc-ends">

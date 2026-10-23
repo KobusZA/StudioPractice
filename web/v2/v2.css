@@ -1076,6 +1076,13 @@ tbody tr:hover { background: rgba(26, 22, 18, 0.04); }
   padding: 0;
 }
 
+/* `.planner-fields label { display: flex }` outranks the browser's own
+   [hidden] rule, so fields the inspector hides (Name, Use, Form, Pitch...)
+   would otherwise still show on objects they do not apply to. */
+.planner-fields [hidden] {
+  display: none !important;
+}
+
 .planner-fields input,
 .planner-fields select {
   font: inherit;
@@ -2322,6 +2329,22 @@ body.library-home {
   color: #fff;
 }
 
+.svc-profile-all {
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 2px 10px;
+  margin-left: auto;
+  margin-right: 8px;
+  border: 1px solid var(--line-strong, rgba(26, 22, 18, 0.25));
+  border-radius: 5px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.svc-profile-all:hover {
+  background: rgba(26, 22, 18, 0.06);
+}
+
 .svc-profile-title {
   margin: 0;
   font-size: 0.8rem;
@@ -2907,8 +2930,10 @@ body.library-home {
   top: 8px;
   left: 8px;
   /* Leave room for the Select/Undo/Both/Existing/Planned toolbar floated at
-     top-right (.plan-float-tools) so the two never collide. */
-  right: 220px;
+     top-right (.plan-float-tools) so the two never collide. The hint now
+     carries the arrow-key sentence as well, so this has to clear the whole
+     toolbar, not only a short chip. */
+  right: 340px;
   z-index: 2;
   display: flex;
   flex-direction: row;
@@ -2924,7 +2949,8 @@ body.library-home {
    to place a door."). One-shot commands surface their own feedback instead. */
 .ribbon-hint {
   margin: 0;
-  max-width: 22rem;
+  max-width: 100%;
+  min-width: 0;
   padding: 4px 8px;
   font-size: 0.74rem;
   text-align: left;
@@ -3132,17 +3158,27 @@ body.library-home {
 }
 
 .wall-opts.floating .plan-loc {
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
+  flex-direction: row;
+  align-items: center;
 }
+.wall-opts.floating {
+  gap: 4px;
+  padding: 3px;
+}
+.plan-loc .seg button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.plan-loc .seg button svg { display: block; }
+.plan-loc .seg button.active { background: #e8dcc6; box-shadow: inset 0 0 0 2px #1c1a17; }
 
 .plan-loc[hidden] {
   display: none !important;
 }
 
 .plan-loc .seg button {
-  padding: 2px 8px;
+  padding: 3px 5px;
   font-size: 0.72rem;
 }
 
@@ -3665,7 +3701,8 @@ body.library-home {
   text-align: right;
 }
 
-#v2-attach-report .attach-row {
+#v2-attach-report .attach-row,
+#v2-foundation-report .attach-row {
   display: flex;
   justify-content: space-between;
   gap: 10px;
@@ -3674,7 +3711,8 @@ body.library-home {
   border-bottom: 1px solid var(--line);
 }
 
-#v2-attach-report .attach-row.attach-broken {
+#v2-attach-report .attach-row.attach-broken,
+#v2-foundation-report .attach-row.attach-broken {
   color: #7a5310;
 }
 
@@ -4205,13 +4243,32 @@ body.library-home {
   gap: 12px;
 }
 
+.schedule-title {
+  margin-right: auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .schedule-panel > header h2 {
   margin: 0;
-  margin-right: auto;
+  font-size: 1.15rem;
+  line-height: 1.2;
+}
+
+#v2-schedule-kicker {
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .schedule-panel > header button {
   font: inherit;
+  font-size: 0.82rem;
+  line-height: 1.2;
   padding: 5px 10px;
   border: 1px solid var(--ink);
   background: #fff;
@@ -4219,11 +4276,183 @@ body.library-home {
   cursor: pointer;
 }
 
+.schedule-overlay.peek .schedule-panel > header h2 {
+  font-size: 1.05rem;
+}
+
+.schedule-overlay.peek .schedule-panel > header button {
+  font-size: 0.78rem;
+  padding: 4px 8px;
+}
+
+.schedule-overlay.peek #v2-schedule-kicker {
+  font-size: 0.75rem;
+}
+
 .schedule-body {
   flex: 1;
   min-height: 0;
   overflow: auto;
   margin-top: 10px;
+  font-size: 0.84rem;
+}
+
+/* Full table: a long model code wraps instead of forcing the description
+   into a few characters, and the description keeps a readable measure. */
+.schedule-panel .cost-table td:nth-child(2),
+.schedule-panel .cost-table th:nth-child(2) {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  max-width: 16rem;
+  line-height: 1.3;
+}
+
+.schedule-panel .cost-table td:nth-child(2) {
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.schedule-panel .cost-table td.wrap,
+.schedule-panel .cost-table th.wrap {
+  min-width: 14rem;
+  max-width: 22rem;
+  line-height: 1.35;
+}
+
+.schedule-panel .cost-table td.wrap {
+  font-size: 0.84rem;
+}
+
+.schedule-panel .cost-table th {
+  font-size: 0.72rem;
+}
+
+.schedule-overlay.peek .schedule-body {
+  overflow-x: hidden;
+  font-size: 0.8rem;
+}
+
+.schedule-overlay.peek .compile-warnings .warn {
+  font-size: 0.78rem;
+}
+
+/* Docked lines: model, description, then category / qty / amount.
+   Same size steps as the rest of the panel, full width of the dock. */
+.schedule-lines {
+  display: flex;
+  flex-direction: column;
+}
+
+.schedule-line {
+  border-bottom: 1px solid var(--line);
+}
+
+.schedule-lines .schedule-group-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 2px;
+}
+
+.schedule-line-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.schedule-line-model {
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.schedule-line-desc {
+  margin-top: 2px;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  color: var(--ink-soft);
+}
+
+.schedule-line-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 0.75rem;
+  color: var(--ink-soft);
+}
+
+.schedule-line-cat {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.schedule-line-qty,
+.schedule-line-amt {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  font-size: 0.78rem;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.schedule-line-amt {
+  min-width: 4.2em;
+  text-align: right;
+}
+
+.schedule-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding: 10px 4px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  border-top: 2px solid var(--ink);
+  background: #ece4d6;
+}
+
+.schedule-overlay.peek .schedule-caret-btn {
+  width: 22px;
+  height: 22px;
+  margin-top: 1px;
+  flex-shrink: 0;
+  border-radius: 4px;
+}
+
+.schedule-overlay.peek .schedule-caret-btn::before {
+  top: 6px;
+  left: 6px;
+  width: 6px;
+  height: 6px;
+}
+
+.schedule-overlay.peek .schedule-group-row.open .schedule-caret-btn::before {
+  top: 5px;
+  left: 7px;
+  border-top: none;
+  border-bottom: 2px solid var(--ink);
+}
+
+.schedule-overlay.peek .schedule-element {
+  font-size: 0.78rem;
+}
+
+.schedule-overlay.peek .schedule-element-id {
+  overflow-wrap: anywhere;
+}
+
+.schedule-elements .hint {
+  margin: 0;
+  padding: 6px 8px 8px;
 }
 
 /* One row per SKU, expandable to the individual elements behind it. */
@@ -4232,15 +4461,48 @@ body.library-home {
 }
 
 .schedule-group-row .schedule-caret {
-  display: inline-block;
-  width: 1em;
-  transition: transform 0.1s ease;
+  width: 44px;
+  padding: 0 4px;
+  text-align: center;
 }
 
-.schedule-group-row.open .schedule-caret {
-  transform: rotate(90deg);
+.schedule-caret-btn {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: #fff;
+  border: 1px solid rgba(20, 18, 15, 0.35);
+  border-radius: 6px;
+  cursor: pointer;
 }
 
+.schedule-caret-btn::before {
+  content: "";
+  position: absolute;
+  top: 9px;
+  left: 8px;
+  width: 8px;
+  height: 8px;
+  border-top: 2px solid var(--ink);
+  border-right: 2px solid var(--ink);
+  transform: rotate(45deg);
+}
+
+.schedule-caret-btn:hover {
+  background: rgba(20, 18, 15, 0.08);
+}
+
+.schedule-group-row.open .schedule-caret-btn {
+  background: rgba(20, 18, 15, 0.1);
+}
+
+.schedule-group-row.open .schedule-caret-btn::before {
+  top: 7px;
+  left: 9px;
+  border-top: none;
+  border-bottom: 2px solid var(--ink);
+}
 .schedule-elements-row > td {
   padding: 0;
   border-bottom: none;
@@ -4271,33 +4533,143 @@ body.library-home {
   font-family: monospace;
 }
 
-.schedule-locate {
-  font: inherit;
-  font-size: 0.78rem;
-  padding: 2px 8px;
-  border: 1px solid var(--ink);
-  background: #fff;
+/* Click a line to pick it out (full table: in the model pane; side view: on
+   the real drawing). No per-line buttons - the row is the control. */
+.schedule-group-row:hover,
+.schedule-element:hover {
+  background: rgba(20, 18, 15, 0.05);
+}
+
+.schedule-element {
+  cursor: pointer;
+  padding: 4px 8px;
+  margin: 0 -8px;
   border-radius: 3px;
+}
+
+.schedule-element .schedule-element-level {
+  min-width: 5em;
+  text-align: right;
+}
+
+.schedule-group-row.picked,
+.schedule-element.picked {
+  background: rgba(255, 170, 0, 0.2);
+  box-shadow: inset 3px 0 0 #ea580c;
+}
+
+/* Model pane above the table (full table only). */
+.schedule-3d {
+  margin-top: 10px;
+  border: 1px solid rgba(20, 18, 15, 0.18);
+  border-radius: 6px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.schedule-overlay.peek .schedule-3d {
+  display: none;
+}
+
+.schedule-3d-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  font-size: 0.82rem;
+  background: rgba(20, 18, 15, 0.03);
+  border-bottom: 1px solid rgba(20, 18, 15, 0.12);
+}
+
+.schedule-3d-note {
+  flex: 1;
+  min-width: 0;
+  color: var(--ink-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.schedule-3d-modes {
+  display: inline-flex;
+  border: 1px solid var(--ink);
+  border-radius: 999px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.schedule-3d-modes label {
   cursor: pointer;
 }
 
-.schedule-locate:disabled {
-  opacity: 0.5;
+.schedule-3d-modes input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.schedule-3d-modes span {
+  display: block;
+  padding: 3px 14px;
+  font-size: 0.8rem;
+}
+
+.schedule-3d-modes input:checked + span {
+  background: var(--ink);
+  color: #fff;
+}
+
+.schedule-3d-modes input:focus-visible + span {
+  outline: 2px solid #ea580c;
+  outline-offset: -2px;
+}
+
+#v2-schedule-3d-drawing {
+  font: inherit;
+  font-size: 0.8rem;
+  padding: 4px 12px;
+  border: 1px solid var(--ink);
+  background: #fff;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+#v2-schedule-3d-drawing:hover:not(:disabled) {
+  background: var(--ink);
+  color: #fff;
+}
+
+#v2-schedule-3d-drawing:disabled {
+  opacity: 0.45;
   cursor: default;
 }
 
-/* "Show all" on the rolled-up line: every drawn element behind it at once,
-   which is the question a schedule line actually raises ("where is my 42 m
-   of 110 wall?"), not "where is the third one". */
-.schedule-locate-all {
-  white-space: nowrap;
+.schedule-3d-stage {
+  position: relative;
+  height: 300px;
 }
 
-.schedule-plan-cell {
-  text-align: right;
-  white-space: nowrap;
+.schedule-3d-stage canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: grab;
 }
 
+.schedule-3d-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  color: var(--ink-soft);
+  pointer-events: none;
+}
+
+.schedule-3d-empty[hidden] {
+  display: none;
+}
 /* Sheets: Output > Print > Sheets. A0-A4 title blocks; see sheets.js for the
    layout maths and ui.js for the canvas draw. Same overlay pattern as Check
    and 3D above, but with a list rail (a sheet is a distinct doc-level
@@ -5068,4 +5440,10 @@ body.library-home .library-foot {
   margin: 0;
   color: #8d3416;
   font-size: 0.82rem;
+}
+
+.svc-fields .svc-check {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
 }

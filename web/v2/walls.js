@@ -9,6 +9,7 @@
 import {
   EPS,
   GRID,
+  distToSeg,
   lineBasis,
   lineKey,
   offsetOf,
@@ -106,6 +107,10 @@ export function deriveRoomWalls(doc, pack) {
   const groups = new Map();
 
   for (const room of doc.rooms || []) {
+    // A bound room's outline is the inner face of walls the user already drew.
+    // Emitting a second wall along that face (or along a separation line) would
+    // price a wall nobody drew.
+    if (room.bound) continue;
     const poly = roomPolygon(room);
     if (poly.length < 3) continue;
     const level = effectiveLevel(room, pack);
@@ -191,12 +196,32 @@ export function deriveRoomWalls(doc, pack) {
 /** Walls the user drew directly: foundations, boundary walls, free-standing walls. */
 export function deriveDrawnWalls(doc, pack, minLength = 0.3) {
   const walls = [];
+  // Rooms tagged inside drawn walls own no walls of their own, so the link a
+  // window needs (wall -> room, for Part O) is found from geometry instead.
+  const roomsByLevel = new Map();
+  for (const room of doc.rooms || []) {
+    const poly = roomPolygon(room);
+    if (poly.length < 3) continue;
+    const level = effectiveLevel(room, pack);
+    if (!roomsByLevel.has(level)) roomsByLevel.set(level, []);
+    roomsByLevel.get(level).push({ id: room.id, edges: polyEdges(poly) });
+  }
+  const adjoining = (wall) => {
+    const rooms = roomsByLevel.get(wall.level);
+    if (!rooms) return [];
+    const mx = (wall.x1 + wall.x2) / 2;
+    const my = (wall.y1 + wall.y2) / 2;
+    const reach = wall.thickness / 2 + ROOM_WALL_REACH;
+    return rooms
+      .filter((r) => r.edges.some((e) => e.length > EPS && distToSeg(e.a[0], e.a[1], e.b[0], e.b[1], mx, my) <= reach))
+      .map((r) => r.id);
+  };
   for (const seg of doc.segments || []) {
     const sku = skuById(pack, seg.sku);
     if (!sku) continue;
     const length = segLength(seg.x1, seg.y1, seg.x2, seg.y2);
     if (length < minLength) continue;
-    walls.push({
+    const drawnWall = {
       id: seg.id,
       x1: seg.x1,
       y1: seg.y1,
@@ -221,9 +246,35 @@ export function deriveDrawnWalls(doc, pack, minLength = 0.3) {
       edges: [],
       drawn: true,
       status: objectStatus(seg),
-    });
+    };
+    drawnWall.roomIds = adjoining(drawnWall);
+    walls.push(drawnWall);
   }
   return walls;
+}
+
+/** How far past a drawn wall's own face a room outline may sit and still count as bounded by it, metres. */
+export const ROOM_WALL_REACH = 0.15;
+
+/**
+ * True when a room-derived wall piece lies along a drawn wall on the same
+ * level. The room outline was traced on top of walls the user had already
+ * drawn, so the generated piece would be a second copy of the same wall.
+ */
+function coveredByDrawn(piece, drawn) {
+  const mx = (piece.x1 + piece.x2) / 2;
+  const my = (piece.y1 + piece.y2) / 2;
+  const px = piece.x2 - piece.x1;
+  const py = piece.y2 - piece.y1;
+  const plen = Math.hypot(px, py) || 1;
+  return drawn.some((d) => {
+    if (d.level !== piece.level || d.category === "foundation") return false;
+    const dx = d.x2 - d.x1;
+    const dy = d.y2 - d.y1;
+    const dlen = Math.hypot(dx, dy) || 1;
+    if (Math.abs(px * dy - py * dx) / (plen * dlen) > 0.02) return false;
+    return distToSeg(d.x1, d.y1, d.x2, d.y2, mx, my) <= d.thickness / 2 + ROOM_WALL_REACH;
+  });
 }
 
 /**
@@ -343,7 +394,9 @@ export function joinWallCorners(walls, tol = CORNER_JOIN_TOL) {
 }
 
 export function deriveWalls(doc, pack) {
-  return joinWallCorners([...deriveRoomWalls(doc, pack), ...deriveDrawnWalls(doc, pack)]);
+  const drawn = deriveDrawnWalls(doc, pack);
+  const generated = deriveRoomWalls(doc, pack).filter((w) => !coveredByDrawn(w, drawn));
+  return joinWallCorners([...generated, ...drawn]);
 }
 
 /** External walls are bounded by exactly one room. Needed by Part XA and Part O. */

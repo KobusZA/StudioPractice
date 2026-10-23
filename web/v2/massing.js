@@ -755,6 +755,38 @@ export function createMassingView({ canvas, emptyEl, captionEl, titleEl, onDraw 
   let showServices = true;
   let drag = null;
   let reframe = true;
+  // Element ids to pick out (BOQ "Show in 3D"). Empty = draw normally; set =
+  // everything else is faded and these are painted in the accent colour.
+  let highlight = new Set();
+  let highlightHits = 0;
+  const NODE_FLASH_MS = 1400;
+  let serviceNodes = [];
+  let flashStart = 0;
+  let flashRaf = 0;
+
+  function setServiceNodes(nodes) {
+    serviceNodes = Array.isArray(nodes) ? nodes : [];
+    draw();
+  }
+
+  // Flat = a fixed top-down plan of the same model: no orbit, roofs left out
+  // (they would hide everything under them), ground grid drawn as usual.
+  let flat = false;
+
+  function setFlat(on) {
+    flat = Boolean(on);
+    if (cam.mode === "orbit") reframe = true;
+    draw();
+  }
+
+  /** Returns how many faces/runs in the current view matched, so a caller can
+   *  say "not visible in 3D" for an element with no solid of its own. */
+  function setHighlight(ids) {
+    highlight = new Set((ids || []).filter(Boolean));
+    flashStart = performance.now();
+    draw();
+    return highlightHits;
+  }
 
   function setPayload(nextPayload) {
     payload = nextPayload;
@@ -840,7 +872,10 @@ export function createMassingView({ canvas, emptyEl, captionEl, titleEl, onDraw 
       titleEl.textContent = isLook ? "Look" : isSection ? "Section" : isElevation ? `${cam.label || "Elevation"} elevation` : "3D massing";
     }
 
-    const faces = facesFromPayload(payload, statusFilter);
+    const allFaces = facesFromPayload(payload, statusFilter);
+    const faces = flat && cam.mode === "orbit"
+      ? allFaces.filter((face) => face.kind !== "roof" || highlight.has(face.id))
+      : allFaces;
     const routes = showServices ? serviceRoutesInView(serviceRoutes, statusFilter, cam) : [];
     if (!faces.length && !routes.length) {
       if (emptyEl) emptyEl.hidden = false;
@@ -866,6 +901,10 @@ export function createMassingView({ canvas, emptyEl, captionEl, titleEl, onDraw 
     if (reframe && !isLook && !isCutView && bounds) {
       frameCamera(cam, bounds);
       reframe = false;
+    }
+    if (flat && cam.mode === "orbit") {
+      cam.pitch = Math.PI / 2 - 0.0001;
+      cam.yaw = 0;
     }
     const withGround = [...faces, ...groundFacesFromBounds(bounds)];
     // Only a section clips: an elevation is viewed from outside the whole
@@ -919,11 +958,21 @@ export function createMassingView({ canvas, emptyEl, captionEl, titleEl, onDraw 
     projected.sort((a, b) => massingLayer(a.face) - massingLayer(b.face)
       || ((isLook || isCutView) ? b.depth - a.depth : a.depth - b.depth));
 
-    for (const item of projected) {
+    const picking = highlight.size > 0;
+    highlightHits = 0;
+    const drawFace = (item, picked) => {
       const style = faceStyle(item.face);
       ctx.beginPath();
       item.pts.forEach((p, i) => (i === 0 ? ctx.moveTo(p[0], p[1]) : ctx.lineTo(p[0], p[1])));
       ctx.closePath();
+      if (picked) {
+        ctx.fillStyle = "rgba(255,170,0,0.78)";
+        ctx.strokeStyle = "#c2410c";
+        ctx.lineWidth = 1.4;
+        ctx.fill();
+        ctx.stroke();
+        return;
+      }
       ctx.fillStyle = item.face.cut
         ? (item.face.kind === "wall" ? "rgba(90,84,76,0.72)" : style.fill)
         : style.fill;
@@ -932,23 +981,87 @@ export function createMassingView({ canvas, emptyEl, captionEl, titleEl, onDraw 
       ctx.fill();
       if (item.face.cut) hatchPolygon(ctx, item.pts, style.stroke);
       if (projected.length < 25000) ctx.stroke();
+    };
+    const pickedItems = [];
+    for (const item of projected) {
+      const picked = picking && item.face.kind !== "ground" && highlight.has(item.face.id);
+      if (picked) {
+        pickedItems.push(item);
+        highlightHits += 1;
+        continue;
+      }
+      if (picking) ctx.globalAlpha = 0.2;
+      drawFace(item, false);
+      ctx.globalAlpha = 1;
     }
-    paintServiceRoutes(ctx, routes, (point) => (isLook
+    // Picked faces go on top of the faded building, so a hit is never hidden
+    // behind a wall that merely happens to be nearer the camera.
+    for (const item of pickedItems) drawFace(item, true);
+    const projectRoute = (point) => (isLook
       ? projectLookPoint(point[0], point[1], point[2], cam, cx, cy, height)
       : isCutView
         ? projectSectionPoint(point[0], point[1], point[2], cam, cam.sectionOu, cam.sectionOv, sectionScale, cx, cy)
-        : projectPoint(point[0], point[1], point[2], origin, cx, cy, scale, cam)), (pa, pb) => {
+        : projectPoint(point[0], point[1], point[2], origin, cx, cy, scale, cam));
+    const routePx = (pa, pb) => {
       if (isLook) {
         const depth = Math.max(LOOK_NEAR, ((pa[2] + pb[2]) / 2));
         const fov = Number(cam.fov) > 0 ? cam.fov : LOOK_FOV_DEFAULT;
         return ((height / 2) / Math.tan(fov / 2)) / depth;
       }
       return isCutView ? sectionScale : scale;
-    }, isLook);
+    };
+    // Fittings (bends) are service nodes: too small to read as faces, so a
+    // picked one gets a solid marker plus a short pulsing ring.
+    const pickedNodes = picking && showServices
+      ? serviceNodes.filter((n) => highlight.has(n.id))
+      : [];
+    const paintPickedNodes = () => {
+      if (!pickedNodes.length) return;
+      const t = (performance.now() - flashStart) / NODE_FLASH_MS;
+      ctx.save();
+      for (const n of pickedNodes) {
+        const p = projectRoute(n.p);
+        if (isLook && p[2] < LOOK_NEAR) continue;
+        ctx.beginPath();
+        ctx.arc(p[0], p[1], 5, 0, Math.PI * 2);
+        ctx.fillStyle = "#ea580c";
+        ctx.strokeStyle = "#fffdf8";
+        ctx.lineWidth = 2;
+        ctx.fill();
+        ctx.stroke();
+        if (t < 1) {
+          const pulse = Math.abs(Math.sin(t * Math.PI * 3));
+          ctx.beginPath();
+          ctx.arc(p[0], p[1], 9 + 18 * pulse, 0, Math.PI * 2);
+          ctx.strokeStyle = "#ea580c";
+          ctx.globalAlpha = (1 - t) * (0.4 + 0.6 * pulse);
+          ctx.lineWidth = 2.4;
+          ctx.stroke();
+          ctx.globalAlpha = 1;
+        }
+      }
+      ctx.restore();
+      if (t < 1 && !flashRaf) {
+        flashRaf = requestAnimationFrame(() => { flashRaf = 0; draw(); });
+      }
+    };
+    highlightHits += pickedNodes.length;
+    if (picking) {
+      const pickedRoutes = routes.filter((route) => highlight.has(route.id));
+      highlightHits += pickedRoutes.length;
+      ctx.globalAlpha = 0.2;
+      paintServiceRoutes(ctx, routes.filter((route) => !highlight.has(route.id)), projectRoute, routePx, isLook);
+      ctx.globalAlpha = 1;
+      paintServiceRoutes(ctx, pickedRoutes.map((route) => ({ ...route, colour: "#ea580c", dash: null, diameter: 0.08 })), projectRoute, routePx, isLook);
+    } else {
+      paintServiceRoutes(ctx, routes, projectRoute, routePx, isLook);
+    }
+    paintPickedNodes();
     if (typeof onDraw === "function") onDraw(cam, payload);
   }
 
   canvas.addEventListener("pointerdown", (event) => {
+    if (flat && cam.mode === "orbit") return;
     drag = {
       x: event.clientX,
       y: event.clientY,
@@ -991,8 +1104,11 @@ export function createMassingView({ canvas, emptyEl, captionEl, titleEl, onDraw 
 
   return {
     setPayload,
+    setHighlight,
+    setFlat,
     setStatusFilter,
     setServices,
+    setServiceNodes,
     setShowServices,
     setLook,
     setSection,

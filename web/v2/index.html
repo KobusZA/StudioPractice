@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,560&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="./v2.css?v=20261022-wall-float" />
+  <link rel="stylesheet" href="./v2.css?v=20261023-schedule-type" />
 </head>
 <body class="auth-pending">
   <div class="chrome">
@@ -135,19 +135,17 @@
           <div class="plan-options" id="v2-plan-options" hidden>
             <div class="wall-opts" id="v2-wall-opts" hidden>
             <div class="plan-loc" id="v2-wall-loc" hidden>
-              <span>Draw on</span>
               <div class="seg" role="group" aria-label="Draw on">
-                <button type="button" data-wall-loc="center" class="active" aria-pressed="true" title="The line you draw is the middle of the wall.">Centreline</button>
-                <button type="button" data-wall-loc="exterior" aria-pressed="false" title="The line you draw is the outside face. Draw clockwise and the wall sits inside the line. Space flips.">Exterior face</button>
-                <button type="button" data-wall-loc="interior" aria-pressed="false" title="The line you draw is the inside face. Draw clockwise and the wall sits outside the line. Space flips.">Interior face</button>
+                <button type="button" data-wall-loc="center" class="active" aria-pressed="true" aria-label="Centreline" title="Centreline: The line you draw is the middle of the wall."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><rect x="2" y="8" width="20" height="8" fill="#d9c7b0" stroke="#5c2410" stroke-width="1"/><line x1="2" y1="12" x2="22" y2="12" stroke="#c8501e" stroke-width="2" stroke-dasharray="3 2"/></svg></button>
+                <button type="button" data-wall-loc="exterior" aria-pressed="false" aria-label="Exterior face" title="Exterior face: The line you draw is the outside face. Draw clockwise and the wall sits inside the line. Space flips."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><rect x="2" y="8" width="20" height="8" fill="#d9c7b0" stroke="#5c2410" stroke-width="1"/><line x1="2" y1="8" x2="22" y2="8" stroke="#c8501e" stroke-width="2.5"/></svg></button>
+                <button type="button" data-wall-loc="interior" aria-pressed="false" aria-label="Interior face" title="Interior face: The line you draw is the inside face. Draw clockwise and the wall sits outside the line. Space flips."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><rect x="2" y="8" width="20" height="8" fill="#d9c7b0" stroke="#5c2410" stroke-width="1"/><line x1="2" y1="16" x2="22" y2="16" stroke="#c8501e" stroke-width="2.5"/></svg></button>
               </div>
             </div>
             <div class="plan-loc" id="v2-wall-corner" hidden>
-              <span>Corner</span>
               <div class="seg" role="group" aria-label="Corner">
-                <button type="button" data-wall-corner="past" aria-pressed="false" title="Starting or ending on another wall's end: the new wall runs past it to its far face, and the other wall stops against the new one.">Past old wall</button>
-                <button type="button" data-wall-corner="against" class="active" aria-pressed="true" title="Starting or ending on another wall's end: the new wall stops against its side, and the other wall runs on to cover the corner.">Against old wall</button>
-                <button type="button" data-wall-corner="center" aria-pressed="false" title="Nothing is trimmed or extended: the walls meet on the line you drew.">On the line</button>
+                <button type="button" data-wall-corner="past" aria-pressed="false" aria-label="Past old wall" title="Past old wall: Starting or ending on another wall's end: the new wall runs past it to its far face, and the other wall stops against the new one."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><rect x="3" y="2" width="6" height="20" fill="#b9b2a6" stroke="#555" stroke-width="1"/><rect x="1" y="12" width="21" height="7" fill="#d9c7b0" stroke="#5c2410"/></svg></button>
+                <button type="button" data-wall-corner="against" class="active" aria-pressed="true" aria-label="Against old wall" title="Against old wall: Starting or ending on another wall's end: the new wall stops against its side, and the other wall runs on to cover the corner."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><rect x="3" y="2" width="6" height="20" fill="#b9b2a6" stroke="#555" stroke-width="1"/><rect x="9" y="12" width="13" height="7" fill="#d9c7b0" stroke="#5c2410"/></svg></button>
+                <button type="button" data-wall-corner="center" aria-pressed="false" aria-label="On the line" title="On the line: Nothing is trimmed or extended: the walls meet on the line you drew."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><rect x="3" y="2" width="6" height="20" fill="#b9b2a6" stroke="#555" stroke-width="1"/><rect x="6" y="12" width="16" height="7" fill="#d9c7b0" fill-opacity=".7" stroke="#5c2410"/><line x1="6" y1="15.5" x2="22" y2="15.5" stroke="#c8501e" stroke-width="1.5" stroke-dasharray="3 2"/></svg></button>
               </div>
             </div>
             </div>
@@ -295,6 +293,8 @@
                 aria-label="Resize route profile" title="Drag to change height" tabindex="0"></button>
         <div class="svc-profile-head">
           <p class="svc-profile-title" id="v2-service-profile-title">Route profile</p>
+          <button type="button" class="svc-profile-all" id="v2-profile-select-all"
+                  title="Select every run on this route, rises and drops included, so type and Include in BoQ can be changed in one go. Double-clicking a run does the same.">Select whole route</button>
           <span class="svc-profile-mode" role="group" aria-label="Drag a node in the profile to">
             <button type="button" data-profile-mode="step" title="Dragging a node makes a vertical rise or drop (90 degrees). Hold Shift to use Slope for one drag.">Step</button>
             <button type="button" data-profile-mode="slope" title="Dragging a node changes only its height, so the runs beside it slope (use for drainage falls). Hold Shift to use Step for one drag.">Slope</button>
@@ -341,6 +341,11 @@
           </label>
           <label id="v2-ctx-use-wrap" hidden>Use
             <select id="v2-ctx-use"></select>
+          </label>
+          <label id="v2-ctx-region-wrap" hidden>Fill
+            <select id="v2-ctx-region">
+              <option value="">Not set</option>
+            </select>
           </label>
           <label id="v2-ctx-type-wrap" hidden>Type
             <select id="v2-ctx-type"></select>
@@ -418,6 +423,13 @@
             <p class="hint">Loading pack…</p>
           </div>
         </section>
+        <section class="panel" id="v2-foundation-report-panel">
+          <header>
+            <h2>Foundations</h2>
+            <span id="v2-foundation-count">—</span>
+          </header>
+          <div class="planner-fields" id="v2-foundation-report"></div>
+        </section>
         <section class="panel" id="v2-attach-report-panel">
           <header>
             <h2>Attached bases</h2>
@@ -443,11 +455,30 @@
   <div class="schedule-overlay" id="v2-schedule-overlay" hidden>
     <div class="panel schedule-panel">
       <header>
-        <h2 id="v2-schedule-title">Schedule</h2>
-        <span id="v2-schedule-kicker">—</span>
-        <button type="button" id="v2-schedule-peek">Peek plan</button>
+        <div class="schedule-title">
+          <h2 id="v2-schedule-title">Schedule</h2>
+          <span id="v2-schedule-kicker">—</span>
+        </div>
+        <button type="button" id="v2-schedule-peek">Side view</button>
         <button type="button" id="v2-schedule-close">Close</button>
       </header>
+      <!-- Full table: click a line and it is picked out in this model view
+           (read-only - the drawing is untouched). Side view hides it: there,
+           a click goes to the real drawing instead. -->
+      <section class="schedule-3d" id="v2-schedule-3d">
+        <div class="schedule-3d-head">
+          <div class="schedule-3d-modes" role="radiogroup" aria-label="Model view">
+            <label><input type="radio" name="v2-schedule-view" value="3d" checked><span>3D</span></label>
+            <label><input type="radio" name="v2-schedule-view" value="2d"><span>2D plan</span></label>
+          </div>
+          <span class="schedule-3d-note" id="v2-schedule-3d-note">Click a line to pick it out.</span>
+          <button type="button" id="v2-schedule-3d-drawing" disabled title="Leaves this table view: switches level, selects the element(s) and pans the real drawing to them">Exit to drawing &#8599;</button>
+        </div>
+        <div class="schedule-3d-stage">
+          <canvas id="v2-schedule-3d-canvas"></canvas>
+          <p class="schedule-3d-empty" id="v2-schedule-3d-empty" hidden>Draw something to see it here.</p>
+        </div>
+      </section>
       <div class="schedule-body" id="v2-schedule-body"></div>
     </div>
   </div>
@@ -558,6 +589,9 @@
             <label>View
               <select id="v2-sheet-view"></select>
             </label>
+            <label>Level
+              <select id="v2-sheet-level"></select>
+            </label>
             <label>Size
               <select id="v2-sheet-size"></select>
             </label>
@@ -596,7 +630,7 @@
           </div>
           <div class="sheet-revisions">
             <h3>Revision clouds</h3>
-            <p class="hint">Drawn on the plan with Document &gt; Annotate &gt; Revision cloud. Link each one to a revision this sheet has issued.</p>
+            <p class="hint">Drawn on the plan with Document &gt; Annotate &gt; Revision cloud. The cloud stays on the plan. Link each one to a revision this sheet has issued.</p>
             <div id="v2-sheet-cloud-list"></div>
           </div>
         </section>
@@ -884,6 +918,6 @@
     </form>
   </div>
 
-  <script type="module" src="./ui.js?v=20261022-wall-float"></script>
+  <script type="module" src="./ui.js?v=20261023-schedule-type"></script>
 </body>
 </html>

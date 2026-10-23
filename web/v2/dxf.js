@@ -184,6 +184,7 @@ export function exportDxf(doc, pack) {
       ["beams", (doc?.beams || []).length],
       ["stairs", (doc?.stairs || []).length],
       ["placed items", (doc?.items || []).length],
+      ["annotation lines", (doc?.lines || []).filter((l) => l.kind === "annotation").length],
     ].filter(([, n]) => n > 0).map(([label, n]) => `${n} ${label}`),
     warnings: [
       ...(out.warnings || []),
@@ -271,6 +272,20 @@ export function exportDxf(doc, pack) {
     const cy = pts.reduce((s, p) => s + p[1], 0) / pts.length;
     dxf.text(layerName("A-ANNO", levelNameOf(room.level)), cx, cy, 200, room.name || room.id);
     report.counts.rooms += 1;
+  }
+
+  report.counts.lines = 0;
+  for (const line of doc?.lines || []) {
+    if (line.kind !== "model") continue;
+    if (![line.x1, line.y1, line.x2, line.y2].every(Number.isFinite)) continue;
+    if (Math.hypot(line.x2 - line.x1, line.y2 - line.y1) < 1e-6) {
+      report.skipped.push("A model line has no length and was left out.");
+      continue;
+    }
+    const layer = layerName("A-LINE", levelNameOf(line.level));
+    const [a, b] = toMmPts([[line.x1, line.y1], [line.x2, line.y2]]);
+    dxf.line(layer, a, b);
+    report.counts.lines += 1;
   }
 
   const base = (pack?.name || "plan").replace(/[^\w\-. ]+/g, "").trim() || "plan";

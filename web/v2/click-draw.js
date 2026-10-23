@@ -96,6 +96,13 @@ export function flipWallLocation(location) {
   return loc === "exterior" ? "interior" : "exterior";
 }
 
+/** Space steps through centreline -> exterior -> interior -> centreline. */
+export function cycleWallLocation(location) {
+  const loc = normalizeWallLocation(location);
+  if (loc === "center") return "exterior";
+  return loc === "exterior" ? "interior" : "center";
+}
+
 /** Mirroring reverses handedness, so the face a wall was drawn on swaps names. */
 export function mirroredWallLocation(location) {
   const loc = normalizeWallLocation(location);
@@ -158,6 +165,8 @@ export function hasClickDraft(state) {
     || state.beamStart
     || state.lineStart
     || state.siteDraft?.length
+    || state.roomDraft?.length
+    || state.regionDraft?.length
     || state.cameraDraft?.a
     || state.sectionDraft?.a
     || state.calloutDraft?.a

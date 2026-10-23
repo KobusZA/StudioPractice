@@ -121,7 +121,7 @@ export const RIBBON = [
         label: "Rooms",
         items: [
           { id: "rooms", label: "Room", tool: "room", categories: ["floor"] },
-          { id: "room-sep", label: "Separate", todo: "Room separation lines follow the polygon editor." },
+          { id: "room-sep", label: "Separate", command: "room-sep" },
         ],
       },
       {
@@ -136,7 +136,7 @@ export const RIBBON = [
         items: [
           { id: "dimensions", label: "Dimensions", command: "dimensions" },
           { id: "revision", label: "Revision cloud", command: "revision" },
-          { id: "region", label: "Region", todo: "Week 3, with the filled-region colour conventions." },
+          { id: "region", label: "Region", command: "region" },
         ],
       },
       {
@@ -151,7 +151,7 @@ export const RIBBON = [
         label: "Project",
         items: [
           { id: "project-info", label: "Project information", command: "project-info" },
-          { id: "finishes", label: "Floor finishes", todo: "Needs a finishes SKU category; none in the template." },
+          { id: "finishes", label: "Floor finishes", command: "finishes" },
         ],
       },
       {
@@ -312,8 +312,11 @@ export const HINTS = {
   "service-slope": "Select drainage runs, then set the fall. Flow runs from the first point to the second.",
   furniture: "Click to place a piece of furniture.",
   casework: "Click to place casework.",
-  rooms: "Click inside enclosed walls to tag a room.",
-  dimensions: "Click two points to measure. Esc to stop.",
+  rooms: "Click inside the walls to fill the room. Where there are no walls, click each corner and press Enter. Set its use in the inspector — compliance checks depend on it.",
+  "room-sep": "Click one end, then the other. A separation line bounds a room where there is no wall.",
+  region: "Click each corner of the patch, then Enter. Pick Brick red, Concrete or Concrete 2 in the inspector. The patch stays ink on the drawing.",
+  finishes: "Pick one of the template's floor types. It is assigned to the selected room, or to the next room you place.",
+  dimensions: "Click two points. The dimension stays on this level and prints on its sheet. Select it and press Delete to remove it.",
   rotate: "Select something first, then rotate.",
   attach: "Click a wall or beam on this storey or the one below to sit the selection on top of it. Esc to cancel.",
   detach: "Stop following what the selection sits on, leaving it at the elevation it already has.",
@@ -322,7 +325,7 @@ export const HINTS = {
   section: "Click two points to cut. Look is to the left of the line; draw the other way to flip.",
   elevation: "Pick a compass side to extrude an orthographic elevation from the plan.",
   callout: "Click two opposite corners to box a detail crop of the plan.",
-  revision: "Click two opposite corners to cloud the changed area. Link it to a revision from the Sheets panel.",
+  revision: "Click two opposite corners. The cloud stays on the plan, where you can select it. Link it to a revision from the Sheets panel.",
   "model-lines": "Click one end, then the other. A model line is a modelled fact, like a wall with no thickness.",
   "annot-lines": "Click one end, then the other. An annotation line is a mark on this drawing only, never exported.",
   compile: "Build the bill of quantities from what you have drawn.",

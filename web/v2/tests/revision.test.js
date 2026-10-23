@@ -14,8 +14,11 @@ import {
   revisionCloudsForSheet,
   cloudArcs,
   revisionCloudExtent,
+  revisionCloudViewBox,
   REVISION_CLOUD_MIN_SIZE_M,
 } from "../revision.js";
+import { sectionFromClicks } from "../section.js";
+import { elevationCut } from "../elevation.js";
 
 // --- revisionCloudFromClicks -------------------------------------------
 
@@ -248,6 +251,25 @@ test("normalizeDoc tolerates a document written before revision clouds existed",
 });
 
 // --- ribbon wiring ----------------------------------------------------
+
+test("a section sheet sees a cloud the cut passes through, and misses one it does not", () => {
+  const rect = revisionCloudFromClicks([0, 0], [4, 2]);
+  const through = sectionFromClicks([0, 1], [4, 1]);
+  const seen = revisionCloudViewBox(rect, through, 0, 2.7);
+  assert.ok(seen);
+  assert.ok(seen.maxU - seen.minU > 1);
+  assert.equal(seen.minV, 0);
+  assert.equal(seen.maxV, 2.7);
+  const beside = sectionFromClicks([0, 8], [4, 8]);
+  assert.equal(revisionCloudViewBox(rect, beside, 0, 2.7), null);
+});
+
+test("an elevation projects the cloud's full width onto the facade", () => {
+  const rect = revisionCloudFromClicks([1, 1], [5, 3]);
+  const box = revisionCloudViewBox(rect, elevationCut("N"), 0, 2.7);
+  assert.ok(box);
+  assert.ok(Math.abs((box.maxU - box.minU) - 4) < 0.01);
+});
 
 test("revision cloud is a live command, not a Week 3 todo", () => {
   const items = ribbonItems();

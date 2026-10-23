@@ -35,7 +35,7 @@ import {
   selectedInspectorStationId,
   isolateShows,
 } from "./level-view.js";
-import { isFoundationLevel as levelIsFoundation, placementHintOverride } from "./placement-warn.js";
+import { foundationStorey, foundationsOffStorey, isFoundationLevel as levelIsFoundation, placementHintOverride } from "./placement-warn.js";
 import {
   alignSelection,
   attachSelection,
@@ -76,6 +76,7 @@ import {
   canCommitRect,
   centerlineFromLocation,
   chainStart,
+  cycleWallLocation,
   flipWallLocation,
   hasClickDraft,
   isFaceLocation,
@@ -104,9 +105,13 @@ import {
   roomCentroid,
   roomMinDimension,
   roomPerimeter,
+  polyShape,
   roomPolygon,
+  roomUse,
   shapePolygon,
 } from "./model.js";
+import { enclosedFace, syncRoomBounds } from "./room-bound.js";
+import { REGION_CONVENTIONS, regionConvention } from "./region.js";
 import { CORNER_JOIN_TOL, deriveWalls, drawnWallThickness, isStripFooting, skuDrawnHeight, statusVisible } from "./walls.js";
 import { findJoinTarget, resolveJoin, sideTowardTarget } from "./wall-join.js?v=20261022-corner-b";
 import {
@@ -123,6 +128,7 @@ import {
   attachTargetLevels,
   compile,
   drawnObjectHeight,
+  levelElevation,
   objectLabel,
   resolvedBase,
 } from "./compile.js";
@@ -140,6 +146,7 @@ import {
   ensureRevisionClouds,
   linkRevisionCloud,
   revisionCloudsForSheet,
+  revisionCloudViewBox,
   cloudArcs,
 } from "./revision.js";
 import {
@@ -153,6 +160,8 @@ import {
   sheetById,
   sheetScale,
   sheetView,
+  planFormsForLevel,
+  scaleBarMetres,
   titleBlockFields,
   titleBlockLayout,
 } from "./sheets.js";
@@ -173,6 +182,7 @@ import {
   createRiser,
   deleteServiceRefs,
   liftNode,
+  liftRun,
   projectOnEdge,
   removeServiceNode,
   splitServiceEdge,
@@ -185,9 +195,12 @@ import {
   reverseEdge,
   routeProfile,
   serviceMassingRoutes,
+  serviceMassingNodes,
   serviceElementCentre,
   networkOf,
   serviceStatus,
+  nodeMap,
+  setEdgeChase,
   setEdgeMode,
   setEdgeSku,
   setNodeLevel,
@@ -195,8 +208,9 @@ import {
 } from "./services.js";
 import { SERVICE_SYSTEM_INFO, pruneServices, serviceLayerVisible, serviceSystemsPresent } from "./service-model.js";
 import { serviceInspectorModel, servicePanelHtml } from "./service-panel.js";
+import { clearanceText, justifyPoint, pipeRadius, runWallRelation, serviceWallFlags, setRunClearance } from "./service-walls.js";
 import { profileObstructions } from "./service-obstructions.js";
-import { drawServiceDraft, drawServiceGhost, drawServiceHover, drawServiceLevel, drawServiceProfile, drawServiceSelection } from "./service-render.js";
+import { drawServiceDraft, drawServiceGhost, drawServiceHover, drawServiceLevel, drawServiceMoveRuns, drawServiceProfile, drawServiceSelection } from "./service-render.js";
 
 const GRID = 0.1;
 const HANDLE = 8;
@@ -224,6 +238,11 @@ const el = {
   scheduleBody: document.getElementById("v2-schedule-body"),
   scheduleClose: document.getElementById("v2-schedule-close"),
   schedulePeek: document.getElementById("v2-schedule-peek"),
+  schedule3d: document.getElementById("v2-schedule-3d"),
+  schedule3dCanvas: document.getElementById("v2-schedule-3d-canvas"),
+  schedule3dEmpty: document.getElementById("v2-schedule-3d-empty"),
+  schedule3dNote: document.getElementById("v2-schedule-3d-note"),
+  schedule3dDrawing: document.getElementById("v2-schedule-3d-drawing"),
   healthDot: document.getElementById("v2-health-dot"),
   healthLabel: document.getElementById("v2-health-label"),
   aboutCatalogue: document.getElementById("v2-about-catalogue"),
@@ -299,6 +318,8 @@ const el = {
   attachCancel: document.getElementById("v2-attach-cancel"),
   attachReport: document.getElementById("v2-attach-report"),
   attachCount: document.getElementById("v2-attach-count"),
+  foundationReport: document.getElementById("v2-foundation-report"),
+  foundationCount: document.getElementById("v2-foundation-count"),
   ribbonTabs: document.getElementById("v2-ribbon-tabs"),
   ribbonFunctions: document.getElementById("v2-ribbon-functions"),
   ribbonHint: document.getElementById("v2-ribbon-hint"),
@@ -362,6 +383,8 @@ const el = {
   ctxNameWrap: document.getElementById("v2-ctx-name-wrap"),
   ctxUse: document.getElementById("v2-ctx-use"),
   ctxUseWrap: document.getElementById("v2-ctx-use-wrap"),
+  ctxRegion: document.getElementById("v2-ctx-region"),
+  ctxRegionWrap: document.getElementById("v2-ctx-region-wrap"),
   ctxLen: document.getElementById("v2-ctx-len"),
   ctxLenWrap: document.getElementById("v2-ctx-len-wrap"),
   ctxAng: document.getElementById("v2-ctx-ang"),
@@ -423,6 +446,7 @@ const el = {
   sheetFields: document.getElementById("v2-sheet-fields"),
   sheetEmptyFields: document.getElementById("v2-sheet-empty-fields"),
   sheetView: document.getElementById("v2-sheet-view"),
+  sheetLevel: document.getElementById("v2-sheet-level"),
   sheetSize: document.getElementById("v2-sheet-size"),
   sheetTitle: document.getElementById("v2-sheet-title"),
   sheetScale: document.getElementById("v2-sheet-scale"),
@@ -523,6 +547,10 @@ let lineStart = null;
 // Site > Property line: the vertices clicked so far, while tool === "property".
 // Closed by clicking near the first point again, Enter, or double-click.
 let siteDraft = null;
+// Document > Rooms, when the click is not already inside walls: corners so far.
+let roomDraft = null;
+// Document > Annotate > Region: corners so far.
+let regionDraft = null;
 // The drawn boundary is selected. Corners can be dragged; the line itself moves.
 let propertySelected = false;
 let propertyHover = null;
@@ -547,7 +575,6 @@ let measureDraft = null;
 // Completed two-point strings kept while the measure tool stays armed, so a
 // second pair can sit next to the first until Escape (or the button again)
 // leaves the tool.
-let userDimensions = [];
 // Modify > Attach base: the refs waiting for a target while tool === "attach",
 // plus the candidate under the pointer so the hint can preview what the click
 // will do before it commits anything.
@@ -564,6 +591,9 @@ let serviceConnect = null;
 // unresolved rather than on the floor.
 const serviceUi = {
   system: "coldWater", networkId: null, sku: null, offsetText: "0.00", mode: "measured",
+  // How new route points sit against a wall: "off", "clear" (pipe edge
+  // justOffsetText mm from the face) or "centre" (in the wall, as a chase).
+  justMode: "off", justOffsetText: "150",
 };
 let serviceDockKey = "";
 // Route profile interaction state (see onProfileDown).
@@ -582,6 +612,9 @@ let wallsCache = [];
 // join/alignment (and, when not latched, how far the pointer is from it).
 // Drawn as tracking lines; cleared when the tool is not snap-aware.
 let snapGuide = null;
+// Route points being dragged: they must not snap to themselves, but the rest of
+// the route (and every wall) is a target. Set only around the snap call.
+let serviceMoveIds = null;
 
 // Which side each axis' live measurement is pinned to, set by the arrow keys
 // (same key again unpins). Null keeps the nearest-object measurement, which
@@ -713,6 +746,11 @@ async function boot() {
     el.ctxUse.innerHTML = ROOM_USES
       .map((u) => `<option value="${escapeHtml(u.id)}">${escapeHtml(u.label)}</option>`)
       .join("");
+  }
+  if (el.ctxRegion) {
+    el.ctxRegion.innerHTML = `<option value="">Not set</option>${
+      REGION_CONVENTIONS.map((c) => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.id)}</option>`).join("")
+    }`;
   }
   drawDensityButtons();
   drawLevelSwitcher();
@@ -1926,7 +1964,7 @@ function applySnap(wx, wy, exclude) {
   const near = align.nearest && align.dist <= GAP_MAX_M;
   originsX.push(0);
   originsY.push(0);
-  const point = applyNicePoint(wx, wy, {
+  let point = applyNicePoint(wx, wy, {
     join: result,
     from,
     originsX,
@@ -1934,6 +1972,23 @@ function applySnap(wx, wy, exclude) {
     tolWorld: tol,
     minStep: NICE_MIN_STEP_M,
   });
+  // A route drawn beside a wall keeps its justification. "Clear" lands the pipe
+  // edge the chosen distance from the face, unless a corner has already locked
+  // the point. "In the wall" is stricter: the point is on a wall's centreline or
+  // it is not placed at all, so a click in open space cannot sneak a free point in.
+  let chaseHeld = false;
+  if (tool === "service-route" && serviceUi.justMode === "centre") {
+    const j = justifyPoint(serviceWalls(), point.x, point.y, { mode: "centre", radius: routeRadius() });
+    chaseHeld = Boolean(j);
+    if (j) point = { x: j.x, y: j.y };
+  } else if (tool === "service-route" && serviceUi.justMode === "clear" && !exactJoin) {
+    const j = justifyPoint(serviceWalls(), point.x, point.y, {
+      mode: "clear",
+      offset: (Number(String(serviceUi.justOffsetText).replace(",", ".")) || 0) / 1000,
+      radius: routeRadius(),
+    });
+    if (j) point = { x: j.x, y: j.y };
+  }
   const origin = near ? align.nearest : null;
   snapGuide = {
     x: point.x,
@@ -1960,6 +2015,8 @@ function applySnap(wx, wy, exclude) {
     dy: origin ? point.y - origin.y : null,
     probes: buildProbes(point, edges),
     tol,
+    // True only while "In the wall" has actually put this point inside a wall.
+    chaseHeld,
   };
   return point;
 }
@@ -2027,6 +2084,8 @@ function activeStationKind() {
 function objectPlanRole(obj) {
   if (!obj || typeof obj !== "object") return "wall";
   if (obj.networkId) return "service";
+  if (obj.separation || (obj.rect && Object.prototype.hasOwnProperty.call(obj, "sheetId"))) return "line";
+  if (obj.shape && Object.prototype.hasOwnProperty.call(obj, "convention") && !obj.use) return "line";
   if (obj.shape && obj.use) return "room";
   if (obj.shape && (obj.form || obj.ridge)) return "roof";
   if (obj.shape) return skuById(obj.sku)?.category === "ceiling" ? "ceiling" : "floor";
@@ -2086,9 +2145,11 @@ function segmentCategory(seg) {
 function snapOpts(extra = {}) {
   return {
     ...extra,
-    // Route points are targets for the route tool only; a wall never snaps to a pipe.
-    services: tool === "service-route",
-    include: (obj) => planObjectVisible(obj)
+    // Route points are targets for the route tool only (and for a route point
+    // being dragged); a wall never snaps to a pipe.
+    services: tool === "service-route" || Boolean(serviceMoveIds),
+    include: (obj) => !(serviceMoveIds && obj.networkId && !obj.fromNode && serviceMoveIds.has(obj.id))
+      && planObjectVisible(obj)
       && (obj.networkId ? onActiveLevel(obj) : (!isolateCurrentLevel || (onActiveLevel(obj) && keptByCut(obj)))),
     thicknessOf: segmentThickness,
     categoryOf: segmentCategory,
@@ -2096,8 +2157,19 @@ function snapOpts(extra = {}) {
 }
 
 function currentWalls() {
+  if (pack) syncRoomBounds(store.doc, pack);
   wallsCache = pack ? deriveWalls(store.doc, pack) : [];
   return wallsCache;
+}
+
+/** The walls of the active storey a service run can sit against. A footing is not one. */
+function serviceWalls() {
+  return wallsCache.filter((w) => w.category !== "foundation" && w.thickness > 0 && onActiveLevel(w));
+}
+
+/** The pipe radius of the type the next run will be drawn with, or 0 when none is chosen. */
+function routeRadius() {
+  return pipeRadius(pack, { sku: serviceUi.sku }) || 0;
 }
 
 /** True if a shaped/drawn object (room, slab, roof, segment, beam, item) sits on the active level. */
@@ -2241,15 +2313,18 @@ function isFoundationLevel(levelId) {
 
 /** The category (or categories) the currently armed tool would place, from
  * whichever source is live: a ribbon function's declared categories, or a
- * single type picked directly from the palette. Null while nothing is armed. */
+ * single type picked directly from the palette. A foundation SKU wins over
+ * the ribbon filter, so picking one from search still counts as drawing a
+ * foundation. Null while nothing is armed. */
 function armedCategories() {
-  if (paletteFilter) return paletteFilter;
   const sku = skuById(placeSkuId);
+  if (sku?.category === "foundation") return ["foundation"];
+  if (paletteFilter) return paletteFilter;
   return sku ? [sku.category] : null;
 }
 
 /** Warning copy when the armed tool does not belong on the current cut
- * (a roof on "00 FOUNDATION", a foundation on a ceiling plan). Null when
+ * (a roof on "00 FOUNDATION", a foundation on the ground floor). Null when
  * the pair is not something the app can rule out. */
 function placementCutWarning() {
   const level = (pack.levels || []).find((l) => l.id === activeLevel);
@@ -2257,8 +2332,39 @@ function placementCutWarning() {
     tool,
     stationKind: houseStations[activeStationIndex()]?.kind,
     level,
+    levels: visibleLevels(),
     categories: armedCategories(),
   });
+}
+
+/** True when the armed type is a foundation and this cut is not its storey.
+ * Clears any wall already started, so the second click cannot file it on
+ * the ground floor after the ribbon hint has been replaced by "click to end". */
+function refuseWrongFoundation() {
+  if (skuById(placeSkuId)?.category !== "foundation") return false;
+  const warning = placementCutWarning();
+  if (!warning) return false;
+  wallDraft = null;
+  sizeDraft = null;
+  snapGuide = null;
+  setStatusMessage(warning, "warn");
+  updateRibbonHint();
+  return true;
+}
+
+/** Foundations belong on the below-datum storey the pack already names.
+ * Arming one moves the cut there. Switching back is still possible; the
+ * status line says why a foundation will not start on that plan. */
+function offerFoundationPlan() {
+  const cats = armedCategories();
+  if (!cats?.length || cats.some((c) => c !== "foundation")) return;
+  const home = foundationStorey(visibleLevels());
+  if (!home || home.id === activeLevel) return;
+  const idx = houseStations.findIndex((s) => s.levelId === home.id && (s.kind === "foundation" || s.kind === "floor"));
+  if (idx < 0) return;
+  selectStationIndex(idx);
+  const name = home.name || home.id;
+  setStatusMessage(`Foundations draw on "${name}". The level switcher moved there.`);
 }
 
 // --- level widget: house cutaway + elevation-accurate rail ---------------
@@ -2557,6 +2663,10 @@ function selectStationIndex(idx, { keepSelection = false } = {}) {
     updateRibbonHint();
   }
   renderLevelCut();
+  if (skuById(placeSkuId)?.category === "foundation") {
+    const warning = placementCutWarning();
+    if (warning) setStatusMessage(warning, "warn");
+  }
   render();
 }
 
@@ -2776,7 +2886,8 @@ function draw() {
   ctx.restore();
   if (attachPick) drawAttachCandidates();
   if (showDimensions) drawDimensions();
-  if (tool === "measure") drawUserDimensions();
+  drawSavedDimensions();
+  if (tool === "measure" && measureDraft?.a) drawMeasureDraft();
 
   drawSelectionHighlights(levelWalls);
   const serviceRefs = refsToDraw().filter((r) => (r.kind === "serviceNode" || r.kind === "serviceEdge") && refShownOnPlan(r));
@@ -2792,15 +2903,51 @@ function draw() {
   if (tool === "service-route" && serviceRoute && serviceSystemShown(serviceUi.system)) {
     const from = serviceRouteFrom();
     if (from && hoverPoint) {
-      drawServiceDraft(ctx, { from, to: hoverPoint, colour: SERVICE_SYSTEM_INFO[serviceUi.system]?.colour || "#2675b8", worldToScreen });
+      // End on the snapped point, so what is drawn is what a click would place.
+      const to = snapGuide ? { x: snapGuide.x, y: snapGuide.y } : hoverPoint;
+      const offWall = serviceUi.justMode === "centre" && !snapGuide?.chaseHeld;
+      const rel = offWall ? null : runWallRelation(serviceWalls(), from, to, routeRadius() || null);
+      drawServiceDraft(ctx, {
+        from, to,
+        colour: offWall ? "#b2451e" : (SERVICE_SYSTEM_INFO[serviceUi.system]?.colour || "#2675b8"),
+        worldToScreen,
+        note: offWall ? "not in a wall" : clearanceText(rel),
+      });
     }
+  }
+  if (drag?.kind === "move" && drag.moved && drag.snaps.length && drag.snaps.every((s) => s.ref.kind === "serviceNode")) {
+    // Where a moved run now sits against a wall, measured from the pipe's edge.
+    const moveNotes = new Map();
+    const moved = new Set(drag.snaps.map((s) => s.ref.id));
+    const movedNodes = nodeMap(store.doc);
+    const wallsHere = serviceWalls();
+    for (const e of store.doc.serviceEdges || []) {
+      if (!moved.has(e.fromNode) && !moved.has(e.toNode)) continue;
+      const a = movedNodes.get(e.fromNode);
+      const b = movedNodes.get(e.toNode);
+      const text = a && b ? clearanceText(runWallRelation(wallsHere, a, b, pipeRadius(pack, e))) : "";
+      if (text) moveNotes.set(e.id, text);
+    }
+    drawServiceMoveRuns(ctx, {
+      notes: moveNotes,
+      doc: store.doc,
+      pack,
+      nodeIds: drag.snaps.map((s) => s.ref.id),
+      worldToScreen,
+      colour: COLOUR.selection,
+      levelId: activeLevel,
+      skipEdgeIds: new Set(serviceRefs.filter((r) => r.kind === "serviceEdge").map((r) => r.id)),
+    });
   }
   if (drag?.kind === "marquee") drawMarquee();
   if (wallDraft) drawWallDraft();
+  if (tool === "wall") drawWallCornerTag();
   if (shapeDraft) drawShapeDraft();
   if (beamStart) drawBeamStart();
   if (lineStart) drawLineDraft();
   if (tool === "property" && siteDraft) drawPropertyDraft();
+  if (tool === "room" && roomDraft?.length) drawPolyDraft(roomDraft, "#b2451e");
+  if (tool === "region" && regionDraft?.length) drawPolyDraft(regionDraft, "#8a7d6c");
   if (tool === "sg-ref" && sgPick) drawSgPick();
   if (tool === "camera" && cameraDraft?.a) drawCameraDraft();
   if (tool === "section" && sectionDraft?.a) drawSectionDraft();
@@ -3211,6 +3358,17 @@ function drawPlanLevel(levelId, walls, { ghost = false, look = "down", allow = (
       if (ghost && line.kind === "annotation") continue;
       drawLine(line);
     }
+    if (!ghost) {
+      for (const line of (store.doc.separations || []).filter((l) => onLevel(l, levelId) && planObjectVisible(l))) {
+        drawSeparation(line);
+      }
+      for (const region of (store.doc.regions || []).filter((r) => onLevel(r, levelId) && planObjectVisible(r))) {
+        drawRegion(region);
+      }
+      for (const cloud of (store.doc.revisionClouds || []).filter((c) => onLevel(c, levelId))) {
+        drawCloudMark(cloud.rect, cloud.rev || "");
+      }
+    }
   }
   if (!ghost && allow("item")) {
     for (const item of store.doc.items.filter((i) => onLevel(i, levelId) && planObjectVisible(i))) drawItem(item);
@@ -3229,6 +3387,7 @@ function drawPlanLevel(levelId, walls, { ghost = false, look = "down", allow = (
     drawServiceLevel(ctx, {
       doc: store.doc, pack, levelId, worldToScreen, scale: cam.scale, ghost, visible: planObjectVisible,
       activeLevel,
+      wallFlags: !ghost && levelId === activeLevel ? serviceWallFlags(store.doc, pack, serviceWalls(), activeLevel) : null,
     });
   }
   ctx.restore();
@@ -3279,10 +3438,12 @@ function drawRoom(room) {
   ctx.fillStyle = "#1a1612";
   ctx.font = "600 12px Source Sans 3, sans-serif";
   ctx.textAlign = "center";
-  ctx.fillText(room.name || "Room", cx, cy - 4);
+  ctx.fillText(room.name || "Room", cx, cy - 14);
   ctx.font = "11px Source Sans 3, sans-serif";
   ctx.fillStyle = "#5c5348";
-  ctx.fillText(`${roomArea(room).toFixed(1)} m²`, cx, cy + 12);
+  const useLabel = room.use && room.use !== "other" ? roomUse(room.use).label : "Use not set";
+  ctx.fillText(useLabel, cx, cy);
+  ctx.fillText(`${roomArea(room).toFixed(1)} m²`, cx, cy + 14);
   ctx.restore();
 }
 
@@ -3425,8 +3586,17 @@ function measureLivePoint() {
   return hoverPoint;
 }
 
-function drawUserDimensions() {
-  for (const dim of userDimensions) drawPickedDimension(dim.a, dim.b, dim.label);
+function drawSavedDimensions() {
+  for (const dim of store.doc.dimensions || []) {
+    if (!onActiveLevel(dim) || !planObjectVisible(dim) || !keptByCut(dim, "line")) continue;
+    const selected = store.isSelected("dimension", dim.id);
+    drawPickedDimension(
+      { x: dim.x1, y: dim.y1 },
+      { x: dim.x2, y: dim.y2 },
+      `${formatLengthMm(Math.hypot(dim.x2 - dim.x1, dim.y2 - dim.y1))} mm`,
+      selected,
+    );
+  }
 }
 
 function drawMeasureDraft() {
@@ -3445,12 +3615,12 @@ function drawMeasureDraft() {
   drawPickedDimension(measureDraft.a, target, live?.label);
 }
 
-function drawPickedDimension(a, b, label) {
+function drawPickedDimension(a, b, label, selected = false) {
   const [ax, ay] = worldToScreen(a.x, a.y);
   const [bx, by] = worldToScreen(b.x, b.y);
   ctx.save();
-  ctx.strokeStyle = COLOUR.hover;
-  ctx.fillStyle = COLOUR.hover;
+  ctx.strokeStyle = selected ? COLOUR.selection : COLOUR.hover;
+  ctx.fillStyle = selected ? COLOUR.selection : COLOUR.hover;
   ctx.lineWidth = 1.4;
   ctx.beginPath();
   ctx.arc(ax, ay, 4, 0, Math.PI * 2);
@@ -3561,6 +3731,59 @@ function drawLine(line) {
   ctx.restore();
 }
 
+function drawSeparation(line) {
+  const [ax, ay] = worldToScreen(line.x1, line.y1);
+  const [bx, by] = worldToScreen(line.x2, line.y2);
+  ctx.save();
+  ctx.strokeStyle = "#6a5a48";
+  ctx.lineWidth = 1;
+  ctx.setLineDash([2, 4]);
+  ctx.beginPath();
+  ctx.moveTo(ax, ay);
+  ctx.lineTo(bx, by);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawRegion(region) {
+  const poly = shapePolygon(region.shape);
+  if (poly.length < 3) return;
+  const look = regionConvention(region.convention);
+  ctx.save();
+  pathForPoly(poly);
+  if (look) {
+    ctx.fillStyle = look.fill;
+    ctx.fill();
+    ctx.strokeStyle = look.stroke;
+  } else {
+    ctx.strokeStyle = "#8a7d6c";
+  }
+  ctx.lineWidth = 1;
+  ctx.setLineDash(look ? [] : [4, 3]);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawCloudMark(rect, label) {
+  ctx.save();
+  ctx.strokeStyle = "#b2451e";
+  ctx.lineWidth = 1.4;
+  ctx.setLineDash([]);
+  for (const arc of cloudArcs(rect)) {
+    const [sx, sy] = worldToScreen(arc.cx, arc.cy);
+    ctx.beginPath();
+    ctx.arc(sx, sy, Math.max(1.5, arc.r * cam.scale), arc.startAngle, arc.endAngle);
+    ctx.stroke();
+  }
+  if (label) {
+    const [tx, ty] = worldToScreen(rect.maxX, rect.minY);
+    ctx.font = "600 11px Source Sans 3, sans-serif";
+    ctx.fillStyle = "#b2451e";
+    ctx.fillText(label, tx + 4, ty - 4);
+  }
+  ctx.restore();
+}
+
 function drawItem(item) {
   const sku = skuById(item.sku);
   if (!sku) return;
@@ -3595,7 +3818,18 @@ function drawSelectionHighlights(walls) {
     if (ref.kind === "room" || ref.kind === "slab" || ref.kind === "roof") {
       pathForPoly(shapePolygon(obj.shape));
       ctx.stroke();
-    } else if (ref.kind === "segment" || ref.kind === "beam" || ref.kind === "line") {
+    } else if (ref.kind === "region") {
+      pathForPoly(shapePolygon(obj.shape));
+      ctx.stroke();
+    } else if (ref.kind === "revisionCloud") {
+      ctx.strokeRect(
+        ...(() => {
+          const [ax, ay] = worldToScreen(obj.rect.minX, obj.rect.minY);
+          const [bx, by] = worldToScreen(obj.rect.maxX, obj.rect.maxY);
+          return [Math.min(ax, bx), Math.min(ay, by), Math.abs(bx - ax), Math.abs(by - ay)];
+        })(),
+      );
+    } else if (ref.kind === "segment" || ref.kind === "beam" || ref.kind === "line" || ref.kind === "dimension" || ref.kind === "separation") {
       const [ax, ay] = worldToScreen(obj.x1, obj.y1);
       const [bx, by] = worldToScreen(obj.x2, obj.y2);
       ctx.beginPath();
@@ -3759,7 +3993,14 @@ function wallJoinPool() {
 function effectiveWallLocation(a, b, thickness) {
   if (!isFaceLocation(wallLocation) || wallDraft?.chained) return wallLocation;
   const target = findJoinTarget(wallJoinPool(), a, segmentThickness, { reach: thickness });
-  const auto = sideTowardTarget({ start: a, end: b, target });
+  // The side is decided once, from the first real stretch of drag, and kept
+  // for this wall: re-deriving it on every mouse move made the wall jump
+  // across the line as the pointer moved.
+  let auto = wallDraft?.lockedSide || null;
+  if (!auto) {
+    auto = sideTowardTarget({ start: a, end: b, target });
+    if (auto && wallDraft && lineLength(a, b) >= MIN_TRACE) wallDraft.lockedSide = auto;
+  }
   if (!auto) return wallLocation;
   return wallSideFlip ? flipWallLocation(auto) : auto;
 }
@@ -3795,6 +4036,42 @@ function wallCornerRelevant() {
  * start - on the side away from where the line is heading - instead of in the
  * bar at the top of the plan. Before the first click they stay in the bar.
  */
+const WALL_CORNER_ORDER = ["past", "against", "center"]; // same left-to-right order as the buttons
+const WALL_CORNER_NAMES = { against: "Against old wall", past: "Past old wall", center: "On the line" };
+
+function cycleWallCorner(dir) {
+  const i = WALL_CORNER_ORDER.indexOf(wallCorner);
+  wallCorner = WALL_CORNER_ORDER[(i + dir + WALL_CORNER_ORDER.length) % WALL_CORNER_ORDER.length];
+  setStatusMessage(`Corner: ${WALL_CORNER_NAMES[wallCorner]}`);
+  render();
+}
+
+/** A small tag beside the cursor naming the corner option, shown wherever a
+ * wall meets another wall's end (before the first click as well as during),
+ * with the key that steps through them. */
+function drawWallCornerTag() {
+  if (!hoverPoint || !wallCornerRelevant()) return;
+  // Mid-draw the Corner buttons float beside the wall's start and the
+  // dimension labels sit at the cursor, so the tag would only overlap them.
+  if (wallDraft) return;
+  const [sx, sy] = worldToScreen(hoverPoint.x, hoverPoint.y);
+  const label = `${WALL_CORNER_NAMES[wallCorner]}  \u00b7  Tab`;
+  ctx.save();
+  ctx.font = "600 11px Source Sans 3, sans-serif";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  const w = ctx.measureText(label).width + 12;
+  const h = 18;
+  const x = Math.min(sx + 16, el.canvasWrap.clientWidth - w - 4);
+  const y = Math.min(sy + 18, el.canvasWrap.clientHeight - h - 4);
+  ctx.fillStyle = "rgba(28, 26, 23, 0.88)";
+  ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = "#f4ede1";
+  ctx.fillText(label, x + 6, y + h / 2);
+  ctx.restore();
+}
+
+const wallOptsSide = { draft: null, locked: false, sx: -1, sy: 1 };
 function positionWallOpts() {
   const box = el.wallOpts;
   if (!box) return;
@@ -3810,9 +4087,22 @@ function positionWallOpts() {
   const [bx, by] = worldToScreen(wallDraft.x2 ?? wallDraft.x1, wallDraft.y2 ?? wallDraft.y1);
   const w = box.offsetWidth;
   const h = box.offsetHeight;
-  const gap = 18;
-  const x = Math.min(Math.max(ax + (bx - ax >= 0 ? -w - gap : gap), 4), Math.max(4, rect.width - w - 4));
-  const y = Math.min(Math.max(ay + (by - ay >= 0 ? -h - gap : gap), 4), Math.max(4, rect.height - h - 4));
+  const gap = 14;
+  // Pick the side once the line has some length, then keep it for the whole
+  // wall so the buttons never jump away as the cursor approaches them.
+  if (wallOptsSide.draft !== wallDraft) {
+    wallOptsSide.draft = wallDraft;
+    wallOptsSide.locked = false;
+    wallOptsSide.sx = -1;
+    wallOptsSide.sy = 1;
+  }
+  if (!wallOptsSide.locked && Math.hypot(bx - ax, by - ay) > 40) {
+    wallOptsSide.locked = true;
+    wallOptsSide.sx = bx - ax >= 0 ? -1 : 1;
+    wallOptsSide.sy = by - ay >= 0 ? -1 : 1;
+  }
+  const x = Math.min(Math.max(ax + (wallOptsSide.sx < 0 ? -w - gap : gap), 4), Math.max(4, rect.width - w - 4));
+  const y = Math.min(Math.max(ay + (wallOptsSide.sy < 0 ? -h - gap : gap), 4), Math.max(4, rect.height - h - 4));
   box.style.left = `${rect.left + x}px`;
   box.style.top = `${rect.top + y}px`;
 }
@@ -4514,6 +4804,33 @@ function drawBeamStart() {
 
 /** Same shape as `drawBeamStart()` - a line is a beam-shaped click-click with
  * no SKU - dashed to read as a draft, not yet-placed geometry. */
+function drawPolyDraft(points, colour) {
+  if (!points?.length) return;
+  const end = hoverPoint;
+  ctx.save();
+  ctx.strokeStyle = colour;
+  ctx.fillStyle = colour;
+  ctx.lineWidth = 1.4;
+  ctx.setLineDash([5, 4]);
+  ctx.beginPath();
+  points.forEach((p, i) => {
+    const [sx, sy] = worldToScreen(p.x, p.y);
+    if (i === 0) ctx.moveTo(sx, sy);
+    else ctx.lineTo(sx, sy);
+  });
+  if (end) {
+    const [ex, ey] = worldToScreen(end.x, end.y);
+    ctx.lineTo(ex, ey);
+  }
+  ctx.stroke();
+  ctx.setLineDash([]);
+  for (const p of points) {
+    const [sx, sy] = worldToScreen(p.x, p.y);
+    ctx.fillRect(sx - 2, sy - 2, 4, 4);
+  }
+  ctx.restore();
+}
+
 function drawLineDraft() {
   const end = snapGuide ? { x: snapGuide.x, y: snapGuide.y } : hoverPoint;
   const [sx, sy] = worldToScreen(lineStart.x, lineStart.y);
@@ -4526,7 +4843,7 @@ function drawLineDraft() {
     const [ex, ey] = worldToScreen(end.x, end.y);
     ctx.strokeStyle = COLOUR.hover;
     ctx.lineWidth = 1.4;
-    ctx.setLineDash(tool === "annot-line" ? [6, 4] : []);
+    ctx.setLineDash(tool === "annot-line" || tool === "separation" ? [6, 4] : []);
     ctx.beginPath();
     ctx.moveTo(sx, sy);
     ctx.lineTo(ex, ey);
@@ -4589,10 +4906,28 @@ function refsInMarquee(box) {
     const beamBox = { x: Math.min(beam.x1, beam.x2), y: Math.min(beam.y1, beam.y2), w: Math.max(0.02, Math.abs(beam.x2 - beam.x1)), h: Math.max(0.02, Math.abs(beam.y2 - beam.y1)) };
     if (test(beamBox)) hits.push({ kind: "beam", id: beam.id });
   }
+  for (const line of (store.doc.separations || []).filter(onActiveLevel)) {
+    if (!planObjectVisible(line) || !keptByCut(line, "line")) continue;
+    const lineBox = { x: Math.min(line.x1, line.x2), y: Math.min(line.y1, line.y2), w: Math.max(0.02, Math.abs(line.x2 - line.x1)), h: Math.max(0.02, Math.abs(line.y2 - line.y1)) };
+    if (test(lineBox)) hits.push({ kind: "separation", id: line.id });
+  }
+  for (const region of (store.doc.regions || []).filter(onActiveLevel)) {
+    if (!planObjectVisible(region) || !keptByCut(region, "line")) continue;
+    if (test(bbox(shapePolygon(region.shape)))) hits.push({ kind: "region", id: region.id });
+  }
+  for (const cloud of (store.doc.revisionClouds || []).filter(onActiveLevel)) {
+    const b = { x: cloud.rect.minX, y: cloud.rect.minY, w: cloud.rect.maxX - cloud.rect.minX, h: cloud.rect.maxY - cloud.rect.minY };
+    if (test(b)) hits.push({ kind: "revisionCloud", id: cloud.id });
+  }
   for (const line of store.doc.lines.filter(onActiveLevel)) {
     if (!planObjectVisible(line) || !keptByCut(line, "line")) continue;
     const lineBox = { x: Math.min(line.x1, line.x2), y: Math.min(line.y1, line.y2), w: Math.max(0.02, Math.abs(line.x2 - line.x1)), h: Math.max(0.02, Math.abs(line.y2 - line.y1)) };
     if (test(lineBox)) hits.push({ kind: "line", id: line.id });
+  }
+  for (const dim of (store.doc.dimensions || []).filter(onActiveLevel)) {
+    if (!planObjectVisible(dim) || !keptByCut(dim, "line")) continue;
+    const dimBox = { x: Math.min(dim.x1, dim.x2), y: Math.min(dim.y1, dim.y2), w: Math.max(0.02, Math.abs(dim.x2 - dim.x1)), h: Math.max(0.02, Math.abs(dim.y2 - dim.y1)) };
+    if (test(dimBox)) hits.push({ kind: "dimension", id: dim.id });
   }
   for (const item of store.doc.items.filter(onActiveLevel)) {
     if (!planObjectVisible(item) || !keptByCut(item, "item")) continue;
@@ -4755,11 +5090,34 @@ function hitTest(wx, wy) {
   }
   // No SKU to size a hit tolerance from, unlike a beam/wall - a fixed
   // pick width close to the drawn stroke is all a line needs.
+  for (let i = (store.doc.revisionClouds || []).length - 1; i >= 0; i -= 1) {
+    const cloud = store.doc.revisionClouds[i];
+    if (!onActiveLevel(cloud)) continue;
+    const { minX, minY, maxX, maxY } = cloud.rect;
+    const near = [ [minX, minY, maxX, minY], [maxX, minY, maxX, maxY], [maxX, maxY, minX, maxY], [minX, maxY, minX, minY] ]
+      .some(([x1, y1, x2, y2]) => distToSeg(x1, y1, x2, y2, wx, wy) < 0.2);
+    if (near) return { kind: "revisionCloud", id: cloud.id };
+  }
+  for (let i = (store.doc.regions || []).length - 1; i >= 0; i -= 1) {
+    const region = store.doc.regions[i];
+    if (!onActiveLevel(region) || !planObjectVisible(region)) continue;
+    if (pointInPoly(wx, wy, shapePolygon(region.shape))) return { kind: "region", id: region.id };
+  }
+  for (let i = (store.doc.separations || []).length - 1; i >= 0; i -= 1) {
+    const line = store.doc.separations[i];
+    if (!onActiveLevel(line) || !planObjectVisible(line)) continue;
+    if (distToSeg(line.x1, line.y1, line.x2, line.y2, wx, wy) < 0.15) return { kind: "separation", id: line.id };
+  }
   const lines = store.doc.lines.filter(onActiveLevel);
   for (let i = lines.length - 1; i >= 0; i -= 1) {
     const line = lines[i];
     if (!planObjectVisible(line) || !keptByCut(line, "line")) continue;
     if (distToSeg(line.x1, line.y1, line.x2, line.y2, wx, wy) < 0.15) return { kind: "line", id: line.id };
+  }
+  for (let i = (store.doc.dimensions || []).length - 1; i >= 0; i -= 1) {
+    const dim = store.doc.dimensions[i];
+    if (!onActiveLevel(dim) || !planObjectVisible(dim) || !keptByCut(dim, "line")) continue;
+    if (distToSeg(dim.x1, dim.y1, dim.x2, dim.y2, wx, wy) < 0.2) return { kind: "dimension", id: dim.id };
   }
   const slabs = store.doc.slabs.filter(onActiveLevel);
   for (let i = slabs.length - 1; i >= 0; i -= 1) {
@@ -4857,6 +5215,9 @@ function inspectKindLabel(kind, sku) {
   if (kind === "beam") return "Beam";
   if (kind === "item") return "Item";
   if (kind === "line") return "Line";
+  if (kind === "separation") return "Separation";
+  if (kind === "region") return "Region";
+  if (kind === "revisionCloud") return "Revision cloud";
   return "";
 }
 
@@ -5059,6 +5420,7 @@ function onSkuClick(sku) {
     tool = "place";
   }
   syncToolButtons();
+  offerFoundationPlan();
   renderPalette();
   updateRibbonHint();
   render();
@@ -5236,6 +5598,9 @@ el.typeCurrent?.addEventListener("click", () => {
 document.addEventListener("pointerdown", (ev) => {
   if (!el.typeFlyout?.classList.contains("is-open")) return;
   if (el.ctxTypePicker?.contains(ev.target)) return;
+  // Re-clicking a ribbon button must not dismiss the list: it re-arms the same
+  // tool, which would otherwise leave the form showing instead of the types.
+  if (ev.target.closest?.("#v2-ribbon, .ribbon")) return;
   setTypeFlyoutOpen(false);
 });
 
@@ -5374,114 +5739,106 @@ function drawRibbon() {
   updateRibbonHint();
 }
 
+/** Second sentence on a snap tool's hint: which side the live measurement
+ * is using. Shown before any arrow is pressed, and updated in the same
+ * chip when one is. A cut warning stays the whole hint — it is the thing
+ * that has to be read, and the arrows still work once it is cleared. */
+function measureHintClause() {
+  if (!snapPreviewTool()) return "";
+  const pinned = [probeSide.h, probeSide.v].filter(Boolean);
+  if (!pinned.length) return "Arrows measure to the left, right, up or down.";
+  return `Measuring ${pinned.join(" and ")}. The same arrow returns to the nearest object.`;
+}
+
+function setRibbonHint(text, warn = false) {
+  const clause = text && !warn ? measureHintClause() : "";
+  const full = clause ? `${text} ${clause}` : (text || "");
+  el.ribbonHint.hidden = !full;
+  el.ribbonHint.classList.toggle("ribbon-hint-warn", Boolean(warn) && Boolean(text));
+  el.ribbonHint.textContent = full;
+}
+
 /** Next-step hint overlaid on the canvas, shown once a tool is armed
  * (a category/tool function is active). One-shot commands (rotate,
  * compile, ...) already surface their own feedback, so they do not set this.
  *
  * Overridden by a warning when the armed tool does not belong on the current
- * cut (a roof on "00 FOUNDATION", a foundation on a ceiling plan — see
- * `placementCutWarning`). This only flags the one thing the app can rule
- * out; it never guesses which of the remaining levels the object actually
- * belongs on, and it never moves the level switcher itself - the user stays
- * in control of the cut. */
+ * cut (a roof on "00 FOUNDATION", a foundation on the ground floor — see
+ * `placementCutWarning`). Arming Foundations is the one case that moves the
+ * cut: the pack already names the storey, so `offerFoundationPlan` switches
+ * there. Switching back stays available, and the hint then says so. */
 function updateRibbonHint() {
   if (!el.ribbonHint) return;
   // While the attach target pick is armed the hint is the live preview of what
   // the hovered candidate would do, or why it cannot be picked.
   if (attachPick) {
     const hoverText = attachPick.hover ? attachHoverText(attachPick.hover) : null;
-    el.ribbonHint.hidden = false;
-    el.ribbonHint.classList.toggle("ribbon-hint-warn", Boolean(hoverText?.warn));
-    el.ribbonHint.textContent = hoverText ? hoverText.text : HINTS.attach;
+    setRibbonHint(hoverText ? hoverText.text : HINTS.attach, Boolean(hoverText?.warn));
     return;
   }
   if (tool === "camera") {
-    el.ribbonHint.hidden = false;
-    el.ribbonHint.classList.remove("ribbon-hint-warn");
-    el.ribbonHint.textContent = cameraDraft?.a
-      ? "Click what you look at."
-      : HINTS["view-camera"];
+    setRibbonHint(cameraDraft?.a ? "Click what you look at." : HINTS["view-camera"]);
     return;
   }
   if (tool === "section") {
-    el.ribbonHint.hidden = false;
-    el.ribbonHint.classList.remove("ribbon-hint-warn");
-    el.ribbonHint.textContent = sectionDraft?.a
+    setRibbonHint(sectionDraft?.a
       ? "Click the other end of the cut. Look is to the left of the line."
-      : HINTS.section;
+      : HINTS.section);
     return;
   }
   if (tool === "callout") {
-    el.ribbonHint.hidden = false;
-    el.ribbonHint.classList.remove("ribbon-hint-warn");
-    el.ribbonHint.textContent = calloutDraft?.a
-      ? "Click the opposite corner."
-      : HINTS.callout;
+    setRibbonHint(calloutDraft?.a ? "Click the opposite corner." : HINTS.callout);
     return;
   }
   if (tool === "revision") {
-    el.ribbonHint.hidden = false;
-    el.ribbonHint.classList.remove("ribbon-hint-warn");
-    el.ribbonHint.textContent = revisionCloudDraft?.a
-      ? "Click the opposite corner."
-      : HINTS.revision;
+    setRibbonHint(revisionCloudDraft?.a ? "Click the opposite corner." : HINTS.revision);
     return;
   }
-  if (tool === "model-line" || tool === "annot-line") {
-    el.ribbonHint.hidden = false;
-    el.ribbonHint.classList.remove("ribbon-hint-warn");
-    el.ribbonHint.textContent = lineStart
+  if (tool === "model-line" || tool === "annot-line" || tool === "separation") {
+    setRibbonHint(lineStart
       ? "Click the other end."
-      : HINTS[tool === "annot-line" ? "annot-lines" : "model-lines"];
+      : HINTS[tool === "annot-line" ? "annot-lines" : tool === "separation" ? "room-sep" : "model-lines"]);
+    return;
+  }
+  if (tool === "room" && roomDraft?.length) {
+    setRibbonHint("Click the next corner. Enter closes the room.");
+    return;
+  }
+  if (tool === "region") {
+    setRibbonHint(regionDraft?.length ? "Click the next corner. Enter closes the region." : HINTS.region);
     return;
   }
   if (tool === "measure") {
-    el.ribbonHint.hidden = false;
-    el.ribbonHint.classList.remove("ribbon-hint-warn");
-    el.ribbonHint.textContent = measureDraft?.a
-      ? "Click the other end."
-      : HINTS.dimensions;
+    setRibbonHint(measureDraft?.a ? "Click the other end." : HINTS.dimensions);
     return;
   }
   if (tool === "service-route" && serviceRoute) {
-    el.ribbonHint.hidden = false;
-    el.ribbonHint.classList.remove("ribbon-hint-warn");
-    el.ribbonHint.textContent = "Click the next point. Enter finishes; Esc drops the route in progress.";
+    setRibbonHint("Click the next point. Enter finishes; Esc drops the route in progress.");
     return;
   }
   if (tool === "service-connect" && serviceConnect) {
-    el.ribbonHint.hidden = false;
-    el.ribbonHint.classList.remove("ribbon-hint-warn");
-    el.ribbonHint.textContent = "Click the component to connect this point to.";
-    return;
-  }
-  if (wallDraft) {
-    el.ribbonHint.hidden = false;
-    el.ribbonHint.classList.remove("ribbon-hint-warn");
-    el.ribbonHint.textContent = wallLocation === "center"
-      ? "Click to end, or type a length and press Enter. Drawing on the centreline. Esc cancels this wall."
-      : `Click to end, or type a length and press Enter. Drawing on the ${wallLocation} face; Space flips it. Esc cancels this wall.`;
-    return;
-  }
-  if (shapeDraft) {
-    el.ribbonHint.hidden = false;
-    el.ribbonHint.classList.remove("ribbon-hint-warn");
-    el.ribbonHint.textContent = shapeDraft.kind === "roof-new"
-      ? "Click the opposite corner. Corners snap to walls; draw past them for an overhang."
-      : "Click the opposite corner, or type millimetres. Tab switches width / height.";
+    setRibbonHint("Click the component to connect this point to.");
     return;
   }
   const cutWarning = placementCutWarning();
   if (cutWarning) {
-    el.ribbonHint.hidden = false;
-    el.ribbonHint.classList.add("ribbon-hint-warn");
-    el.ribbonHint.textContent = cutWarning;
+    setRibbonHint(cutWarning, true);
     return;
   }
-  el.ribbonHint.classList.remove("ribbon-hint-warn");
+  if (wallDraft) {
+    setRibbonHint(wallLocation === "center"
+      ? "Click to end, or type a length and press Enter. Drawing on the centreline. Esc cancels this wall."
+      : `Click to end, or type a length and press Enter. Drawing on the ${wallLocation} face; Space flips it. Esc cancels this wall.`);
+    return;
+  }
+  if (shapeDraft) {
+    setRibbonHint(shapeDraft.kind === "roof-new"
+      ? "Click the opposite corner. Corners snap to walls; draw past them for an overhang."
+      : "Click the opposite corner, or type millimetres. Tab switches width / height.");
+    return;
+  }
   const hint = activeFunction && HINTS[activeFunction];
-  el.ribbonHint.hidden = !hint;
-  el.ribbonHint.textContent = hint || "";
+  setRibbonHint(hint || "");
 }
 
 function setDensity(next) {
@@ -5612,11 +5969,13 @@ function onRibbonFunction(item) {
   wallDraft = null;
   shapeDraft = null;
   sizeDraft = null;
+  roomDraft = null;
+  regionDraft = null;
   measureDraft = null;
-  userDimensions = [];
   showDimensions = false;
   underlaySelected = false;
   syncToolButtons();
+  offerFoundationPlan();
   drawRibbon();
   renderPalette();
   render();
@@ -5650,6 +6009,9 @@ function runCommand(name) {
     case "revision": startRevisionCloud(); return;
     case "model-lines": startLineTool("model"); return;
     case "annot-lines": startLineTool("annotation"); return;
+    case "room-sep": startSeparation(); return;
+    case "region": startRegion(); return;
+    case "finishes": openFloorFinishes(); return;
     case "sheets": case "view-section": openSheets(); return;
     case "project-info": openProjectInfo(); return;
     case "underlay": openUnderlayPicker(); return;
@@ -6059,9 +6421,129 @@ function commitLine(kind, a, b) {
   store.persist();
 }
 
+function startSeparation() {
+  lineStart = null;
+  roomDraft = null;
+  regionDraft = null;
+  tool = "separation";
+  activeFunction = "room-sep";
+  underlaySelected = false;
+  store.clearSelection();
+  syncToolButtons();
+  drawRibbon();
+  setStatusMessage(HINTS["room-sep"], "ok");
+  render();
+}
+
+function commitSeparation(a, b) {
+  if (!canCommitLine(a, b)) return;
+  if (!Array.isArray(store.doc.separations)) store.doc.separations = [];
+  store.pushUndo();
+  store.doc.separations.push({
+    id: nid("sp"), separation: true, level: activeLevel, x1: a.x, y1: a.y, x2: b.x, y2: b.y, status: placementStatus(),
+  });
+  store.persist();
+}
+
+function startRegion() {
+  regionDraft = [];
+  roomDraft = null;
+  lineStart = null;
+  tool = "region";
+  activeFunction = "region";
+  underlaySelected = false;
+  store.clearSelection();
+  syncToolButtons();
+  drawRibbon();
+  setStatusMessage(HINTS.region, "ok");
+  render();
+}
+
+function finishRegionDraft() {
+  if (!regionDraft || regionDraft.length < 3) {
+    setStatusMessage("A region needs at least three corners.", "warn");
+    return;
+  }
+  if (!Array.isArray(store.doc.regions)) store.doc.regions = [];
+  store.pushUndo();
+  const region = {
+    id: nid("rg"),
+    level: activeLevel,
+    convention: null,
+    status: placementStatus(),
+    shape: polyShape(regionDraft.map((p) => [p.x, p.y])),
+  };
+  store.doc.regions.push(region);
+  regionDraft = null;
+  tool = "select";
+  activeFunction = null;
+  store.setSelection([{ kind: "region", id: region.id }]);
+  syncToolButtons();
+  drawRibbon();
+  store.persist();
+  setStatusMessage("Region saved. Pick Brick red, Concrete or Concrete 2 in the inspector.", "ok");
+  render();
+}
+
+function placeRoomAt(p) {
+  const face = enclosedFace(store.doc, pack, activeLevel, p.x, p.y);
+  if (!face) return false;
+  commitRoomRecord({
+    shape: polyShape(face),
+    seed: { x: p.x, y: p.y },
+    bound: true,
+  });
+  setStatusMessage("Room filled to the surrounding walls. Set its use in the inspector.", "ok");
+  render();
+  return true;
+}
+
+function finishRoomDraft() {
+  if (!roomDraft || roomDraft.length < 3) {
+    setStatusMessage("A room needs at least three corners.", "warn");
+    return;
+  }
+  const points = roomDraft.map((p) => [p.x, p.y]);
+  const [cx, cy] = points.reduce((s, p) => [s[0] + p[0], s[1] + p[1]], [0, 0]).map((n) => n / points.length);
+  const face = enclosedFace(store.doc, pack, activeLevel, cx, cy);
+  if (face) {
+    commitRoomRecord({ shape: polyShape(face), seed: { x: cx, y: cy }, bound: true });
+    setStatusMessage("Room filled to the surrounding walls. Set its use in the inspector.", "ok");
+  } else {
+    commitRoomRecord({ shape: polyShape(points) });
+    setStatusMessage("Room placed. Set its use in the inspector.", "ok");
+  }
+  roomDraft = null;
+  updateRibbonHint();
+  render();
+}
+
+function openFloorFinishes() {
+  const floors = (pack?.skus || []).filter((s) => s.category === "floor");
+  if (!floors.length) {
+    setStatusMessage("The template has no floor types.", "warn");
+    return;
+  }
+  activeFunction = "finishes";
+  paletteFilter = ["floor"];
+  lastPaletteLabel = "Floor finishes";
+  const selectedRoom = store.selected.some((r) => r.kind === "room");
+  if (!selectedRoom) {
+    tool = "room";
+    activeFunction = "rooms";
+  }
+  setTypeFlyoutOpen(true);
+  syncToolButtons();
+  drawRibbon();
+  renderPalette();
+  setStatusMessage(selectedRoom
+    ? "Pick a floor type. It is assigned to the selected room."
+    : "Pick a floor type, then place the room.", "ok");
+  render();
+}
+
 function startMeasure() {
   measureDraft = { a: null };
-  userDimensions = [];
   tool = "measure";
   activeFunction = "dimensions";
   showDimensions = true;
@@ -6075,7 +6557,6 @@ function startMeasure() {
 
 function stopMeasure() {
   measureDraft = null;
-  userDimensions = [];
   showDimensions = false;
   if (tool === "measure") tool = "select";
   if (activeFunction === "dimensions") activeFunction = null;
@@ -6090,7 +6571,14 @@ function finishMeasure(target) {
     setStatusMessage("The two points need to be different.", "warn");
     return;
   }
-  userDimensions.push(dim);
+  if (!Array.isArray(store.doc.dimensions)) store.doc.dimensions = [];
+  store.pushUndo();
+  store.doc.dimensions.push({
+    id: nid("dim"),
+    level: activeLevel,
+    x1: dim.a.x, y1: dim.a.y, x2: dim.b.x, y2: dim.b.y,
+  });
+  store.persist();
   measureDraft = { a: null };
   setStatusMessage(dim.label, "ok");
   updateRibbonHint();
@@ -6200,6 +6688,14 @@ function renderSheetFields() {
       callouts.map((c) => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`).join("")
     }`;
     const view = sheetView(store.doc, sheet);
+    if (el.sheetLevel && pack) {
+      const planView = view.kind === "plan" || view.kind === "callout";
+      el.sheetLevel.disabled = !planView;
+      el.sheetLevel.innerHTML = `<option value="">All levels</option>${
+        (pack.levels || []).map((l) => `<option value="${escapeHtml(l.id)}">${escapeHtml(l.name || l.id)}</option>`).join("")
+      }`;
+      el.sheetLevel.value = sheet.planLevel || "";
+    }
     el.sheetView.value = view.kind === "section" ? view.sectionId
       : view.kind === "elevation" ? view.elevationId
       : view.kind === "callout" ? view.calloutId
@@ -6274,25 +6770,204 @@ function renderSheets() {
   renderSheetClouds();
 }
 
-/** Bounding box of every plan point compile() emits, ignoring elevation -
- * the sheet draws one schematic plan, not a per-level split. Returns null
- * for an empty document so the caller can fall back rather than divide by
- * a zero extent. */
-function planExtentFromPayload(payload) {
+/** Bounding box of the forms a sheet will actually draw, plus any extra
+ * plan points (the property line, so the erf fits on the sheet). Returns
+ * null when there is nothing, so the caller can fall back rather than
+ * divide by a zero extent. */
+function planExtentFromPayload(payload, { forms = null, extraPoints = [] } = {}) {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const form of payload?.sketchForms || []) {
+  const grow = (x, y) => {
+    minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+    minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+  };
+  for (const form of forms || payload?.sketchForms || []) {
     for (const loop of form.profileLoops || []) {
       for (const curve of loop.curves || []) {
-        for (const pt of [curve.start, curve.end]) {
-          if (!pt) continue;
-          minX = Math.min(minX, pt[0]); maxX = Math.max(maxX, pt[0]);
-          minY = Math.min(minY, pt[1]); maxY = Math.max(maxY, pt[1]);
-        }
+        for (const pt of [curve.start, curve.end]) if (pt) grow(pt[0], pt[1]);
       }
     }
   }
+  for (const p of extraPoints) grow(p[0], p[1]);
   if (!Number.isFinite(minX) || !Number.isFinite(maxX)) return null;
   return { minX, minY, maxX, maxY, w: maxX - minX, h: maxY - minY };
+}
+
+/** Room boxes where rooms exist, otherwise one box around the walls, so a
+ * wall-traced plan still gets an overall dimension string on the sheet. */
+function sheetDimensionBoxes(doc, forms) {
+  const boxes = [];
+  for (const form of forms) {
+    if ((form.kind || "").toLowerCase() !== "room") continue;
+    const raw = (doc.rooms || []).find((r) => r.id === form.elementId);
+    if (!raw) continue;
+    const b = bbox(roomPolygon(raw));
+    if (b && b.w > 0 && b.h > 0) boxes.push(b);
+  }
+  if (boxes.length) return boxes;
+  const extent = planExtentFromPayload(null, {
+    forms: forms.filter((f) => (f.kind || "").toLowerCase() === "wall"),
+  });
+  return extent && extent.w > 0 && extent.h > 0
+    ? [{ x: extent.minX, y: extent.minY, w: extent.w, h: extent.h }]
+    : [];
+}
+
+function drawSheetDimension(sctx, project, line) {
+  const [x1, y1] = project(line.x1, line.y1);
+  const [x2, y2] = project(line.x2, line.y2);
+  const colour = line.overall ? "#1a1612" : "#5c5347";
+  sctx.save();
+  sctx.strokeStyle = colour;
+  sctx.lineWidth = line.overall ? 1.1 : 0.8;
+  for (const [ex, ey] of line.extFrom || []) {
+    const [sx, sy] = project(ex, ey);
+    sctx.beginPath();
+    sctx.moveTo(sx, sy);
+    sctx.lineTo(line.kind === "h" ? sx : x1, line.kind === "h" ? y1 : sy);
+    sctx.stroke();
+  }
+  sctx.beginPath();
+  sctx.moveTo(x1, y1);
+  sctx.lineTo(x2, y2);
+  sctx.stroke();
+  const mx = (x1 + x2) / 2;
+  const my = (y1 + y2) / 2;
+  let rot = Math.atan2(y2 - y1, x2 - x1);
+  if (rot > Math.PI / 2) rot -= Math.PI;
+  if (rot < -Math.PI / 2) rot += Math.PI;
+  sctx.font = `${line.overall ? 11 : 10}px "Source Sans 3", sans-serif`;
+  sctx.textAlign = "center";
+  sctx.textBaseline = "middle";
+  sctx.translate(mx, my);
+  sctx.rotate(rot);
+  const width = sctx.measureText(line.label).width + 4;
+  sctx.fillStyle = "#fdfaf3";
+  sctx.fillRect(-width / 2, -6, width, 12);
+  sctx.fillStyle = colour;
+  sctx.fillText(line.label, 0, 0);
+  sctx.restore();
+}
+
+function drawSheetOpening(sctx, project, pxPerM, form, walls) {
+  const curves = form.profileLoops?.[0]?.curves || [];
+  const line = curves.find((c) => c.kind === "Line" && c.start && c.end);
+  if (!line) return;
+  const a = project(line.start[0], line.start[1]);
+  const b = project(line.end[0], line.end[1]);
+  const host = (walls || []).find((w) => w.id === form.hostWallId);
+  sctx.save();
+  sctx.strokeStyle = "#fdfaf3";
+  sctx.lineWidth = Math.max(2, ((host?.thickness || 0.22) * pxPerM) + 1);
+  sctx.lineCap = "butt";
+  sctx.beginPath();
+  sctx.moveTo(a[0], a[1]);
+  sctx.lineTo(b[0], b[1]);
+  sctx.stroke();
+  sctx.strokeStyle = "#1a1612";
+  sctx.lineWidth = 1;
+  const arc = curves.find((c) => c.kind === "Arc" && c.end);
+  if (arc) {
+    const leaf = project(arc.end[0], arc.end[1]);
+    sctx.beginPath();
+    sctx.moveTo(a[0], a[1]);
+    sctx.lineTo(leaf[0], leaf[1]);
+    sctx.stroke();
+    const radius = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    if (radius > 1) {
+      const from = Math.atan2(b[1] - a[1], b[0] - a[0]);
+      const to = Math.atan2(leaf[1] - a[1], leaf[0] - a[0]);
+      let sweep = to - from;
+      while (sweep > Math.PI) sweep -= Math.PI * 2;
+      while (sweep < -Math.PI) sweep += Math.PI * 2;
+      sctx.beginPath();
+      sctx.arc(a[0], a[1], radius, from, from + sweep, sweep < 0);
+      sctx.stroke();
+    }
+  } else {
+    sctx.setLineDash([4, 3]);
+    sctx.beginPath();
+    sctx.moveTo(a[0], a[1]);
+    sctx.lineTo(b[0], b[1]);
+    sctx.stroke();
+  }
+  sctx.restore();
+}
+
+function drawSheetSite(sctx, project, site) {
+  if (!site) return;
+  const drawPoly = (shape, colour) => {
+    const poly = shapePolygon(shape);
+    if (poly.length < 3) return;
+    sctx.save();
+    sctx.strokeStyle = colour;
+    sctx.fillStyle = colour;
+    sctx.lineWidth = 1.2;
+    sctx.setLineDash([6, 4]);
+    sctx.beginPath();
+    poly.forEach((p, i) => {
+      const [sx, sy] = project(p[0], p[1]);
+      if (i) sctx.lineTo(sx, sy);
+      else sctx.moveTo(sx, sy);
+    });
+    sctx.closePath();
+    sctx.stroke();
+    sctx.setLineDash([]);
+    sctx.font = "10px \"Source Sans 3\", sans-serif";
+    sctx.textAlign = "center";
+    sctx.textBaseline = "bottom";
+    for (let i = 0; i < poly.length; i += 1) {
+      const a = poly[i];
+      const b = poly[(i + 1) % poly.length];
+      const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (len < 0.2) continue;
+      const [mx, my] = project((a[0] + b[0]) / 2, (a[1] + b[1]) / 2);
+      sctx.fillText(`${formatLengthMm(len)} mm`, mx, my - 2);
+    }
+    sctx.restore();
+  };
+  drawPoly(site.propertyLine, "#8d3416");
+  drawPoly(site.buildingLine, "#1f6b45");
+}
+
+function drawSheetNorthAndScale(sctx, areaX, areaY, areaH, pxPerM, scaleN) {
+  const metres = scaleBarMetres(scaleN);
+  const x = areaX + 14;
+  const base = areaY + areaH - 16;
+  sctx.save();
+  sctx.strokeStyle = "#1a1612";
+  sctx.fillStyle = "#1a1612";
+  sctx.lineWidth = 1.2;
+  const nx = x + 8;
+  const ny = base - 34;
+  sctx.beginPath();
+  sctx.moveTo(nx, ny + 12);
+  sctx.lineTo(nx, ny - 14);
+  sctx.stroke();
+  sctx.beginPath();
+  sctx.moveTo(nx, ny - 16);
+  sctx.lineTo(nx - 4, ny - 8);
+  sctx.lineTo(nx + 4, ny - 8);
+  sctx.closePath();
+  sctx.fill();
+  sctx.font = "600 11px \"Source Sans 3\", sans-serif";
+  sctx.textAlign = "center";
+  sctx.textBaseline = "middle";
+  sctx.fillText("N", nx, ny - 26);
+  if (metres) {
+    const w = metres * pxPerM;
+    sctx.beginPath();
+    sctx.moveTo(x + 24, base);
+    sctx.lineTo(x + 24 + w, base);
+    sctx.moveTo(x + 24, base - 4);
+    sctx.lineTo(x + 24, base + 4);
+    sctx.moveTo(x + 24 + w, base - 4);
+    sctx.lineTo(x + 24 + w, base + 4);
+    sctx.stroke();
+    sctx.font = "10px \"Source Sans 3\", sans-serif";
+    sctx.textAlign = "left";
+    sctx.fillText(`${metres} m`, x + 28 + w, base);
+  }
+  sctx.restore();
 }
 
 function drawActiveSheet() {
@@ -6340,13 +7015,21 @@ function drawActiveSheet() {
   const section = view.kind === "section" ? sectionById(store.doc, view.sectionId) : null;
   const elevation = view.kind === "elevation" ? elevationById(store.doc, view.elevationId) : null;
   const callout = view.kind === "callout" ? calloutById(store.doc, view.calloutId) : null;
-  // A callout draws the same schematic plan a plain "plan" viewport does
-  // (walls/rooms, no openings, no dimensions) just windowed to its crop
-  // rectangle - see the header comment above - so it needs the same compiled
-  // payload a plan viewport does, not the extruded faces a section/elevation
-  // needs.
+  // A callout draws the same schematic plan a plain "plan" viewport does,
+  // windowed to its crop. Both read one compiled payload. `planLevel` keeps
+  // a plan or callout to a single storey; unset, every storey still draws.
   const payload = (view.kind === "plan" || view.kind === "callout") ? (compile(store.doc, pack) || { sketchForms: [] }) : null;
-  const planExtent = payload && view.kind === "plan" ? planExtentFromPayload(payload) : null;
+  const planLevel = payload ? (sheet.planLevel || null) : null;
+  const forms = payload ? planFormsForLevel(payload, planLevel) : null;
+  const sitePoints = [];
+  if (view.kind === "plan") {
+    for (const shape of [store.doc.site?.propertyLine, store.doc.site?.buildingLine]) {
+      for (const p of shapePolygon(shape)) sitePoints.push(p);
+    }
+  }
+  const planExtent = forms && view.kind === "plan"
+    ? planExtentFromPayload(payload, { forms, extraPoints: sitePoints })
+    : null;
   const sectionGeom = section ? sectionCutGeometry(section) : null;
   const elevationGeom = elevation ? elevationGeometry(elevation) : null;
   const calloutGeom = callout ? calloutExtent(callout) : null;
@@ -6398,7 +7081,9 @@ function drawActiveSheet() {
     const midX = (extent.minX + extent.maxX) / 2;
     const midY = (extent.minY + extent.maxY) / 2;
     const project = (x, y) => [cx + (x - midX) * pxPerM, cy + (y - midY) * pxPerM];
-    for (const form of payload.sketchForms || []) {
+    const onSheetLevel = (obj) => !planLevel || !obj?.level || obj.level === planLevel;
+    if (view.kind === "plan") drawSheetSite(sctx, project, store.doc.site);
+    for (const form of forms || []) {
       const kind = (form.kind || "").toLowerCase();
       if (kind === "room") {
         for (const loop of form.profileLoops || []) {
@@ -6427,28 +7112,87 @@ function drawActiveSheet() {
         }
       }
     }
-    // Document > Lines geometry, drawn straight from `doc.lines` rather than
-    // `payload.sketchForms` - compile() never reads them (see model.js's
-    // `LINE_KINDS` comment: neither kind is a 3D fact). Both kinds print
-    // here, without a per-level split, the same limitation the walls/rooms
-    // loop above already carries.
-    for (const line of store.doc.lines || []) {
+    for (const form of forms || []) {
+      const kind = (form.kind || "").toLowerCase();
+      if (kind === "window" || kind === "opening") drawSheetOpening(sctx, project, pxPerM, form, payload.walls);
+    }
+    // Lines are not compiled (model.js LINE_KINDS): drawn from the document,
+    // and only the storey this sheet is set to.
+    for (const line of (store.doc.lines || []).filter(onSheetLevel)) {
+      if (line.kind !== "model") continue;
       const a = project(line.x1, line.y1);
       const b = project(line.x2, line.y2);
       sctx.beginPath();
       sctx.moveTo(a[0], a[1]);
       sctx.lineTo(b[0], b[1]);
-      sctx.strokeStyle = line.kind === "annotation" ? "#5a5044" : "#1a1612";
+      sctx.strokeStyle = "#1a1612";
       sctx.lineWidth = 1;
-      sctx.setLineDash(line.kind === "annotation" ? [5, 3] : []);
+      sctx.setLineDash([]);
+      sctx.stroke();
+    }
+    for (const line of (store.doc.separations || []).filter(onSheetLevel)) {
+      const a = project(line.x1, line.y1);
+      const b = project(line.x2, line.y2);
+      sctx.beginPath();
+      sctx.moveTo(a[0], a[1]);
+      sctx.lineTo(b[0], b[1]);
+      sctx.strokeStyle = "#6a5a48";
+      sctx.lineWidth = 1;
+      sctx.setLineDash([2, 3]);
       sctx.stroke();
       sctx.setLineDash([]);
     }
-    // Revision clouds linked to this sheet - drawn over the plan/callout
-    // schematic above, never as a third viewport kind of their own: a cloud
-    // annotates whichever view is already showing (see revision.js's header).
-    // Same no-per-level-split limitation the walls/lines loops above carry.
-    for (const cloud of revisionCloudsForSheet(store.doc, sheet.id)) {
+    for (const region of (store.doc.regions || []).filter(onSheetLevel)) {
+      const poly = shapePolygon(region.shape);
+      if (poly.length < 3) continue;
+      const look = regionConvention(region.convention);
+      sctx.beginPath();
+      poly.forEach(([x, y], i) => {
+        const p = project(x, y);
+        if (i === 0) sctx.moveTo(p[0], p[1]);
+        else sctx.lineTo(p[0], p[1]);
+      });
+      sctx.closePath();
+      if (look) {
+        sctx.fillStyle = look.fill;
+        sctx.fill();
+        sctx.strokeStyle = look.stroke;
+      } else {
+        sctx.strokeStyle = "#8a7d6c";
+      }
+      sctx.lineWidth = 1;
+      sctx.stroke();
+    }
+    for (const room of payload.rooms || []) {
+      if (planLevel && room.level !== planLevel) continue;
+      if (!room.centroid) continue;
+      const [tx, ty] = project(room.centroid[0], room.centroid[1]);
+      sctx.textAlign = "center";
+      sctx.textBaseline = "alphabetic";
+      sctx.font = `600 ${Math.max(9, Math.min(14, pxPerM * 0.22))}px "Source Sans 3", sans-serif`;
+      sctx.fillStyle = "#1a1612";
+      sctx.fillText(room.name || "Room", tx, ty - 10);
+      sctx.font = `${Math.max(8, Math.min(12, pxPerM * 0.18))}px "Source Sans 3", sans-serif`;
+      sctx.fillStyle = "#5c5348";
+      const useLabel = room.use && room.use !== "other" ? roomUse(room.use).label : "Use not set";
+      sctx.fillText(useLabel, tx, ty + 2);
+      const areaText = Number.isFinite(room.area) ? `${room.area.toFixed(1)} m²` : "";
+      if (areaText) sctx.fillText(areaText, tx, ty + 14);
+    }
+    if (view.kind === "plan") {
+      for (const line of planDimensionLines(sheetDimensionBoxes(store.doc, forms || []))) {
+        drawSheetDimension(sctx, project, line);
+      }
+    }
+    for (const dim of (store.doc.dimensions || []).filter(onSheetLevel)) {
+      const len = Math.hypot(dim.x2 - dim.x1, dim.y2 - dim.y1);
+      drawSheetDimension(sctx, project, {
+        x1: dim.x1, y1: dim.y1, x2: dim.x2, y2: dim.y2,
+        kind: "h", extFrom: [], label: `${formatLengthMm(len)} mm`,
+      });
+    }
+    // Revision clouds linked to this sheet, and only this storey.
+    for (const cloud of revisionCloudsForSheet(store.doc, sheet.id).filter(onSheetLevel)) {
       sctx.strokeStyle = "#b2451e";
       sctx.lineWidth = 1.2;
       for (const arc of cloudArcs(cloud.rect)) {
@@ -6462,6 +7206,7 @@ function drawActiveSheet() {
       sctx.fillStyle = "#b2451e";
       sctx.fillText(cloud.rev || "?", tx + 3, ty - 3);
     }
+    drawSheetNorthAndScale(sctx, areaX, areaY, areaH, pxPerM, scaleN);
   } else if (sectionGeom || elevationGeom) {
     // Same faces (and, for a section, the same poché) the interactive
     // Section/Elevation (massing.js) views draw, projected orthographically
@@ -6495,6 +7240,25 @@ function drawActiveSheet() {
       if (item.face.cut) hatchPolygon(sctx, item.pts, style.stroke);
       sctx.stroke();
     }
+    const projectUV = (u, v) => [cx + (u - midU) * pxPerM, cy - (v - midV) * pxPerM];
+    for (const cloud of revisionCloudsForSheet(store.doc, sheet.id)) {
+      const [z0, z1] = storeyBand(cloud.level);
+      const box = revisionCloudViewBox(cloud.rect, cut, z0, z1);
+      if (!box) continue;
+      const flipped = { minX: box.minU, minY: -box.maxV, maxX: box.maxU, maxY: -box.minV };
+      sctx.strokeStyle = "#b2451e";
+      sctx.lineWidth = 1.2;
+      for (const arc of cloudArcs(flipped)) {
+        const [sx, sy] = projectUV(arc.cx, -arc.cy);
+        sctx.beginPath();
+        sctx.arc(sx, sy, Math.max(1.5, arc.r * pxPerM), arc.startAngle, arc.endAngle);
+        sctx.stroke();
+      }
+      const [tx, ty] = projectUV(box.maxU, box.maxV);
+      sctx.font = `600 ${Math.max(9, pxPerM * 0.12)}px "Source Sans 3", sans-serif`;
+      sctx.fillStyle = "#b2451e";
+      sctx.fillText(cloud.rev || "?", tx + 3, ty - 3);
+    }
   }
   sctx.restore();
 }
@@ -6505,6 +7269,17 @@ function drawActiveSheet() {
  * its own function so the scale-row calculation above and the drawing loop
  * below read the same numbers rather than deriving the box twice.
  */
+/** Vertical band a plan cloud occupies on a section or elevation: this storey
+ * up to the next one, or one wall-height when this is the top storey. */
+function storeyBand(levelId) {
+  const z0 = levelElevation(pack, levelId);
+  const above = (pack.levels || [])
+    .map((l) => levelElevation(pack, l.id))
+    .filter((z) => z > z0 + 0.05)
+    .sort((a, b) => a - b)[0];
+  return [z0, above ?? z0 + (pack.system?.wallHeight || 2.7)];
+}
+
 function sectionCutGeometry(section) {
   const payload = compile(store.doc, pack) || { sketchForms: [] };
   const faces = facesFromPayload(payload, "both");
@@ -6553,7 +7328,7 @@ function wireSheets() {
     if (event.target === el.sheetOverlay) closeSheets();
   });
   el.sheetAdd?.addEventListener("click", () => {
-    const { sheet } = createSheet(store.doc, { size: "A1" });
+    const { sheet } = createSheet(store.doc, { size: "A1", level: activeLevel });
     activeSheetId = sheet.id;
     store.persist();
     renderSheets();
@@ -6595,6 +7370,14 @@ function wireSheets() {
     setSheetView(sheet, view);
     store.persist();
     renderSheetList();
+    renderSheetFields();
+    drawActiveSheet();
+  });
+  el.sheetLevel?.addEventListener("change", () => {
+    const sheet = activeSheet();
+    if (!sheet) return;
+    sheet.planLevel = el.sheetLevel.value || null;
+    store.persist();
     drawActiveSheet();
   });
   field(el.sheetSize, (sheet, value) => { sheet.size = value; });
@@ -6661,6 +7444,7 @@ function wireProjectInfo() {
 function openCheck() {
   if (el.checkOverlay) el.checkOverlay.hidden = false;
   renderRulesReport();
+  renderFoundationReport();
   renderAttachReport();
 }
 
@@ -7351,6 +8135,42 @@ function attachStateText(obj) {
   return `Not attached — ${levelLabel} + ${formatLengthMm(obj.baseOffset || 0)} mm`;
 }
 
+/** Drawn foundations filed on a storey that is not the foundation storey.
+ * The ribbon moves the cut when Foundations is armed; this is what remains
+ * when a footing was drawn before that, or after the cut was switched back. */
+function renderFoundationReport() {
+  if (!el.foundationReport) return;
+  const home = foundationStorey(pack.levels || []);
+  if (!home) {
+    el.foundationCount.textContent = "—";
+    el.foundationReport.innerHTML = '<p class="hint">This template has no foundation storey, so a foundation stays on the plan it is drawn on.</p>';
+    return;
+  }
+  const drawn = [];
+  for (const seg of store.doc.segments || []) {
+    const sku = skuById(seg.sku);
+    if (sku?.category !== "foundation") continue;
+    drawn.push({ id: seg.id, label: sku.name || seg.id, levelId: effectiveLevel(seg, pack) });
+  }
+  if (!drawn.length) {
+    el.foundationCount.textContent = "None";
+    el.foundationReport.innerHTML = '<p class="hint">No foundations drawn yet.</p>';
+    return;
+  }
+  const rows = foundationsOffStorey(drawn, pack.levels || []);
+  if (!rows.length) {
+    el.foundationCount.textContent = "On the foundation storey";
+    el.foundationReport.innerHTML = '<p class="hint">Every drawn foundation is on the foundation storey.</p>';
+    return;
+  }
+  el.foundationCount.textContent = `${rows.length} on another storey`;
+  el.foundationReport.innerHTML = rows.map((row) => `
+    <div class="attach-row attach-broken">
+      <span>${escapeHtml(row.message)}</span>
+    </div>
+  `).join("");
+}
+
 /** Attach state in the Check panel as well as on the object, so a broken
  * attach is findable without knowing which object to select first. */
 function renderAttachReport() {
@@ -7462,7 +8282,7 @@ const REVERTIBLE_DRAGS = new Set(["move", "segment-end", "property-vertex", "pro
  */
 function abortClickDraft() {
   if (!hasClickDraft({
-    wallDraft, shapeDraft, beamStart, lineStart, siteDraft, cameraDraft, sectionDraft, calloutDraft, revisionCloudDraft, measureDraft, calibration,
+    wallDraft, shapeDraft, beamStart, lineStart, siteDraft, roomDraft, regionDraft, cameraDraft, sectionDraft, calloutDraft, revisionCloudDraft, measureDraft, calibration,
     serviceRoute, serviceConnect,
   })) return false;
   if (serviceRoute?.fromNodeId) finishServiceRoute();
@@ -7472,6 +8292,8 @@ function abortClickDraft() {
   else if (beamStart) beamStart = null;
   else if (lineStart) lineStart = null;
   else if (siteDraft?.length) siteDraft.pop();
+  else if (roomDraft?.length) roomDraft.pop();
+  else if (regionDraft?.length) regionDraft.pop();
   else if (cameraDraft?.a) cameraDraft = { a: null };
   else if (sectionDraft?.a) sectionDraft = { a: null };
   else if (calloutDraft?.a) calloutDraft = { a: null };
@@ -7516,6 +8338,10 @@ function cancelDrawing() {
     || (tool !== "select") || activeFunction
   );
 
+  // Leaving a draw tool also drops the selection (typically the element just
+  // drawn), so the sequence is draft -> tool+selection: two presses, not three.
+  const leavingDrawTool = tool !== "select";
+
   drag = null;
   serviceRoute = null;
   serviceConnect = null;
@@ -7530,6 +8356,8 @@ function cancelDrawing() {
   propertyHover = null;
   calibration = null;
   siteDraft = null;
+  roomDraft = null;
+  regionDraft = null;
   sgPick = null;
   attachPick = null;
   cameraDraft = null;
@@ -7537,7 +8365,6 @@ function cancelDrawing() {
   calloutDraft = null;
   revisionCloudDraft = null;
   measureDraft = null;
-  userDimensions = [];
   showDimensions = false;
   if (tool !== "select") {
     tool = "select";
@@ -7547,7 +8374,7 @@ function cancelDrawing() {
     activeFunction = null;
     renderPalette();
   }
-  if (!wasDrawing && store.selected.length) {
+  if ((!wasDrawing || leavingDrawTool) && store.selected.length) {
     store.clearSelection();
   }
   drawRibbon();
@@ -7566,7 +8393,6 @@ function wireToolbar() {
         activeFunction = null;
         showDimensions = false;
         measureDraft = null;
-        userDimensions = [];
         drawRibbon();
         renderPalette();
       }
@@ -7579,6 +8405,8 @@ function wireToolbar() {
       shapeDraft = null;
       sizeDraft = null;
       siteDraft = null;
+      roomDraft = null;
+      regionDraft = null;
       sgPick = null;
       attachPick = null;
       cameraDraft = null;
@@ -7586,7 +8414,6 @@ function wireToolbar() {
       calloutDraft = null;
       revisionCloudDraft = null;
       measureDraft = null;
-      userDimensions = [];
       syncToolButtons();
       render();
     });
@@ -7634,6 +8461,13 @@ function wireCanvas() {
   el.canvas.addEventListener("pointerleave", () => {
     hoverPoint = null;
     hover = null;
+    // Stepping onto the option buttons (they sit close to the wall's start)
+    // leaves a stub shorter than a wall, which would switch the corner preview
+    // off. Fall back to the last proper end so every option can be tried.
+    if (wallDraft?.keep && segmentLength(wallDraft.x1, wallDraft.y1, wallDraft.x2, wallDraft.y2) < MIN_TRACE) {
+      wallDraft.x2 = wallDraft.keep.x;
+      wallDraft.y2 = wallDraft.keep.y;
+    }
     const wasProp = propertyHover;
     propertyHover = null;
     if (wasProp || tool === "door" || tool === "window" || wallDraft || shapeDraft || beamStart || lineStart || (tool === "camera" && cameraDraft?.a) || (tool === "section" && sectionDraft?.a) || (tool === "callout" && calloutDraft?.a) || (tool === "revision" && revisionCloudDraft?.a) || (tool === "measure" && measureDraft?.a)) render();
@@ -7863,7 +8697,43 @@ function onPointerDown(ev) {
     proposeAttach(target);
     return;
   }
-  if (tool === "room" || tool === "slab" || tool === "roof") {
+  if (tool === "room") {
+    underlaySelected = false;
+    const p = applySnap(wx, wy);
+    if (!roomDraft?.length) {
+      if (placeRoomAt(p)) return;
+      roomDraft = [p];
+      setStatusMessage("Point 1 placed. Keep clicking each corner. Enter closes the room.", "ok");
+      render();
+      return;
+    }
+    const first = roomDraft[0];
+    if (roomDraft.length >= 3 && Math.hypot(p.x - first.x, p.y - first.y) < 0.3) {
+      finishRoomDraft();
+      return;
+    }
+    roomDraft.push(p);
+    setStatusMessage(`Point ${roomDraft.length} placed. Enter closes the room.`, "ok");
+    render();
+    return;
+  }
+  if (tool === "region") {
+    underlaySelected = false;
+    const p = applySnap(wx, wy);
+    if (!regionDraft) regionDraft = [];
+    const first = regionDraft[0];
+    if (first && regionDraft.length >= 3 && Math.hypot(p.x - first.x, p.y - first.y) < 0.3) {
+      finishRegionDraft();
+      return;
+    }
+    regionDraft.push(p);
+    setStatusMessage(regionDraft.length >= 3
+      ? `Point ${regionDraft.length} placed. Enter closes the region, or click the first corner.`
+      : `Point ${regionDraft.length} placed. Keep clicking each corner.`, "ok");
+    render();
+    return;
+  }
+  if (tool === "slab" || tool === "roof") {
     underlaySelected = false;
     clickShapeCorner(wx, wy);
     return;
@@ -7890,12 +8760,14 @@ function onPointerDown(ev) {
     render();
     return;
   }
-  if (tool === "model-line" || tool === "annot-line") {
+  if (tool === "model-line" || tool === "annot-line" || tool === "separation") {
     underlaySelected = false;
     if (!lineStart) {
       lineStart = applySnap(wx, wy);
     } else {
-      commitLine(tool === "annot-line" ? "annotation" : "model", lineStart, applySnap(wx, wy));
+      const end = applySnap(wx, wy);
+      if (tool === "separation") commitSeparation(lineStart, end);
+      else commitLine(tool === "annot-line" ? "annotation" : "model", lineStart, end);
       lineStart = null;
       snapGuide = null;
     }
@@ -8003,6 +8875,11 @@ function serviceNodeNear(x, y, tol) {
 
 function clickServicePoint(wx, wy) {
   const p = applySnap(wx, wy);
+  if (serviceUi.justMode === "centre" && !snapGuide?.chaseHeld) {
+    setStatusMessage("In the wall only places a point inside a wall. Click on the wall, or set Beside walls back to Free.", "warn");
+    render();
+    return;
+  }
   const offset = parseOffsetText(serviceUi.offsetText);
   if (offset === undefined) {
     setStatusMessage("Height must be a number of metres, or blank if it is not known yet.", "warn");
@@ -8029,6 +8906,7 @@ function clickServicePoint(wx, wy) {
     offset,
     sku: serviceUi.sku || null,
     mode: serviceUi.mode,
+    chase: serviceUi.justMode === "centre",
   };
   const res = addRoutePoint(store.doc, pack, route, p, { tol });
   if (!res.ok) {
@@ -8185,6 +9063,10 @@ function settleServicesAfterMove(snaps) {
 }
 
 function clickWallPoint(wx, wy) {
+  if (refuseWrongFoundation()) {
+    render();
+    return;
+  }
   const p = applySnap(wx, wy);
   if (!wallDraft) {
     sizeDraft = { lockW: false, lockH: false, typedW: "", typedH: "", axis: "w" };
@@ -8372,6 +9254,22 @@ function onPointerMove(ev) {
         };
       }
     }
+    if (drag.snaps.length >= 1 && drag.snaps.every((s) => s.ref.kind === "serviceNode")) {
+      // Route points get the same live snap and gap dimensions to nearby walls,
+      // corners and other route points that a wall gets while it is drawn. The
+      // lead point is snapped; the rest (a riser column, a picked run) follow
+      // by the same delta.
+      const lead = drag.snaps[0];
+      serviceMoveIds = new Set(drag.snaps.map((s) => s.ref.id));
+      try {
+        const p = applySnap(lead.x + dx, lead.y + dy);
+        dx = p.x - lead.x;
+        dy = p.y - lead.y;
+        grid = null;
+      } finally {
+        serviceMoveIds = null;
+      }
+    }
     if (drag.snaps.length > 1 && grid) {
       // Several objects move as one rigid body: round the shared delta once
       // and apply it exactly. Rounding each coordinate separately shifts
@@ -8431,6 +9329,11 @@ function onPointerMove(ev) {
     wallDraft.x2 = p.x;
     wallDraft.y2 = p.y;
     if (sizeDraft?.lockW) setWallDraftLength(parseLengthInput(sizeDraft.typedW, wallDraftLength() || 1));
+    // Remember the last end long enough to be a real wall, so the corner
+    // preview survives the cursor stepping onto the option buttons.
+    if (segmentLength(wallDraft.x1, wallDraft.y1, wallDraft.x2, wallDraft.y2) >= MIN_TRACE) {
+      wallDraft.keep = { x: wallDraft.x2, y: wallDraft.y2 };
+    }
     render();
     return;
   }
@@ -8592,19 +9495,33 @@ function wireKeyboard() {
       const side = PROBE_KEYS[ev.key];
       const axis = probeAxis(side);
       probeSide[axis] = probeSide[axis] === side ? null : side;
-      const pinned = [probeSide.h, probeSide.v].filter(Boolean);
-      setStatusMessage(pinned.length
-        ? `Measuring ${pinned.join(" and ")} - same arrow again to go back to nearest`
-        : "Measuring to the nearest object");
+      // The ribbon hint already names the arrows. Updating it here is what
+      // says which side is pinned; the status line would only repeat it
+      // and then clear.
+      updateRibbonHint();
       // Re-resolve from the last pointer position so the new side appears
       // straight away, without waiting for the mouse to twitch.
       if (hoverPoint && (snapPreviewTool() || beamStart || lineStart)) applySnap(hoverPoint.x, hoverPoint.y);
+      else if (drag?.kind === "move" && drag.snaps.length && drag.snaps.every((s) => s.ref.kind === "serviceNode")) {
+        // A route point mid-drag: the guide was last built on the pointer move,
+        // so re-resolve it at the point where the node now sits.
+        const lead = objByRef(drag.snaps[0].ref);
+        if (lead) {
+          serviceMoveIds = new Set(drag.snaps.map((s) => s.ref.id));
+          try { applySnap(lead.x, lead.y); } finally { serviceMoveIds = null; }
+        }
+      }
       render();
     } else if (ev.key === "Enter" && serviceRoute) {
       ev.preventDefault();
       finishServiceRoute();
       updateRibbonHint();
       render();
+    } else if (ev.key === "Tab" && tool === "wall" && !typing && wallCornerRelevant()) {
+      // Step through the corner options with the cursor held where it is, so
+      // the wall stays exactly where it was drawn while each one is tried.
+      ev.preventDefault();
+      cycleWallCorner(ev.shiftKey ? -1 : 1);
     } else if (ev.key === " " && tool === "wall") {
       ev.preventDefault();
       if (wallStartedAgainstWall()) {
@@ -8612,8 +9529,10 @@ function wireKeyboard() {
         wallSideFlip = !wallSideFlip;
         setStatusMessage("Flipped: the wall now sits on the other side of the line.");
       } else {
-        wallLocation = flipWallLocation(wallLocation);
-        setStatusMessage(wallLocation === "exterior"
+        wallLocation = cycleWallLocation(wallLocation);
+        setStatusMessage(wallLocation === "center"
+          ? "Drawing on the centreline."
+          : wallLocation === "exterior"
           ? "Drawing on the exterior face. The wall sits to the right of the line as you draw."
           : "Drawing on the interior face. The wall sits to the left of the line as you draw.");
       }
@@ -8627,6 +9546,12 @@ function wireKeyboard() {
       finishShapeRect();
     } else if (ev.key === "Enter" && tool === "property" && siteDraft?.length >= 3) {
       finishPropertyLine();
+    } else if (ev.key === "Enter" && tool === "room" && roomDraft?.length >= 3) {
+      ev.preventDefault();
+      finishRoomDraft();
+    } else if (ev.key === "Enter" && tool === "region" && regionDraft?.length >= 3) {
+      ev.preventDefault();
+      finishRegionDraft();
     } else if ((ev.key === "Delete" || ev.key === "Backspace") && (store.selected.length || propertySelected)) {
       deleteSelection();
       render();
@@ -8664,8 +9589,12 @@ function wireKeyboard() {
 
 // --- object creation ------------------------------------------------------
 
-function commitRoom(rect) {
-  if (!canCommitRect(rect, "room-new")) return false;
+function floorSkuForPlacement() {
+  const sku = skuById(placeSkuId);
+  return sku?.category === "floor" ? sku.id : pack.system.defaultFloorSku;
+}
+
+function commitRoomRecord({ shape, seed = null, bound = false }) {
   store.pushUndo();
   store.doc.rooms.push({
     id: nid("r"),
@@ -8673,12 +9602,19 @@ function commitRoom(rect) {
     use: "other",
     level: activeLevel,
     wallSku: pack.system.defaultWallSku,
-    floorSku: pack.system.defaultFloorSku,
+    floorSku: floorSkuForPlacement(),
     status: placementStatus(),
-    shape: rectShape(rect.x, rect.y, rect.w, rect.h),
+    bound,
+    seed,
+    shape,
   });
   store.persist();
   return true;
+}
+
+function commitRoom(rect) {
+  if (!canCommitRect(rect, "room-new")) return false;
+  return commitRoomRecord({ shape: rectShape(rect.x, rect.y, rect.w, rect.h) });
 }
 
 function commitSlab(rect) {
@@ -8713,6 +9649,7 @@ function commitRoof(rect) {
 }
 
 function commitWall(a, b) {
+  if (refuseWrongFoundation()) return false;
   if (!canCommitLine(a, b)) return false;
   const thickness = drawnWallThickness(skuById(placeSkuId));
   const location = effectiveWallLocation(a, b, thickness);
@@ -9086,9 +10023,10 @@ function syncServiceProfileDock() {
     obstructions: profileObstructions(store.doc, pack, profile),
     storeyHeight: pack?.system?.wallHeight || 2.8,
     colour: SERVICE_SYSTEM_INFO[network?.system]?.colour,
-    drag: profileDrag?.moved ? { nodeId: profileDrag.nodeId, z: profileDrag.z, mode: profileDrag.mode } : null,
+    drag: profileDrag?.moved ? { nodeId: profileDrag.nodeId, runEdgeId: profileDrag.runEdgeId, z0: profileDrag.z0, z: profileDrag.z, mode: profileDrag.mode } : null,
     hoverGhost: profileHoverGhost,
     selectedNodeIds: store.selected.filter((r) => r.kind === "serviceNode").map((r) => r.id),
+    selectedEdgeIds: store.selected.filter((r) => r.kind === "serviceEdge").map((r) => r.id),
     selectionColour: COLOUR.selection,
   });
   // The canvas wrap's ResizeObserver re-measures the plan when the dock opens.
@@ -9099,6 +10037,7 @@ function syncServiceProfileDock() {
 // degree corners the mock draws. A ghost node (dashed, mid-run) is made real by
 // one click; a real node is lifted by dragging it up or down.
 const PROFILE_HIT = 10;
+const PROFILE_SEGMENT_HIT = 7;
 const LIFT_STEP = 0.05;
 const SLOPE_STEP = 0.01;
 
@@ -9143,13 +10082,72 @@ function profileHit(p) {
     const d = Math.hypot(g.px - p.x, g.py - p.y);
     if (d <= bestD) { best = { kind: "ghost", ...g }; bestD = d; }
   }
+  if (best) return best;
+  // Nothing else under the pointer: the stretch of route itself, a rise or
+  // drop included. Points and ghosts win above, so editing is unchanged.
+  let bestSegD = PROFILE_SEGMENT_HIT;
+  for (const s of profileLayout.segments || []) {
+    const d = distToSeg(s.x1, s.y1, s.x2, s.y2, p.x, p.y);
+    if (d <= bestSegD) { best = { kind: "segment", edgeId: s.edgeId }; bestSegD = d; }
+  }
   return best;
+}
+
+/**
+ * A click on a stretch of the profile selects that run on the plan. A rise or
+ * drop has no length there, so it is shown as a ring on its point, and a short
+ * pulse says where. The plan moves to the run's storey if it is on another.
+ */
+function selectProfileSegment(edgeId) {
+  const edge = (store.doc.serviceEdges || []).find((e) => e.id === edgeId);
+  if (!edge) return;
+  const levels = edgeLevels(store.doc, pack, edge);
+  if (levels.length && !levels.includes(activeLevel)) {
+    activeLevel = levels[0];
+    drawLevelSwitcher();
+  }
+  store.selectOne({ kind: "serviceEdge", id: edgeId });
+  const centre = serviceElementCentre(store.doc, { kind: "serviceEdge", id: edgeId });
+  startLocateFlash(centre ? [centre] : [], activeLevel);
+  render();
+}
+
+/**
+ * Select every run on the route the profile shows, rises and drops included,
+ * so the inspector's Type and "Include in BoQ" apply to the lot in one change.
+ * A route ends where it meets a junction; other branches are not swept in.
+ */
+function selectWholeRoute() {
+  if (!profileEdgeId) return;
+  const { edgeIds } = routeProfile(store.doc, pack, profileEdgeId);
+  const edges = (store.doc.serviceEdges || []).filter((e) => edgeIds.includes(e.id));
+  if (!edges.length) return;
+  // Stay where you are if any of it is on this storey; otherwise go to the first.
+  if (!edges.some((e) => edgeLevels(store.doc, pack, e).includes(activeLevel))) {
+    const levels = edgeLevels(store.doc, pack, edges[0]);
+    if (levels.length) {
+      activeLevel = levels[0];
+      drawLevelSwitcher();
+    }
+  }
+  const refs = edges.map((e) => ({ kind: "serviceEdge", id: e.id }));
+  store.setSelection(refs, refs[0]);
+  setStatusMessage(`Selected the whole route: ${refs.length} run${refs.length === 1 ? "" : "s"}. Change the type or quantities in the panel.`, "ok");
+  render();
 }
 
 function onProfileDown(ev) {
   if (ev.button !== 0) return;
   const hit = profileHit(profilePointer(ev));
   if (!hit) return;
+  if (hit.kind === "segment") {
+    // A click selects the run; dragging it up or down lifts the whole run.
+    const y = profilePointer(ev).y;
+    const z0 = profileLayout.zAt(y);
+    profileDrag = { runEdgeId: hit.edgeId, nodeId: null, z0, z: z0, startY: y, moved: false, mode: "run" };
+    el.serviceProfileCanvas.setPointerCapture(ev.pointerId);
+    return;
+  }
   if (hit.kind === "ghost") {
     const centre = serviceElementCentre(store.doc, { kind: "serviceEdge", id: hit.edgeId });
     if (!centre) return;
@@ -9173,7 +10171,7 @@ function onProfileMove(ev) {
     if (Math.abs(p.y - profileDrag.startY) > 4) profileDrag.moved = true;
     if (profileDrag.moved && profileLayout) {
       const raw = Math.min(profileLayout.zHi, Math.max(profileLayout.zLo, profileLayout.zAt(p.y)));
-      const q = profileDrag.mode === "slope" ? SLOPE_STEP : LIFT_STEP;
+      const q = profileDrag.mode === "slope" ? SLOPE_STEP : LIFT_STEP; // "run" lifts in LIFT_STEPs too
       profileDrag.z = profileDrag.z0 + Math.round((raw - profileDrag.z0) / q) * q;
     }
     render();
@@ -9181,7 +10179,7 @@ function onProfileMove(ev) {
   }
   const hit = profileHit(p);
   const ghostId = hit?.kind === "ghost" ? hit.edgeId : null;
-  el.serviceProfileCanvas.style.cursor = hit?.kind === "node" ? "ns-resize" : hit ? "copy" : "default";
+  el.serviceProfileCanvas.style.cursor = hit?.kind === "node" ? "ns-resize" : hit?.kind === "segment" ? "ns-resize" : hit ? "copy" : "default";
   if (ghostId !== profileHoverGhost) {
     profileHoverGhost = ghostId;
     render();
@@ -9192,6 +10190,16 @@ function onProfileUp() {
   const d = profileDrag;
   profileDrag = null;
   if (!d) return;
+  if (d.mode === "run") {
+    if (!d.moved) { selectProfileSegment(d.runEdgeId); return; }
+    const runDelta = d.z - d.z0;
+    if (Math.abs(runDelta) >= LIFT_STEP / 2) {
+      const res = mutateServices(() => liftRun(store.doc, pack, d.runEdgeId, runDelta));
+      if (res?.ok) store.setSelection([{ kind: "serviceEdge", id: d.runEdgeId }]);
+    }
+    render();
+    return;
+  }
   const delta = d.z - d.z0;
   const min = (d.mode === "slope" ? SLOPE_STEP : LIFT_STEP) / 2;
   if (d.moved && Math.abs(delta) >= min) {
@@ -9210,6 +10218,10 @@ if (el.serviceProfileCanvas) {
   el.serviceProfileCanvas.addEventListener("pointerdown", onProfileDown);
   el.serviceProfileCanvas.addEventListener("pointermove", onProfileMove);
   el.serviceProfileCanvas.addEventListener("pointerup", onProfileUp);
+  el.serviceProfileCanvas.addEventListener("dblclick", (ev) => {
+    if (profileHit(profilePointer(ev))?.kind === "segment") selectWholeRoute();
+  });
+  document.getElementById("v2-profile-select-all")?.addEventListener("click", selectWholeRoute);
   el.serviceProfileCanvas.addEventListener("pointercancel", () => { profileDrag = null; render(); });
   el.serviceProfileCanvas.addEventListener("pointerleave", () => {
     if (profileDrag || profileHoverGhost === null) return;
@@ -9292,7 +10304,7 @@ bindServiceProfileResize();
 
 function syncServiceDock() {
   const refs = store.selected.filter(isServiceRef);
-  const model = serviceInspectorModel(store.doc, pack, refs);
+  const model = serviceInspectorModel(store.doc, pack, refs, { walls: serviceWalls(), levelId: activeLevel });
   const connectHint = tool === "service-connect"
     ? (serviceConnect ? "Click the component to connect this point to." : "Click a route point, then the component it serves.")
     : "";
@@ -9354,6 +10366,10 @@ function onServiceControl(ev) {
     if (isInput) serviceUi.offsetText = value;
     return;
   }
+  if (name === "just-offset") {
+    if (isInput) serviceUi.justOffsetText = value;
+    return;
+  }
   if (isInput || (isClick && target.tagName !== "BUTTON")) return;
   switch (name) {
     case "system":
@@ -9368,6 +10384,19 @@ function onServiceControl(ev) {
     case "network": serviceUi.networkId = value || null; return;
     case "sku": serviceUi.sku = value || null; return;
     case "mode": serviceUi.mode = value === "schematic" ? "schematic" : "measured"; return;
+    case "just-mode":
+      serviceUi.justMode = value === "clear" || value === "centre" ? value : "off";
+      serviceDockKey = "";
+      target.blur();
+      render();
+      return;
+    case "edge-chase": mutateServices(() => setEdgeChase(store.doc, edgeIds, target.checked)); return;
+    case "edge-clearance": {
+      const mm = numberOrNull(value);
+      if (mm === null || Number.isNaN(mm)) { setStatusMessage("Clearance must be a number of millimetres.", "warn"); return; }
+      mutateServices(() => setRunClearance(store.doc, pack, serviceWalls(), edgeIds[0], mm, activeLevel));
+      return;
+    }
     case "node-level": mutateServices(() => setNodeLevel(store.doc, pack, nodeId, value)); return;
     case "node-offset": {
       const v = numberOrNull(value);
@@ -9456,6 +10485,7 @@ function syncPlanContext() {
   const obj = ref ? objByRef(ref) : null;
   const linear = draft || (obj && (ref.kind === "segment" || ref.kind === "beam"));
   const room = Boolean(obj && ref.kind === "room");
+  const region = Boolean(obj && ref.kind === "region");
   const slab = Boolean(obj && ref.kind === "slab");
   const roof = Boolean(obj && ref.kind === "roof");
   const opening = Boolean(obj && ref.kind === "opening");
@@ -9470,7 +10500,7 @@ function syncPlanContext() {
   const multiTypeable = multi && refs.some((r) => TYPEABLE_KINDS.has(r.kind));
   const showType = linear || slab || roof || opening || item;
   const showGeom = linear || rect;
-  const showInspect = Boolean(el.inspectFields) && (linear || room || slab || roof || opening || item);
+  const showInspect = Boolean(el.inspectFields) && (linear || room || region || slab || roof || opening || item);
   const editingProperty = propertySelected && !draft && refs.length === 0;
   const creating = !showInspect && !multi && !editingProperty && placingToolArmed();
   const dockState = editingProperty || showInspect ? "edit" : multiTypeable ? "edit" : creating ? "create" : "empty";
@@ -9552,6 +10582,7 @@ function syncPlanContext() {
 
   setHidden(el.ctxNameWrap, !room);
   setHidden(el.ctxUseWrap, !room);
+  setHidden(el.ctxRegionWrap, !region);
   setHidden(el.ctxLenWrap, !linear);
   setHidden(el.ctxAngWrap, !linear);
   setHidden(el.ctxWWrap, !(rect || linear));
@@ -9600,6 +10631,7 @@ function syncPlanContext() {
   }
   if (room && document.activeElement !== el.ctxName) el.ctxName.value = obj.name;
   if (room && document.activeElement !== el.ctxUse) el.ctxUse.value = obj.use;
+  if (region && document.activeElement !== el.ctxRegion) el.ctxRegion.value = obj.convention || "";
   if (rect) {
     if (document.activeElement !== el.ctxW) el.ctxW.value = formatLengthMm(obj.shape.w);
     if (document.activeElement !== el.ctxH) el.ctxH.value = formatLengthMm(obj.shape.h);
@@ -9726,10 +10758,21 @@ el.ctxUse?.addEventListener("change", (e) => {
   render();
 });
 
+el.ctxRegion?.addEventListener("change", (e) => {
+  const region = soleOf("region");
+  if (!region) return;
+  store.pushUndo();
+  region.convention = e.target.value || null;
+  store.persist();
+  render();
+});
+
 el.ctxW?.addEventListener("change", (e) => {
   const obj = soleOf("room") || soleOf("slab") || soleOf("roof");
   if (!obj?.shape || obj.shape.kind !== "rect") return;
   store.pushUndo();
+  obj.bound = false;
+  obj.seed = null;
   obj.shape.w = parseLengthInput(e.target.value, obj.shape.w);
   store.persist();
   render();
@@ -9739,6 +10782,8 @@ el.ctxH?.addEventListener("change", (e) => {
   const obj = soleOf("room") || soleOf("slab") || soleOf("roof");
   if (!obj?.shape || obj.shape.kind !== "rect") return;
   store.pushUndo();
+  obj.bound = false;
+  obj.seed = null;
   obj.shape.h = parseLengthInput(e.target.value, obj.shape.h);
   store.persist();
   render();
@@ -9956,12 +11001,92 @@ function runCompile() {
 // through, so the plan and the line that sent you there stay on one screen.
 
 let scheduleRowsCache = [];
+// BOQ carries rates; BOM does not. Remembered so toggling the dock can
+// repaint the same lines without compiling again.
+let schedulePriced = false;
 // Which rolled-up lines are expanded, keyed by groupByModel's own key (model,
 // falling back to category) rather than row index: re-running the compile
 // re-sorts and re-numbers the rows, and an index would re-open the wrong one.
 let scheduleOpenGroups = new Set();
 let schedulePeeking = false;
 
+// Model pane (full table only): a second, small massing view inside the
+// schedule panel. It reads compile()'s faces like Output > 3D does but is its
+// own instance, so picking a line out here never touches the plan camera, the
+// active level or the selection. A 2D/3D radio flips the same model between a
+// fixed top-down plan and the orbit view; the pick shows in whichever is on.
+const scheduleView3d = el.schedule3dCanvas
+  ? createMassingView({
+    canvas: el.schedule3dCanvas,
+    emptyEl: el.schedule3dEmpty,
+    captionEl: null,
+    titleEl: null,
+  })
+  : null;
+// What is picked right now, so "Exit to drawing" can hand the very same
+// elements to the plan locator.
+let schedule3dTarget = null;
+
+function scheduleModelIs2d() {
+  return document.querySelector('input[name="v2-schedule-view"]:checked')?.value === "2d";
+}
+
+function clearSchedulePicks() {
+  schedule3dTarget = null;
+  el.scheduleBody?.querySelectorAll(".picked").forEach((n) => n.classList.remove("picked"));
+}
+
+function syncSchedule3dChrome(hits) {
+  if (el.schedule3dDrawing) el.schedule3dDrawing.disabled = !schedule3dTarget;
+  if (!el.schedule3dNote) return;
+  const hint = scheduleModelIs2d() ? "scroll to zoom" : "drag to orbit · scroll to zoom";
+  if (!schedule3dTarget) {
+    el.schedule3dNote.textContent = "Click a line to pick it out.";
+  } else if (hits) {
+    const n = schedule3dTarget.refs.length;
+    el.schedule3dNote.textContent = `${schedule3dTarget.label || "Selection"} · ${n} element${n === 1 ? "" : "s"} in orange · ${hint}`;
+  } else {
+    el.schedule3dNote.textContent = "Not a solid in the model (e.g. derived from a room) - use Exit to drawing.";
+  }
+}
+
+/** Fresh read of the drawing into the model pane. Called whenever the
+ *  schedule opens, so it never shows a stale compile. */
+function loadSchedule3d() {
+  if (!scheduleView3d) return;
+  const out = compile(store.doc, pack);
+  if (!out) return;
+  scheduleView3d.setFlat(scheduleModelIs2d());
+  scheduleView3d.setOrbit();
+  scheduleView3d.setServices(serviceMassingRoutes(store.doc, pack));
+  scheduleView3d.setServiceNodes(serviceMassingNodes(store.doc, pack));
+  scheduleView3d.setPayload(out);
+  scheduleView3d.setHighlight([]);
+  syncSchedule3dChrome(0);
+  // The overlay only just became visible; draw once layout has settled.
+  requestAnimationFrame(() => requestAnimationFrame(() => scheduleView3d.resize()));
+}
+
+function applySchedule3dPick() {
+  if (!scheduleView3d) return;
+  const hits = scheduleView3d.setHighlight(schedule3dTarget ? schedule3dTarget.refs.map((ref) => ref.id) : []);
+  syncSchedule3dChrome(hits);
+}
+
+/** A click on a schedule line or element. Full table: pick it out in the
+ *  model pane (the drawing is untouched). Side view: the pane is gone, so the
+ *  click goes to the real drawing instead. */
+function pickScheduleRefs(refs, label, pickedEl) {
+  if (!refs.length) return;
+  clearSchedulePicks();
+  pickedEl?.classList.add("picked");
+  schedule3dTarget = { refs, label };
+  if (schedulePeeking) {
+    locateScheduleRefs(refs, label);
+    return;
+  }
+  applySchedule3dPick();
+}
 /** shared money formatter for the priced BOQ view - ZAR unless the loaded
  *  rate book states otherwise. */
 function money(rate, symbol) {
@@ -10002,26 +11127,23 @@ function elementRowHtml(groupIndex, element, elementIndex) {
   const label = `${element.id}${element.status ? ` · ${element.status}` : ""}${detail ? ` · ${detail}` : ""}`;
   const locatable = Boolean(element.kind);
   return `
-    <div class="schedule-element">
+    <div class="schedule-element${locatable ? " locatable" : ""}" data-group="${groupIndex}" data-element="${elementIndex}"
+      title="${locatable ? "Click to pick this element out" : "Not a drawn element - nothing to pick out"}">
       <span class="schedule-element-id">${escapeHtml(label)}</span>
-      <span>${escapeHtml(levelName(element.level))}</span>
-      <button type="button" class="schedule-locate" data-group="${groupIndex}" data-element="${elementIndex}"
-        ${locatable ? "" : "disabled"} title="${locatable ? "Select this element and pan the plan to it" : "Not a drawn element - nothing to select"}">
-        Show on plan
-      </button>
+      <span class="schedule-element-level">${escapeHtml(levelName(element.level))}</span>
     </div>`;
 }
 
 function scheduleRowsHtml(rows, { priced }) {
   const symbol = rateBook?.symbol || "R";
   // Full column count, so the expanded element list spans the whole table.
-  const colspan = priced ? 9 : 7;
+  const colspan = priced ? 8 : 6;
   const head = priced
-    ? `<tr><th></th><th>Model</th><th class="wrap">Description</th><th>Category</th><th class="num">Qty</th><th>Unit</th><th class="num">Rate</th><th class="num">Amount</th><th></th></tr>`
-    : `<tr><th></th><th>Model</th><th class="wrap">Description</th><th>Category</th><th class="num">Qty</th><th>Unit</th><th></th></tr>`;
+    ? `<tr><th></th><th>Model</th><th class="wrap">Description</th><th>Category</th><th class="num">Qty</th><th>Unit</th><th class="num">Rate</th><th class="num">Amount</th></tr>`
+    : `<tr><th></th><th>Model</th><th class="wrap">Description</th><th>Category</th><th class="num">Qty</th><th>Unit</th></tr>`;
   const body = rows.map((row, i) => {
     const first = `
-      <td class="schedule-caret">▸</td>
+      <td class="schedule-caret"><button type="button" class="schedule-caret-btn" aria-expanded="${scheduleOpenGroups.has(scheduleGroupKey(row))}" aria-label="Show or hide the elements on this line" title="Show or hide the elements on this line"></button></td>
       <td>${escapeHtml(row.model || "")}</td>
       <td class="wrap">${escapeHtml(row.description || "")}</td>
       <td>${escapeHtml(row.category || "")}</td>
@@ -10033,28 +11155,87 @@ function scheduleRowsHtml(rows, { priced }) {
       <td class="num">${row.priced ? money(row.amount, symbol) : "—"}</td>`
       : "";
     const refCount = scheduleGroupRefs(row).length;
-    const planCell = `
-      <td class="schedule-plan-cell">
-        <button type="button" class="schedule-locate schedule-locate-all" data-group="${i}"
-          ${refCount ? "" : "disabled"}
-          title="${refCount ? "Select every drawn element on this line and frame them on the plan" : "Nothing drawn on this line to select"}">
-          Show all${refCount ? ` (${refCount})` : ""}
-        </button>
-      </td>`;
     const elements = (row.elements || [])
       .map((element, j) => elementRowHtml(i, element, j))
       .join("");
     const open = scheduleOpenGroups.has(scheduleGroupKey(row));
+    const rowTitle = refCount
+      ? `Click to pick out all ${refCount} drawn element${refCount === 1 ? "" : "s"} on this line`
+      : "Nothing drawn on this line";
     return `
-      <tr class="schedule-group-row${open ? " open" : ""}" data-group="${i}">${first}${priceCells}${planCell}</tr>
+      <tr class="schedule-group-row${open ? " open" : ""}" data-group="${i}" title="${rowTitle}">${first}${priceCells}</tr>
       <tr class="schedule-elements-row" data-group="${i}"${open ? "" : " hidden"}>
         <td colspan="${colspan}"><div class="schedule-elements">${elements || '<p class="hint">Nothing drawn against this line yet.</p>'}</div></td>
       </tr>`;
-  }).join("");
-  const foot = priced
+  }).join("");  const foot = priced
     ? `<tr class="total"><td colspan="${colspan - 1}">Total (priced lines only)</td><td class="num">${money(scheduleTotal(rows), symbol)}</td></tr>`
     : "";
   return `<table class="cost-table"><thead>${head}</thead><tbody>${body}${foot}</tbody></table>`;
+}
+
+/** Docked beside the plan. The full table's eight columns do not fit here:
+ *  the description column collapses to a few words a line and the rest of
+ *  the figures sit off a horizontal scrollbar. One block per line instead,
+ *  same controls (caret, row click, element click) as the table. */
+function scheduleCompactHtml(rows, { priced }) {
+  const symbol = rateBook?.symbol || "R";
+  const lines = rows.map((row, i) => {
+    const open = scheduleOpenGroups.has(scheduleGroupKey(row));
+    const refCount = scheduleGroupRefs(row).length;
+    const elements = (row.elements || [])
+      .map((element, j) => elementRowHtml(i, element, j))
+      .join("");
+    const rowTitle = refCount
+      ? `Click to pick out all ${refCount} drawn element${refCount === 1 ? "" : "s"} on this line`
+      : "Nothing drawn on this line";
+    const amount = priced ? (row.priced ? money(row.amount, symbol) : "—") : "";
+    return `
+      <div class="schedule-line">
+        <div class="schedule-group-row${open ? " open" : ""}" data-group="${i}" title="${rowTitle}">
+          <button type="button" class="schedule-caret-btn" aria-expanded="${open}" aria-label="Show or hide the elements on this line" title="Show or hide the elements on this line"></button>
+          <div class="schedule-line-body">
+            <div class="schedule-line-model">${escapeHtml(row.model || "—")}</div>
+            <div class="schedule-line-desc">${escapeHtml(row.description || "")}</div>
+            <div class="schedule-line-meta">
+              <span class="schedule-line-cat">${escapeHtml(row.category || "")}</span>
+              <span class="schedule-line-qty">${fmtQty(row.qty, row.unit)}</span>
+              ${priced ? `<span class="schedule-line-amt">${amount}</span>` : ""}
+            </div>
+          </div>
+        </div>
+        <div class="schedule-elements-row" data-group="${i}"${open ? "" : " hidden"}>
+          <div class="schedule-elements">${elements || '<p class="hint">Nothing drawn against this line yet.</p>'}</div>
+        </div>
+      </div>`;
+  }).join("");
+  const foot = priced
+    ? `<div class="schedule-foot"><span>Total (priced lines only)</span><span>${money(scheduleTotal(rows), symbol)}</span></div>`
+    : "";
+  return `<div class="schedule-lines">${lines}${foot}</div>`;
+}
+
+function scheduleMarkup() {
+  return schedulePeeking
+    ? scheduleCompactHtml(scheduleRowsCache, { priced: schedulePriced })
+    : `<div class="table-wrap">${scheduleRowsHtml(scheduleRowsCache, { priced: schedulePriced })}</div>`;
+}
+
+/** Repaint the lines, leaving the warning banner where it is. A picked row
+ *  is the same data-group after the switch between table and dock. */
+function paintSchedule() {
+  if (!el.scheduleBody) return;
+  const picked = el.scheduleBody.querySelector(".picked");
+  const group = picked?.dataset.group ?? null;
+  const element = picked?.classList.contains("schedule-element") ? picked.dataset.element : null;
+  const slot = el.scheduleBody.querySelector(".table-wrap, .schedule-lines");
+  const html = scheduleMarkup();
+  if (slot) slot.outerHTML = html;
+  else el.scheduleBody.insertAdjacentHTML("beforeend", html);
+  if (group == null) return;
+  const next = element != null
+    ? el.scheduleBody.querySelector(`.schedule-element[data-group="${group}"][data-element="${element}"]`)
+    : el.scheduleBody.querySelector(`.schedule-group-row[data-group="${group}"]`);
+  next?.classList.add("picked");
 }
 
 /** "from 1 March 2026", or nothing for a book with no date (the sample file has none). */
@@ -10069,6 +11250,7 @@ function rateBookEffective() {
 
 function openSchedule(title, rows, { priced }) {
   scheduleRowsCache = rows;
+  schedulePriced = Boolean(priced);
   if (el.scheduleOverlay) el.scheduleOverlay.hidden = false;
   if (el.scheduleTitle) el.scheduleTitle.textContent = title;
   // Which price list produced these figures, beside the line count: a priced
@@ -10080,15 +11262,18 @@ function openSchedule(title, rows, { priced }) {
       ...(priced ? [rateBook?.name, rateBookEffective()] : []),
     ].filter(Boolean).join(" · ");
   }
-  if (el.scheduleBody) {
-    el.scheduleBody.innerHTML = `<div class="table-wrap">${scheduleRowsHtml(rows, { priced })}</div>`;
-  }
+  // Warnings are inserted after this returns. Clear first so a second open
+  // does not keep the previous banner.
+  if (el.scheduleBody) el.scheduleBody.replaceChildren();
   // Re-opening the schedule from the ribbon is a fresh read of the drawing,
   // so it comes back full-screen; peek is a state locating puts it into.
   setSchedulePeek(false);
+  clearSchedulePicks();
+  loadSchedule3d();
 }
 
 function closeSchedule() {
+  clearSchedulePicks();
   if (el.scheduleOverlay) el.scheduleOverlay.hidden = true;
   setSchedulePeek(false);
   clearLocateFlash();
@@ -10101,6 +11286,7 @@ function setSchedulePeek(on) {
   schedulePeeking = Boolean(on);
   el.scheduleOverlay?.classList.toggle("peek", schedulePeeking);
   if (el.schedulePeek) el.schedulePeek.textContent = schedulePeeking ? "Full table" : "Peek plan";
+  paintSchedule();
 }
 
 function runBoq() {
@@ -10162,9 +11348,9 @@ function elementCenter(ref, obj, walls = null) {
   }
 }
 
-/** Plan extent of a doc entity as a point list, so framing a selection fits
- *  the whole of a long wall rather than centring on its midpoint. Falls back
- *  to the centre for kinds with no cheap outline of their own. */
+/** Plan extent of a doc entity as a point list, so a pan can tell whether any
+ *  part of a long wall is already on screen and, if not, which edge is nearest.
+ *  Falls back to the centre for kinds with no cheap outline of their own. */
 function elementExtent(ref, obj, walls = null) {
   switch (ref.kind) {
     case "room": case "slab": case "roof": {
@@ -10191,15 +11377,16 @@ function elementLevel(ref, obj, walls = null) {
   return effectiveLevel(obj, pack) || null;
 }
 
-/** Put a set of plan points on screen, padded. One point keeps the old
- *  close-in behaviour (the element is already the right size); several get
- *  fitted, which is what makes "Show all" readable for a whole wall type. */
+/** Bring these points into the visible plan without changing zoom. If any
+ *  part is already on screen, the camera stays put. Otherwise it shifts only
+ *  along the axes where they sit off-screen, and only until the near edge
+ *  clears the border — not until they are centred. */
 function framePlanPoints(points) {
   if (!points.length || !el.canvas) return;
   const rect = el.canvas.getBoundingClientRect();
   if (rect.width < 8 || rect.height < 8) return;
   // While peeking, the docked panel sits over the right of the canvas.
-  // Framing into the full width would put the located element underneath it.
+  // That strip is not "on screen": an element under the panel still needs a nudge.
   const panel = schedulePeeking ? el.scheduleOverlay?.querySelector(".schedule-panel") : null;
   let viewW = rect.width;
   if (panel) {
@@ -10210,20 +11397,16 @@ function framePlanPoints(points) {
   }
   const xs = points.map((p) => p.x);
   const ys = points.map((p) => p.y);
-  const minX = Math.min(...xs);
-  const maxX = Math.max(...xs);
-  const minY = Math.min(...ys);
-  const maxY = Math.max(...ys);
-  if (points.length === 1 || (maxX - minX < 0.5 && maxY - minY < 0.5)) {
-    cam.scale = Math.max(cam.scale, 90);
-  } else {
-    const pad = 1.4;
-    const w = maxX - minX + pad * 2;
-    const h = maxY - minY + pad * 2;
-    cam.scale = Math.min(90, Math.max(MIN_VIEW_SCALE, Math.min(viewW / w, rect.height / h)));
-  }
-  cam.ox = viewW / 2 - ((minX + maxX) / 2) * cam.scale;
-  cam.oy = rect.height / 2 - ((minY + maxY) / 2) * cam.scale;
+  const pad = Math.min(24, viewW / 4, rect.height / 4);
+  // How far to slide one axis so the near edge lands `pad` inside the view.
+  // Zero when the extent already overlaps that axis.
+  const shift = (near, far, vis0, vis1) => {
+    if (far < vis0) return vis0 + pad - far;
+    if (near > vis1) return vis1 - pad - near;
+    return 0;
+  };
+  cam.ox += shift(cam.ox + Math.min(...xs) * cam.scale, cam.ox + Math.max(...xs) * cam.scale, 0, viewW);
+  cam.oy += shift(cam.oy + Math.min(...ys) * cam.scale, cam.oy + Math.max(...ys) * cam.scale, 0, rect.height);
 }
 
 // A located element is selected, but on a busy plan a selection outline is
@@ -10280,7 +11463,7 @@ function drawLocateFlash() {
 
 /**
  * Output > Schedules > Show on plan / Show all. Selects every ref it can
- * still find, switches to the storey most of them are on, frames them, and
+ * still find, switches to the storey most of them are on, pans to them, and
  * flashes them. The schedule stays open in peek mode: the point of clicking
  * a schedule line is to compare the line with the plan, and closing the
  * table to show the plan loses half of that.
@@ -10326,8 +11509,8 @@ function locateScheduleRefs(refs, label) {
     drawLevelSwitcher();
   }
 
-  // Peek first: it decides how much of the canvas the panel leaves, which
-  // is what the framing below has to centre into.
+  // Peek first: the docked panel covers the right of the canvas, so the
+  // nudge below has to treat that strip as off-screen.
   setSchedulePeek(true);
   const onLevel = found.filter((entry) => !entry.level || entry.level === activeLevel);
   const extent = onLevel.flatMap((entry) => elementExtent(entry.ref, entry.obj, walls));
@@ -10360,6 +11543,7 @@ function toggleScheduleGroup(groupRow) {
   if (!elementsRow) return;
   elementsRow.hidden = !elementsRow.hidden;
   groupRow.classList.toggle("open", !elementsRow.hidden);
+  groupRow.querySelector(".schedule-caret-btn")?.setAttribute("aria-expanded", String(!elementsRow.hidden));
   if (!row) return;
   const key = scheduleGroupKey(row);
   if (elementsRow.hidden) scheduleOpenGroups.delete(key);
@@ -10373,28 +11557,41 @@ function wireSchedule() {
     // In peek mode the backdrop is not there to be dismissed - it is the plan.
     if (event.target === el.scheduleOverlay && !schedulePeeking) closeSchedule();
   });
+  // The deliberate jump out of the table: same locator the side view uses,
+  // fed whatever is picked. Changes the level, selection and plan camera.
+  el.schedule3dDrawing?.addEventListener("click", () => {
+    if (!schedule3dTarget) return;
+    locateScheduleRefs(schedule3dTarget.refs, schedule3dTarget.label);
+  });
+  document.querySelectorAll('input[name="v2-schedule-view"]').forEach((radio) => {
+    radio.addEventListener("change", () => {
+      scheduleView3d?.setFlat(scheduleModelIs2d());
+      applySchedule3dPick();
+    });
+  });
+  // The row is the control: no per-line buttons.
   el.scheduleBody?.addEventListener("click", (event) => {
-    const allBtn = event.target.closest(".schedule-locate-all");
-    if (allBtn) {
-      if (allBtn.disabled) return;
-      const row = scheduleRowsCache[Number(allBtn.dataset.group)];
-      const refs = scheduleGroupRefs(row);
-      if (refs.length) locateScheduleRefs(refs, row.model || row.category || null);
+    const elementRow = event.target.closest(".schedule-element");
+    if (elementRow) {
+      const row = scheduleRowsCache[Number(elementRow.dataset.group)];
+      const element = row?.elements?.[Number(elementRow.dataset.element)];
+      if (element?.kind) pickScheduleRefs([{ kind: element.kind, id: element.id }], element.id, elementRow);
       return;
     }
-    const locateBtn = event.target.closest(".schedule-locate");
-    if (locateBtn) {
-      if (locateBtn.disabled) return;
-      const row = scheduleRowsCache[Number(locateBtn.dataset.group)];
-      const element = row?.elements?.[Number(locateBtn.dataset.element)];
-      if (element?.kind) locateScheduleRefs([{ kind: element.kind, id: element.id }], null);
+    // Only the chevron expands/collapses; the rest of the row just picks.
+    const caret = event.target.closest(".schedule-caret-btn");
+    if (caret) {
+      const toggled = caret.closest(".schedule-group-row");
+      if (toggled) toggleScheduleGroup(toggled);
       return;
     }
     const groupRow = event.target.closest(".schedule-group-row");
-    if (groupRow) toggleScheduleGroup(groupRow);
+    if (groupRow) {
+      const row = scheduleRowsCache[Number(groupRow.dataset.group)];
+      pickScheduleRefs(scheduleGroupRefs(row), row?.model || row?.category || null, groupRow);
+    }
   });
 }
-
 function downloadText(fileName, text, mime) {
   const url = URL.createObjectURL(new Blob([text], { type: mime }));
   const link = document.createElement("a");

@@ -126,6 +126,9 @@ export function normalizeServices(raw, { itemIds = new Set() } = {}) {
       toNode: e.toNode,
       sku: text(e.sku),
       mode: e.mode === "schematic" ? "schematic" : "measured",
+      // Stored only when true: the run is said to sit in a chase or cavity, so
+      // being inside a wall is a decision, not a clash (service-walls.js).
+      ...(e.chase === true ? { chase: true } : {}),
     });
   }
 

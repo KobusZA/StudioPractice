@@ -186,6 +186,7 @@ export function exportIfc(doc, pack, { now = new Date(), author = "", organisati
       ["beams", (doc?.beams || []).length],
       ["stairs", (doc?.stairs || []).length],
       ["placed items", (doc?.items || []).length],
+      ["annotation lines", (doc?.lines || []).filter((l) => l.kind === "annotation").length],
     ].filter(([, n]) => n > 0).map(([label, n]) => `${n} ${label}`),
     warnings: [...(out.warnings || [])],
   };
@@ -215,6 +216,9 @@ export function exportIfc(doc, pack, { now = new Date(), author = "", organisati
   ]);
   const bodyContext = f.add("IFCGEOMETRICREPRESENTATIONSUBCONTEXT", [
     s("Body"), s("Model"), "*", "*", "*", "*", context, "$", ".MODEL_VIEW.", "$",
+  ]);
+  const annoContext = f.add("IFCGEOMETRICREPRESENTATIONSUBCONTEXT", [
+    s("Annotation"), s("Plan"), "*", "*", "*", "*", context, "$", ".PLAN_VIEW.", "$",
   ]);
   const axisContext = f.add("IFCGEOMETRICREPRESENTATIONSUBCONTEXT", [
     s("Axis"), s("Model"), "*", "*", "*", "*", context, "$", ".GRAPH_VIEW.", "$",
@@ -552,6 +556,32 @@ export function exportIfc(doc, pack, { now = new Date(), author = "", organisati
       ["CeilingHeight", room.ceilingHeight ?? null, "IFCLENGTHMEASURE"],
       ["Status", room.status],
     ]);
+  }
+
+  // --- model lines ---------------------------------------------------------
+  // A flat sketch line, the same thing a Revit model line is. Annotation
+  // lines are drafting marks and stay out of the file (counted in notExported).
+  report.counts.lines = 0;
+  for (const line of doc?.lines || []) {
+    if (line.kind !== "model") continue;
+    if (![line.x1, line.y1, line.x2, line.y2].every(Number.isFinite)) continue;
+    const [x1, y1] = flip([line.x1, line.y1]);
+    const [x2, y2] = flip([line.x2, line.y2]);
+    if (Math.hypot(x2 - x1, y2 - y1) < 1e-6) {
+      report.skipped.push("A model line has no length and was left out.");
+      continue;
+    }
+    const storey = storeyFor(line.level);
+    const placement = f.add("IFCLOCALPLACEMENT", [storey.placement, f.axis3(0, 0, 0)]);
+    const poly = f.add("IFCPOLYLINE", [`(${f.point2(x1, y1)},${f.point2(x2, y2)})`]);
+    const rep = f.add("IFCSHAPEREPRESENTATION", [annoContext, s("Annotation"), s("Curve2D"), `(${poly})`]);
+    const shape = f.add("IFCPRODUCTDEFINITIONSHAPE", ["$", "$", `(${rep})`]);
+    const ref = f.add("IFCANNOTATION", [
+      s(ifcGuid(`line:${line.id}`)), owner, s("Model line"), "$", "$",
+      placement, shape, s(line.id),
+    ]);
+    place(line.level, ref);
+    report.counts.lines += 1;
   }
 
   // --- relationships -------------------------------------------------------

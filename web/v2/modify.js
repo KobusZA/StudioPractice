@@ -33,13 +33,13 @@ import {
 } from "./model.js";
 import { drawnWallThickness } from "./walls.js";
 
-const SHAPED = new Set(["room", "slab", "roof"]);
+const SHAPED = new Set(["room", "slab", "roof", "region"]);
 // Every endpoint-geometry kind: rotate/mirror/copy/align/split/cut/join all
 // work on nothing but x1/y1/x2/y2, so a line (no SKU, no thickness) is as
 // eligible as a wall or beam for those. Attach/detach are narrower - a base
 // only resolves against something with a template-stated height - so those
 // two check `ATTACHABLE_KINDS` (model.js) instead of this set.
-const ENDPOINTED = new Set(["segment", "beam", "line"]);
+const ENDPOINTED = new Set(["segment", "beam", "line", "dimension", "separation"]);
 
 function fail(message) {
   return { ok: false, message };
@@ -60,6 +60,7 @@ export function selectionBounds(doc, refs) {
   const points = [];
   for (const { ref, obj } of resolve(doc, refs)) {
     if (SHAPED.has(ref.kind)) points.push(...shapePolygon(obj.shape));
+    else if (obj.rect && Number.isFinite(obj.rect.minX)) points.push([obj.rect.minX, obj.rect.minY], [obj.rect.maxX, obj.rect.maxY]);
     else if (ENDPOINTED.has(ref.kind)) points.push([obj.x1, obj.y1], [obj.x2, obj.y2]);
     else if (obj.x !== undefined) points.push([obj.x, obj.y]);
   }
@@ -98,6 +99,9 @@ export function rotateSelection(doc, refs, { degrees = 90 } = {}) {
   for (const { ref, obj } of rows) {
     if (SHAPED.has(ref.kind)) {
       obj.shape = rotateShape(obj.shape, turn);
+      if (obj.seed) [obj.seed.x, obj.seed.y] = turn(obj.seed.x, obj.seed.y);
+    } else if (obj.rect && Number.isFinite(obj.rect.minX)) {
+      obj.rect = rectFromCorners(obj.rect, turn);
     } else if (ENDPOINTED.has(ref.kind)) {
       [obj.x1, obj.y1] = turn(obj.x1, obj.y1);
       [obj.x2, obj.y2] = turn(obj.x2, obj.y2);
@@ -110,6 +114,18 @@ export function rotateSelection(doc, refs, { degrees = 90 } = {}) {
 }
 
 /** A rect under a quarter turn is still a rect, so map its corners and rebuild. */
+function rectFromCorners(rect, turn) {
+  const corners = [
+    [rect.minX, rect.minY],
+    [rect.maxX, rect.minY],
+    [rect.maxX, rect.maxY],
+    [rect.minX, rect.maxY],
+  ].map(([x, y]) => turn(x, y));
+  const xs = corners.map((p) => p[0]);
+  const ys = corners.map((p) => p[1]);
+  return { minX: Math.min(...xs), minY: Math.min(...ys), maxX: Math.max(...xs), maxY: Math.max(...ys) };
+}
+
 function rotateRect(rect, turn) {
   const [ax, ay] = turn(rect.x, rect.y);
   const [bx, by] = turn(rect.x + rect.w, rect.y + rect.h);
@@ -144,6 +160,9 @@ export function mirrorSelection(doc, refs, { axis = "v" } = {}) {
   for (const { ref, obj } of rows) {
     if (SHAPED.has(ref.kind)) {
       obj.shape = rotateShape(obj.shape, flip); // corner mapping is the same job
+      if (obj.seed) [obj.seed.x, obj.seed.y] = flip(obj.seed.x, obj.seed.y);
+    } else if (obj.rect && Number.isFinite(obj.rect.minX)) {
+      obj.rect = rectFromCorners(obj.rect, flip);
     } else if (ENDPOINTED.has(ref.kind)) {
       [obj.x1, obj.y1] = flip(obj.x1, obj.y1);
       [obj.x2, obj.y2] = flip(obj.x2, obj.y2);
@@ -175,6 +194,16 @@ export function copySelection(doc, refs, { dx = null, dy = 0 } = {}) {
     copy.id = nid(ref.kind[0]);
     if (SHAPED.has(ref.kind)) {
       copy.shape = translateAny(copy.shape, offsetX, dy);
+      if (copy.seed) {
+        copy.seed = { x: copy.seed.x + offsetX, y: copy.seed.y + dy };
+      }
+    } else if (copy.rect && Number.isFinite(copy.rect.minX)) {
+      copy.rect = {
+        minX: copy.rect.minX + offsetX,
+        minY: copy.rect.minY + dy,
+        maxX: copy.rect.maxX + offsetX,
+        maxY: copy.rect.maxY + dy,
+      };
     } else if (ENDPOINTED.has(ref.kind)) {
       copy.x1 = copy.x1 + offsetX;
       copy.y1 = copy.y1 + dy;

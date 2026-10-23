@@ -17,8 +17,19 @@ import {
   serviceStatus,
   serviceStyle,
 } from "./services.js";
+import { pipeRadius } from "./service-walls.js";
 
 const PAPER = "#fffdf8";
+
+/**
+ * Stroke width of a run on the plan: its true diameter (insulation included)
+ * when the type states one, never thinner than the 3.5 px line it has always
+ * been, so a small pipe stays visible at any zoom.
+ */
+function runWidth(pack, edge, scale) {
+  const r = pipeRadius(pack, edge);
+  return r && scale > 0 ? Math.max(3.5, r * 2 * scale) : 3.5;
+}
 
 function dashFor(doc, edge) {
   if (edge.mode === "schematic") return [2, 5];
@@ -31,7 +42,7 @@ function dashFor(doc, edge) {
  * something to read labels off - the same rule drawPlanLevel applies to walls.
  */
 export function drawServiceLevel(ctx, o) {
-  const { doc, pack, levelId, worldToScreen, scale, ghost = false, visible = () => true } = o;
+  const { doc, pack, levelId, worldToScreen, scale, ghost = false, visible = () => true, wallFlags = null } = o;
   if (!(doc.serviceNodes || []).length) return;
   const view = serviceLevelView(doc, pack, levelId);
   ctx.save();
@@ -43,8 +54,32 @@ export function drawServiceLevel(ctx, o) {
     if (!visible(m.edge)) continue;
     const [ax, ay] = worldToScreen(m.from.x, m.from.y);
     const [bx, by] = worldToScreen(m.to.x, m.to.y);
+    // A run against a wall: halo it so an obstruction cannot be missed, and
+    // outline an accepted chase in green. Never on the faded neighbour storey.
+    const flag = !ghost ? wallFlags?.get(m.edge.id) : null;
+    if (flag?.level === "obstruction" || flag?.level === "warn") {
+      ctx.save();
+      ctx.strokeStyle = flag.level === "obstruction" ? "rgba(178,69,30,0.32)" : "rgba(168,106,0,0.3)";
+      ctx.lineWidth = runWidth(pack, m.edge, scale) + 9;
+      ctx.beginPath();
+      ctx.moveTo(ax, ay);
+      ctx.lineTo(bx, by);
+      ctx.stroke();
+      ctx.restore();
+    } else if (flag?.level === "chase") {
+      ctx.save();
+      ctx.strokeStyle = "#2f7a47";
+      ctx.lineWidth = runWidth(pack, m.edge, scale) + 7;
+      ctx.setLineDash([6, 3]);
+      ctx.lineCap = "butt";
+      ctx.beginPath();
+      ctx.moveTo(ax, ay);
+      ctx.lineTo(bx, by);
+      ctx.stroke();
+      ctx.restore();
+    }
     ctx.strokeStyle = serviceStyle(doc, m.edge).colour;
-    ctx.lineWidth = ghost ? 2.5 : 3.5;
+    ctx.lineWidth = ghost ? 2.5 : runWidth(pack, m.edge, scale);
     ctx.setLineDash(dashFor(doc, m.edge));
     ctx.beginPath();
     ctx.moveTo(ax, ay);
@@ -173,9 +208,15 @@ export function drawServiceSelection(ctx, o) {
       const [ax, ay] = worldToScreen(m.from.x, m.from.y);
       const [bx, by] = worldToScreen(m.to.x, m.to.y);
       if (m.vertical) {
+        // A rise has no length on the plan: it is a point, so it is shown as a
+        // ring there, named by what it does.
+        if (m.levelFrom !== levelId && m.levelTo !== levelId) continue;
         ctx.beginPath();
         ctx.arc(ax, ay, 21, 0, Math.PI * 2);
         ctx.stroke();
+        if (m.dz !== null) {
+          label(ctx, `${m.dz >= 0 ? "Rise" : "Drop"} ${fmt(Math.abs(m.dz))} m`, ax + 26, ay - 14, color);
+        }
         continue;
       }
       if (m.levelFrom !== levelId && m.levelTo !== levelId) continue;
@@ -205,6 +246,29 @@ function label(ctx, text, x, y, colour) {
   ctx.fillStyle = colour;
   ctx.fillText(text, x, y);
   ctx.restore();
+}
+
+/**
+ * While route points are being dragged: the length of every run that meets
+ * them, so a node can be placed by how long its pipes come out. Runs already
+ * labelled by the selection (`skipEdgeIds`) and risers (a point on the plan)
+ * are left alone.
+ */
+export function drawServiceMoveRuns(ctx, o) {
+  const { doc, pack, nodeIds, worldToScreen, colour, levelId, skipEdgeIds = null, notes = null } = o;
+  const ids = new Set(nodeIds);
+  const nodes = nodeMap(doc);
+  for (const edge of doc.serviceEdges || []) {
+    if (!ids.has(edge.fromNode) && !ids.has(edge.toNode)) continue;
+    if (skipEdgeIds?.has(edge.id)) continue;
+    const m = edgeMeasure(doc, pack, edge, nodes);
+    if (!m || m.vertical || m.plan < 0.01) continue;
+    if (levelId && m.levelFrom !== levelId && m.levelTo !== levelId) continue;
+    const [ax, ay] = worldToScreen(m.from.x, m.from.y);
+    const [bx, by] = worldToScreen(m.to.x, m.to.y);
+    const note = notes?.get(edge.id);
+    label(ctx, `${m.plan.toFixed(2)} m${note ? ` · ${note}` : ""}`, (ax + bx) / 2 + 6, (ay + by) / 2 - 8, colour);
+  }
 }
 
 /** A ghost node: a faint, not-yet-real route point that one click makes real. */
@@ -264,7 +328,7 @@ export function drawServiceHover(ctx, o) {
 
 /** Rubber band from the last route point to the pointer. */
 export function drawServiceDraft(ctx, o) {
-  const { from, to, colour, worldToScreen } = o;
+  const { from, to, colour, worldToScreen, note = "" } = o;
   if (!from || !to) return;
   const [ax, ay] = worldToScreen(from.x, from.y);
   const [bx, by] = worldToScreen(to.x, to.y);
@@ -286,14 +350,14 @@ export function drawServiceDraft(ctx, o) {
   ctx.stroke();
   ctx.restore();
   const len = Math.hypot(to.x - from.x, to.y - from.y);
-  if (len > 0.01) label(ctx, `${len.toFixed(2)} m`, (ax + bx) / 2 + 6, (ay + by) / 2 - 8, colour);
+  if (len > 0.01) label(ctx, `${len.toFixed(2)} m${note ? ` · ${note}` : ""}`, (ax + bx) / 2 + 6, (ay + by) / 2 - 8, colour);
 }
 
 const OBSTRUCTION_NEAR_M = 1;
 
-/** Solid on the route, fading towards the edge of the 1 m reach. */
+/** Solid beside the route, only a little dimmer towards the edge of the 1 m reach. */
 function reachAlpha(distance) {
-  return 1 - 0.65 * Math.min(1, Math.max(0, distance / OBSTRUCTION_NEAR_M));
+  return 1 - 0.22 * Math.min(1, Math.max(0, distance / OBSTRUCTION_NEAR_M));
 }
 
 const WALL_GREY = "120,110,98";
@@ -400,6 +464,55 @@ function drawHeadLabels(ctx, labels, heads, g) {
       if (labels.placeInSpan(ctx, text, x0, x1, seg.y - 4)) break;
     }
   }
+}
+
+/**
+ * Level stretches of the route, named by how far the pipe sits off that
+ * level's floor. A riser has no plan length and is a change of height, so it
+ * stays with routeSteps; a level run otherwise has nothing that says how high
+ * it is.
+ */
+function floorHeightNotes(known, levels) {
+  const floorOf = new Map((levels || []).map((l) => [l.id, l.elevation]));
+  const notes = [];
+  let i = 0;
+  while (i < known.length - 1) {
+    const a = known[i];
+    const floor = floorOf.get(a.level);
+    if (floor === undefined) { i += 1; continue; }
+    let j = i;
+    while (j + 1 < known.length) {
+      const p = known[j];
+      const n = known[j + 1];
+      const riser = Math.abs(n.s - p.s) < 1e-6 && Math.abs(n.z - p.z) > 1e-6;
+      if (riser || n.level !== a.level) break;
+      j += 1;
+    }
+    if (j > i) {
+      const offs = known.slice(i, j + 1).map((p) => p.z - floor);
+      const lo = Math.min(...offs);
+      const hi = Math.max(...offs);
+      const zs = known.slice(i, j + 1).map((p) => p.z);
+      notes.push({
+        s0: known[i].s,
+        s1: known[j].s,
+        z: (Math.min(...zs) + Math.max(...zs)) / 2,
+        text: floorHeightText(lo, hi),
+      });
+    }
+    i = j > i ? j : i + 1;
+  }
+  return notes;
+}
+
+function floorHeightText(lo, hi) {
+  const mag = (n) => Math.abs(n).toFixed(2);
+  if (Math.abs(hi - lo) < 0.005) {
+    return lo < -0.005 ? `${mag(lo)} m below floor` : `${mag(lo)} m above floor`;
+  }
+  if (hi < -0.005) return `${mag(hi)}–${mag(lo)} m below floor`;
+  if (lo < -0.005) return `${lo.toFixed(2)}–${hi.toFixed(2)} m above floor`;
+  return `${lo.toFixed(2)}–${hi.toFixed(2)} m above floor`;
 }
 
 /** Vertical steps, in route order. Two nodes at one chainage are a rise or a drop. */
@@ -596,7 +709,7 @@ function drawObstructions(ctx, obstructions, g) {
  * level datums it crosses. Redrawn from routeProfile() each time; nothing here is
  * stored. Sized to its own canvas, so it works in a collapsed panel.
  */
-export function drawServiceProfile(canvas, profile, { colour = "#2675b8", drag = null, hoverGhost = null, obstructions = null, storeyHeight = 2.8, selectedNodeIds = null, selectionColour = "#243044" } = {}) {
+export function drawServiceProfile(canvas, profile, { colour = "#2675b8", drag = null, hoverGhost = null, obstructions = null, storeyHeight = 2.8, selectedNodeIds = null, selectedEdgeIds = null, selectionColour = "#243044" } = {}) {
   if (!canvas) return null;
   const dpr = window.devicePixelRatio || 1;
   const w = canvas.clientWidth || 360;
@@ -622,7 +735,16 @@ export function drawServiceProfile(canvas, profile, { colour = "#2675b8", drag =
   const padR = 14;
   const padT = 14;
   const padB = 22;
-  const zLo = profile.zMin - 0.2;
+  // A flat run used to start the scale just under the pipe, so its own floor
+  // fell off the bottom and the height above it could not be read. Keep this
+  // storey's floor on the scale when the pipe is within a storey or so of it.
+  let zLo = profile.zMin - 0.2;
+  const floorOf = new Map((profile.levels || []).map((l) => [l.id, l.elevation]));
+  for (const p of known) {
+    const floor = floorOf.get(p.level);
+    if (floor === undefined || p.z - floor > 4) continue;
+    zLo = Math.min(zLo, floor - 0.08);
+  }
   // Headroom above the route so a node can be lifted without rescaling mid-drag.
   let zHi = profile.zMax + Math.max(0.8, 0.35 * (profile.zMax - profile.zMin));
   // A roof close above the route is the whole point of drawing it, so make room
@@ -669,6 +791,21 @@ export function drawServiceProfile(canvas, profile, { colour = "#2675b8", drag =
     labels.hold(rect);
     steps.push({ ...step, tx, ty });
   }
+  const heights = [];
+  for (const note of floorHeightNotes(known, profile.levels)) {
+    const width = ctx.measureText(note.text).width;
+    const x0 = Math.max(padL + 2, X(note.s0) + 4);
+    let x = x0;
+    if (X(note.s1) - x < width) x = Math.max(padL + 2, Math.min(x0, w - padR - width - 2));
+    for (const ty of [Y(note.z) - 6, Y(note.z) - 22]) {
+      if (ty < padT + 12 || ty > h - padB - 4) continue;
+      const rect = { x: x - 3, y: ty - 9, w: width + 6, h: 15 };
+      if (labels.hits(rect)) continue;
+      labels.hold(rect);
+      heights.push({ ...note, tx: x, ty });
+      break;
+    }
+  }
   ctx.font = "11px Source Sans 3, sans-serif";
   const chainText = `${profile.chainage.toFixed(2)} m along plan`;
   labels.hold(textRect(w - padR, h - 6, ctx.measureText(chainText).width, "alphabetic", "right"));
@@ -695,6 +832,33 @@ export function drawServiceProfile(canvas, profile, { colour = "#2675b8", drag =
   known.forEach((p, i) => (i ? ctx.lineTo(X(p.s), Y(p.z)) : ctx.moveTo(X(p.s), Y(p.z))));
   ctx.stroke();
 
+  // Each stretch of the route as a clickable segment, rises and drops included:
+  // profile.edgeIds[k] is the run between points[k] and points[k + 1].
+  const segments = [];
+  (profile.edgeIds || []).forEach((edgeId, k) => {
+    const a = profile.points[k];
+    const b = profile.points[k + 1];
+    if (!a || !b || a.z === null || b.z === null) return;
+    segments.push({ edgeId, x1: X(a.s), y1: Y(a.z), x2: X(b.s), y2: Y(b.z) });
+  });
+  // A selected run is drawn over the route in the selection colour, so what the
+  // plan shows highlighted is the same stretch wearing the same colour here.
+  const selectedEdges = new Set(selectedEdgeIds || []);
+  if (selectedEdges.size) {
+    ctx.save();
+    ctx.strokeStyle = selectionColour;
+    ctx.lineWidth = 5.5;
+    ctx.lineCap = "round";
+    for (const seg of segments) {
+      if (!selectedEdges.has(seg.edgeId)) continue;
+      ctx.beginPath();
+      ctx.moveTo(seg.x1, seg.y1);
+      ctx.lineTo(seg.x2, seg.y2);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
   const selectedIds = new Set(selectedNodeIds || []);
@@ -717,6 +881,12 @@ export function drawServiceProfile(canvas, profile, { colour = "#2675b8", drag =
     ctx.fillRect(step.tx - 3, step.ty - 9, ctx.measureText(step.text).width + 6, 15);
     ctx.fillStyle = colour;
     ctx.fillText(step.text, step.tx, step.ty + 3);
+  }
+  for (const note of heights) {
+    ctx.fillStyle = PAPER;
+    ctx.fillRect(note.tx - 3, note.ty - 9, ctx.measureText(note.text).width + 6, 15);
+    ctx.fillStyle = colour;
+    ctx.fillText(note.text, note.tx, note.ty + 3);
   }
 
   // Ghost nodes: one at the middle of each run. A normal click makes it real.
@@ -753,7 +923,32 @@ export function drawServiceProfile(canvas, profile, { colour = "#2675b8", drag =
 
   // Drag preview. Step: a straight 90 degree rise or drop, the route ahead
   // following. Slope: only this node moves, so the runs either side tilt.
-  if (drag) {
+  if (drag && drag.mode === "run") {
+    const k = (profile.edgeIds || []).indexOf(drag.runEdgeId);
+    const a = profile.points[k];
+    const b = profile.points[k + 1];
+    if (a && b && a.z !== null && b.z !== null) {
+      const dz = Math.min(zHi, Math.max(zLo, drag.z)) - drag.z0;
+      ctx.save();
+      ctx.setLineDash([5, 4]);
+      ctx.strokeStyle = colour;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(X(a.s), Y(a.z + dz));
+      ctx.lineTo(X(b.s), Y(b.z + dz));
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.font = "600 11px Source Sans 3, sans-serif";
+      const text = `${dz >= 0 ? "Raise" : "Lower"} ${fmt(Math.abs(dz))} m`;
+      const tx = (X(a.s) + X(b.s)) / 2;
+      const ty = Y(a.z + dz) - 8;
+      ctx.fillStyle = PAPER;
+      ctx.fillRect(tx - 3, ty - 11, ctx.measureText(text).width + 6, 15);
+      ctx.fillStyle = colour;
+      ctx.fillText(text, tx, ty);
+      ctx.restore();
+    }
+  } else if (drag) {
     const p = known.find((q) => q.nodeId === drag.nodeId);
     if (p) {
       const z = Math.min(zHi, Math.max(zLo, drag.z));
@@ -843,5 +1038,6 @@ export function drawServiceProfile(canvas, profile, { colour = "#2675b8", drag =
     zAt: (py) => zLo + ((h - padB - py) / (h - padT - padB)) * span,
     nodes: known.map((p) => ({ nodeId: p.nodeId, z: p.z, px: X(p.s), py: Y(p.z) })),
     ghosts,
+    segments,
   };
 }

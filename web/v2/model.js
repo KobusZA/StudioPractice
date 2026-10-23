@@ -19,6 +19,7 @@ import {
   simplify,
   unionRectsOuter,
 } from "./geom.js";
+import { knownConvention } from "./region.js";
 import { normalizeSatelliteUnderlay } from "./satellite.js";
 import { expandServiceRefs, normalizeServices } from "./service-model.js";
 
@@ -35,6 +36,9 @@ export const ENTITY_KINDS = [
   "beam",
   "stair",
   "line",
+  "separation",
+  "region",
+  "revisionCloud",
   // 2.5D services (service-model.js). A network is not selectable - it is a
   // grouping, not a thing on the plan - so only nodes and edges have refs.
   "serviceNode",
@@ -53,6 +57,8 @@ export const ENTITY_KINDS = [
  * never exported as if it were part of the building). Neither compiles into
  * a 3D face or a schedule row: a Revit model line is a flat sketch line on
  * its work plane too, not a solid, so `compile.js` never reads `doc.lines`.
+ * The DXF and IFC exports do write model lines (a receiving Revit user can
+ * trace them). Annotation lines stay out of both files.
  */
 export const LINE_KINDS = ["model", "annotation"];
 
@@ -117,6 +123,16 @@ export function emptyDoc() {
     // Document > Lines (`model-lines`/`annot-lines`) - see LINE_KINDS above
     // for why one array serves both ribbon buttons.
     lines: [],
+    // Document > Rooms > Separate. A line that bounds a room where there is
+    // no wall. Not a model line (it is not part of the building export) and
+    // not an annotation line (the room outline follows it).
+    separations: [],
+    // Document > Annotate > Region. A filled patch on the drawing. `convention`
+    // is one of region.js's three template names, or null until the user picks one.
+    regions: [],
+    // Document > Annotate > Dimensions. A placed string, not a scratch
+    // measurement: it stays on its level's plan and prints on that level's sheet.
+    dimensions: [],
     // 2.5D service routing - see service-model.js. Normalised, not nested:
     // a route that rises through three storeys is one network whose nodes
     // carry their own level, not three per-level copies.
@@ -340,6 +356,10 @@ const KIND_TO_ARRAY = {
   beam: "beams",
   stair: "stairs",
   line: "lines",
+  separation: "separations",
+  region: "regions",
+  revisionCloud: "revisionClouds",
+  dimension: "dimensions",
   serviceNode: "serviceNodes",
   serviceEdge: "serviceEdges",
 };
@@ -613,11 +633,13 @@ export class PlanStore {
     for (const ref of expandServiceRefs(this.doc, uniqueRefs(refs))) {
       const obj = objectByRef(this.doc, ref);
       if (!obj) continue;
-      if (obj.shape) snaps.push({ ref, shape: clone(obj.shape) });
+      if (obj.shape) snaps.push({ ref, shape: clone(obj.shape), seed: obj.seed ? clone(obj.seed) : null });
       else if (obj.x1 !== undefined) {
         snaps.push({ ref, x1: obj.x1, y1: obj.y1, x2: obj.x2, y2: obj.y2 });
       } else if (obj.x !== undefined) {
         snaps.push({ ref, x: obj.x, y: obj.y });
+      } else if (obj.rect && Number.isFinite(obj.rect.minX)) {
+        snaps.push({ ref, rect: clone(obj.rect) });
       }
     }
     return snaps;
@@ -636,11 +658,19 @@ export class PlanStore {
       if (!obj) continue;
       if (snap.shape) {
         obj.shape = translateShape(snap.shape, dx, dy, grid);
+        if (snap.seed) obj.seed = { x: snapVal(snap.seed.x + dx), y: snapVal(snap.seed.y + dy) };
       } else if (snap.x1 !== undefined) {
         obj.x1 = snapVal(snap.x1 + dx);
         obj.y1 = snapVal(snap.y1 + dy);
         obj.x2 = snapVal(snap.x2 + dx);
         obj.y2 = snapVal(snap.y2 + dy);
+      } else if (snap.rect) {
+        obj.rect = {
+          minX: snapVal(snap.rect.minX + dx),
+          minY: snapVal(snap.rect.minY + dy),
+          maxX: snapVal(snap.rect.maxX + dx),
+          maxY: snapVal(snap.rect.maxY + dy),
+        };
       } else {
         obj.x = snapVal(snap.x + dx);
         obj.y = snapVal(snap.y + dy);
@@ -667,6 +697,9 @@ const JOB_CONTENT_ARRAYS = [
   "beams",
   "stairs",
   "lines",
+  "separations",
+  "regions",
+  "dimensions",
   "serviceNetworks",
   "serviceNodes",
   "serviceEdges",
@@ -718,6 +751,12 @@ export function normalizeDoc(raw) {
     wallSku: room.wallSku || null,
     floorSku: room.floorSku || null,
     ceilingSku: room.ceilingSku || null,
+    // A bound room keeps the point the user clicked inside the walls. Absent
+    // on every room drawn before that, which must keep the polygon it stored.
+    bound: room.bound === true,
+    seed: Number.isFinite(room.seed?.x) && Number.isFinite(room.seed?.y)
+      ? { x: room.seed.x, y: room.seed.y }
+      : null,
     status: room.status === "existing" ? "existing" : "planned",
     shape: room.shape
       ? room.shape
@@ -779,6 +818,42 @@ export function normalizeDoc(raw) {
         x1, y1, x2, y2,
         status: l.status === "existing" ? "existing" : "planned",
       };
+    })
+    .filter(Boolean);
+  doc.separations = (Array.isArray(raw.separations) ? raw.separations : [])
+    .map((l) => {
+      const x1 = lineCoord(l?.x1);
+      const y1 = lineCoord(l?.y1);
+      const x2 = lineCoord(l?.x2);
+      const y2 = lineCoord(l?.y2);
+      if (!l?.id || [x1, y1, x2, y2].some((v) => v === null)) return null;
+      return { id: l.id, separation: true, level: l.level || null, x1, y1, x2, y2, status: l.status === "existing" ? "existing" : "planned" };
+    })
+    .filter(Boolean);
+  doc.regions = (Array.isArray(raw.regions) ? raw.regions : [])
+    .map((r) => {
+      const shape = r?.shape?.kind === "poly" || r?.shape?.kind === "rect" || r?.shape?.kind === "rects"
+        ? r.shape
+        : null;
+      if (!r?.id || !shape) return null;
+      return {
+        id: r.id,
+        level: r.level || null,
+        convention: knownConvention(r.convention),
+        status: r.status === "existing" ? "existing" : "planned",
+        shape,
+      };
+    })
+    .filter(Boolean);
+  doc.dimensions = (Array.isArray(raw.dimensions) ? raw.dimensions : [])
+    .map((d) => {
+      const x1 = lineCoord(d?.x1);
+      const y1 = lineCoord(d?.y1);
+      const x2 = lineCoord(d?.x2);
+      const y2 = lineCoord(d?.y2);
+      if (!d?.id || [x1, y1, x2, y2].some((v) => v === null)) return null;
+      if (Math.hypot(x2 - x1, y2 - y1) <= 0) return null;
+      return { id: d.id, level: d.level || null, x1, y1, x2, y2 };
     })
     .filter(Boolean);
   Object.assign(doc, normalizeServices(raw, { itemIds: new Set(doc.items.map((i) => i.id)) }));

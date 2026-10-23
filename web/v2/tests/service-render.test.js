@@ -154,6 +154,34 @@ test("obstruction captions share the profile without painting over each other", 
   assert.equal(boxes.filter((b) => b.text === "4.30–5.10").length, 0);
 });
 
+test("a level run is labelled with its height above the floor, with no riser", () => {
+  const doc = normalizeDoc({
+    serviceNetworks: [{ id: "n1", name: "GS-01", system: "gas", status: "planned" }],
+    serviceNodes: [
+      { id: "a", networkId: "n1", x: 0, y: 0, level: "L1", offset: 1.77 },
+      { id: "b", networkId: "n1", x: 8, y: 0, level: "L1", offset: 1.77 },
+    ],
+    serviceEdges: [
+      { id: "run", networkId: "n1", fromNode: "a", toNode: "b", sku: "GAS", mode: "measured" },
+    ],
+  });
+  const view = mockCanvas();
+  const layout = drawServiceProfile(view.canvas, routeProfile(doc, pack, "run"));
+  const texts = view.texts().map((t) => t.text);
+  assert.ok(texts.includes("1.77 m above floor"));
+  assert.equal(texts.some((t) => t.startsWith("Rise") || t.startsWith("Drop")), false);
+  // The floor of this storey stays on the scale, so the gap under the pipe is real.
+  assert.ok(layout.zLo < 3, "the scale reaches below the First floor datum");
+});
+
+test("a route with a riser still names the level run's height off the floor", () => {
+  const view = mockCanvas();
+  drawServiceProfile(view.canvas, riserProfile());
+  const texts = view.texts().map((t) => t.text);
+  assert.ok(texts.includes("0.30 m above floor"));
+  assert.equal(texts.filter((t) => t.startsWith("Rise")).length, 1);
+});
+
 test("dragging a selected profile node moves its ring to the new height", () => {
   const rested = ringFor(["b"]);
   const lifted = ringFor(["b"], { drag: { nodeId: "b", z: 6, mode: "slope" } });

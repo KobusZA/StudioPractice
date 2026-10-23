@@ -90,6 +90,20 @@ test("floors and roofs stay behind and are named", () => {
   assert.deepEqual(report.notExported, ["1 floors and slabs", "1 roofs"]);
 });
 
+test("a model line is written and an annotation line is named as left out", () => {
+  const doc = roomDoc({
+    lines: [
+      { id: "m1", kind: "model", level: LEVEL, x1: 0, y1: 0, x2: 3, y2: 0, status: "planned" },
+      { id: "a1", kind: "annotation", level: LEVEL, x1: 0, y1: 1, x2: 3, y2: 1, status: "planned" },
+    ],
+  });
+  const { text, report } = exportDxf(doc, pack);
+  assert.equal(report.counts.lines, 1);
+  assert.match(text, /A-LINE-01_GFL/);
+  assert.ok(report.notExported.some((row) => row === "1 annotation lines"));
+  assert.equal(codes(text, "LINE").length >= 1, true);
+});
+
 test("an empty document is still a valid DXF", () => {
   const { text, report } = exportDxf(normalizeDoc({}), pack);
   assert.ok(text.trimEnd().endsWith("EOF"));

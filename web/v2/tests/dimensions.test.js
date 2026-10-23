@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { boxDimensionLines, pickedDimension, planDimensionLines, unionBox } from "../dimensions.js";
+import { emptyDoc, normalizeDoc } from "../model.js";
 
 test("a box gets one horizontal and one vertical dimension line", () => {
   const lines = boxDimensionLines({ x: 0, y: 0, w: 4, h: 3 }, 0.25);
@@ -49,6 +50,20 @@ test("two picked points become a labelled distance", () => {
   const dim = pickedDimension({ x: 0, y: 0 }, { x: 3, y: 4 });
   assert.equal(dim.length, 5);
   assert.equal(dim.label, "5000 mm");
+});
+
+test("a placed dimension survives a save and a zero-length one does not", () => {
+  assert.deepEqual(emptyDoc().dimensions, []);
+  const doc = normalizeDoc({
+    dimensions: [
+      { id: "d1", level: "GF", x1: 0, y1: 0, x2: 4, y2: 0 },
+      { id: "d2", x1: 1, y1: 1, x2: 1, y2: 1 },
+      { x1: 0, y1: 0, x2: 1, y2: 0 },
+    ],
+  });
+  assert.equal(doc.dimensions.length, 1);
+  assert.equal(doc.dimensions[0].id, "d1");
+  assert.equal(doc.dimensions[0].level, "GF");
 });
 
 test("a zero-length pick is refused", () => {

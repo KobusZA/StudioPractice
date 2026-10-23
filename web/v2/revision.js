@@ -35,6 +35,7 @@
 // step that points it at a sheet + revision letter that already exists.
 
 import { nid } from "./model.js";
+import { clipPolyHalfspace, sectionUV } from "./section.js";
 
 /** Below this, in metres, a click-click box reads as a mis-click rather than
  * an intentional cloud - the same purpose callout.js's own minimum serves.
@@ -187,6 +188,44 @@ export function cloudArcs(rect, arcRadius = CLOUD_ARC_RADIUS_M) {
     }
   }
   return arcs;
+}
+
+/**
+ * Where a plan cloud sits on a section or elevation sheet.
+ * A section only shows the part of the cloud the cut can see (along the cut,
+ * on the look side, within the cut's depth). An elevation has no clip, so the
+ * cloud's full width projects onto that facade and its height is the storey
+ * band the caller passes in — a plan cloud has no height of its own.
+ * Returns { minU, maxU, minV, maxV } in the cut's coordinates, or null.
+ */
+export function revisionCloudViewBox(rect, cut, z0, z1) {
+  if (!rect || !cut || !(z1 > z0)) return null;
+  let poly = [
+    [rect.minX, rect.minY],
+    [rect.maxX, rect.minY],
+    [rect.maxX, rect.maxY],
+    [rect.minX, rect.maxY],
+  ];
+  if (cut.mode === "section" && cut.length > 0) {
+    const far = cut.far > 0 ? cut.far : 20;
+    const origin = cut.origin;
+    const along = cut.along;
+    const look = cut.look;
+    poly = clipPolyHalfspace(poly, origin, along, 0);
+    poly = clipPolyHalfspace(poly, origin, [-along[0], -along[1]], -cut.length);
+    poly = clipPolyHalfspace(poly, origin, look, 0);
+    poly = clipPolyHalfspace(poly, origin, [-look[0], -look[1]], -far);
+    if (poly.length < 3) return null;
+  }
+  let minU = Infinity;
+  let maxU = -Infinity;
+  for (const p of poly) {
+    const [u] = sectionUV([p[0], p[1], 0], cut);
+    minU = Math.min(minU, u);
+    maxU = Math.max(maxU, u);
+  }
+  if (!(maxU - minU > 0.05)) return null;
+  return { minU, maxU, minV: z0, maxV: z1 };
 }
 
 /** Bounding box in metres, shaped like calloutExtent()'s output, for a

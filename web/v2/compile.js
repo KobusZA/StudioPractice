@@ -13,7 +13,8 @@
 // wall (only the drawn segment is a real entity) and every recipe-implied row
 // from `explodeRecipes` below (a foundation nobody drew has nothing to click).
 
-import { area as polyArea, perimeter as polyPerimeter } from "./geom.js";
+import { area as polyArea, perimeter as polyPerimeter, pointInPoly } from "./geom.js";
+import { syncRoomBounds } from "./room-bound.js";
 import { lookDownLevelId } from "./level-view.js";
 import {
   ATTACHABLE_KINDS,
@@ -340,6 +341,10 @@ function baseRow(pack, sku, elementId, status) {
 export function compile(doc, pack, { phase = "Day 1" } = {}) {
   if (!pack) return null;
 
+  // Bound rooms take their outline from the walls around them before any
+  // quantity is read, so a wall move is in the bill and the compliance check
+  // without a separate refresh step.
+  syncRoomBounds(doc, pack);
   const walls = deriveWalls(doc, pack);
   const wallHeight = pack.system.wallHeight;
   const instances = [];
@@ -389,7 +394,17 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
       status: objectStatus(room),
     });
 
-    if (floor) {
+    // A floor slab already drawn under this room is the floor; a second finish
+    // row from the room would price the same floor twice.
+    const [rcx, rcy] = roomCentroid(room);
+    const slabUnder = (doc.slabs || []).some((s) => {
+      if (effectiveLevel(s, pack) !== effectiveLevel(room, pack)) return false;
+      if (skuById(pack, s.sku)?.category !== "floor") return false;
+      const sp = shapePolygon(s.shape);
+      return sp.length >= 3 && pointInPoly(rcx, rcy, sp);
+    });
+
+    if (floor && !slabUnder) {
       const row = baseRow(pack, floor, `F${floorSeq}`, objectStatus(room));
       applyMeasures(row, floor, {
         area: a,
