@@ -15,13 +15,13 @@ export const SAMPLE_JOBS = [
   {
     id: "observatory",
     name: "Observatory warehouse",
-    summary: "Existing masonry shell, planned 110 partitions, fit-out ceilings only.",
+    summary: "Existing masonry shell, proposed 110 partitions, fit-out ceilings only.",
     build: observatoryDoc,
   },
   {
     id: "constantia",
     name: "Constantia pavilion",
-    summary: "All-planned traced pavilion: walls, ceilings, doors and a roof.",
+    summary: "All-proposed traced pavilion: walls, ceilings, doors and a roof.",
     build: constantiaDoc,
   },
 ];

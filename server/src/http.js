@@ -77,6 +77,30 @@ export function clearedCookie(name, { secure }) {
   return parts.join("; ");
 }
 
+/**
+ * Raw bytes, for a file that must not be parsed as JSON and must not be
+ * buffered past `limit`. The caller decides what the bytes are allowed to be.
+ */
+export async function readRawBody(req, { limit, message = "That file is too large" } = {}) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > limit) throw new HttpError(413, message);
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
+}
+
+export function sendBytes(res, status, buffer, mime) {
+  res.writeHead(status, {
+    "Content-Type": mime,
+    "Content-Length": buffer.length,
+    "Cache-Control": "private, no-store",
+  });
+  res.end(buffer);
+}
+
 export async function readJsonBody(req, { limit = MAX_BODY_BYTES } = {}) {
   const chunks = [];
   let size = 0;

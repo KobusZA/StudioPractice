@@ -27,6 +27,11 @@ import {
   serviceTakeoff,
 } from "./services.js";
 
+/** The on-screen word for a drawing status. Stored value stays "planned". */
+function statusWord(status) {
+  return status === "planned" ? "proposed" : (status || "");
+}
+
 function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g, (c) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;",
@@ -239,7 +244,7 @@ export function routeSettingsHtml(doc, pack, ui) {
     <section class="svc-block" aria-label="Route settings">
       <h3>Route</h3>
       ${field("System", `<select data-svc="system">${options(SERVICE_SYSTEMS.map((id) => ({ id, label: SERVICE_SYSTEM_INFO[id].label })), ui.system)}</select>`)}
-      ${field("Network", `<select data-svc="network">${options(networks.map((n) => ({ id: n.id, label: `${n.name} (${n.status})` })), ui.networkId, { blank: "New network" })}</select>`)}
+      ${field("Network", `<select data-svc="network">${options(networks.map((n) => ({ id: n.id, label: `${n.name} (${statusWord(n.status)})` })), ui.networkId, { blank: "New network" })}</select>`)}
       ${field("Type", `<select data-svc="sku">${options(skus.map((s) => ({ id: s.id, label: skuLabel(s) })), ui.sku, { blank: "No type chosen" })}</select>`)}
       ${skus.length ? "" : `<p class="hint">The template has no length-measured ${esc(SERVICE_SYSTEM_INFO[ui.system].label.toLowerCase())} types. Runs can still be drawn; they stay uncounted until a type is chosen.</p>`}
       ${field("Height above level datum", `<span class="plan-context-field"><input data-svc="offset" type="text" inputmode="decimal" autocomplete="off" value="${esc(ui.offsetText)}" /><span>m</span></span>`)}
@@ -282,7 +287,7 @@ function edgesHtml(model) {
   const parts = [`<section class="svc-block"><h3>${model.count > 1 ? `${model.count} runs` : "Run"}</h3>`];
   if (s) {
     parts.push(
-      readout("Network", `${s.network?.name || "—"} · ${SERVICE_SYSTEM_INFO[s.network?.system]?.label || ""} · ${s.network?.status || ""}`),
+      readout("Network", `${s.network?.name || "—"} · ${SERVICE_SYSTEM_INFO[s.network?.system]?.label || ""} · ${statusWord(s.network?.status)}`),
       readout("Spans", s.networkLevels.join(", ") || "—"),
     );
   } else if (model.system) {

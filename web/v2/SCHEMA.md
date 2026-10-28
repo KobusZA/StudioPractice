@@ -605,9 +605,39 @@ save path reports `offline` those commands are disabled with that as the reason,
 rather than failing after the click. Offline *editing* is step 7 of the plan and
 is not a merge engine.
 
-**The underlay is no longer session-only.** It becomes an `asset` row with
-`doc.underlay` keeping placement plus an `assetId`, so a job opens on a second
-device with its scan and its scale intact. The table exists; the route is step 6.
+**The underlay files are `asset` rows, not part of the drawing.** A sheet set
+holds `sheetSet.sources`, one `{ id, name, assetId, mime, sha256? }` per plan
+file (`mime` is a PDF or image type, or `satellite` with no `assetId`), and
+every page carries `sourceId` and `sourcePage` (its page number inside that
+file). Page `index` is unique across the whole set, so adding a file never
+renumbers a placed page. An image underlay keeps `underlay.assetId`. A set
+saved with one file is wrapped on read as one source with the id `src1`;
+`sheetSet.pdfName` and `sheetSet.assetId` are still written as copies of the
+first source for one revision and nothing reads them. The bytes are
+`POST /api/projects/:id/assets` and read back from `GET /api/assets/:id`. A
+job opens on a second device with its scans and their scales. One file is
+capped at 128 MB and a firm at 4 GB of live plan files. A drawing saved before
+files were stored still asks for the PDF once; choosing it stores the file.
+
+**The same bytes are one file.** An asset stores its SHA-256. The client asks
+`POST /api/projects/:id/assets/lookup` with `{ sha256, mime }` before sending
+anything, and a second upload of the same bytes returns the existing id.
+
+**A file is released when nothing names it.** On every accepted save, a live
+underlay asset on the job is kept while the drawing just saved names it (any
+source, or the image), any `drawing_revision.doc` for that drawing names it, or
+it was uploaded after the drawing's previous `updated_at`. Anything else is
+released on that save, including a file orphaned by removing the last source.
+Bytes a recovery snapshot names are not released and count toward the quota.
+
+**A sheet-set page has a floor and a role.** `levelId` is the floor of a placed
+page and the user can change it; `kind` is only the bookmark classification from
+import. `role` is `plan` (has a placement, drawn on `levelId`), `elevation` or
+`section` (reference panel only), or `unused` (kept in the list). A document
+without `role` gets one on read: a placement means `plan`, kind
+`elevations`/`sections` means those roles, anything else is `unused`. Moving a
+page to another floor changes `levelId` only; its placement, anchor and
+`verified` stay.
 
 **Site notes are rows, not a document key** (`project_note`). Two devices' notes
 both arrive and cannot conflict, which is precisely why note-taking is allowed

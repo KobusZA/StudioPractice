@@ -14,7 +14,7 @@ and the old Clear rewired as navigations.
 A drawing survives having its browser wiped: sign in, draw, clear all local
 storage, reload, and the job comes back from the server. Save, Save As, Clear and
 the file picker are gone, because nothing is replaced in place any more. Steps
-6–8 (underlay assets, offline, notes) are unbuilt, and the library says so where
+6 (underlay assets) is built. 7–8 (offline, notes) are unbuilt, and the library says so where
 it would otherwise have to pretend: the per-row *On site* control is disabled
 with the reason, rather than claiming a job is cached when nothing caches it yet.
 
@@ -264,9 +264,16 @@ operate without the system"; storage location never was.
 
 The old spec's apology — *pixels are session-only, load the PDF again* —
 existed only because `localStorage` cannot hold a scan. It is dropped: the
-PDF/image becomes an `asset` row, `doc.underlay` keeps placement plus
-`assetId`, and a job opens on a second device with its scan and its scale
-intact. Size caps and per-org quota are worth deciding before this ships.
+PDF/image is an `asset` row, the drawing keeps placement plus `assetId`
+(`sheetSet.assetId` for a plan set, `underlay.assetId` for a single image),
+and a job opens on a second device with its scan and its scale intact.
+
+Caps, chosen so a multi-page concept set fits and a firm cannot fill the
+database by accident: 128 MB per file, 4 GB of live plan files per firm. A
+deleted job does not count. Replacing a PDF releases the previous file when
+the drawing save names the new id; removing the underlay does not, so Undo
+can put the same id back. Drawings saved before this have no id and ask for
+the file once.
 
 ## 8. Auth
 

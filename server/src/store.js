@@ -18,6 +18,15 @@ import { DEFAULT_PROJECT_TYPES, DEFAULT_RATE_BANDS, DEFAULT_RATE_BOOK } from "./
 import { FEE_TEMPLATES, pctSplit, templateTotal } from "./fee-templates.js";
 import { certificateUnits, priceEntry, toCents } from "./pricing.js";
 import { sid } from "./ids.js";
+import { createHash } from "node:crypto";
+import {
+  MAX_UNDERLAY_BYTES,
+  cleanSha256,
+  ORG_UNDERLAY_QUOTA_BYTES,
+  retargetUnderlayAssets,
+  sniffUnderlay,
+  underlayAssetIds,
+} from "./assets.js";
 import { buildTeamReport } from "./team-report.js";
 import { capabilitiesFor, gate, ROLES } from "./permissions.js";
 
@@ -417,8 +426,28 @@ export function openStore(queryable, { orgId, userId, role }) {
         return { ...(await this.getProject(created.id)), drawing: null };
       }
       const drawingId = sid("dwg");
-      const doc = { ...source.doc, id: drawingId, name };
-      return this.createProject({ name, packId: source.pack_id, doc, drawingId });
+      const newProjectId = sid("prj");
+      // Cloned before insert: the source row's document must not gain the
+      // copy's ids, and the copy must not keep the source's file pointers.
+      const doc = structuredClone({ ...source.doc, id: drawingId, name });
+      const created = await this.createProject({
+        name, packId: source.pack_id, doc, drawingId, projectId: newProjectId,
+      });
+      const map = await copyUnderlayAssets(q, {
+        fromProjectId: projectId,
+        toProjectId: newProjectId,
+        ids: underlayAssetIds(source.doc),
+        orgId,
+        userId,
+      });
+      if (retargetUnderlayAssets(doc, map)) {
+        await q(
+          `update drawing set doc = $3 where id = $1 and project_id = $2`,
+          [drawingId, newProjectId, doc],
+        );
+        created.drawing.doc = doc;
+      }
+      return created;
     },
 
     /**
@@ -517,6 +546,25 @@ export function openStore(queryable, { orgId, userId, role }) {
      * without seeing theirs. Never merges.
      */
     async putDrawing(drawingId, { doc, packId = undefined, ifMatch }) {
+      // The file ids have to be checked before the write. Pulling the document
+      // itself here would copy every autosave's jsonb just to learn which job
+      // it belongs to, so this read is the project id only.
+      const { rows: scope } = await q(
+        `select d.project_id, d.updated_at
+           from drawing d
+           join project p on p.id = d.project_id
+          where d.id = $1
+            and d.deleted_at is null
+            and p.org_id = $2
+            and p.deleted_at is null`,
+        [drawingId, orgId],
+      );
+      const assetIds = underlayAssetIds(doc);
+      if (scope[0] && assetIds.length) {
+        await assertUnderlayAssets(q, {
+          orgId, projectId: scope[0].project_id, ids: assetIds,
+        });
+      }
       const { rows } = await q(
         `update drawing d
             set doc = $3,
@@ -542,6 +590,33 @@ export function openStore(queryable, { orgId, userId, role }) {
         throw new ConflictError(current);
       }
       const row = drawingRow(rows[0]);
+      // Release the plan files nothing names any more. A live underlay file on
+      // this job is kept while any of these name it:
+      //   - the drawing just saved (every source of the sheet set, or the image),
+      //   - a recovery snapshot of this drawing, so a restore still finds it,
+      //   - an upload newer than the drawing's previous save. An autosave that
+      //     left a moment before the new id was written must not delete the
+      //     file the next save is about to point at; the save after that, once
+      //     the drawing's timestamp has moved past the upload, releases it if
+      //     it is still unnamed.
+      // Everything else goes, including a file orphaned by removing the last
+      // source, which is what stops it counting toward the quota for ever.
+      await q(
+        `update asset a
+            set deleted_at = now()
+          where a.org_id = $1
+            and a.project_id = $2
+            and a.kind = 'underlay'
+            and a.deleted_at is null
+            and a.created_at <= $4
+            and not (a.id = any($3::text[]))
+            and not exists (
+              select 1 from drawing_revision r
+               where r.drawing_id = $5
+                 and position(a.id in r.doc::text) > 0
+            )`,
+        [orgId, row.projectId, assetIds, scope[0].updated_at, drawingId],
+      );
       // The job's name follows the document's, on every accepted save.
       //
       // `doc.name` is what the title block prints and what the chrome's name
@@ -580,6 +655,111 @@ export function openStore(queryable, { orgId, userId, role }) {
       );
       await snapshot(q, rows[0], userId);
       return drawingRow(rows[0]);
+    },
+
+    // --- underlay files -------------------------------------------------
+
+    /**
+     * Store a plan PDF or image for a job. The drawing is updated separately,
+     * by the autosave, once it knows this id. Replacing a file does not delete
+     * the previous row here: that happens when the save names the new id, so a
+     * failed save does not lose the file the job is still pointing at.
+     *
+     * `quota` is the firm's ceiling. The HTTP handler leaves it at the default;
+     * tests pass a small one rather than inserting gigabytes.
+     */
+    async putUnderlayAsset(projectId, { mime, bytes, quota = ORG_UNDERLAY_QUOTA_BYTES }) {
+      const project = await this.getProject(projectId);
+      if (!project) return null;
+      const body = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes || []);
+      const detected = sniffUnderlay(body, mime);
+      if (!detected) throw new ValidationError("That file is not a PDF or an image");
+      if (body.length > MAX_UNDERLAY_BYTES) {
+        throw new ValidationError("That file is larger than 128 MB");
+      }
+      // The same bytes on the same job are one file. The hash is of what was
+      // received, never of what the client says it sent.
+      const sha256 = createHash("sha256").update(body).digest("hex");
+      const existing = await this.findUnderlayByHash(projectId, { sha256, mime: detected });
+      if (existing) return existing;
+      // Serialise quota checks for this firm. Two uploads otherwise both read
+      // the same total and both insert.
+      await q(`select id from org where id = $1 for update`, [orgId]);
+      const { rows: used } = await q(
+        `select coalesce(sum(octet_length(a.bytes)), 0)::bigint as total
+           from asset a
+           join project p on p.id = a.project_id
+          where a.org_id = $1
+            and a.deleted_at is null
+            and p.deleted_at is null`,
+        [orgId],
+      );
+      if (Number(used[0].total) + body.length > quota) {
+        throw new ValidationError("Stored plan files have reached this firm's 4 GB limit");
+      }
+      const id = sid("ast");
+      const { rows } = await q(
+        `insert into asset (id, org_id, project_id, kind, mime, bytes, created_by, sha256)
+              values ($1, $2, $3, 'underlay', $4, $5, $6, $7)
+           returning id, project_id, kind, mime, octet_length(bytes) as byte_length`,
+        [id, orgId, projectId, detected, body, userId, sha256],
+      );
+      return assetSummary(rows[0]);
+    },
+
+    /**
+     * A live file on this job with this hash and type, or null. Asked before
+     * the bytes are sent, so a file already on the job is not uploaded again.
+     * A hit is touched: its `created_at` moves to now, which puts it under the
+     * same "uploaded since the last save" guard as a fresh upload. Without
+     * that, an autosave between this answer and the save that names the id
+     * would release a file the drawing is about to point at.
+     */
+    async findUnderlayByHash(projectId, { sha256, mime }) {
+      const hash = cleanSha256(sha256);
+      if (!hash || !mime) return null;
+      const project = await this.getProject(projectId);
+      if (!project) return null;
+      const { rows } = await q(
+        `update asset
+            set created_at = now()
+          where id = (
+            select a.id from asset a
+             where a.org_id = $1
+               and a.project_id = $2
+               and a.kind = 'underlay'
+               and a.deleted_at is null
+               and a.sha256 = $3
+               and a.mime = $4
+             order by a.created_at
+             limit 1)
+        returning id, project_id, kind, mime, octet_length(bytes) as byte_length`,
+        [orgId, projectId, hash, String(mime).split(";")[0].trim().toLowerCase()],
+      );
+      return rows[0] ? assetSummary(rows[0]) : null;
+    },
+
+    /** The bytes, or null when this firm has no such live file on a live job. */
+    async getUnderlayAsset(assetId) {
+      const { rows } = await q(
+        `select a.id, a.project_id, a.kind, a.mime, a.bytes
+           from asset a
+           join project p on p.id = a.project_id
+          where a.id = $1
+            and a.org_id = $2
+            and a.deleted_at is null
+            and a.kind = 'underlay'
+            and p.org_id = $2
+            and p.deleted_at is null`,
+        [assetId, orgId],
+      );
+      if (!rows[0]) return null;
+      return {
+        id: rows[0].id,
+        projectId: rows[0].project_id,
+        mime: rows[0].mime,
+        bytes: rows[0].bytes,
+      };
     },
 
     // --- the register ---------------------------------------------------
@@ -3005,6 +3185,54 @@ function projectSummary(row) {
     packId: row.pack_id ?? null,
     revision: row.revision ?? null,
   };
+}
+
+function assetSummary(row) {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    kind: row.kind,
+    mime: row.mime,
+    byteLength: Number(row.byte_length),
+  };
+}
+
+/** Every named file must be a live underlay on this job. One missing id rejects the save. */
+async function assertUnderlayAssets(q, { orgId, projectId, ids }) {
+  const { rows } = await q(
+    `select id
+       from asset
+      where org_id = $1
+        and project_id = $2
+        and kind = 'underlay'
+        and deleted_at is null
+        and id = any($3::text[])`,
+    [orgId, projectId, ids],
+  );
+  if (rows.length !== ids.length) {
+    throw new ValidationError("That drawing points at a plan file this job does not have");
+  }
+}
+
+/** New rows on the copy, keyed by the source asset id. A missing source is absent from the map. */
+async function copyUnderlayAssets(q, { fromProjectId, toProjectId, ids, orgId, userId }) {
+  const map = {};
+  for (const id of ids) {
+    const newId = sid("ast");
+    const { rows } = await q(
+      `insert into asset (id, org_id, project_id, kind, mime, bytes, created_by, sha256)
+       select $1, org_id, $2, kind, mime, bytes, $3, sha256
+         from asset
+        where id = $4
+          and org_id = $5
+          and project_id = $6
+          and deleted_at is null
+       returning id`,
+      [newId, toProjectId, userId, id, orgId, fromProjectId],
+    );
+    if (rows[0]) map[id] = newId;
+  }
+  return map;
 }
 
 function drawingRow(row) {

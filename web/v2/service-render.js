@@ -20,16 +20,52 @@ import {
 import { pipeRadius } from "./service-walls.js";
 
 const PAPER = "#fffdf8";
+/** Joints and rise marks are ink, not the pipe colour, so they stay visible on the run. */
+const JOINT_INK = "#1a1612";
+
+/** Thinnest plan stroke, in screen pixels. Below this a route disappears; at this it stays a line, not a wall. */
+const RUN_MIN_PX = 1.5;
 
 /**
- * Stroke width of a run on the plan: its true diameter (insulation included)
- * when the type states one, never thinner than the 3.5 px line it has always
- * been, so a small pipe stays visible at any zoom.
+ * Stroke width of a run on the plan: its true outside diameter (insulation
+ * included) in screen pixels. A type with no stated diameter, and a pipe
+ * zoomed out thinner than a hairline, stay at RUN_MIN_PX so the route remains
+ * visible and still follows zoom once the real size is wider than that.
  */
 function runWidth(pack, edge, scale) {
   const r = pipeRadius(pack, edge);
-  return r && scale > 0 ? Math.max(3.5, r * 2 * scale) : 3.5;
+  const px = r && scale > 0 ? r * 2 * scale : 0;
+  return Math.max(RUN_MIN_PX, px);
 }
+
+/** Plan stroke of the pipe a new run will be, for the rubber band and its joint. */
+export function servicePlanWidth(pack, sku, scale) {
+  return runWidth(pack, { sku }, scale);
+}
+
+/** A joint is a dot, not the pipe. The run stroke already shows the diameter, so the dot never grows past this radius. */
+const JOINT_MAX_PX = 2.5;
+
+/**
+ * Plan radius of a joint: half the fattest pipe that meets it, capped so a
+ * close zoom does not turn the point into a disc. A node with no sized run
+ * is the hairline's own radius.
+ */
+function jointRadius(pack, doc, nodeId, scale) {
+  let width = RUN_MIN_PX;
+  for (const edge of doc?.serviceEdges || []) {
+    if (edge.fromNode !== nodeId && edge.toNode !== nodeId) continue;
+    width = Math.max(width, runWidth(pack, edge, scale));
+  }
+  return Math.min(JOINT_MAX_PX, width / 2);
+}
+
+/** Selection and hover sit just outside the joint, in screen pixels. */
+const JOINT_RING_GAP = 2;
+
+/** Rise/drop symbol on the plan. A fixed small mark: it names the direction, it is not the pipe. */
+const MARKER_DISC = 4.5;
+const MARKER_HALO = 6.5;
 
 function dashFor(doc, edge) {
   if (edge.mode === "schematic") return [2, 5];
@@ -111,14 +147,15 @@ export function drawServiceLevel(ctx, o) {
       if (!visible(node)) continue;
       const [sx, sy] = worldToScreen(node.x, node.y);
       ctx.fillStyle = PAPER;
-      ctx.strokeStyle = serviceStyle(doc, node).colour;
-      ctx.lineWidth = 2.5;
+      ctx.strokeStyle = JOINT_INK;
+      ctx.lineWidth = 1.5;
+      const r = jointRadius(pack, doc, node.id, scale);
       ctx.beginPath();
       if (node.connectedRef) {
         // A connected node is square: it is a fitting, not a bend.
-        ctx.rect(sx - 5, sy - 5, 10, 10);
+        ctx.rect(sx - r, sy - r, r * 2, r * 2);
       } else {
-        ctx.arc(sx, sy, 4.5, 0, Math.PI * 2);
+        ctx.arc(sx, sy, r, 0, Math.PI * 2);
       }
       ctx.fill();
       ctx.stroke();
@@ -137,19 +174,16 @@ const ARROW = { up: "↑", down: "↓", through: "↕", riser: "↕" };
 function drawMarker(ctx, marker, worldToScreen) {
   const [sx, sy] = worldToScreen(marker.x, marker.y);
   ctx.save();
-  ctx.globalAlpha = 0.34;
-  ctx.strokeStyle = marker.colour;
-  ctx.lineWidth = 2;
+  ctx.fillStyle = PAPER;
   ctx.beginPath();
-  ctx.arc(sx, sy, 17, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.globalAlpha = 1;
-  ctx.fillStyle = marker.colour;
-  ctx.beginPath();
-  ctx.arc(sx, sy, 11, 0, Math.PI * 2);
+  ctx.arc(sx, sy, MARKER_HALO, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = "#fff";
-  ctx.font = "600 14px Source Sans 3, sans-serif";
+  ctx.fillStyle = JOINT_INK;
+  ctx.beginPath();
+  ctx.arc(sx, sy, MARKER_DISC, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = PAPER;
+  ctx.font = "600 9px Source Sans 3, sans-serif";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillText(ARROW[marker.kind] || "↕", sx, sy + 0.5);
@@ -159,9 +193,9 @@ function drawMarker(ctx, marker, worldToScreen) {
     ctx.textBaseline = "alphabetic";
     ctx.lineWidth = 3;
     ctx.strokeStyle = "rgba(255,253,248,0.9)";
-    ctx.strokeText(marker.label, sx + 20, sy - 10);
+    ctx.strokeText(marker.label, sx + MARKER_HALO + 4, sy - 6);
     ctx.fillStyle = marker.colour;
-    ctx.fillText(marker.label, sx + 20, sy - 10);
+    ctx.fillText(marker.label, sx + MARKER_HALO + 4, sy - 6);
   }
   ctx.restore();
 }
@@ -184,23 +218,24 @@ function strokeSelectionRing(ctx, x, y, colour) {
 
 /** The selection's outline and the numbers a selected run is judged by. */
 export function drawServiceSelection(ctx, o) {
-  const { doc, pack, refs, worldToScreen, color, levelId } = o;
+  const { doc, pack, refs, worldToScreen, color, levelId, scale = 0 } = o;
   const nodes = nodeMap(doc);
   ctx.save();
   ctx.strokeStyle = color;
   ctx.fillStyle = color;
-  ctx.lineWidth = 2.4;
   ctx.lineCap = "round";
   for (const ref of refs) {
     if (ref.kind === "serviceNode") {
       const n = nodes.get(ref.id);
       if (!n) continue;
       const [sx, sy] = worldToScreen(n.x, n.y);
+      const ring = jointRadius(pack, doc, n.id, scale) + JOINT_RING_GAP;
+      ctx.lineWidth = 1.5;
       ctx.beginPath();
-      ctx.arc(sx, sy, 11, 0, Math.PI * 2);
+      ctx.arc(sx, sy, ring, 0, Math.PI * 2);
       ctx.stroke();
       const z = n.offset == null ? "height unresolved" : `${fmt(n.offset)} m`;
-      label(ctx, `${z}`, sx + 14, sy + 16, color);
+      label(ctx, `${z}`, sx + ring + 4, sy + ring + 4, color);
     } else if (ref.kind === "serviceEdge") {
       const e = (doc.serviceEdges || []).find((x) => x.id === ref.id);
       const m = e ? edgeMeasure(doc, pack, e, nodes) : null;
@@ -211,15 +246,17 @@ export function drawServiceSelection(ctx, o) {
         // A rise has no length on the plan: it is a point, so it is shown as a
         // ring there, named by what it does.
         if (m.levelFrom !== levelId && m.levelTo !== levelId) continue;
+        ctx.lineWidth = 1.5;
         ctx.beginPath();
-        ctx.arc(ax, ay, 21, 0, Math.PI * 2);
+        ctx.arc(ax, ay, MARKER_HALO + JOINT_RING_GAP, 0, Math.PI * 2);
         ctx.stroke();
         if (m.dz !== null) {
-          label(ctx, `${m.dz >= 0 ? "Rise" : "Drop"} ${fmt(Math.abs(m.dz))} m`, ax + 26, ay - 14, color);
+          label(ctx, `${m.dz >= 0 ? "Rise" : "Drop"} ${fmt(Math.abs(m.dz))} m`, ax + MARKER_HALO + 6, ay - 8, color);
         }
         continue;
       }
       if (m.levelFrom !== levelId && m.levelTo !== levelId) continue;
+      ctx.lineWidth = 2.4;
       ctx.beginPath();
       ctx.moveTo(ax, ay);
       ctx.lineTo(bx, by);
@@ -273,30 +310,33 @@ export function drawServiceMoveRuns(ctx, o) {
 
 /** A ghost node: a faint, not-yet-real route point that one click makes real. */
 export function drawServiceGhost(ctx, o) {
-  const { x, y, worldToScreen, colour } = o;
+  const { x, y, worldToScreen, colour, doc = null, pack = null, edgeId = null, scale = 0 } = o;
   const [sx, sy] = worldToScreen(x, y);
+  const edge = (doc?.serviceEdges || []).find((e) => e.id === edgeId);
+  const r = Math.min(JOINT_MAX_PX, edge ? runWidth(pack, edge, scale) / 2 : RUN_MIN_PX / 2);
   ctx.save();
   ctx.setLineDash([3, 2]);
-  ctx.lineWidth = 2;
+  ctx.lineWidth = 1;
   ctx.strokeStyle = colour;
   ctx.fillStyle = PAPER;
   ctx.beginPath();
-  ctx.arc(sx, sy, 7, 0, Math.PI * 2);
+  ctx.arc(sx, sy, r, 0, Math.PI * 2);
   ctx.fill();
   ctx.stroke();
   ctx.setLineDash([]);
+  const arm = Math.max(1.5, r * 0.7);
   ctx.beginPath();
-  ctx.moveTo(sx - 3, sy);
-  ctx.lineTo(sx + 3, sy);
-  ctx.moveTo(sx, sy - 3);
-  ctx.lineTo(sx, sy + 3);
+  ctx.moveTo(sx - arm, sy);
+  ctx.lineTo(sx + arm, sy);
+  ctx.moveTo(sx, sy - arm);
+  ctx.lineTo(sx, sy + arm);
   ctx.stroke();
   ctx.restore();
 }
 
 /** Hover feedback for a route point or run. */
 export function drawServiceHover(ctx, o) {
-  const { doc, ref, worldToScreen, color } = o;
+  const { doc, pack = null, ref, worldToScreen, color, scale = 0 } = o;
   const nodes = nodeMap(doc);
   ctx.save();
   ctx.strokeStyle = color;
@@ -307,7 +347,7 @@ export function drawServiceHover(ctx, o) {
     if (n) {
       const [sx, sy] = worldToScreen(n.x, n.y);
       ctx.beginPath();
-      ctx.arc(sx, sy, 10, 0, Math.PI * 2);
+      ctx.arc(sx, sy, jointRadius(pack, doc, n.id, scale) + JOINT_RING_GAP, 0, Math.PI * 2);
       ctx.stroke();
     }
   } else {
@@ -328,13 +368,14 @@ export function drawServiceHover(ctx, o) {
 
 /** Rubber band from the last route point to the pointer. */
 export function drawServiceDraft(ctx, o) {
-  const { from, to, colour, worldToScreen, note = "" } = o;
+  const { from, to, colour, worldToScreen, note = "", width = RUN_MIN_PX } = o;
   if (!from || !to) return;
   const [ax, ay] = worldToScreen(from.x, from.y);
   const [bx, by] = worldToScreen(to.x, to.y);
+  const r = Math.min(JOINT_MAX_PX, Math.max(RUN_MIN_PX, width) / 2);
   ctx.save();
   ctx.strokeStyle = colour;
-  ctx.lineWidth = 3;
+  ctx.lineWidth = Math.max(RUN_MIN_PX, width);
   ctx.setLineDash([6, 5]);
   ctx.lineCap = "round";
   ctx.beginPath();
@@ -343,9 +384,9 @@ export function drawServiceDraft(ctx, o) {
   ctx.stroke();
   ctx.setLineDash([]);
   ctx.fillStyle = PAPER;
-  ctx.lineWidth = 2.5;
+  ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.arc(ax, ay, 4.5, 0, Math.PI * 2);
+  ctx.arc(ax, ay, r, 0, Math.PI * 2);
   ctx.fill();
   ctx.stroke();
   ctx.restore();

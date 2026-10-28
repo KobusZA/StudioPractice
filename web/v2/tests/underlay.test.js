@@ -4,12 +4,19 @@ import { readFileSync } from "node:fs";
 
 import {
   calibrate,
+  hasStashedUnderlay,
+  pageLineworkStatus,
+  restoreStashedUnderlay,
+  setUnderlayPinned,
+  stashUnderlay,
   rotateUnderlayBy,
   scaleUnderlayFromCorner,
   setUnderlayOpacity,
   setUnderlayRotation,
+  snapUnderlayWorld,
   toggleUnderlayHidden,
   underlayCorners,
+  underlayFrameBounds,
   underlayPixelFromWorld,
   underlayWorldFromPixel,
 } from "../underlay.js";
@@ -112,6 +119,36 @@ test("rotateUnderlayBy nudges from the current angle rather than replacing it", 
 });
 
 // --- corners and centre-anchored scaling ------------------------------
+
+test("underlayFrameBounds is the plan sheets of the open floor", () => {
+  const doc = {
+    sheetSet: {
+      pages: [
+        {
+          index: 0,
+          role: "plan",
+          levelId: "g",
+          placement: { x: 10, y: 20, pixelWidth: 100, pixelHeight: 50, metresPerPixel: 0.1, rotation: 0 },
+        },
+        { index: 1, role: "unused", levelId: null, placement: null },
+        {
+          index: 2,
+          role: "plan",
+          levelId: "f",
+          placement: { x: 500, y: 500, pixelWidth: 100, pixelHeight: 50, metresPerPixel: 1, rotation: 0 },
+        },
+      ],
+    },
+  };
+  const b = underlayFrameBounds(doc, "g");
+  assert.deepEqual(b, { minX: 10, minY: 20, maxX: 20, maxY: 25 });
+  assert.equal(underlayFrameBounds(doc, "other"), null);
+});
+
+test("underlayFrameBounds uses a lone image underlay", () => {
+  const b = underlayFrameBounds(docWithUnderlay(), "g");
+  assert.ok(b.maxX > b.minX && b.maxY > b.minY);
+});
 
 test("underlayCorners returns an axis-aligned box when rotation is zero", () => {
   const doc = docWithUnderlay({ x: 0, y: 0, pixelWidth: 200, pixelHeight: 100, metresPerPixel: 0.1 });
@@ -282,4 +319,145 @@ test("every catalog-backed function maps to a category the pack defines", () => 
   // Boundary walls, beams and furniture are genuinely absent from the template;
   // the ribbon disables them and says so.
   assert.deepEqual(unbacked.sort(), ["beams", "boundary", "furniture"]);
+});
+
+import { alignSheets, markAlignmentPoint } from "../underlay.js";
+import { createSheetSet } from "../sheet-set.js";
+
+function twoFloorDoc() {
+  const rows = [
+    { index: 0, label: "GROUND", kind: "ground", use: true, levelId: "01 GFL", printedScale: 100, pixelWidth: 1000, pixelHeight: 800 },
+    { index: 1, label: "FIRST", kind: "first", use: true, levelId: "02 L1", printedScale: 100, pixelWidth: 1000, pixelHeight: 800 },
+  ];
+  const sheetSet = createSheetSet("plans.pdf", rows);
+  // Same house, drawn at different places on each page.
+  sheetSet.pages[1].placement.x = 7;
+  sheetSet.pages[1].placement.y = -3;
+  return { sheetSet, underlay: null };
+}
+
+test("two drawings of the same floor: the later sheet moves onto the earlier one", () => {
+  const rows = [
+    { index: 0, label: "WALLS", kind: "ground", use: true, levelId: "01 GFL", printedScale: 100, pixelWidth: 1000, pixelHeight: 800 },
+    { index: 1, label: "SERVICES", kind: "ground", use: true, levelId: "01 GFL", printedScale: 100, pixelWidth: 1000, pixelHeight: 800 },
+  ];
+  const doc = { sheetSet: createSheetSet("ground.pdf", rows), underlay: null };
+  const [walls, services] = doc.sheetSet.pages;
+  services.placement.x = 4;
+  services.placement.y = 2;
+  const order = ["01 GFL"];
+
+  doc.underlay = walls.placement;
+  const w = underlayWorldFromPixel(walls.placement, 200, 150);
+  markAlignmentPoint(doc, w.x, w.y, order);
+  doc.underlay = services.placement;
+  const s = underlayWorldFromPixel(services.placement, 480, 320);
+  const before = { x: walls.placement.x, y: walls.placement.y };
+  const result = markAlignmentPoint(doc, s.x, s.y, order);
+
+  assert.deepEqual(result.moved, [1]);
+  assert.equal(result.datum.label, "WALLS");
+  assert.equal(walls.placement.x, before.x);
+  const landed = underlayWorldFromPixel(services.placement, 480, 320);
+  assert.ok(Math.abs(landed.x - w.x) < 1e-9 && Math.abs(landed.y - w.y) < 1e-9);
+});
+
+test("marking the same feature on two floors moves the upper sheet onto the lower, not the reverse", () => {
+  const doc = twoFloorDoc();
+  const [ground, first] = doc.sheetSet.pages;
+  const order = ["01 GFL", "02 L1"];
+
+  doc.underlay = ground.placement;
+  const g = underlayWorldFromPixel(ground.placement, 300, 200);
+  markAlignmentPoint(doc, g.x, g.y, order);
+
+  // The corner sits at pixel (600, 450) on the first-floor page.
+  doc.underlay = first.placement;
+  const f = underlayWorldFromPixel(first.placement, 600, 450);
+  const before = { x: ground.placement.x, y: ground.placement.y };
+  const result = markAlignmentPoint(doc, f.x, f.y, order);
+
+  assert.deepEqual(result.moved, [1]);
+  assert.equal(result.datum.index, 0);
+  assert.equal(ground.placement.x, before.x);
+  const after = underlayWorldFromPixel(first.placement, 600, 450);
+  assert.ok(Math.abs(after.x - g.x) < 1e-9 && Math.abs(after.y - g.y) < 1e-9);
+});
+
+test("re-marking the lower floor drags the upper sheet along with it", () => {
+  const doc = twoFloorDoc();
+  const [ground, first] = doc.sheetSet.pages;
+  const order = ["01 GFL", "02 L1"];
+  doc.underlay = first.placement;
+  const f = underlayWorldFromPixel(first.placement, 100, 100);
+  markAlignmentPoint(doc, f.x, f.y, order);
+  doc.underlay = ground.placement;
+  const g = underlayWorldFromPixel(ground.placement, 500, 500);
+  markAlignmentPoint(doc, g.x, g.y, order);
+  const landed = underlayWorldFromPixel(first.placement, 100, 100);
+  assert.ok(Math.abs(landed.x - g.x) < 1e-9 && Math.abs(landed.y - g.y) < 1e-9);
+  assert.deepEqual(alignSheets(doc, order).moved, []);
+});
+
+test("PDF snap is inert without an extracted page", () => {
+  const doc = docWithUnderlay({ sheetPage: 0 });
+  assert.equal(pageLineworkStatus(0), "idle");
+  assert.equal(snapUnderlayWorld(doc.underlay, 1, 1, 0.1), null);
+});
+
+test("a mark survives a JSON round trip", async () => {
+  const { normalizeSheetSet } = await import("../sheet-set.js");
+  const doc = twoFloorDoc();
+  doc.underlay = doc.sheetSet.pages[0].placement;
+  markAlignmentPoint(doc, 1, 1, ["01 GFL"]);
+  const back = normalizeSheetSet(JSON.parse(JSON.stringify(doc.sheetSet)));
+  assert.ok(back.pages[0].anchor && Number.isFinite(back.pages[0].anchor.x));
+  assert.equal(back.pages[1].anchor, null);
+});
+
+test("removing an underlay keeps it for Undo, and Undo puts back the same placement", () => {
+  const doc = docWithUnderlay();
+  const placement = doc.underlay;
+  const removed = stashUnderlay(doc);
+  assert.equal(removed.name, "plan.pdf");
+  assert.equal(removed.isSet, false);
+  assert.equal(doc.underlay, null);
+  assert.equal(hasStashedUnderlay(), true);
+
+  assert.equal(restoreStashedUnderlay(doc), true);
+  assert.equal(doc.underlay, placement);
+  assert.equal(hasStashedUnderlay(), false);
+  assert.equal(restoreStashedUnderlay(doc), false);
+});
+
+test("Undo is refused once something else has been put on the plan", () => {
+  const doc = docWithUnderlay();
+  stashUnderlay(doc);
+  doc.underlay = { name: "other.png" };
+  assert.equal(restoreStashedUnderlay(doc), false);
+  doc.underlay = null;
+  assert.equal(restoreStashedUnderlay(doc), true);
+});
+
+test("stashing a plan set counts what would be lost", () => {
+  const doc = {
+    underlay: null,
+    sheetSet: { pdfName: "set.pdf", pages: [
+      { index: 0, placement: { x: 0 }, verified: true, anchor: { x: 1, y: 1 } },
+      { index: 1, placement: { x: 0 }, verified: false, anchor: null },
+      { index: 2, placement: null, verified: false, anchor: null },
+    ] },
+  };
+  const removed = stashUnderlay(doc);
+  assert.deepEqual({ ...removed }, { name: "set.pdf", sheets: 2, verified: 1, marks: 1, isSet: true });
+  assert.equal(doc.sheetSet, null);
+  assert.equal(restoreStashedUnderlay(doc), true);
+  assert.equal(doc.sheetSet.pdfName, "set.pdf");
+});
+
+test("pinning is a flag on the placement, and nothing without an underlay", () => {
+  const doc = docWithUnderlay();
+  setUnderlayPinned(doc, true);
+  assert.equal(doc.underlay.pinned, true);
+  setUnderlayPinned({ underlay: null }, true);
 });

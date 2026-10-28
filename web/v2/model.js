@@ -21,6 +21,7 @@ import {
 } from "./geom.js";
 import { knownConvention } from "./region.js";
 import { normalizeSatelliteUnderlay } from "./satellite.js";
+import { normalizeSheetSet } from "./sheet-set.js";
 import { expandServiceRefs, normalizeServices } from "./service-model.js";
 
 export const DOC_SCHEMA = "sp.doc/2";
@@ -678,12 +679,44 @@ export class PlanStore {
     }
   }
 
-  /** Drawn plan geometry only - what the canvas legend and the empty-canvas
-   * hint care about. For "is this job worth keeping" use hasJobContent(). */
+  /** Rooms, walls, slabs and roofs: the Existing / Proposed legend.
+   * Any mark on the plan, including services, is hasPlanDrawing().
+   * For "is this job worth keeping" use hasJobContent(). */
   hasContent() {
     return Boolean(this.doc.rooms.length || this.doc.segments.length
       || this.doc.slabs.length || this.doc.roofs.length);
   }
+}
+
+/** Marks that show on the plan but do not turn on the Existing / Proposed
+ * legend. Rooms, walls, slabs and roofs are covered by hasContent(). */
+const PLAN_MARK_ARRAYS = [
+  "openings",
+  "items",
+  "beams",
+  "stairs",
+  "lines",
+  "separations",
+  "regions",
+  "dimensions",
+  "serviceNodes",
+  "serviceEdges",
+  "revisionClouds",
+];
+
+/**
+ * Whether the plan canvas has something drawn on it. Broader than
+ * hasContent() on purpose: a route, a door cut into an underlay, or a
+ * property line is a drawing, and the centred "Nothing drawn" hint should
+ * go away. It does not include a bare site record (that can exist just to
+ * hold an erf number) or a service network with no nodes.
+ */
+export function hasPlanDrawing(doc) {
+  if (!doc || typeof doc !== "object") return false;
+  if (doc.rooms?.length || doc.segments?.length || doc.slabs?.length || doc.roofs?.length) return true;
+  if (PLAN_MARK_ARRAYS.some((key) => Array.isArray(doc[key]) && doc[key].length > 0)) return true;
+  if (doc.site?.propertyLine || doc.site?.buildingLine) return true;
+  return false;
 }
 
 /** Every array whose contents are work someone did. */
@@ -729,6 +762,33 @@ export function hasJobContent(doc) {
 // --- normalisation and v1 migration --------------------------------------
 
 /** Accept a v1 or v2 document and return a valid v2 document. */
+/**
+ * A scan or photo that has a stored file. Without that id the pixels were
+ * never kept, and a placement alone would come back as an empty sheet, so
+ * those older underlays are still dropped.
+ */
+function normalizeFileUnderlay(raw) {
+  if (!raw || typeof raw !== "object" || raw.source) return null;
+  if (typeof raw.assetId !== "string" || !raw.assetId) return null;
+  const finite = (v) => typeof v === "number" && Number.isFinite(v);
+  if (![raw.x, raw.y, raw.metresPerPixel, raw.pixelWidth, raw.pixelHeight].every(finite)) return null;
+  if (raw.metresPerPixel <= 0 || raw.pixelWidth <= 0 || raw.pixelHeight <= 0) return null;
+  return {
+    name: typeof raw.name === "string" && raw.name ? raw.name : "underlay",
+    assetId: raw.assetId,
+    pixelWidth: raw.pixelWidth,
+    pixelHeight: raw.pixelHeight,
+    x: raw.x,
+    y: raw.y,
+    metresPerPixel: raw.metresPerPixel,
+    opacity: finite(raw.opacity) ? Math.min(1, Math.max(0, raw.opacity)) : 0.55,
+    rotation: finite(raw.rotation) ? raw.rotation : 0,
+    hidden: Boolean(raw.hidden),
+    calibrated: Boolean(raw.calibrated),
+    ...(raw.pinned ? { pinned: true } : {}),
+  };
+}
+
 export function normalizeDoc(raw) {
   const doc = emptyDoc();
   if (!raw || typeof raw !== "object") return doc;
@@ -740,8 +800,11 @@ export function normalizeDoc(raw) {
   doc.name = typeof raw.name === "string" && raw.name.trim() ? raw.name.trim() : null;
   doc.packId = raw.packId ?? null;
   doc.site = raw.site ?? null;
-  const underlay = normalizeSatelliteUnderlay(raw.underlay);
+  const underlay = normalizeSatelliteUnderlay(raw.underlay) || normalizeFileUnderlay(raw.underlay);
   if (underlay) doc.underlay = underlay;
+  // A multi-page plan set: placements only, never bitmaps. Absent on older documents.
+  const sheetSet = normalizeSheetSet(raw.sheetSet);
+  if (sheetSet) doc.sheetSet = sheetSet;
 
   doc.rooms = (raw.rooms || []).map((room) => ({
     id: room.id || nid("r"),

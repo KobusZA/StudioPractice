@@ -80,7 +80,7 @@ export function objectStatus(obj) {
 }
 
 /** Plan and 3D filters share this: mixed (a wall shared by existing and
- *  planned rooms) stays visible in either slice. */
+ *  proposed rooms) stays visible in either slice. */
 export function statusVisible(status, filter) {
   if (!filter || filter === "both") return true;
   if (status === "mixed") return true;

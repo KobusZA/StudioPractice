@@ -3,12 +3,12 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>StudioPractice — Part 3 core preview</title>
+  <title>StudioPractice � Part 3 core preview</title>
   <link rel="icon" href="../logo.png" type="image/png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,560&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="./v2.css?v=20261023-schedule-type" />
+  <link rel="stylesheet" href="./v2.css?v=20261028-eye" />
 </head>
 <body class="auth-pending">
   <div class="chrome">
@@ -28,7 +28,7 @@
              far left where back belongs rather than in among the state. -->
         <a class="practice-link" id="v2-practice-link" hidden
            title="The job's overview in Practice operations, where this drawing was started from."><span
-             aria-hidden="true">←</span> Back to overview</a>
+             aria-hidden="true">?</span> Back to overview</a>
         <span class="bar-sep" id="v2-practice-sep" aria-hidden="true" hidden></span>
         <span class="job-code" id="v2-job-code" hidden></span>
         <label class="visually-hidden" for="v2-job-name">Job name</label>
@@ -90,13 +90,57 @@
 
   <main class="layout layout-planner view-page" id="v2-app">
     <section class="panel planner-stage">
+      <!-- Mode bar: one strip for every modal underlay tool (Set scale, Adjust,
+           Align sheets). Hidden when none is on; when one is, it names the
+           mode, the step, what to click next, and how to get out. Driven by
+           syncModeBar() in ui.js. -->
+      <div class="mode-bar" id="v2-mode-bar" role="toolbar" aria-label="Underlay tool" aria-live="polite" hidden>
+        <span class="mode-pill" id="v2-mode-name"></span>
+        <span class="mode-step" id="v2-mode-step"></span>
+        <span class="mode-prompt" id="v2-mode-prompt"></span>
+        <span class="mode-controls" data-mode="scale" hidden>
+          <label id="v2-calibrate-distance-wrap" hidden>Real distance
+            <input id="v2-calibrate-distance" type="text" inputmode="decimal" autocomplete="off" aria-label="Real distance in millimetres" />
+            mm
+          </label>
+          <button type="button" class="mode-link" id="v2-calibrate-restart">Restart</button>
+        </span>
+        <span class="mode-controls" data-mode="adjust" hidden>
+          <span id="v2-mode-sheet"></span>
+          <label>Opacity
+            <input id="v2-underlay-opacity" type="range" min="0" max="100" step="1" />
+          </label>
+          <label>Rotation
+            <input id="v2-underlay-rotation" type="text" inputmode="decimal" autocomplete="off" aria-label="Rotation in degrees" />
+            �
+          </label>
+          <button type="button" id="v2-underlay-rotate-ccw" title="Rotate 90� left">? 90�</button>
+          <button type="button" id="v2-underlay-rotate-cw" title="Rotate 90� right">? 90�</button>
+          <button type="button" id="v2-underlay-pin" aria-pressed="false" title="Lock the sheet so it cannot be moved, resized or rotated by accident">Pin</button>
+        </span>
+        <span class="mode-controls" data-mode="align" hidden>
+          <span class="mode-seg" id="v2-align-sheets" role="group" aria-label="Sheet to mark"></span>
+          <button type="button" id="v2-align-next" hidden>Next sheet ?</button>
+          <button type="button" class="mode-link" id="v2-align-clear">Clear marks</button>
+        </span>
+        <label class="sheet-set-snap" id="v2-calibrate-snap-wrap" hidden>
+          <input id="v2-calibrate-snap" type="checkbox" checked />
+          Snap to PDF lines<span class="sheet-set-snap-note" id="v2-mode-snap-note"></span>
+        </label>
+        <span class="mode-exit">
+          <button type="button" id="v2-mode-cancel">Cancel</button>
+          <button type="button" class="primary" id="v2-mode-done">Done</button>
+          <kbd id="v2-mode-esc" title="Escape">Esc</kbd>
+          <button type="button" class="mode-close" id="v2-mode-close" aria-label="Close" title="Close">?</button>
+        </span>
+      </div>
       <div class="stage-row" id="v2-stage-row">
         <aside class="level-widget panel" id="v2-level-widget" hidden>
           <h2>Active cut</h2>
-          <p class="level-cut-name" id="v2-cut-name">—</p>
+          <p class="level-cut-name" id="v2-cut-name">�</p>
           <p class="level-cut-meta">
-            <span id="v2-cut-elev">—</span>
-            <span class="level-kind-chip" id="v2-cut-kind">—</span>
+            <span id="v2-cut-elev">�</span>
+            <span class="level-kind-chip" id="v2-cut-kind">�</span>
           </p>
           <label class="level-isolate" title="Show only this cut. Off ghosts the neighbouring level and keeps the tracing sheet.">
             <input type="checkbox" id="v2-level-isolate" />
@@ -107,7 +151,7 @@
                aria-label="Building cut" aria-orientation="vertical"
                aria-valuemin="0" tabindex="0"></svg>
           </div>
-          <p class="hint">Drag the rail, or click the section to jump. <kbd>↑</kbd> <kbd>↓</kbd> step;
+          <p class="hint">Drag the rail, or click the section to jump. <kbd>?</kbd> <kbd>?</kbd> step;
             <kbd>PgUp</kbd> <kbd>PgDn</kbd> skip a storey.</p>
           <ul class="level-stations" id="v2-level-stations"></ul>
           <button type="button" class="panel-resize panel-resize-levels" id="v2-resize-levels"
@@ -117,11 +161,12 @@
         <div class="canvas-wrap planner-canvas-wrap" id="v2-canvas-wrap">
         <div class="planner-tools plan-float-tools" role="toolbar" aria-label="Plan tools">
           <button type="button" data-tool="select" class="active">Select</button>
+          <button type="button" id="v2-pan" aria-pressed="false" title="Pan the plan with the left button. Esc or Pan again goes back to the tool you were using. The middle button, or Alt-drag, pans without switching.">Pan</button>
           <button type="button" id="v2-undo">Undo</button>
           <div class="seg" role="group" aria-label="Show on plan">
             <button type="button" data-plan-status="both" class="active">Both</button>
             <button type="button" data-plan-status="existing">Existing</button>
-            <button type="button" data-plan-status="planned">Planned</button>
+            <button type="button" data-plan-status="planned">Proposed</button>
           </div>
           <span class="header-modify" id="v2-header-modify" hidden>
             <button type="button" id="v2-hm-rotate">Rotate</button>
@@ -158,7 +203,7 @@
             <label id="v2-ctx-ang-wrap">Angle
               <span class="plan-context-field">
                 <input id="v2-ctx-ang" type="text" inputmode="decimal" autocomplete="off" />
-                <span>°</span>
+                <span>�</span>
               </span>
             </label>
             <label id="v2-ctx-w-wrap" hidden>Width
@@ -185,49 +230,22 @@
         </div>
         <div class="legend" id="v2-legend" hidden>
           <span class="existing"><i></i>Existing</span>
-          <span class="planned"><i></i>Planned</span>
+          <span class="planned"><i></i>Proposed</span>
         </div>
         <div class="planner-size-hud" id="v2-size-hud" hidden>
           <label id="v2-hud-w-label"><span id="v2-hud-w-name">Width</span>
             <input id="v2-hud-w" type="text" inputmode="decimal" autocomplete="off" />
           </label>
-          <span class="planner-size-times" id="v2-hud-times" aria-hidden="true">×</span>
+          <span class="planner-size-times" id="v2-hud-times" aria-hidden="true">�</span>
           <label id="v2-hud-h-label">Height
             <input id="v2-hud-h" type="text" inputmode="decimal" autocomplete="off" />
           </label>
           <span class="planner-size-unit">mm</span>
           <p class="hint" id="v2-hud-hint">Click the opposite corner, or type millimetres. Tab switches width / height.</p>
         </div>
-        <div class="planner-underlay-panel" id="v2-underlay-panel" hidden>
-          <strong>Underlay</strong>
-          <label>Opacity
-            <input id="v2-underlay-opacity" type="range" min="0" max="100" step="1" />
-          </label>
-          <label>Rotation
-            <span class="plan-context-field">
-              <input id="v2-underlay-rotation" type="text" inputmode="decimal" autocomplete="off" />
-              <span>°</span>
-            </span>
-          </label>
-          <button type="button" id="v2-underlay-rotate-ccw" title="Rotate 90° left">⟲ 90°</button>
-          <button type="button" id="v2-underlay-rotate-cw" title="Rotate 90° right">⟳ 90°</button>
-          <p class="hint">Drag a corner to resize, the top handle to rotate (Shift snaps to 15°), or the sheet to move it. Hide, show and set scale live on the Build ribbon.</p>
-        </div>
-        <div class="planner-underlay-panel" id="v2-calibrate-panel" hidden>
-          <strong>Set scale</strong>
-          <p class="hint" id="v2-calibrate-hint">Click a point, then a second point a known distance away. After that you can drag a corner to resize.</p>
-          <label id="v2-calibrate-distance-wrap" hidden>Real distance
-            <span class="plan-context-field">
-              <input id="v2-calibrate-distance" type="text" inputmode="decimal" autocomplete="off" />
-              <span>mm</span>
-            </span>
-          </label>
-          <button type="button" id="v2-calibrate-confirm" hidden>Set scale</button>
-          <button type="button" id="v2-calibrate-cancel">Cancel</button>
-        </div>
         <div class="planner-underlay-panel" id="v2-satellite-panel" hidden>
           <strong>Satellite view</strong>
-          <p class="hint" id="v2-satellite-hint">Start typing a South African address and pick a match, or paste coordinates such as -25.7479, 28.2293. About 200 × 200 m around it loads at true scale, centred on your view.</p>
+          <p class="hint" id="v2-satellite-hint">Start typing a South African address and pick a match, or paste coordinates such as -25.7479, 28.2293. About 200 � 200 m around it loads at true scale, centred on your view.</p>
           <label class="satellite-query">Address or coordinates
             <input id="v2-satellite-query" type="text" autocomplete="off" spellcheck="false" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="v2-satellite-suggest" placeholder="94 Aberdeen Road, Clubview, Centurion" />
           </label>
@@ -286,7 +304,9 @@
         </div>
       </div>
       <!-- Route profile: sits under the plan, as in the services mock, and
-           follows whichever route or node is selected. Drawn by ui.js.
+           follows whichever route or node is selected. A click on empty plan
+           leaves it open; Exit, Escape, or selecting another object closes it.
+           Drawn by ui.js.
            The top edge is a height handle; the canvas fills whatever is left. -->
       <div class="svc-profile-dock" id="v2-service-profile-dock" hidden>
         <button type="button" class="svc-profile-resize" id="v2-resize-profile"
@@ -299,6 +319,8 @@
             <button type="button" data-profile-mode="step" title="Dragging a node makes a vertical rise or drop (90 degrees). Hold Shift to use Slope for one drag.">Step</button>
             <button type="button" data-profile-mode="slope" title="Dragging a node changes only its height, so the runs beside it slope (use for drainage falls). Hold Shift to use Step for one drag.">Slope</button>
           </span>
+          <button type="button" class="svc-profile-exit" id="v2-profile-exit"
+                  title="Close the route profile and the Services panel. A click on empty plan leaves them open. Escape does the same.">Exit</button>
         </div>
         <canvas id="v2-service-profile-canvas"></canvas>
       </div>
@@ -311,7 +333,7 @@
               aria-label="Resize context panel" title="Drag to resize" tabindex="0"></button>
       <header>
         <h2 id="v2-palette-title">Inspector</h2>
-        <span id="v2-inspect-kicker">—</span>
+        <span id="v2-inspect-kicker">�</span>
       </header>
       <p class="hint ctx-empty" id="v2-inspect-empty">Select a wall, room, roof or opening to edit its type and identity, or pick a tool on the ribbon to start drawing.</p>
       <div class="ctx-body" id="v2-ctx-body">
@@ -354,7 +376,7 @@
             <legend>Status</legend>
             <div class="planner-status-opts">
               <label><input type="radio" name="v2-ctx-status" value="existing" /> Existing</label>
-              <label><input type="radio" name="v2-ctx-status" value="planned" /> Planned</label>
+              <label><input type="radio" name="v2-ctx-status" value="planned" /> Proposed</label>
             </div>
           </fieldset>
           <label id="v2-ctx-form-wrap" hidden>Form
@@ -368,7 +390,7 @@
           <label id="v2-ctx-pitch-wrap" hidden>Pitch
             <span class="plan-context-field">
               <input id="v2-ctx-pitch" type="text" inputmode="decimal" autocomplete="off" />
-              <span>°</span>
+              <span>�</span>
             </span>
           </label>
           <label id="v2-ctx-ridge-wrap" hidden>Ridge
@@ -408,39 +430,39 @@
         <section class="panel">
           <header>
             <h2>Compliance</h2>
-            <span id="v2-rules-count">—</span>
+            <span id="v2-rules-count">�</span>
           </header>
           <div class="planner-fields" id="v2-rules">
-            <p class="hint">Loading pack…</p>
+            <p class="hint">Loading pack�</p>
           </div>
         </section>
         <section class="panel">
           <header>
             <h2>Data quality</h2>
-            <span id="v2-gap-count">—</span>
+            <span id="v2-gap-count">�</span>
           </header>
           <div class="planner-fields" id="v2-gaps">
-            <p class="hint">Loading pack…</p>
+            <p class="hint">Loading pack�</p>
           </div>
         </section>
         <section class="panel" id="v2-foundation-report-panel">
           <header>
             <h2>Foundations</h2>
-            <span id="v2-foundation-count">—</span>
+            <span id="v2-foundation-count">�</span>
           </header>
           <div class="planner-fields" id="v2-foundation-report"></div>
         </section>
         <section class="panel" id="v2-attach-report-panel">
           <header>
             <h2>Attached bases</h2>
-            <span id="v2-attach-count">—</span>
+            <span id="v2-attach-count">�</span>
           </header>
           <div class="planner-fields" id="v2-attach-report"></div>
         </section>
         <section class="panel" id="v2-compile-panel" hidden>
           <header>
             <h2>Take-off result</h2>
-            <span id="v2-compile-kicker">—</span>
+            <span id="v2-compile-kicker">�</span>
           </header>
           <div class="planner-fields" id="v2-compile-out"></div>
         </section>
@@ -457,7 +479,7 @@
       <header>
         <div class="schedule-title">
           <h2 id="v2-schedule-title">Schedule</h2>
-          <span id="v2-schedule-kicker">—</span>
+          <span id="v2-schedule-kicker">�</span>
         </div>
         <button type="button" id="v2-schedule-peek">Side view</button>
         <button type="button" id="v2-schedule-close">Close</button>
@@ -490,20 +512,20 @@
         <div class="seg" role="group" aria-label="Show in 3D">
           <button type="button" data-mass-status="both" class="active">Both</button>
           <button type="button" data-mass-status="existing">Existing</button>
-          <button type="button" data-mass-status="planned">Planned</button>
+          <button type="button" data-mass-status="planned">Proposed</button>
         </div>
         <label class="mass-services" title="Hot water, cold water, drainage, electrical and gas. Drawn in each system's colour, including vertical rises. A run with no height set is left out.">
           <input type="checkbox" id="v2-mass-services" checked />
           Services
         </label>
-        <span id="v2-mass-caption">Drag to orbit · scroll to zoom</span>
+        <span id="v2-mass-caption">Drag to orbit � scroll to zoom</span>
         <button type="button" id="v2-mass-generate">Generate model</button>
         <button type="button" id="v2-mass-show-3d" hidden>Show 3D</button>
         <button type="button" id="v2-mass-close">Close</button>
       </header>
       <div class="mass-split" id="v2-mass-split">
         <div class="canvas-wrap mass-wrap mass-plan-wrap" id="v2-mass-plan-wrap" hidden>
-          <p class="mass-pane-label">Plan · distances</p>
+          <p class="mass-pane-label">Plan � distances</p>
           <canvas id="v2-mass-plan-canvas"></canvas>
         </div>
         <div class="canvas-wrap mass-wrap" id="v2-mass-wrap">
@@ -531,14 +553,14 @@
   <div class="type-detail-overlay" id="v2-type-detail-overlay" hidden>
     <div class="panel type-detail-panel">
       <header>
-        <button type="button" id="v2-type-detail-prev" class="type-detail-step" aria-label="Previous type" title="Previous type (←)">
+        <button type="button" id="v2-type-detail-prev" class="type-detail-step" aria-label="Previous type" title="Previous type (?)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
         </button>
         <div class="type-detail-heading">
           <h2 id="v2-type-detail-name">Type</h2>
           <span id="v2-type-detail-meta" class="type-detail-meta"></span>
         </div>
-        <button type="button" id="v2-type-detail-next" class="type-detail-step" aria-label="Next type" title="Next type (→)">
+        <button type="button" id="v2-type-detail-next" class="type-detail-step" aria-label="Next type" title="Next type (?)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>
         </button>
         <span id="v2-type-detail-count" class="type-detail-count"></span>
@@ -612,7 +634,7 @@
             </label>
             <button type="button" id="v2-sheet-delete">Delete sheet</button>
           </div>
-          <p class="hint" id="v2-sheet-empty-fields">Add a sheet to lay the current plan out on an A0–A4 title block.</p>
+          <p class="hint" id="v2-sheet-empty-fields">Add a sheet to lay the current plan out on an A0�A4 title block.</p>
           <div class="canvas-wrap sheet-canvas-wrap">
             <canvas id="v2-sheet-canvas"></canvas>
             <div class="empty" id="v2-sheet-empty">
@@ -684,8 +706,8 @@
         <div class="account-head">
           <span class="account-avatar account-avatar-lg" id="v2-account-avatar-lg">?</span>
           <div class="account-who">
-            <strong id="v2-account-name">—</strong>
-            <span id="v2-account-email">—</span>
+            <strong id="v2-account-name">�</strong>
+            <span id="v2-account-email">�</span>
             <span class="account-chips">
               <em id="v2-account-plan">Studio</em>
               <em id="v2-account-role">Owner</em>
@@ -696,32 +718,32 @@
           <div class="account-license">
             <div class="account-license-row">
               <span>Licence</span>
-              <strong id="v2-account-license-left">—</strong>
+              <strong id="v2-account-license-left">�</strong>
             </div>
             <div class="account-meter" aria-hidden="true">
               <i id="v2-account-meter"></i>
             </div>
             <p class="account-license-meta">
-              <span id="v2-account-license-renews">—</span>
-              <span id="v2-account-seats">—</span>
+              <span id="v2-account-license-renews">�</span>
+              <span id="v2-account-seats">�</span>
             </p>
           </div>
           <dl class="account-facts">
             <div>
               <dt>Firm</dt>
-              <dd id="v2-account-firm">—</dd>
+              <dd id="v2-account-firm">�</dd>
             </div>
             <div>
               <dt>Address</dt>
-              <dd id="v2-account-address">—</dd>
+              <dd id="v2-account-address">�</dd>
             </div>
             <div>
               <dt>Member</dt>
-              <dd id="v2-account-member">—</dd>
+              <dd id="v2-account-member">�</dd>
             </div>
             <div>
               <dt>Jobs</dt>
-              <dd id="v2-account-jobs">—</dd>
+              <dd id="v2-account-jobs">�</dd>
             </div>
           </dl>
         </div>
@@ -841,12 +863,12 @@
             </div>
             <div class="about-info-content">
               <span class="about-info-label">Catalogue</span>
-              <span class="about-info-value" id="v2-about-catalogue">Loading…</span>
+              <span class="about-info-value" id="v2-about-catalogue">Loading�</span>
             </div>
           </div>
         </div>
         <div class="about-description">
-          <p>StudioPractice helps a builder get to four things: a plan, a price, a picture, and a permit. Draw the job, price it, show the client what it will look like, and produce the compliance documentation the municipality asks for. Types, levels, sheets and title blocks come from the firm’s Revit template. Unknown facts stay unknown — they are asked for, never guessed.</p>
+          <p>StudioPractice helps a builder get to four things: a plan, a price, a picture, and a permit. Draw the job, price it, show the client what it will look like, and produce the compliance documentation the municipality asks for. Types, levels, sheets and title blocks come from the firm�s Revit template. Unknown facts stay unknown � they are asked for, never guessed.</p>
         </div>
         <div class="about-features">
           <div class="about-feature">
@@ -871,12 +893,12 @@
           </div>
           <div class="about-feature">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
-            Export IFC for Revit File → Open
+            Export IFC for Revit File ? Open
           </div>
         </div>
       </div>
       <div class="about-footer">
-        <span class="about-copyright">© 2026 The Studio Practice</span>
+        <span class="about-copyright">� 2026 The Studio Practice</span>
         <button type="button" class="primary" id="v2-about-ok">Close</button>
       </div>
     </div>
@@ -918,6 +940,6 @@
     </form>
   </div>
 
-  <script type="module" src="./ui.js?v=20261023-schedule-type"></script>
+  <script type="module" src="./ui.js?v=20261028-eye"></script>
 </body>
 </html>

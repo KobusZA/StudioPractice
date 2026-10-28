@@ -12,14 +12,14 @@
 //    overlap. Exact for rectangles, which is everything this UI draws.
 //  - Free-angle walls are drawable (a v1 impossibility) but not snapped to
 //    common angles; hold Shift while dragging an end to keep the current
-//    heading. Walls are click–click and chain from the last end. Length is
+//    heading. Walls are click�click and chain from the last end. Length is
 //    labelled on the visible part of the wall (so zooming into an end does
 //    not hide it), and in the options strip with angle.
 
 import { complianceGaps, normalizePackUnits, GEOMETRY_LENGTH_KEYS } from "./schema.js";
 import { RULE_PACK, evaluateCompliance, groupFindingsByPart, summarizeFindings } from "./rules.js";
 import { deriveBuildingLine, hitPropertyLine, setBuildingLine, setPropertyLine, setSgReference } from "./site.js?v=20261015-property";
-import { HINTS, firstTabId, renderRibbon } from "./ribbon.js?v=20261022-ribbon-fit";
+import { HINTS, firstTabId, renderRibbon } from "./ribbon.js?v=20261026-inspector";
 import { closeOverflowMenus, decorateRibbon, fitRibbon } from "./ribbon-fit.js?v=20261022-ribbon-fit";
 import {
   ghostContext,
@@ -51,9 +51,35 @@ import {
 } from "./modify.js?v=20261022-wall-loc";
 import {
   calibrate,
+  activateSheetForLevel,
+  alignmentPointWorld,
+  markAlignmentPoint,
+  adoptSheetSet,
+  chooseSheet,
   clearUnderlay,
+  commitPendingPdf,
+  attachSourceFile,
+  dropSourceFile,
+  isSourceOpen,
+  sourcesNeedingFile,
+  ghostSheetIndexes,
+  setGhostSheets,
+  discardPendingPdf,
   drawUnderlay,
+  ensureSheetBitmap,
+  isPageBitmapReady,
+  hasOpenPdf,
   isSatelliteUnderlay,
+  openPdf,
+  sessionPdfBytes,
+  setPdfRestorePending,
+  isPdfRestorePending,
+  showStoredUnderlay,
+  renderReferencePage,
+  renderThumbnail,
+  setSharpListener,
+  setSharpReady,
+  sheetSetNeedsPdf,
   loadSatelliteUnderlay,
   loadUnderlayFile,
   moveUnderlayTo,
@@ -62,12 +88,27 @@ import {
   scaleUnderlayFromCorner,
   setUnderlayOpacity,
   setUnderlayRotation,
+  setUnderlayPinned,
+  stashUnderlay,
+  restoreStashedUnderlay,
   toggleUnderlayHidden,
+  isUnderlayHidden,
+  setUnderlayHidden,
+  setShownSheetsReady,
   underlayBitmap,
   underlayCorners,
+  underlayFrameBounds,
   underlayPixelFromWorld,
   underlayWorldFromPixel,
-} from "./underlay.js?v=20261015-geocode";
+  ensurePageLinework,
+  pageLinework,
+  pageLineworkStatus,
+  setLineworkListener,
+  snapUnderlayWorld,
+  snapReferencePixel,
+} from "./underlay.js?v=20261028-eye";
+import { alignablePages, applyCeilingHeights, isPlanPage, mirrorLegacySource, pagesOfSource, sameSheetGeometry } from "./sheet-set.js";
+import { createSheetUi } from "./sheet-ui.js?v=20261028-eye";
 import { SATELLITE_ATTRIBUTION, locateSuggestion, suggestAddresses } from "./satellite.js?v=20261015-geocode";
 import { pickedDimension, planDimensionLines } from "./dimensions.js?v=20260917-measure";
 import {
@@ -97,6 +138,7 @@ import {
   collectionFor,
   effectiveLevel,
   emptyDoc,
+  hasPlanDrawing,
   nid,
   normalizeDoc,
   objectByRef,
@@ -135,7 +177,7 @@ import {
 import { exportDxf } from "./dxf.js";
 import { exportIfc } from "./ifc.js";
 import { boqRows, bomRows, scheduleTotal } from "./schedule.js";
-import { createMassingView, lookFromClicks, EYE_HEIGHT_M, facesFromPayload, faceStyle, massingLayer, hatchPolygon } from "./massing.js";
+import { createMassingView, lookFromClicks, EYE_HEIGHT_M, facesFromPayload, faceStyle, massingLayer, hatchPolygon, strokeFaceEdges } from "./massing.js";
 import { drawLookPlan, lookPlanCaption } from "./look-plan.js";
 import { sectionFromClicks, createSection, ensureSections, sectionById, clipFacesForSection, sectionUV } from "./section.js";
 import { ELEVATION_DIRECTIONS, elevationDirectionLabel, createElevation, ensureElevations, elevationById } from "./elevation.js";
@@ -210,7 +252,7 @@ import { SERVICE_SYSTEM_INFO, pruneServices, serviceLayerVisible, serviceSystems
 import { serviceInspectorModel, servicePanelHtml } from "./service-panel.js";
 import { clearanceText, justifyPoint, pipeRadius, runWallRelation, serviceWallFlags, setRunClearance } from "./service-walls.js";
 import { profileObstructions } from "./service-obstructions.js";
-import { drawServiceDraft, drawServiceGhost, drawServiceHover, drawServiceLevel, drawServiceMoveRuns, drawServiceProfile, drawServiceSelection } from "./service-render.js";
+import { drawServiceDraft, drawServiceGhost, drawServiceHover, drawServiceLevel, drawServiceMoveRuns, drawServiceProfile, drawServiceSelection, servicePlanWidth } from "./service-render.js";
 
 const GRID = 0.1;
 const HANDLE = 8;
@@ -280,17 +322,29 @@ const el = {
   hudW: document.getElementById("v2-hud-w"),
   hudH: document.getElementById("v2-hud-h"),
   hudHint: document.getElementById("v2-hud-hint"),
-  underlayPanel: document.getElementById("v2-underlay-panel"),
+  modeBar: document.getElementById("v2-mode-bar"),
+  modeName: document.getElementById("v2-mode-name"),
+  modeStep: document.getElementById("v2-mode-step"),
+  modePrompt: document.getElementById("v2-mode-prompt"),
+  modeSheet: document.getElementById("v2-mode-sheet"),
+  modeCancel: document.getElementById("v2-mode-cancel"),
+  modeDone: document.getElementById("v2-mode-done"),
+  modeEsc: document.getElementById("v2-mode-esc"),
+  modeClose: document.getElementById("v2-mode-close"),
+  modeSnapNote: document.getElementById("v2-mode-snap-note"),
   underlayOpacity: document.getElementById("v2-underlay-opacity"),
   underlayRotation: document.getElementById("v2-underlay-rotation"),
   underlayRotateCcw: document.getElementById("v2-underlay-rotate-ccw"),
   underlayRotateCw: document.getElementById("v2-underlay-rotate-cw"),
-  calibratePanel: document.getElementById("v2-calibrate-panel"),
-  calibrateHint: document.getElementById("v2-calibrate-hint"),
+  underlayPin: document.getElementById("v2-underlay-pin"),
   calibrateDistanceWrap: document.getElementById("v2-calibrate-distance-wrap"),
   calibrateDistance: document.getElementById("v2-calibrate-distance"),
-  calibrateConfirm: document.getElementById("v2-calibrate-confirm"),
-  calibrateCancel: document.getElementById("v2-calibrate-cancel"),
+  calibrateRestart: document.getElementById("v2-calibrate-restart"),
+  alignSheets: document.getElementById("v2-align-sheets"),
+  alignNext: document.getElementById("v2-align-next"),
+  alignClear: document.getElementById("v2-align-clear"),
+  calibrateSnap: document.getElementById("v2-calibrate-snap"),
+  calibrateSnapWrap: document.getElementById("v2-calibrate-snap-wrap"),
   satellitePanel: document.getElementById("v2-satellite-panel"),
   satelliteHint: document.getElementById("v2-satellite-hint"),
   satelliteQuery: document.getElementById("v2-satellite-query"),
@@ -500,6 +554,9 @@ let openProject = null;
 let openDrawingId = null;
 
 let tool = "select";
+// Pan is a view gesture, not a draw tool. The tool and any draft stay put
+// and come back when Pan is pressed again or Escape is pressed.
+let panMode = false;
 let placeSkuId = null;
 let placeStatus = "planned";
 let planStatusFilter = "both";
@@ -519,10 +576,10 @@ let cam = { scale: 48, ox: 80, oy: 60 };
 // Pixels per metre. 3000 is a few millimetres across the screen. 3 is far
 // enough out that the 200 m satellite, and the ground around it, fit on a
 // laptop; the old floor of 12 stopped at roughly 100 m.
-const MIN_VIEW_SCALE = 3;
+const MIN_VIEW_SCALE = 0.1; // a 1:500 A1 site plan is ~420 m across, so the floor has to allow it
 const MAX_VIEW_SCALE = 3000;
 let drag = null;
-// Click–click wall: first click writes the start, the free end follows the
+// Click�click wall: first click writes the start, the free end follows the
 // pointer with the button up, second click commits and chains from that end.
 let wallDraft = null;
 // Where the line under the cursor sits on the wall being drawn: "center",
@@ -536,7 +593,7 @@ let wallCorner = "against";
 // Space on a wall that started against another: the side is chosen from that
 // wall, so this swaps it for the draft instead of changing the setting.
 let wallSideFlip = false;
-// Click–click room/slab/roof rectangle: first click is one corner, second
+// Click�click room/slab/roof rectangle: first click is one corner, second
 // click is the opposite. Not a press-and-hold box.
 let shapeDraft = null;
 let beamStart = null;
@@ -612,6 +669,48 @@ let wallsCache = [];
 // join/alignment (and, when not latched, how far the pointer is from it).
 // Drawn as tracking lines; cleared when the tool is not snap-aware.
 let snapGuide = null;
+// Snap calibration / tracing clicks to the PDF's own endpoints and crossings.
+// Session-only; on by default once a plan-set page is showing.
+let snapToPdf = true;
+
+function pdfSnapAvailable() {
+  return hasOpenPdf() && Number.isInteger(store.doc?.underlay?.sheetPage) && underlayIsVisible();
+}
+
+function requestPdfLinework(pageIndex = store.doc?.underlay?.sheetPage) {
+  if (!snapToPdf || !hasOpenPdf() || !Number.isInteger(pageIndex)) return;
+  if (pageLineworkStatus(pageIndex) !== "idle") return;
+  ensurePageLinework(pageIndex);
+}
+
+function pdfSnapTarget(wx, wy) {
+  if (!snapToPdf || !pdfSnapAvailable()) return null;
+  requestPdfLinework();
+  return snapUnderlayWorld(store.doc.underlay, wx, wy, SNAP_PIXEL_TOL / cam.scale);
+}
+
+/** True while a click would miss PDF corners because the page is still being read. */
+function pdfLineworkPending() {
+  if (!snapToPdf || !pdfSnapAvailable()) return false;
+  const status = pageLineworkStatus(store.doc.underlay.sheetPage);
+  return status === "idle" || status === "loading";
+}
+
+/** Draw, trace, and sheet-alignment clicks. These are the ones that must wait for the index. */
+function clickSnapsToPdf() {
+  return snapPreviewTool() || tool === "align" || tool === "calibrate" || tool === "region" || tool === "separation";
+}
+
+function applyPdfPick(wx, wy) {
+  const hit = pdfSnapTarget(wx, wy);
+  return hit ? { x: hit.x, y: hit.y, kind: hit.kind } : { x: wx, y: wy };
+}
+
+function setSnapToPdf(on) {
+  snapToPdf = Boolean(on);
+  if (snapToPdf) requestPdfLinework();
+  render();
+}
 // Route points being dragged: they must not snap to themselves, but the rest of
 // the route (and every wall) is a target. Set only around the snap call.
 let serviceMoveIds = null;
@@ -643,7 +742,7 @@ function probeAxis(side) {
 let activeLevel = null;
 
 // Off (default): ghost the neighbouring level, like Revit's look-down
-// underlay — or look-up when nothing sits below, so a foundation plan can
+// underlay � or look-up when nothing sits below, so a foundation plan can
 // still see the walls it carries. On: this cut only. The neighbour, the
 // tracing sheet, and (on a ceiling or roof cut) the rest of the storey are
 // not drawn. Hit-testing stays on what is drawn. The widget checkbox and
@@ -700,7 +799,7 @@ function syncLookPlan(cam, payload) {
   if (!isLook || !el.massPlanCanvas) return;
   drawLookPlan(el.massPlanCanvas, payload, cam);
   if (el.massCaption) {
-    el.massCaption.textContent = `${lookPlanCaption(payload, cam)} · drag to look around · scroll to zoom`;
+    el.massCaption.textContent = `${lookPlanCaption(payload, cam)} � drag to look around � scroll to zoom`;
   }
 }
 
@@ -845,7 +944,7 @@ async function restoreSession() {
  * Signed in: recover anything left in the old browser slot, then land on the
  * job list. The canvas is a drawing that already has a row; opening one is a
  * choice, not the default. Reconnects that already have a job attached stay
- * there — the retry after a dropped connection must not yank the work away.
+ * there � the retry after a dropped connection must not yank the work away.
  */
 async function enterApp() {
   try {
@@ -931,6 +1030,10 @@ function applyOpenedJob({ project, drawing }) {
   loadRateBook(project);
 
   clearUnderlay(store.doc);
+  // A fetch started for the job being left must not open its PDF onto this one.
+  underlayFetchToken += 1;
+  underlayFetchFor = null;
+  setPdfRestorePending(false);
   store.doc = normalizeDoc(drawing.doc);
   if (!store.doc.packId) store.doc.packId = pack.id;
   store.clearSelection();
@@ -967,9 +1070,9 @@ function applyOpenedJob({ project, drawing }) {
   render();
 }
 
-/** After Open / Create, put the whole drawing on screen. New empty jobs stay put. */
+/** After Open / Create, put the whole drawing on screen. A plan sheet counts even when nothing has been traced yet, so the PDF is in view. New empty jobs stay put. */
 function frameDrawing(doc) {
-  const b = drawingBounds(doc);
+  const b = unionBounds(drawingBounds(doc), underlayFrameBounds(doc, activeLevel));
   if (!b || !el.canvas) return;
   const rect = el.canvas.getBoundingClientRect();
   if (rect.width < 8 || rect.height < 8) return;
@@ -981,6 +1084,17 @@ function frameDrawing(doc) {
   const cy = (b.minY + b.maxY) / 2;
   cam.ox = rect.width / 2 - cx * cam.scale;
   cam.oy = rect.height / 2 - cy * cam.scale;
+}
+
+function unionBounds(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  return {
+    minX: Math.min(a.minX, b.minX),
+    minY: Math.min(a.minY, b.minY),
+    maxX: Math.max(a.maxX, b.maxX),
+    maxY: Math.max(a.maxY, b.maxY),
+  };
 }
 
 function offlineMessage(error) {
@@ -1024,7 +1138,7 @@ function hideAuth() {
   resizeCanvas();
   // The ribbon's boot-time fit ran while .chrome was still display:none
   // (body.auth-pending), so every group measured as zero-width and stayed
-  // at its unshrunk "large" scale — the ribbon then looks like it belongs to
+  // at its unshrunk "large" scale � the ribbon then looks like it belongs to
   // a much wider window until something re-triggers fitRibbon (a resize, or
   // a Simple/Full click, which redraws and refits). Now that the chrome is
   // actually visible, refit for real once layout has settled.
@@ -1148,7 +1262,7 @@ function wireAuth() {
     const orgName = el.authOrg.value.trim();
 
     el.authSubmit.disabled = true;
-    el.authSubmit.textContent = authMode === "sign-in" ? "Signing in…" : "Creating…";
+    el.authSubmit.textContent = authMode === "sign-in" ? "Signing in�" : "Creating�";
     setAuthError("");
     try {
       currentSession = authMode === "sign-in"
@@ -1217,12 +1331,12 @@ function drawAccount() {
   setText(el.accountFirm, card.orgName);
   setText(el.accountAddress, card.address.lines.join("\n"));
   setText(el.accountMember, card.memberSince
-    ? `${card.memberFor} · since ${formatDate(card.memberSince)}`
-    : "—");
+    ? `${card.memberFor} � since ${formatDate(card.memberSince)}`
+    : "�");
   setText(el.accountJobs, card.jobCount === 1 ? "1 live job" : `${card.jobCount} live jobs`);
   if (el.accountMeter) el.accountMeter.style.width = `${Math.round(card.license.yearProgress * 100)}%`;
   if (el.accountOpen) {
-    el.accountOpen.title = `${card.name} · ${card.license.level}`;
+    el.accountOpen.title = `${card.name} � ${card.license.level}`;
   }
 }
 
@@ -1298,7 +1412,7 @@ function closeLibrary() {
   // With no job open there is nothing behind this but a canvas that belongs to
   // no row and cannot be saved, so the way out is New or Open, not Close.
   if (!openDrawingId) {
-    setLibraryMessage("Open a drawing or start a new one — there is nothing open behind this.");
+    setLibraryMessage("Open a drawing or start a new one � there is nothing open behind this.");
     return;
   }
   el.libraryOverlay.hidden = true;
@@ -1336,7 +1450,7 @@ function syncLibrarySurface() {
 
 /**
  * Deleted jobs are asked for too. A soft delete that disappeared from every
- * surface would not be undoable from anywhere, and the library is where §5 says
+ * surface would not be undoable from anywhere, and the library is where �5 says
  * the undo lives.
  */
 async function refreshLibrary({ keepMessage = false } = {}) {
@@ -1426,7 +1540,7 @@ function libraryRow(project, blocked) {
       fields.erfLabel,
       fields.deleted ? "Deleted" : isOpen ? "Open now" : null,
       fields.lastOpened ? `Last opened ${fields.lastOpened}` : "Never opened",
-    ].filter(Boolean).join(" · ");
+    ].filter(Boolean).join(" � ");
     main.append(name, meta);
     main.disabled = fields.deleted || isOpen;
     main.title = fields.deleted
@@ -1708,7 +1822,7 @@ function drawSyncState(state) {
 /**
  * A 409 is the one save state the user has to answer, so it gets a bar with two
  * buttons rather than a word in the chrome. Neither is a default and neither is
- * pre-selected: choosing for them is the silent merge §4 refuses.
+ * pre-selected: choosing for them is the silent merge �4 refuses.
  */
 function drawConflictBar(state) {
   if (!el.conflict) return;
@@ -1716,7 +1830,7 @@ function drawConflictBar(state) {
   el.conflict.hidden = !conflicted;
   if (!conflicted) return;
   el.conflictText.textContent = state.conflict?.doc
-    ? "This drawing changed somewhere else — another tab, or the tablet on site."
+    ? "This drawing changed somewhere else � another tab, or the tablet on site."
     : "This drawing changed somewhere else, and that version could not be read.";
   // Nothing to reload if their document did not arrive with the refusal.
   el.conflictTheirs.disabled = !state.conflict?.doc;
@@ -1930,6 +2044,8 @@ function applySnap(wx, wy, exclude) {
   if (tool === "wall" && isFaceLocation(wallLocation)) targets = targets.filter((p) => p.kind !== "endpoint");
   const edges = collectSnapEdges(store.doc, snapOpts(exclude));
   const tol = SNAP_PIXEL_TOL / cam.scale;
+  const pdfHit = pdfSnapTarget(wx, wy);
+  if (pdfHit) targets.push(pdfHit);
   let result = snapPoint(wx, wy, targets, tol);
   // A corner wins; failing that, a point anywhere along a wall's face beats a
   // same-X/Y guide, so a wall can start against the side or end of another.
@@ -2240,8 +2356,9 @@ let levelInsertOpen = false;
  * mutated, so a re-export of the template cannot be polluted by a job. */
 function syncPackLevels() {
   const own = store.doc?.levels || [];
-  pack = own.length
-    ? { ...templatePack, levels: mergedLevels(templatePack.levels, own) }
+  const typedCeilings = Object.keys(store.doc?.sheetSet?.ceilingHeights || {}).length > 0;
+  pack = own.length || typedCeilings
+    ? { ...templatePack, levels: applyCeilingHeights(mergedLevels(templatePack.levels, own), store.doc?.sheetSet) }
     : templatePack;
 }
 
@@ -2657,8 +2774,8 @@ function selectStationIndex(idx, { keepSelection = false } = {}) {
     if (!keepSelection) store.clearSelection();
     drawRibbon();
   } else {
-    // Same storey, different cut (floor → ceiling). The armed tool may now
-    // be the wrong kind of work for this plan — refresh the hint without
+    // Same storey, different cut (floor ? ceiling). The armed tool may now
+    // be the wrong kind of work for this plan � refresh the hint without
     // rebuilding the whole ribbon.
     updateRibbonHint();
   }
@@ -2690,7 +2807,7 @@ function showHouseGhost(idx) {
 
 /** Paper chip beside the dashed preview cut. The old 8.5px copper text sat
  * at 40% opacity and was clipped by the viewBox, so long names such as
- * "First Floor (inferred) · Floor" were unreadable on hover. */
+ * "First Floor (inferred) � Floor" were unreadable on hover. */
 function layoutHouseGhostLabel(label, cutY) {
   if (!houseGhostLabel || !houseGhostBg) return;
   const xLeft = HOUSE_X0 - 8;
@@ -2847,10 +2964,11 @@ function statusStroke(status) {
 }
 
 /** Centred "Nothing drawn" copy is only for an idle plan. Hide it once the user
- * is working on the canvas: geometry, a selection, an armed tool, a draft, or
- * a visible underlay to trace. */
+ * is working on the canvas: any mark (services included; those do not turn on
+ * the Existing / Proposed legend), a selection, an armed tool, a draft, or a
+ * visible underlay to trace. */
 function shouldHidePlanEmpty() {
-  if (store.hasContent()) return true;
+  if (hasPlanDrawing(store.doc)) return true;
   if (store.selected.length) return true;
   if (underlaySelected || underlayIsVisible()) return true;
   if (drag || wallDraft || shapeDraft || beamStart || siteDraft?.length || sgPick || attachPick || calibration) return true;
@@ -2892,14 +3010,14 @@ function draw() {
   drawSelectionHighlights(levelWalls);
   const serviceRefs = refsToDraw().filter((r) => (r.kind === "serviceNode" || r.kind === "serviceEdge") && refShownOnPlan(r));
   if (serviceRefs.length) {
-    drawServiceSelection(ctx, { doc: store.doc, pack, refs: serviceRefs, worldToScreen, color: COLOUR.selection, levelId: activeLevel });
+    drawServiceSelection(ctx, { doc: store.doc, pack, refs: serviceRefs, worldToScreen, color: COLOUR.selection, levelId: activeLevel, scale: cam.scale });
   }
   if (hover && refShownOnPlan(hover) && !store.isSelected(hover.kind, hover.id) && tool === "select" && !drag) {
-    if (hover.kind === "serviceNode" || hover.kind === "serviceEdge") drawServiceHover(ctx, { doc: store.doc, ref: hover, worldToScreen, color: COLOUR.hover });
+    if (hover.kind === "serviceNode" || hover.kind === "serviceEdge") drawServiceHover(ctx, { doc: store.doc, pack, ref: hover, worldToScreen, color: COLOUR.hover, scale: cam.scale });
     else drawHover(hover);
   }
   const ghost = serviceGhost();
-  if (ghost) drawServiceGhost(ctx, { x: ghost.x, y: ghost.y, worldToScreen, colour: COLOUR.selection });
+  if (ghost) drawServiceGhost(ctx, { x: ghost.x, y: ghost.y, worldToScreen, colour: COLOUR.selection, doc: store.doc, pack, edgeId: ghost.edgeId, scale: cam.scale });
   if (tool === "service-route" && serviceRoute && serviceSystemShown(serviceUi.system)) {
     const from = serviceRouteFrom();
     if (from && hoverPoint) {
@@ -2912,6 +3030,7 @@ function draw() {
         colour: offWall ? "#b2451e" : (SERVICE_SYSTEM_INFO[serviceUi.system]?.colour || "#2675b8"),
         worldToScreen,
         note: offWall ? "not in a wall" : clearanceText(rel),
+        width: servicePlanWidth(pack, serviceUi.sku, cam.scale),
       });
     }
   }
@@ -2960,13 +3079,19 @@ function draw() {
   drawPropertyChrome();
   drawUnderlayHandles();
   if (calibration?.a) drawCalibration();
+  drawAlignmentMarks();
+  if ((tool === "calibrate" || tool === "align") && hoverPoint?.kind?.startsWith("pdf")) {
+    drawPdfSnapMarker(hoverPoint.x, hoverPoint.y, hoverPoint.kind);
+  }
   drawOpeningDraft(walls);
   if (isSatelliteUnderlay(store.doc) && underlayIsVisible()) drawSatelliteAttribution(rect);
+  if (store.doc.sheetSet && underlayIsVisible()) drawSheetCaption(rect);
 
   el.empty.hidden = shouldHidePlanEmpty();
   el.legend.hidden = !store.hasContent();
   syncServiceVisibility();
   el.canvasWrap.classList.toggle("tool-opening", tool === "door" || tool === "window");
+  el.canvasWrap.classList.toggle("tool-align", tool === "align");
 }
 
 /** Selection outline plus the four corner-scale handles and the free-rotate handle. */
@@ -2975,13 +3100,16 @@ const UNDERLAY_DRAG_KINDS = new Set(["underlay-move", "underlay-scale", "underla
 /** Corner handles while the sheet is selected, and again once both scale points are down so the measured length can be resized into. */
 function underlayHandlesActive() {
   if (!underlayIsVisible()) return false;
+  // A pinned sheet has no handles to grab, which is how it reads as locked.
+  if (store.doc.underlay?.pinned) return false;
   if (tool === "select" && underlaySelected) return true;
   if (tool === "calibrate" && calibration?.b) return true;
   return false;
 }
 
 function drawUnderlayHandles() {
-  if (!underlayHandlesActive()) return;
+  const pinnedView = tool === "select" && underlaySelected && underlayIsVisible() && Boolean(store.doc.underlay?.pinned);
+  if (!underlayHandlesActive() && !pinnedView) return;
   if (drag && !UNDERLAY_DRAG_KINDS.has(drag.kind)) return;
   const corners = underlayCorners(store.doc);
   if (!corners) return;
@@ -2998,6 +3126,11 @@ function drawUnderlayHandles() {
   });
   ctx.closePath();
   ctx.stroke();
+
+  if (pinnedView) {
+    ctx.restore();
+    return;
+  }
 
   for (const { x, y } of corners) {
     const [sx, sy] = worldToScreen(x, y);
@@ -3054,6 +3187,28 @@ function drawCalibration() {
   }
   ctx.restore();
   if (target) drawLengthLabel(a.x, a.y, target.x, target.y);
+}
+
+/** Copper cross + ring on a PDF endpoint or crossing, distinct from the steel wall snap. */
+function drawPdfSnapMarker(wx, wy, kind) {
+  const [sx, sy] = worldToScreen(wx, wy);
+  ctx.save();
+  ctx.strokeStyle = "#b2451e";
+  ctx.fillStyle = "#fffdf8";
+  ctx.lineWidth = 1.6;
+  ctx.beginPath();
+  ctx.arc(sx, sy, 6, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(sx - 9, sy);
+  ctx.lineTo(sx + 9, sy);
+  ctx.moveTo(sx, sy - 9);
+  ctx.lineTo(sx, sy + 9);
+  ctx.stroke();
+  const note = kind === "pdf-cross" ? "PDF crossing" : "PDF corner";
+  drawSnapTag(sx + 10, sy - 10, note);
+  ctx.restore();
 }
 
 function drawCameraDraft() {
@@ -3177,15 +3332,16 @@ let lastRibbonHasSelection = null;
 
 function render() {
   if (tool !== "select" || !propertyRing()) propertySelected = false;
+  syncSheets();
   draw();
   syncSizeHud();
   syncPlanContext();
-  syncUnderlayPanel();
-  syncCalibratePanel();
+  syncModeBar();
   syncSatellitePanel();
   syncSgPanel();
   syncLevelPanel();
   restoreSatelliteBitmap();
+  restoreStoredUnderlay();
   syncAttachPanel();
   syncHeaderModify();
   // Simple's Modify tab gates its whole content on selection; refresh it
@@ -3204,46 +3360,239 @@ function render() {
 function syncHeaderModify() {
   if (!el.headerModify) return;
   const model = store.selected.length > 0;
-  el.headerModify.hidden = !model && !propertySelected;
+  const canDelete = model || propertySelected;
+  el.headerModify.hidden = !canDelete;
   if (el.hmRotate) el.hmRotate.hidden = !model;
   if (el.hmCopy) el.hmCopy.hidden = !model;
+  if (el.hmDelete) el.hmDelete.hidden = !canDelete;
 }
 
-/** Opacity slider + rotation field, shown only while the underlay is the active selection (and not mid-calibration - the two panels would otherwise overlap). */
-function syncUnderlayPanel() {
-  if (!el.underlayPanel) return;
-  const show = tool === "select" && underlaySelected && underlayIsVisible();
-  el.underlayPanel.hidden = !show;
-  if (!show) return;
+// --- underlay mode bar -----------------------------------------------------
+//
+// Set scale, Adjust and Align sheets are modes: they change what a click on
+// the plan means. One docked strip says which one is on, which step it is on,
+// what to click next, and how to leave. Cancel puts the sheets back as they
+// were when the mode began; Done keeps the work.
+
+const MODE_NAMES = { scale: "Set scale", adjust: "Adjust", align: "Align sheets" };
+let barMode = null;
+let barSnapshot = null;
+let alignSheetsSignature = "";
+
+function currentUnderlayMode() {
+  if (tool === "calibrate") return "scale";
+  if (tool === "align") return "align";
+  if (tool === "select" && underlaySelected && underlayIsVisible()) return "adjust";
+  return null;
+}
+
+/** Placements and alignment marks as they are now, so Cancel can put them back in place (the objects are shared with doc.sheetSet, so they are restored, not replaced). */
+function captureUnderlayState() {
+  const doc = store.doc;
+  const pages = doc.sheetSet?.pages || [];
+  const placements = new Map();
+  for (const page of pages) if (page.placement) placements.set(page.placement, { ...page.placement, pinned: Boolean(page.placement.pinned) });
+  if (doc.underlay && !placements.has(doc.underlay)) placements.set(doc.underlay, { ...doc.underlay, pinned: Boolean(doc.underlay.pinned) });
+  return {
+    placements,
+    anchors: pages.map((page) => [page, page.anchor ? { ...page.anchor } : null]),
+    showing: Number.isInteger(doc.underlay?.sheetPage) ? doc.underlay.sheetPage : null,
+  };
+}
+
+function restoreUnderlayState(state) {
+  for (const [placement, copy] of state.placements) Object.assign(placement, copy);
+  for (const [page, anchor] of state.anchors) page.anchor = anchor;
+}
+
+/** Sheets an alignment runs across: every placed floor plan, including two drawings of the same floor, plus whatever is showing. */
+function alignPages() {
+  const set = store.doc.sheetSet;
+  if (!set) return [];
+  return alignablePages(set, store.doc.underlay?.sheetPage);
+}
+
+function syncModeBar() {
+  if (!el.modeBar) return;
+  const mode = currentUnderlayMode();
+  if (mode !== barMode) {
+    barMode = mode;
+    barSnapshot = mode ? captureUnderlayState() : null;
+  }
+  el.modeBar.hidden = !mode;
+  el.canvasWrap.classList.toggle("in-underlay-mode", Boolean(mode));
+  if (!mode) return;
+
   const u = store.doc.underlay;
-  if (document.activeElement !== el.underlayOpacity) {
-    el.underlayOpacity.value = String(Math.round((u.opacity ?? 0.55) * 100));
+  const set = store.doc.sheetSet;
+  const showingPage = set?.pages.find((p) => p.index === u?.sheetPage) || null;
+  const bar = el.modeBar;
+  for (const group of bar.querySelectorAll(".mode-controls")) group.hidden = group.dataset.mode !== mode;
+  el.modeName.textContent = MODE_NAMES[mode];
+
+  let step = "";
+  let prompt = "";
+  let primary = "Done";
+  let primaryDisabled = false;
+  let escLabel = "Esc";
+
+  if (mode === "scale") {
+    const aSet = Boolean(calibration?.a);
+    const bSet = Boolean(calibration?.b);
+    const n = !aSet ? 1 : !bSet ? 2 : 3;
+    step = `${n} of 3`;
+    prompt = [
+      "Click the first point of a dimension you know.",
+      "Click the second point.",
+      "Type the real distance, or drag a corner to resize.",
+    ][n - 1];
+    primary = "Set scale";
+    primaryDisabled = n < 3;
+    setHidden(el.calibrateDistanceWrap, !bSet);
+    setHidden(el.calibrateRestart, !aSet);
+    if (bSet && !calibration.distanceEdited && el.calibrateDistance && document.activeElement !== el.calibrateDistance) {
+      const guess = calibrationDistanceGuess(liveCalibrationPoint(calibration.a), liveCalibrationPoint(calibration.b));
+      if (guess) el.calibrateDistance.value = formatLengthMm(guess);
+    }
+    if (bSet && el.calibrateDistance && !bar.dataset.distanceFocused) {
+      bar.dataset.distanceFocused = "1";
+      setTimeout(() => {
+        el.calibrateDistance.focus();
+        el.calibrateDistance.select();
+      }, 0);
+    }
+    if (!bSet) delete bar.dataset.distanceFocused;
+  } else {
+    delete bar.dataset.distanceFocused;
   }
-  if (document.activeElement !== el.underlayRotation) {
-    el.underlayRotation.value = String(Math.round(((u.rotation || 0) % 360) * 10) / 10);
+
+  if (mode === "adjust") {
+    const pinned = Boolean(u?.pinned);
+    step = showingPage?.label || u?.name || "";
+    prompt = pinned
+      ? "Pinned. Unpin to move, resize or rotate."
+      : "Drag to move. Corners resize, the top handle rotates.";
+    escLabel = "Esc = Done";
+    sheetUi.syncPanel(el.modeSheet);
+    if (u && document.activeElement !== el.underlayOpacity) el.underlayOpacity.value = String(Math.round((u.opacity ?? 0.55) * 100));
+    if (u && document.activeElement !== el.underlayRotation) el.underlayRotation.value = String(Math.round(((u.rotation || 0) % 360) * 10) / 10);
+    el.underlayPin.setAttribute("aria-pressed", String(pinned));
+    el.underlayPin.textContent = pinned ? "Pinned" : "Pin";
+    for (const control of [el.underlayRotation, el.underlayRotateCcw, el.underlayRotateCw]) control.disabled = pinned;
   }
+
+  if (mode === "align") {
+    const pages = alignPages();
+    const marked = pages.filter((p) => p.anchor).length;
+    const here = pages.find((p) => p.index === u?.sheetPage);
+    const unmarked = pages.filter((p) => !p.anchor);
+    step = `${marked} of ${pages.length} marked`;
+    if (pages.length < 2) prompt = "Only one sheet is placed. Place another drawing of this floor, or another floor, to align them.";
+    else if (marked === 0) prompt = `Click a point that is on every sheet, such as a building corner, on ${here?.label || "this sheet"}.`;
+    else if (marked === pages.length) prompt = "Aligned. Check the faint overlay of the other sheet, then Done.";
+    else if (here?.anchor) prompt = `Marked. Switch to ${unmarked[0].label} and click the same point.`;
+    else prompt = `Click the same point on ${here?.label || "this sheet"}.`;
+    primaryDisabled = marked === 1;
+
+    const signature = JSON.stringify([u?.sheetPage, pages.map((p) => [p.index, p.label, Boolean(p.anchor)])]);
+    if (signature !== alignSheetsSignature) {
+      alignSheetsSignature = signature;
+      el.alignSheets.replaceChildren(...pages.map((p) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = `${p.anchor ? "?" : "?"} ${p.label}`;
+        button.classList.toggle("is-on", p.index === u?.sheetPage);
+        button.addEventListener("click", () => sheetUi.goToSheet(p.index, { fit: false }));
+        return button;
+      }));
+    }
+    setHidden(el.alignNext, !(here?.anchor && unmarked.length));
+    if (!el.alignNext.hidden) el.alignNext.dataset.index = String(unmarked[0].index);
+    setHidden(el.alignClear, !marked);
+  } else {
+    alignSheetsSignature = "";
+  }
+
+  const canPdf = hasOpenPdf() && Number.isInteger(u?.sheetPage);
+  const snapping = (mode === "scale" || mode === "align") && canPdf;
+  if (el.calibrateSnapWrap) el.calibrateSnapWrap.hidden = !snapping;
+  if (el.calibrateSnap && document.activeElement !== el.calibrateSnap) el.calibrateSnap.checked = snapToPdf;
+  if (snapping && el.modeSnapNote) {
+    const status = pageLineworkStatus(u.sheetPage);
+    el.modeSnapNote.textContent = status === "loading" ? " (reading�)" : status === "empty" ? " (no vector lines)" : status === "failed" ? " (could not read)" : "";
+  }
+
+  el.modeStep.textContent = step;
+  el.modePrompt.textContent = prompt;
+  el.modeDone.textContent = primary;
+  el.modeDone.disabled = primaryDisabled;
+  el.modeEsc.textContent = escLabel;
+  el.modeCancel.hidden = mode === "adjust" && !barSnapshotChanged();
 }
 
-/** Set-scale panel: the hint and the real-distance field track which of the two points have been clicked. */
-function syncCalibratePanel() {
-  if (!el.calibratePanel) return;
-  const show = tool === "calibrate";
-  el.calibratePanel.hidden = !show;
-  if (!show) return;
-  const bSet = Boolean(calibration?.b);
-  setHidden(el.calibrateDistanceWrap, !bSet);
-  setHidden(el.calibrateConfirm, !bSet);
-  if (el.calibrateHint) {
-    el.calibrateHint.textContent = !calibration?.a
-      ? "Click the first point of a known distance."
-      : !bSet
-        ? "Click the second point."
-        : "Drag a corner to resize — the measured length updates — or type the real distance and Set scale.";
+/** Adjust only offers Cancel once something moved, so the common case is a single Done. */
+function barSnapshotChanged() {
+  if (!barSnapshot) return false;
+  for (const [placement, copy] of barSnapshot.placements) {
+    for (const key of Object.keys(copy)) if (placement[key] !== copy[key]) return true;
   }
-  if (bSet && !calibration.distanceEdited && el.calibrateDistance && document.activeElement !== el.calibrateDistance) {
-    const guess = calibrationDistanceGuess(liveCalibrationPoint(calibration.a), liveCalibrationPoint(calibration.b));
-    if (guess) el.calibrateDistance.value = formatLengthMm(guess);
+  return false;
+}
+
+/** Leave the mode with what was done kept. */
+function doneUnderlayMode() {
+  const mode = currentUnderlayMode();
+  if (!mode) return;
+  if (mode === "scale") {
+    confirmCalibration();
+    return;
   }
+  if (mode === "align") {
+    const pages = alignPages();
+    const marked = pages.filter((p) => p.anchor).length;
+    setStatusMessage(marked >= 2 ? "Sheets aligned." : "Nothing marked, so nothing was aligned.", marked >= 2 ? "ok" : "warn");
+    tool = "select";
+    setGhostSheets([]);
+  } else {
+    underlaySelected = false;
+  }
+  store.persist();
+  syncToolButtons();
+  drawRibbon();
+  render();
+}
+
+/** Leave the mode and put the sheets back as they were when it began. */
+function cancelUnderlayMode(message) {
+  const mode = currentUnderlayMode();
+  if (!mode) return;
+  const snapshot = barSnapshot;
+  if (snapshot) {
+    restoreUnderlayState(snapshot);
+    if (mode === "align" && snapshot.showing !== null && store.doc.underlay?.sheetPage !== snapshot.showing) {
+      sheetUi.goToSheet(snapshot.showing, { fit: false });
+    }
+  }
+  calibration = null;
+  if (tool === "calibrate" || tool === "align") tool = "select";
+  underlaySelected = false;
+  setGhostSheets([]);
+  store.persist();
+  syncToolButtons();
+  drawRibbon();
+  render();
+  sheetUi.toast(message || `${MODE_NAMES[mode]} cancelled, nothing changed.`, { ms: 4000 });
+}
+
+/** Starting a mode while another is on: Adjust is kept (its work is the sheet's new place), the others are cancelled and the user is told. */
+function leaveUnderlayMode(next) {
+  const mode = currentUnderlayMode();
+  if (!mode || mode === next) return;
+  if (mode === "adjust") {
+    underlaySelected = false;
+    return;
+  }
+  cancelUnderlayMode(next ? `${MODE_NAMES[mode]} cancelled, nothing changed. ${MODE_NAMES[next]} is on.` : undefined);
 }
 
 /** SG reference panel: the field row only appears once a plan point has been picked. */
@@ -3268,7 +3617,9 @@ function drawGrid(rect) {
   const [wx0, wy0] = screenToWorld(0, 0);
   const [wx1, wy1] = screenToWorld(rect.width, rect.height);
   const step =
-    cam.scale < 8 ? 20
+    cam.scale < 0.5 ? 500
+    : cam.scale < 2 ? 100
+    : cam.scale < 8 ? 20
     : cam.scale < 24 ? 5
     : cam.scale < 60 ? 1
     : cam.scale < 90 ? 0.5
@@ -3443,7 +3794,7 @@ function drawRoom(room) {
   ctx.fillStyle = "#5c5348";
   const useLabel = room.use && room.use !== "other" ? roomUse(room.use).label : "Use not set";
   ctx.fillText(useLabel, cx, cy);
-  ctx.fillText(`${roomArea(room).toFixed(1)} m²`, cx, cy + 14);
+  ctx.fillText(`${roomArea(room).toFixed(1)} m�`, cx, cy + 14);
   ctx.restore();
 }
 
@@ -4245,7 +4596,7 @@ function drawGapDimension(x1, y1, x2, y2, kind, note = "", flip = false) {
   // `note` names what the far end of the string actually is. A bare "300 mm"
   // beside a 600 mm footing leaves the reader guessing whether it measures to
   // the centreline it is aligned with or the face they can see.
-  const label = note ? `${formatLengthMm(len)} mm · ${note}` : `${formatLengthMm(len)} mm`;
+  const label = note ? `${formatLengthMm(len)} mm � ${note}` : `${formatLengthMm(len)} mm`;
   const off = 20;
   const dx = bx - ax;
   const dy = by - ay;
@@ -4555,9 +4906,12 @@ function drawSnapGuide(rect) {
   // paint on top of it instead of being hidden underneath a same-colour,
   // same-position dot (an exact join lands on this exact point, and used to
   // draw its marker *first* - the dot then covered it almost entirely).
+  const pdfSnap = g.guideXPoint?.kind === "pdf-end" || g.guideXPoint?.kind === "pdf-cross"
+    || g.guideYPoint?.kind === "pdf-end" || g.guideYPoint?.kind === "pdf-cross";
+  const ink = pdfSnap ? "#b2451e" : "#3a5f7a";
   const [px, py] = worldToScreen(g.x, g.y);
-  ctx.fillStyle = g.snapped ? "#3a5f7a" : "rgba(58, 95, 122, 0.7)";
-  ctx.strokeStyle = "#3a5f7a";
+  ctx.fillStyle = g.snapped ? ink : "rgba(58, 95, 122, 0.7)";
+  ctx.strokeStyle = ink;
   ctx.lineWidth = 1.2;
   ctx.beginPath();
   ctx.arc(px, py, g.snapped ? 4 : 3, 0, Math.PI * 2);
@@ -4576,7 +4930,7 @@ function drawSnapGuide(rect) {
   for (const guidePoint of new Set([g.snapX ? g.guideXPoint : null, g.snapY ? g.guideYPoint : null])) {
     if (!guidePoint) continue;
     const [qx, qy] = worldToScreen(guidePoint.x, guidePoint.y);
-    ctx.strokeStyle = "#3a5f7a";
+    ctx.strokeStyle = ink;
     if (g.exactJoin) {
       ctx.lineWidth = 1.4;
       ctx.setLineDash([3, 2]);
@@ -4681,6 +5035,8 @@ const CATEGORY_NOTE = {
  * unexplained extra corner on the foundation itself.
  */
 function targetNote(point) {
+  if (point?.kind === "pdf-end") return "PDF corner";
+  if (point?.kind === "pdf-cross") return "PDF crossing";
   const kind = point?.kind === "endpoint" ? "centreline" : point?.kind === "face" ? "face" : "";
   if (!kind) return "";
   const category = CATEGORY_NOTE[point.category] || null;
@@ -4966,7 +5322,7 @@ function refsInMarquee(box) {
 /** A hidden sheet is not drawn and must not steal clicks either. */
 function underlayIsVisible() {
   if (isolateCurrentLevel && !isolateShows(activeStationKind(), "underlay")) return false;
-  return Boolean(store.doc.underlay && underlayBitmap() && !store.doc.underlay.hidden);
+  return Boolean(store.doc.underlay && underlayBitmap() && !isUnderlayHidden(store.doc));
 }
 
 /** True if the point falls inside the placed (and possibly rotated) sheet. */
@@ -5047,11 +5403,13 @@ function serviceHit(wx, wy) {
   return bestEdge ? { kind: "serviceEdge", id: bestEdge.id } : null;
 }
 
-function hitTest(wx, wy) {
+function hitTest(wx, wy, { skipServices = false, skipAreas = false } = {}) {
   const pxTol = 6 / cam.scale;
 
-  const serviceRef = serviceHit(wx, wy);
-  if (serviceRef) return serviceRef;
+  if (!skipServices) {
+    const serviceRef = serviceHit(wx, wy);
+    if (serviceRef) return serviceRef;
+  }
 
   const items = store.doc.items.filter(onActiveLevel);
   for (let i = items.length - 1; i >= 0; i -= 1) {
@@ -5098,10 +5456,12 @@ function hitTest(wx, wy) {
       .some(([x1, y1, x2, y2]) => distToSeg(x1, y1, x2, y2, wx, wy) < 0.2);
     if (near) return { kind: "revisionCloud", id: cloud.id };
   }
-  for (let i = (store.doc.regions || []).length - 1; i >= 0; i -= 1) {
-    const region = store.doc.regions[i];
-    if (!onActiveLevel(region) || !planObjectVisible(region)) continue;
-    if (pointInPoly(wx, wy, shapePolygon(region.shape))) return { kind: "region", id: region.id };
+  if (!skipAreas) {
+    for (let i = (store.doc.regions || []).length - 1; i >= 0; i -= 1) {
+      const region = store.doc.regions[i];
+      if (!onActiveLevel(region) || !planObjectVisible(region)) continue;
+      if (pointInPoly(wx, wy, shapePolygon(region.shape))) return { kind: "region", id: region.id };
+    }
   }
   for (let i = (store.doc.separations || []).length - 1; i >= 0; i -= 1) {
     const line = store.doc.separations[i];
@@ -5119,6 +5479,7 @@ function hitTest(wx, wy) {
     if (!onActiveLevel(dim) || !planObjectVisible(dim) || !keptByCut(dim, "line")) continue;
     if (distToSeg(dim.x1, dim.y1, dim.x2, dim.y2, wx, wy) < 0.2) return { kind: "dimension", id: dim.id };
   }
+  if (skipAreas) return null;
   const slabs = store.doc.slabs.filter(onActiveLevel);
   for (let i = slabs.length - 1; i >= 0; i -= 1) {
     const slab = slabs[i];
@@ -5141,6 +5502,47 @@ function hitTest(wx, wy) {
     if (pointInPoly(wx, wy, shapePolygon(roof.shape))) return { kind: "roof", id: roof.id };
   }
   return null;
+}
+
+/** A wall, a floor slab, or the floor of a room. Ceilings are not floors. */
+function wallOrFloorAt(wx, wy) {
+  const segments = store.doc.segments.filter(onActiveLevel);
+  for (let i = segments.length - 1; i >= 0; i -= 1) {
+    const seg = segments[i];
+    if (!planObjectVisible(seg) || !keptByCut(seg, "wall")) continue;
+    const sku = skuById(seg.sku);
+    const tol = Math.max(0.18, drawnWallThickness(sku) / 2 + 0.08);
+    if (distToSeg(seg.x1, seg.y1, seg.x2, seg.y2, wx, wy) < tol) return { kind: "segment", id: seg.id };
+  }
+  const slabs = (store.doc.slabs || []).filter(onActiveLevel);
+  for (let i = slabs.length - 1; i >= 0; i -= 1) {
+    const slab = slabs[i];
+    if (!planObjectVisible(slab) || !keptByCut(slab)) continue;
+    if (skuById(slab.sku)?.category === "ceiling") continue;
+    if (pointInPoly(wx, wy, shapePolygon(slab.shape))) return { kind: "slab", id: slab.id };
+  }
+  const rooms = store.doc.rooms.filter(onActiveLevel);
+  for (let i = rooms.length - 1; i >= 0; i -= 1) {
+    const room = rooms[i];
+    if (!planObjectVisible(room) || !keptByCut(room, "room")) continue;
+    if (pointInPoly(wx, wy, roomPolygon(room))) return { kind: "room", id: room.id };
+  }
+  return null;
+}
+
+/**
+ * The plan object a stationary click should take while a route is already
+ * selected. The route is skipped, so the wall, door, line or floor under it
+ * can be chosen. A ceiling is not a floor.
+ */
+function objectUnderRoute(wx, wy) {
+  const hit = hitTest(wx, wy, { skipServices: true });
+  if (!hit) return null;
+  if (hit.kind === "slab") {
+    const slab = (store.doc.slabs || []).find((s) => s.id === hit.id);
+    if (skuById(slab?.sku)?.category === "ceiling") return wallOrFloorAt(wx, wy);
+  }
+  return hit;
 }
 
 /**
@@ -5224,10 +5626,10 @@ function inspectKindLabel(kind, sku) {
 function skuDimLabel(sku) {
   const g = sku.geometry || {};
   if (g.width && g.height && (sku.category === "door" || sku.category === "window")) {
-    return `${Math.round(g.width * 1000)} × ${Math.round(g.height * 1000)} mm`;
+    return `${Math.round(g.width * 1000)} � ${Math.round(g.height * 1000)} mm`;
   }
   if (isStripFooting(sku) && g.width && g.depth) {
-    return `${Math.round(g.width * 1000)} × ${Math.round(g.depth * 1000)} mm`;
+    return `${Math.round(g.width * 1000)} � ${Math.round(g.depth * 1000)} mm`;
   }
   if (g.thickness) return `${Math.round(g.thickness * 1000)} mm`;
   if (g.width) return `${Math.round(g.width * 1000)} mm`;
@@ -5372,7 +5774,7 @@ function renderPalette() {
       btn.type = "button";
       btn.className = "sku-item";
       if (placeSkuId === sku.id) btn.classList.add("active");
-      btn.innerHTML = `<span class="sku-name">${escapeHtml(sku.name)}</span><span class="sku-meta">${escapeHtml(sku.id)} · ${escapeHtml(skuDimLabel(sku))}</span>`;
+      btn.innerHTML = `<span class="sku-name">${escapeHtml(sku.name)}</span><span class="sku-meta">${escapeHtml(sku.id)} � ${escapeHtml(skuDimLabel(sku))}</span>`;
       btn.addEventListener("click", () => onSkuClick(sku));
       const expand = document.createElement("button");
       expand.type = "button";
@@ -5532,7 +5934,7 @@ function renderTypeDetailNav() {
 
 function renderTypeDetail(sku) {
   if (el.typeDetailName) el.typeDetailName.textContent = sku.name;
-  if (el.typeDetailMeta) el.typeDetailMeta.textContent = `${sku.id} · ${skuDimLabel(sku)}`;
+  if (el.typeDetailMeta) el.typeDetailMeta.textContent = `${sku.id} � ${skuDimLabel(sku)}`;
   if (el.typeDetailCategory) el.typeDetailCategory.textContent = CATEGORY_LABEL[sku.category] || sku.category;
   if (el.typeDetailCount) {
     const i = typeDetailList.findIndex((s) => s.id === sku.id);
@@ -5675,7 +6077,7 @@ function renderRulesReport() {
   const findings = evaluateCompliance(store.doc, pack);
   const counts = summarizeFindings(findings);
   el.rulesCount.textContent = findings.length
-    ? `${counts.fail} fail · ${counts.unknown} cannot check · ${counts.advisory} advisory · ${counts.pass} pass`
+    ? `${counts.fail} fail � ${counts.unknown} cannot check � ${counts.advisory} advisory � ${counts.pass} pass`
     : "Nothing to check yet";
   if (!findings.length) {
     el.rules.innerHTML = '<p class="hint">Draw a room, opening or stair, then reopen Check.</p>';
@@ -5741,7 +6143,7 @@ function drawRibbon() {
 
 /** Second sentence on a snap tool's hint: which side the live measurement
  * is using. Shown before any arrow is pressed, and updated in the same
- * chip when one is. A cut warning stays the whole hint — it is the thing
+ * chip when one is. A cut warning stays the whole hint � it is the thing
  * that has to be read, and the arrows still work once it is cleared. */
 function measureHintClause() {
   if (!snapPreviewTool()) return "";
@@ -5751,7 +6153,7 @@ function measureHintClause() {
 }
 
 function setRibbonHint(text, warn = false) {
-  const clause = text && !warn ? measureHintClause() : "";
+  const clause = text && !warn && !panMode ? measureHintClause() : "";
   const full = clause ? `${text} ${clause}` : (text || "");
   el.ribbonHint.hidden = !full;
   el.ribbonHint.classList.toggle("ribbon-hint-warn", Boolean(warn) && Boolean(text));
@@ -5763,17 +6165,28 @@ function setRibbonHint(text, warn = false) {
  * compile, ...) already surface their own feedback, so they do not set this.
  *
  * Overridden by a warning when the armed tool does not belong on the current
- * cut (a roof on "00 FOUNDATION", a foundation on the ground floor — see
+ * cut (a roof on "00 FOUNDATION", a foundation on the ground floor � see
  * `placementCutWarning`). Arming Foundations is the one case that moves the
  * cut: the pack already names the storey, so `offerFoundationPlan` switches
  * there. Switching back stays available, and the hint then says so. */
 function updateRibbonHint() {
   if (!el.ribbonHint) return;
+  if (panMode) {
+    setRibbonHint("Drag to move the plan. Esc or Pan again goes back to the tool you were using.");
+    return;
+  }
   // While the attach target pick is armed the hint is the live preview of what
   // the hovered candidate would do, or why it cannot be picked.
   if (attachPick) {
     const hoverText = attachPick.hover ? attachHoverText(attachPick.hover) : null;
     setRibbonHint(hoverText ? hoverText.text : HINTS.attach, Boolean(hoverText?.warn));
+    return;
+  }
+  if (tool === "align") {
+    const marked = (store.doc.sheetSet?.pages || []).filter((p) => p.anchor).length;
+    setRibbonHint(marked
+      ? `${marked} sheet${marked === 1 ? " is" : "s are"} marked. Switch to the next sheet and click the same point. Esc stops.`
+      : "Click a point that is on every sheet, such as a building corner. Then mark it on each other sheet, whether that is another floor or another drawing of this one. Esc stops.");
     return;
   }
   if (tool === "camera") {
@@ -5924,11 +6337,27 @@ function ribbonCommandState(item) {
   if (item.id === "dimensions") {
     return { active: tool === "measure", title: HINTS.dimensions };
   }
+  if (item.id === "sheet-list") {
+    const has = Boolean(store.doc.sheetSet);
+    return {
+      active: has && sheetUi.listVisible(),
+      disabled: !has,
+      title: has ? "Show or hide the list of pages in the inspector." : "Import a multi-page PDF first.",
+    };
+  }
+  if (item.id === "align-floors") {
+    const can = Number.isInteger(store.doc.underlay?.sheetPage);
+    return {
+      active: tool === "align",
+      disabled: !can,
+      title: can ? "Click the same point on each sheet. Lines up different floors, or two drawings of one floor. Other sheets move onto the one that stays put." : "Import a multi-page PDF and show one of its sheets first.",
+    };
+  }
   const ids = new Set(["underlay-adjust", "calibrate", "underlay-toggle", "underlay-off"]);
   if (!ids.has(item.id)) return null;
   const loaded = Boolean(store.doc.underlay);
   if (!loaded) return { disabled: true, title: "Load a PDF, image or satellite view first." };
-  const hidden = Boolean(store.doc.underlay.hidden);
+  const hidden = isUnderlayHidden(store.doc);
   if (item.id === "underlay-toggle") {
     return {
       label: hidden ? "Show" : "Hide",
@@ -5956,7 +6385,8 @@ function onRibbonFunction(item) {
     runCommand(item.command);
     return;
   }
-  if (serviceRoute?.fromNodeId) finishServiceRoute();
+  setPanMode(false);
+  if (serviceRoute?.fromNodeId) finishServiceRoute({ select: false });
   serviceRoute = null;
   serviceConnect = null;
   activeFunction = item.id;
@@ -5975,6 +6405,10 @@ function onRibbonFunction(item) {
   showDimensions = false;
   underlaySelected = false;
   syncToolButtons();
+  // The route stays selected otherwise, so the Services panel and route
+  // profile stay up until the first wall point. Drop it now, and the wall
+  // (or other) inspector takes the panel.
+  clearRouteIfLeavingServices();
   offerFoundationPlan();
   drawRibbon();
   renderPalette();
@@ -5983,6 +6417,7 @@ function onRibbonFunction(item) {
 
 /** One entry point so the ribbon, the keyboard and the header buttons agree. */
 function runCommand(name) {
+  setPanMode(false);
   switch (name) {
     // Undo can restore a document with a different level stack (an inserted
     // level, or one that had not been inserted yet), so the merged pack has to
@@ -6015,6 +6450,9 @@ function runCommand(name) {
     case "sheets": case "view-section": openSheets(); return;
     case "project-info": openProjectInfo(); return;
     case "underlay": openUnderlayPicker(); return;
+    case "reference": sheetUi.openReference(); return;
+    case "sheet-list": sheetUi.setListVisible(); drawRibbon(); return;
+    case "align-floors": startAlignFloors(); return;
     case "satellite": openSatellitePanel(); return;
     case "underlay-adjust": startUnderlayAdjust(); return;
     case "calibrate": startCalibration(); return;
@@ -6156,7 +6594,7 @@ async function generateModel() {
   if (el.massGenerate) {
     el.massGenerate.dataset.busy = "1";
     el.massGenerate.disabled = true;
-    el.massGenerate.textContent = "Generating…";
+    el.massGenerate.textContent = "Generating�";
   }
   if (el.massRender) {
     el.massRender.hidden = false;
@@ -6165,7 +6603,7 @@ async function generateModel() {
   }
   if (el.massRenderStatus) {
     el.massRenderStatus.hidden = false;
-    el.massRenderStatus.textContent = "Generating a photorealistic view…";
+    el.massRenderStatus.textContent = "Generating a photorealistic view�";
   }
   try {
     const rendered = await cloud.visualize({ image });
@@ -6198,7 +6636,7 @@ async function generateModel() {
     if (el.massGenerate) {
       delete el.massGenerate.dataset.busy;
       syncGenerateEnabled();
-      if (!el.massGenerate.textContent || el.massGenerate.textContent === "Generating…") {
+      if (!el.massGenerate.textContent || el.massGenerate.textContent === "Generating�") {
         el.massGenerate.textContent = "Generate model";
       }
     }
@@ -6648,7 +7086,7 @@ function renderSheetList() {
   el.sheetList.innerHTML = sheets.map((s) => `
     <button type="button" class="sheet-list-item${s.id === activeSheetId ? " active" : ""}" data-sheet-id="${escapeHtml(s.id)}">
       <strong>${escapeHtml(s.number)}</strong>
-      <span>${escapeHtml(s.name)} · ${escapeHtml(s.size)}</span>
+      <span>${escapeHtml(s.name)} � ${escapeHtml(s.size)}</span>
     </button>
   `).join("") || '<p class="hint">No sheets yet.</p>';
   el.sheetList.querySelectorAll("[data-sheet-id]").forEach((btn) => {
@@ -6712,8 +7150,8 @@ function renderSheetFields() {
     ? sheet.revisions.map((r) => `
         <div class="sheet-rev-row">
           <span class="sheet-rev-letter">${escapeHtml(r.rev)}</span>
-          <span>${escapeHtml(r.description || "—")}</span>
-          <span class="sheet-rev-date">${escapeHtml(r.date)}${r.by ? ` · ${escapeHtml(r.by)}` : ""}</span>
+          <span>${escapeHtml(r.description || "�")}</span>
+          <span class="sheet-rev-date">${escapeHtml(r.date)}${r.by ? ` � ${escapeHtml(r.by)}` : ""}</span>
         </div>
       `).join("")
     : '<p class="hint">No revisions issued yet.</p>';
@@ -6741,7 +7179,7 @@ function renderSheetClouds() {
     return;
   }
   const revOptions = (sheet.revisions || [])
-    .map((r) => `<option value="${escapeHtml(r.rev)}">${escapeHtml(r.rev)} — ${escapeHtml(r.description || "—")}</option>`)
+    .map((r) => `<option value="${escapeHtml(r.rev)}">${escapeHtml(r.rev)} � ${escapeHtml(r.description || "�")}</option>`)
     .join("");
   el.sheetCloudList.innerHTML = clouds.map((c, i) => `
     <div class="sheet-rev-row">
@@ -7058,7 +7496,7 @@ function drawActiveSheet() {
     sctx.fillText(row.label, tbX + 5, y + rowH * 0.28);
     sctx.font = `600 ${Math.max(9, rowH * 0.3)}px "Source Sans 3", sans-serif`;
     sctx.fillStyle = "#1a1612";
-    sctx.fillText(String(fields[row.key] ?? "—"), tbX + 5, y + rowH * 0.66, tbW - 10);
+    sctx.fillText(String(fields[row.key] ?? "�"), tbX + 5, y + rowH * 0.66, tbW - 10);
   });
 
   if (!extent || extent.w <= 0 || extent.h <= 0) return;
@@ -7176,7 +7614,7 @@ function drawActiveSheet() {
       sctx.fillStyle = "#5c5348";
       const useLabel = room.use && room.use !== "other" ? roomUse(room.use).label : "Use not set";
       sctx.fillText(useLabel, tx, ty + 2);
-      const areaText = Number.isFinite(room.area) ? `${room.area.toFixed(1)} m²` : "";
+      const areaText = Number.isFinite(room.area) ? `${room.area.toFixed(1)} m�` : "";
       if (areaText) sctx.fillText(areaText, tx, ty + 14);
     }
     if (view.kind === "plan") {
@@ -7208,7 +7646,7 @@ function drawActiveSheet() {
     }
     drawSheetNorthAndScale(sctx, areaX, areaY, areaH, pxPerM, scaleN);
   } else if (sectionGeom || elevationGeom) {
-    // Same faces (and, for a section, the same poché) the interactive
+    // Same faces (and, for a section, the same poch�) the interactive
     // Section/Elevation (massing.js) views draw, projected orthographically
     // at the sheet's own scale instead of the camera's pan/zoom - a drafted
     // view, not a screenshot of the 3D one. An elevation's faces never carry
@@ -7238,7 +7676,7 @@ function drawActiveSheet() {
       sctx.lineWidth = item.face.cut ? 1.1 : 0.6;
       sctx.fill();
       if (item.face.cut) hatchPolygon(sctx, item.pts, style.stroke);
-      sctx.stroke();
+      strokeFaceEdges(sctx, item.pts, item.face);
     }
     const projectUV = (u, v) => [cx + (u - midU) * pxPerM, cy - (v - midV) * pxPerM];
     for (const cloud of revisionCloudsForSheet(store.doc, sheet.id)) {
@@ -7480,6 +7918,143 @@ function wireAbout() {
 
 let calibration = null;
 
+// Multi-page plan sets. The active level's sheet is mirrored into
+// `store.doc.underlay`, so everything below that reads it keeps working.
+const sheetUi = createSheetUi({
+  doc: () => store.doc,
+  levels: () => visibleLevels().filter((l) => !/foundation/i.test(`${l.id} ${l.name ?? ""}`)),
+  activeLevel: () => activeLevel,
+  mount: el.canvasWrap,
+  underlayPanel: el.modeSheet,
+  underlay: {
+    openPdf, renderThumbnail, discardPendingPdf, commitPendingPdf, adoptSheetSet, ensureSheetBitmap, isPageBitmapReady,
+    attachSourceFile, dropSourceFile, isSourceOpen, sourcesNeedingFile,
+    chooseSheet, hasOpenPdf, sheetSetNeedsPdf, renderReferencePage, setSharpListener,
+    ensurePageLinework, snapReferencePixel,
+  },
+  pdfSnap: {
+    enabled: () => snapToPdf,
+    setEnabled: (on) => setSnapToPdf(on),
+    available: () => hasOpenPdf() && Boolean(store.doc?.sheetSet),
+    status: () => {
+      const index = store.doc.underlay?.sheetPage;
+      return Number.isInteger(index) ? pageLineworkStatus(index) : "idle";
+    },
+    stats: () => {
+      const index = store.doc.underlay?.sheetPage;
+      return Number.isInteger(index) ? pageLinework(index)?.stats ?? null : null;
+    },
+  },
+  setStatus: (text, tone) => setStatusMessage(text, tone),
+  // Returns the new file id, null when the store failed (a warning is already
+  // showing), and undefined when there is nothing open to store.
+  loadingName: () => (isPdfRestorePending()
+    ? (restoringName || store.doc?.sheetSet?.sources?.[0]?.name || store.doc?.underlay?.name || "plan file")
+    : null),
+  // Stores one source's file on the job. A file the job already holds (same
+  // bytes) is pointed at, not sent again.
+  rememberPdf: async (sourceId, onProgress) => {
+    const bytes = sessionPdfBytes(sourceId);
+    if (!bytes || !openProject?.id || !store.doc?.sheetSet?.sources?.some((s) => s.id === sourceId)) return undefined;
+    try {
+      const sha256 = await sha256Hex(bytes);
+      let asset = null;
+      if (sha256) {
+        try {
+          asset = await cloud.findUnderlay(openProject.id, sha256, "application/pdf");
+        } catch {
+          asset = null; // Not asked, not an error: the upload below says what is wrong.
+        }
+      }
+      if (asset) onProgress?.(100);
+      else asset = await cloud.saveUnderlay(openProject.id, bytes, "application/pdf", { onProgress });
+      const source = store.doc?.sheetSet?.sources?.find((s) => s.id === sourceId);
+      if (!asset?.id || !source) return null;
+      source.assetId = asset.id;
+      if (sha256) source.sha256 = sha256;
+      mirrorLegacySource(store.doc.sheetSet);
+      return asset.id;
+    } catch (error) {
+      const offline = error instanceof CloudError && error.status === 0;
+      setStatusMessage(
+        offline
+          ? "No connection. The PDF is on screen, but a refresh will ask for the file again."
+          : (error?.message || "The PDF is on screen, but it was not saved. A refresh will ask for the file again."),
+        "warn",
+      );
+      return null;
+    }
+  },
+  pushUndo: () => store.pushUndo(),
+  changed: () => {
+    store.persist();
+    drawRibbon();
+    render();
+  },
+  levelsChanged: () => {
+    syncPackLevels();
+    drawLevelSwitcher();
+    store.persist();
+    render();
+  },
+  addFloor: () => addFloor(),
+  canAddFloor: () => canAddFloor(),
+  goToLevel: (id) => {
+    if (!id || id === activeLevel) return;
+    const idx = houseStations.findIndex((s) => s.id === `${id}::floor`);
+    if (idx >= 0) selectStationIndex(idx);
+    else {
+      activeLevel = id;
+      drawLevelSwitcher();
+    }
+  },
+  fitSheet: () => {
+    if (tool === "align") return;
+    fitUnderlayView();
+  },
+});
+
+/** Zoom and centre the view on the placed sheet, however large - a 1:500 site plan is 400 m wide. */
+function fitUnderlayView() {
+  const corners = underlayCorners(store.doc);
+  if (!corners || !el.canvas) return;
+  const rect = el.canvas.getBoundingClientRect();
+  if (rect.width < 8 || rect.height < 8) return;
+  const xs = corners.map((c) => c.x);
+  const ys = corners.map((c) => c.y);
+  const w = Math.max(...xs) - Math.min(...xs);
+  const h = Math.max(...ys) - Math.min(...ys);
+  cam.scale = Math.min(MAX_VIEW_SCALE, Math.max(MIN_VIEW_SCALE, Math.min((rect.width - 48) / w, (rect.height - 48) / h)));
+  cam.ox = rect.width / 2 - ((Math.min(...xs) + Math.max(...xs)) / 2) * cam.scale;
+  cam.oy = rect.height / 2 - ((Math.min(...ys) + Math.max(...ys)) / 2) * cam.scale;
+  render();
+}
+setSharpReady(() => render());
+setShownSheetsReady(() => render());
+setLineworkListener((_index, status) => {
+  if (status === "loading") sheetUi.sync();
+  else {
+    // The read finishes with the pointer still, so snap again here. Otherwise
+    // the first click lands on the raw cursor and only the next move snaps.
+    refreshLiveSnap();
+    render();
+  }
+});
+
+/** Keep `doc.underlay` pointing at the active level's sheet and its bitmap rendered. */
+function syncSheets() {
+  const doc = store.doc;
+    if (doc?.sheetSet) {
+    if (activateSheetForLevel(doc, activeLevel)) drawRibbon();
+    ensureSheetBitmap(doc)?.then((shown) => {
+      if (shown) render();
+    });
+    if (snapToPdf && Number.isInteger(doc.underlay?.sheetPage)) requestPdfLinework(doc.underlay.sheetPage);
+    syncAlignmentGhosts();
+  }
+  sheetUi.sync();
+}
+
 function openUnderlayPicker() {
   const input = document.createElement("input");
   input.type = "file";
@@ -7487,13 +8062,21 @@ function openUnderlayPicker() {
   input.addEventListener("change", async () => {
     const file = input.files?.[0];
     if (!file) return;
-    setStatusMessage(`Reading ${file.name}…`, "ok");
+    // A PDF may be a whole plan set: choose pages, levels and scales first.
+    if (file.type === "application/pdf" || /\.pdf$/i.test(file.name)) {
+      sheetUi.importFile(file);
+      return;
+    }
+    if (!(await sheetUi.confirmReplace())) return;
+    setStatusMessage(`Reading ${file.name}�`, "ok");
     const result = await loadUnderlayFile(store.doc, file);
     setStatusMessage(result.message, result.ok ? "ok" : "warn");
     if (result.ok) {
       store.persist();
       drawRibbon();
       startCalibration();
+      // On screen first; the file goes up behind it.
+      sheetUi.trackUpload((onProgress) => rememberImageFile(file, onProgress));
     }
     render();
   });
@@ -7531,7 +8114,7 @@ function syncSatellitePanel() {
   el.satellitePanel.hidden = !satelliteOpen;
   if (el.satelliteConfirm) {
     el.satelliteConfirm.disabled = satelliteBusy;
-    el.satelliteConfirm.textContent = satelliteBusy ? "Loading…" : "Load";
+    el.satelliteConfirm.textContent = satelliteBusy ? "Loading�" : "Load";
   }
 }
 
@@ -7635,7 +8218,7 @@ async function commitSatellite(place) {
   clearSatelliteSuggestions();
   let known = place && Number.isFinite(place.lat) && Number.isFinite(place.lng) ? place : null;
   if (place && !known) {
-    setStatusMessage("Looking up that address…", "ok");
+    setStatusMessage("Looking up that address�", "ok");
     const located = await locateSuggestion(place);
     if (!located.ok) {
       satelliteBusy = false;
@@ -7647,7 +8230,7 @@ async function commitSatellite(place) {
     }
     known = located;
   }
-  setStatusMessage("Fetching the satellite view…", "ok");
+  setStatusMessage("Fetching the satellite view�", "ok");
   const result = await loadSatelliteUnderlay(store.doc, query, { x: cx, y: cy }, undefined, known);
   satelliteBusy = false;
   setStatusMessage(result.message, result.ok ? "ok" : "warn");
@@ -7659,6 +8242,188 @@ async function commitSatellite(place) {
     el.satelliteHint.textContent = result.message;
   }
   render();
+}
+
+/** Which stored file a reload is already fetching, so a redraw does not start another. */
+let underlayFetchFor = null;
+let underlayFetchToken = 0;
+
+/**
+ * A reopened drawing names the plan file but does not carry its bytes. Fetch
+ * them once and open them the same way choosing the file would.
+ */
+function restoreStoredUnderlay() {
+  const doc = store.doc;
+  if (doc?.sheetSet) {
+    restoreSheetSources();
+    return;
+  }
+  const assetId = doc?.underlay?.assetId && !isSatelliteUnderlay(doc) ? doc.underlay.assetId : null;
+  if (!assetId || !openProject?.id) return;
+  if (underlayBitmap()) return;
+  if (underlayFetchFor === assetId) return;
+  underlayFetchFor = assetId;
+  const token = ++underlayFetchToken;
+  const projectId = openProject.id;
+  setPdfRestorePending(true);
+  refreshSheetChips();
+  cloud.fetchAsset(assetId).then(async ({ bytes, mime }) => {
+    if (token !== underlayFetchToken || openProject?.id !== projectId) return;
+    const file = new File([bytes], doc.underlay?.name || "underlay", {
+      type: mime || "application/octet-stream",
+    });
+    if (store.doc?.underlay?.assetId === assetId) {
+      const result = await showStoredUnderlay(store.doc, file);
+      if (token !== underlayFetchToken) return;
+      if (!result.ok) setStatusMessage(result.message, "warn");
+      else render();
+    }
+  }).catch((error) => {
+    if (token !== underlayFetchToken) return;
+    const offline = error instanceof CloudError && error.status === 0;
+    if (offline) underlayFetchFor = null;
+    setStatusMessage(
+      offline
+        ? "No connection. The plan file will load when you are back online, or choose it from disk."
+        : "The plan file could not be loaded. Choose it from disk.",
+      "warn",
+    );
+  }).finally(() => {
+    if (token === underlayFetchToken) {
+      setPdfRestorePending(false);
+      refreshSheetChips();
+    }
+  });
+}
+
+/** Sources whose stored file this session has already tried to fetch (and failed, or is fetching): `project:source:asset`. */
+const sourceFetchTried = new Set();
+let sheetRestoring = false;
+let restoringName = null;
+
+/** The next file of the sheet set that is named on the job but not open here. */
+function nextRestorableSource() {
+  if (!store.doc?.sheetSet || !openProject?.id) return null;
+  return sourcesNeedingFile(store.doc).find((s) => s.assetId && !sourceFetchTried.has(`${openProject.id}:${s.id}:${s.assetId}`)) || null;
+}
+
+/**
+ * Fetch every file of the sheet set that is stored on the job, one after
+ * another (each opens through the single import slot). A file that does not
+ * match its sheets, or fails to load, is left for the user to choose from
+ * disk; the others still open.
+ */
+function restoreSheetSources() {
+  if (sheetRestoring || !nextRestorableSource()) return;
+  sheetRestoring = true;
+  const token = ++underlayFetchToken;
+  const projectId = openProject.id;
+  setPdfRestorePending(true);
+  (async () => {
+    try {
+      for (let source = nextRestorableSource(); source; source = nextRestorableSource()) {
+        const key = `${projectId}:${source.id}:${source.assetId}`;
+        sourceFetchTried.add(key);
+        restoringName = source.name;
+        refreshSheetChips();
+        const sourceId = source.id;
+        const assetId = source.assetId;
+        let fetched;
+        try {
+          fetched = await cloud.fetchAsset(assetId);
+        } catch (error) {
+          if (token !== underlayFetchToken) return;
+          const offline = error instanceof CloudError && error.status === 0;
+          if (offline) sourceFetchTried.delete(key);
+          setStatusMessage(
+            offline
+              ? "No connection. The plan files will load when you are back online, or choose them from disk."
+              : `${source.name} could not be loaded. Choose it from disk.`,
+            "warn",
+          );
+          if (offline) return;
+          continue;
+        }
+        if (token !== underlayFetchToken || openProject?.id !== projectId) return;
+        const current = store.doc?.sheetSet?.sources?.find((s) => s.id === sourceId);
+        if (!current || current.assetId !== assetId) continue;
+        const file = new File([fetched.bytes], current.name, { type: fetched.mime || "application/pdf" });
+        const result = await openPdf(file);
+        if (token !== underlayFetchToken) {
+          discardPendingPdf();
+          return;
+        }
+        if (!result.ok) {
+          setStatusMessage(result.message, "warn");
+          continue;
+        }
+        if (!sameSheetGeometry(pagesOfSource(store.doc.sheetSet, sourceId), result.pages)) {
+          discardPendingPdf();
+          setStatusMessage(`The stored ${current.name} does not match its sheets on this drawing. Choose the original file.`, "warn");
+          continue;
+        }
+        attachSourceFile(store.doc, sourceId, activeLevel);
+        ensureSheetBitmap(store.doc)?.then((shown) => { if (shown) render(); });
+        setStatusMessage(`${current.name} loaded.`, "ok");
+        render();
+      }
+    } finally {
+      sheetRestoring = false;
+      restoringName = null;
+      if (token === underlayFetchToken) {
+        setPdfRestorePending(false);
+        refreshSheetChips();
+      }
+    }
+  })();
+}
+
+/** The status chips read module state; nudge them when that state changes outside a render. */
+function refreshSheetChips() {
+  try {
+    sheetUi.sync();
+  } catch {
+    // Called before the sheet UI exists (very early in start-up); the first render syncs it.
+  }
+}
+
+/** SHA-256 of some bytes as hex, or null where the browser has no crypto (an insecure origin). */
+async function sha256Hex(bytes) {
+  try {
+    if (!globalThis.crypto?.subtle) return null;
+    const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes);
+    return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  } catch {
+    return null;
+  }
+}
+
+/** Store an image underlay on the job before the placement is saved. */
+async function rememberImageFile(file, onProgress) {
+  if (!openProject?.id || !store.doc?.underlay || store.doc.sheetSet || isSatelliteUnderlay(store.doc)) return undefined;
+  try {
+    const asset = await cloud.saveUnderlay(
+      openProject.id,
+      await file.arrayBuffer(),
+      file.type || "application/octet-stream",
+      { onProgress },
+    );
+    if (asset?.id && store.doc?.underlay && !store.doc.sheetSet) {
+      store.doc.underlay.assetId = asset.id;
+      underlayFetchFor = asset.id;
+      return asset.id;
+    }
+    return undefined;
+  } catch (error) {
+    const offline = error instanceof CloudError && error.status === 0;
+    setStatusMessage(
+      offline
+        ? "No connection. The image is on screen, but a refresh will ask for the file again."
+        : (error?.message || "The image is on screen, but it was not saved. A refresh will ask for the file again."),
+      "warn",
+    );
+    return null;
+  }
 }
 
 /** A reopened drawing carries the satellite placement but not its pixels; fetch them once. */
@@ -7673,6 +8438,33 @@ function restoreSatelliteBitmap() {
       setStatusMessage("Could not download the saved satellite view. Check the connection, then remove it and load it again.", "warn");
     }
   });
+}
+
+/** "{sheet} � {floor} � 1:{scale} � scale checked" at the sheet's own top-left corner, kept on screen when zoomed in. */
+function drawSheetCaption(rect) {
+  const set = store.doc.sheetSet;
+  const page = set?.pages.find((p) => p.index === store.doc.underlay?.sheetPage);
+  if (!page || !isPlanPage(page) || page.suppressed) return;
+  const corners = underlayCorners(store.doc);
+  if (!corners?.length) return;
+  const floor = visibleLevels().find((l) => l.id === page.levelId)?.name || page.levelId || "no floor";
+  const text = `${page.label} � ${floor} � 1:${page.printedScale} � ${page.verified ? "scale checked" : "scale not checked"}`;
+  ctx.save();
+  ctx.font = "11px Source Sans 3, sans-serif";
+  const pad = 5;
+  const width = ctx.measureText(text).width + pad * 2;
+  const top = corners.reduce((a, c) => (c.y < a.y || (c.y === a.y && c.x < a.x) ? c : a), corners[0]);
+  const [sx, sy] = worldToScreen(top.x, top.y);
+  const x = Math.min(Math.max(sx, 6), Math.max(6, rect.width - width - 6));
+  const y = Math.min(Math.max(sy, 6), Math.max(6, rect.height - 40));
+  ctx.fillStyle = "rgba(244, 237, 225, 0.92)";
+  ctx.fillRect(x, y, width, 18);
+  ctx.strokeStyle = page.verified ? "#3a6b4a" : "#9a6b1f";
+  ctx.strokeRect(x + 0.5, y + 0.5, width - 1, 17);
+  ctx.fillStyle = "#222";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, x + pad, y + 9);
+  ctx.restore();
 }
 
 function drawSatelliteAttribution(rect) {
@@ -7695,8 +8487,14 @@ function startCalibration() {
     setStatusMessage("Load an underlay first.", "warn");
     return;
   }
-  if (store.doc.underlay.hidden) {
-    store.doc.underlay.hidden = false;
+  // Pressed again while lit: nothing to keep from a half-made measurement.
+  if (tool === "calibrate") {
+    cancelUnderlayMode();
+    return;
+  }
+  leaveUnderlayMode("scale");
+  if (isUnderlayHidden(store.doc)) {
+    setUnderlayHidden(store.doc, false);
     store.persist();
   }
   calibration = { a: null, b: null };
@@ -7709,22 +8507,120 @@ function startCalibration() {
   render();
 }
 
+function startAlignFloors() {
+  if (!Number.isInteger(store.doc.underlay?.sheetPage)) {
+    setStatusMessage("Show a sheet from an imported plan set first.", "warn");
+    return;
+  }
+  // Pressed again while lit: the marks are the work, so this is Done, not Cancel.
+  if (tool === "align") {
+    doneUnderlayMode();
+    return;
+  }
+  leaveUnderlayMode("align");
+  if (isUnderlayHidden(store.doc)) setUnderlayHidden(store.doc, false);
+  calibration = null;
+  tool = "align";
+  underlaySelected = false;
+  store.clearSelection();
+  syncToolButtons();
+  drawRibbon();
+  render();
+}
+
+/** The other sheets, drawn faintly, but only while aligning - that is when the overlay is the point. */
+function syncAlignmentGhosts() {
+  const set = store.doc.sheetSet;
+  const current = store.doc.underlay?.sheetPage;
+  if (tool !== "align" || !set || !Number.isInteger(current)) {
+    setGhostSheets([]);
+    return;
+  }
+  const indexes = alignablePages(set, current).filter((p) => p.index !== current).map((p) => p.index);
+  setGhostSheets(indexes, () => render());
+}
+
+function placeAlignmentPoint(wx, wy) {
+  store.pushUndo();
+  const result = markAlignmentPoint(store.doc, wx, wy, visibleLevels().map((l) => l.id));
+  store.persist();
+  syncToolButtons();
+  drawRibbon();
+  if (!result.ok) setStatusMessage(result.message, "warn");
+  else if (!result.moved.length) {
+    const waiting = (store.doc.sheetSet?.pages || []).filter((p) => isPlanPage(p) && !p.anchor);
+    setStatusMessage(waiting.length
+      ? `Marked on ${result.page.label}. Switch to ${waiting[0].label} and click the same point there.`
+      : `Marked on ${result.page.label}.`, "ok");
+  } else {
+    const movedLabels = result.moved.map((i) => store.doc.sheetSet.pages.find((p) => p.index === i)?.label).filter(Boolean);
+    const beneath = movedLabels.length === 1 ? "The other sheet shows faintly beneath." : "The other sheets show faintly beneath.";
+    setStatusMessage(`Aligned: ${movedLabels.join(", ")} moved onto ${result.datum.label}. ${beneath}`, "ok");
+  }
+  render();
+}
+
+/** The alignment marks of the showing sheet and of the datum beneath it. */
+function drawAlignmentMarks() {
+  const set = store.doc.sheetSet;
+  if (!set || !underlayIsVisible()) return;
+  const showing = set.pages.find((p) => p.index === store.doc.underlay?.sheetPage);
+  const ghosts = new Set(ghostSheetIndexes());
+  for (const page of set.pages) {
+    if (page !== showing && !ghosts.has(page.index)) continue;
+    const w = alignmentPointWorld(page);
+    if (!w) continue;
+    const [sx, sy] = worldToScreen(w.x, w.y);
+    ctx.save();
+    ctx.strokeStyle = page === showing ? "#b2451e" : "rgba(178, 69, 30, 0.55)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(sx - 9, sy);
+    ctx.lineTo(sx + 9, sy);
+    ctx.moveTo(sx, sy - 9);
+    ctx.lineTo(sx, sy + 9);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(sx, sy, 5, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+  if (tool === "align" && hoverPoint) {
+    const [hx, hy] = worldToScreen(hoverPoint.x, hoverPoint.y);
+    ctx.save();
+    ctx.strokeStyle = "#b2451e";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(hx - 14, hy);
+    ctx.lineTo(hx + 14, hy);
+    ctx.moveTo(hx, hy - 14);
+    ctx.lineTo(hx, hy + 14);
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
 function startUnderlayAdjust() {
   if (!store.doc.underlay) {
     setStatusMessage("Load an underlay first.", "warn");
     return;
   }
-  if (store.doc.underlay.hidden) {
+  if (isUnderlayHidden(store.doc)) {
     setStatusMessage("Show the underlay first.", "warn");
     return;
   }
+  // Pressed again while lit: Done.
+  if (currentUnderlayMode() === "adjust") {
+    doneUnderlayMode();
+    return;
+  }
+  leaveUnderlayMode("adjust");
   calibration = null;
   tool = "select";
   underlaySelected = true;
   store.clearSelection();
   syncToolButtons();
   drawRibbon();
-  setStatusMessage("Drag a corner to resize, the top handle to rotate, or the sheet to move it.", "ok");
   render();
 }
 
@@ -7734,7 +8630,7 @@ function captureCalibrationPoint(wx, wy) {
   return { x: wx, y: wy, pixel };
 }
 
-/** World position of a calibration pick — follows the sheet when it is resized. */
+/** World position of a calibration pick � follows the sheet when it is resized. */
 function liveCalibrationPoint(pt) {
   if (!pt) return null;
   if (pt.pixel && store.doc.underlay) return underlayWorldFromPixel(store.doc.underlay, pt.pixel.x, pt.pixel.y);
@@ -7763,7 +8659,8 @@ function confirmCalibration() {
   if (result.ok) {
     calibration = null;
     tool = "select";
-    underlaySelected = true;
+    underlaySelected = false;
+    sheetUi.afterCalibration();
     store.persist();
     syncToolButtons();
     drawRibbon();
@@ -7773,11 +8670,7 @@ function confirmCalibration() {
 
 function cancelCalibration() {
   if (tool !== "calibrate") return;
-  calibration = null;
-  tool = "select";
-  syncToolButtons();
-  drawRibbon();
-  render();
+  cancelUnderlayMode();
 }
 
 // --- site: property line, SG reference, building line ---------------------
@@ -7870,18 +8763,70 @@ function runAutoBuildingLine() {
   render();
 }
 
-function removeUnderlay() {
-  clearUnderlay(store.doc);
-  underlaySelected = false;
-  if (tool === "calibrate") {
-    calibration = null;
-    tool = "select";
-    syncToolButtons();
+/** What Remove would throw away, in the user's terms, for the confirmation. */
+function describeUnderlayRemoval() {
+  const doc = store.doc;
+  const set = doc.sheetSet;
+  if (!set) return { title: "Remove the underlay?", message: `${doc.underlay?.name || "The underlay"} comes off the plan. Your walls and the rest of the drawing are not affected.` };
+  const placed = set.pages.filter((p) => p.placement);
+  const parts = [`${placed.length} placed sheet${placed.length === 1 ? "" : "s"} and their level assignments`];
+  const verified = placed.filter((p) => p.verified).length;
+  if (verified) parts.push(`${verified} scale check${verified === 1 ? "" : "s"}`);
+  const marks = placed.filter((p) => p.anchor).length;
+  if (marks) parts.push(`${marks} alignment mark${marks === 1 ? "" : "s"}`);
+  if (Object.keys(set.ceilingHeights || {}).length) parts.push("the floor-to-ceiling heights you typed");
+  return {
+    title: "Remove the whole plan set?",
+    message: `This takes ${set.sources?.length > 1 ? `all ${set.sources.length} plan files` : (set.sources?.[0]?.name || set.pdfName)} off the plan, including ${parts.join(", ")}. Your walls and the rest of the drawing are not affected. To just get it out of the way, hide it instead.`,
+  };
+}
+
+async function removeUnderlay() {
+  const doc = store.doc;
+  if (!doc.underlay && !doc.sheetSet) {
+    setStatusMessage("Nothing to remove.", "warn");
+    return;
   }
+  leaveUnderlayMode(null);
+  const { title, message } = describeUnderlayRemoval();
+  const choice = await sheetUi.ask({
+    title,
+    message,
+    choices: [
+      { id: "cancel", label: "Cancel" },
+      { id: "hide", label: "Hide instead", primary: true },
+      { id: "remove", label: "Remove" },
+    ],
+  });
+  if (choice === "hide") {
+    if (store.doc.underlay && !isUnderlayHidden(store.doc)) toggleUnderlayVisibility();
+    return;
+  }
+  if (choice !== "remove") return;
+
+  const removed = stashUnderlay(store.doc);
+  if (!removed) return;
+  underlaySelected = false;
+  calibration = null;
+  if (tool === "calibrate" || tool === "align") tool = "select";
+  setGhostSheets([]);
   store.persist();
-  setStatusMessage("Underlay removed.", "ok");
+  syncToolButtons();
   drawRibbon();
   render();
+  sheetUi.toast(`${removed.name} removed.`, {
+    actionLabel: "Undo",
+    onAction: () => {
+      if (!restoreStashedUnderlay(store.doc)) {
+        setStatusMessage("Could not restore it: something else has been loaded since.", "warn");
+        return;
+      }
+      store.persist();
+      drawRibbon();
+      render();
+      setStatusMessage(`${removed.name} restored.`, "ok");
+    },
+  });
 }
 
 function toggleUnderlayVisibility() {
@@ -7889,17 +8834,14 @@ function toggleUnderlayVisibility() {
     setStatusMessage("Load an underlay first.", "warn");
     return;
   }
+  // Hiding the sheet ends any mode that needs to see it.
+  if (!isUnderlayHidden(store.doc) && (tool === "calibrate" || tool === "align")) cancelUnderlayMode();
   toggleUnderlayHidden(store.doc);
-  if (store.doc.underlay.hidden) {
+  if (isUnderlayHidden(store.doc)) {
     underlaySelected = false;
-    if (tool === "calibrate") {
-      calibration = null;
-      tool = "select";
-      syncToolButtons();
-    }
   }
   store.persist();
-  setStatusMessage(store.doc.underlay.hidden ? "Underlay hidden." : "Underlay shown.", "ok");
+  setStatusMessage(isUnderlayHidden(store.doc) ? "Underlay hidden." : "Underlay shown.", "ok");
   drawRibbon();
   render();
 }
@@ -8017,7 +8959,7 @@ function fillAttachList() {
   el.attachList.innerHTML = attachPick.candidates.map((ref) => {
     const obj = objByRef(ref);
     const level = (pack.levels || []).find((l) => l.id === effectiveLevel(obj, pack))?.name || effectiveLevel(obj, pack);
-    return `<option value="${escapeHtml(attachRefKey(ref))}">${escapeHtml(`${objectLabel(pack, obj)} — ${level}`)}</option>`;
+    return `<option value="${escapeHtml(attachRefKey(ref))}">${escapeHtml(`${objectLabel(pack, obj)} � ${level}`)}</option>`;
   }).join("");
 }
 
@@ -8128,11 +9070,11 @@ function attachStateText(obj) {
   const base = resolvedBase(store.doc, pack, obj, drawnObjectHeight(pack, obj));
   const level = (pack.levels || []).find((l) => l.id === effectiveLevel(obj, pack));
   const levelLabel = level?.name || effectiveLevel(obj, pack) || "level";
-  if (base.warning) return `Attached, but unresolved — falls back to ${levelLabel}. See Check.`;
+  if (base.warning) return `Attached, but unresolved � falls back to ${levelLabel}. See Check.`;
   if (base.attachedTo) {
     return `On "${base.attachedTo.label}" at ${formatLengthMm(base.elevation)} mm, ${formatLengthMm(base.height)} mm high`;
   }
-  return `Not attached — ${levelLabel} + ${formatLengthMm(obj.baseOffset || 0)} mm`;
+  return `Not attached � ${levelLabel} + ${formatLengthMm(obj.baseOffset || 0)} mm`;
 }
 
 /** Drawn foundations filed on a storey that is not the foundation storey.
@@ -8142,7 +9084,7 @@ function renderFoundationReport() {
   if (!el.foundationReport) return;
   const home = foundationStorey(pack.levels || []);
   if (!home) {
-    el.foundationCount.textContent = "—";
+    el.foundationCount.textContent = "�";
     el.foundationReport.innerHTML = '<p class="hint">This template has no foundation storey, so a foundation stays on the plan it is drawn on.</p>';
     return;
   }
@@ -8178,7 +9120,7 @@ function renderAttachReport() {
   const rows = attachReport(store.doc, pack);
   const broken = rows.filter((r) => r.warning).length;
   el.attachCount.textContent = rows.length
-    ? `${rows.length} attached${broken ? ` · ${broken} unresolved` : ""}`
+    ? `${rows.length} attached${broken ? ` � ${broken} unresolved` : ""}`
     : "None";
   if (!rows.length) {
     el.attachReport.innerHTML = '<p class="hint">No object\'s base follows another one. Every elevation here is its level\'s datum.</p>';
@@ -8189,7 +9131,7 @@ function renderAttachReport() {
       <span>${escapeHtml(row.label)}</span>
       <span>${escapeHtml(row.warning
         ? row.warning
-        : `on "${row.attachedTo.label}" — base ${formatLengthMm(row.elevation)} mm, ${formatLengthMm(row.height)} mm high`)}</span>
+        : `on "${row.attachedTo.label}" � base ${formatLengthMm(row.elevation)} mm, ${formatLengthMm(row.height)} mm high`)}</span>
     </div>
   `).join("");
 }
@@ -8267,7 +9209,29 @@ function drawDensityButtons() {
 // --- toolbar -----------------------------------------------------------
 
 function syncToolButtons() {
-  document.querySelectorAll("[data-tool]").forEach((btn) => btn.classList.toggle("active", btn.dataset.tool === tool));
+  document.querySelectorAll("[data-tool]").forEach((btn) => {
+    btn.classList.toggle("active", !panMode && btn.dataset.tool === tool);
+  });
+  const pan = document.getElementById("v2-pan");
+  if (pan) {
+    pan.classList.toggle("active", panMode);
+    pan.setAttribute("aria-pressed", panMode ? "true" : "false");
+  }
+}
+
+function setPanMode(on) {
+  const next = Boolean(on);
+  if (next === panMode) return;
+  panMode = next;
+  syncToolButtons();
+  if (el.canvas) el.canvas.style.cursor = panMode ? "grab" : "crosshair";
+  updateRibbonHint();
+}
+
+function beginPan(ev) {
+  drag = { kind: "pan", startX: ev.clientX, startY: ev.clientY, ox0: cam.ox, oy0: cam.oy };
+  el.canvas.style.cursor = "grabbing";
+  try { el.canvas.setPointerCapture(ev.pointerId); } catch { /* capture can fail if the pointer already ended */ }
 }
 
 // Drags that edit geometry already in the document mutate it live, off the
@@ -8276,7 +9240,7 @@ function syncToolButtons() {
 const REVERTIBLE_DRAGS = new Set(["move", "segment-end", "property-vertex", "property-move", "underlay-move", "underlay-scale", "underlay-rotate"]);
 
 /**
- * Drop the in-progress click–click segment (or last property-line vertex)
+ * Drop the in-progress click�click segment (or last property-line vertex)
  * without leaving the tool. Returns true when there was something to abort,
  * so Escape can stay in the wall/beam/roof tool the way Revit does.
  */
@@ -8306,11 +9270,13 @@ function abortClickDraft() {
 }
 
 /**
- * Escape: first drop the live click–click preview (keep the tool armed);
+ * Escape: first drop the live click�click preview (keep the tool armed);
  * a second press leaves the tool, which is what the ribbon hints
  * ("Esc to stop") promise once there is no segment in flight.
  */
 function cancelDrawing() {
+  // A click waiting on the PDF index must not place a point after Escape.
+  pdfSnapClickGate += 1;
   if (REVERTIBLE_DRAGS.has(drag?.kind)) {
     // undo() clears the selection; the user only cancelled a move, so put the
     // same objects back under the pointer.
@@ -8321,6 +9287,14 @@ function cancelDrawing() {
     drag = null;
     drawRibbon();
     render();
+    return;
+  }
+
+  // Set scale and Align sheets: Escape leaves the mode and puts the sheets back.
+  // (Adjust falls through: Escape there deselects the sheet and keeps the move.)
+  const underlayMode = currentUnderlayMode();
+  if (underlayMode === "scale" || underlayMode === "align") {
+    cancelUnderlayMode();
     return;
   }
 
@@ -8382,8 +9356,10 @@ function cancelDrawing() {
 }
 
 function wireToolbar() {
+  document.getElementById("v2-pan")?.addEventListener("click", () => setPanMode(!panMode));
   document.querySelectorAll("[data-tool]").forEach((btn) => {
     btn.addEventListener("click", () => {
+      setPanMode(false);
       tool = btn.dataset.tool;
       if (tool !== "select") placeSkuId = placeSkuId || defaultSkuFor(tool);
       else if (activeFunction) {
@@ -8396,7 +9372,7 @@ function wireToolbar() {
         drawRibbon();
         renderPalette();
       }
-      if (serviceRoute?.fromNodeId) finishServiceRoute();
+      if (serviceRoute?.fromNodeId) finishServiceRoute({ select: false });
       serviceRoute = null;
       serviceConnect = null;
       beamStart = null;
@@ -8415,6 +9391,7 @@ function wireToolbar() {
       revisionCloudDraft = null;
       measureDraft = null;
       syncToolButtons();
+      clearRouteIfLeavingServices();
       render();
     });
   });
@@ -8491,13 +9468,82 @@ function onWheel(ev) {
   render();
 }
 
+let pdfSnapClickGate = 0;
+let replayingPdfSnapClick = false;
+const PDF_LINES_READING = "Reading PDF lines...";
+
+/** Snap the still pointer once the page's corners and crossings exist. */
+function refreshLiveSnap() {
+  if (!hoverPoint || drag) return;
+  if (tool === "calibrate") {
+    if (!calibration?.b) {
+      const p = applyPdfPick(hoverPoint.x, hoverPoint.y);
+      hoverPoint = { x: p.x, y: p.y, kind: p.kind };
+    }
+    return;
+  }
+  if (tool === "align") {
+    const p = applyPdfPick(hoverPoint.x, hoverPoint.y);
+    hoverPoint = { x: p.x, y: p.y, kind: p.kind };
+    return;
+  }
+  if (wallDraft) {
+    const p = applySnap(hoverPoint.x, hoverPoint.y);
+    wallDraft.x2 = p.x;
+    wallDraft.y2 = p.y;
+    if (sizeDraft?.lockW) setWallDraftLength(parseLengthInput(sizeDraft.typedW, wallDraftLength() || 1));
+    if (segmentLength(wallDraft.x1, wallDraft.y1, wallDraft.x2, wallDraft.y2) >= MIN_TRACE) {
+      wallDraft.keep = { x: wallDraft.x2, y: wallDraft.y2 };
+    }
+    return;
+  }
+  if (shapeDraft) {
+    const p = applySnap(hoverPoint.x, hoverPoint.y);
+    shapeDraft.rect = rectFromDrag(shapeDraft.x0, shapeDraft.y0, p.x, p.y);
+    return;
+  }
+  if (snapPreviewTool() || beamStart || lineStart) applySnap(hoverPoint.x, hoverPoint.y);
+}
+
+function dismissStatus(text) {
+  if (el.healthLabel?.textContent !== text) return;
+  clearTimeout(statusTimer);
+  el.healthLabel.textContent = "";
+  el.healthDot.classList.add("ok");
+  el.healthDot.hidden = true;
+  drawPackHealth();
+}
+
 function onPointerDown(ev) {
-  if (ev.button === 1 || ev.altKey) {
-    drag = { kind: "pan", startX: ev.clientX, startY: ev.clientY, ox0: cam.ox, oy0: cam.oy };
-    el.canvas.setPointerCapture(ev.pointerId);
+  // Middle button and Alt-drag pan from any tool and leave the draft alone.
+  // Pan mode is the same gesture on the left button, and it swallows the
+  // click so a wall point or a selection window cannot start underneath.
+  if (ev.button === 1 || ev.altKey || (panMode && ev.button === 0)) {
+    beginPan(ev);
+    return;
+  }
+  if (panMode) return;
+  // The first point of a stroke used to miss: the click asked for a snap
+  // before the page's lines had been read, and only the following move hit.
+  // Hold this click until that read finishes, then place the snapped point.
+  if (!replayingPdfSnapClick && clickSnapsToPdf() && pdfLineworkPending()) {
+    const gate = ++pdfSnapClickGate;
+    const toolAtClick = tool;
+    setStatusMessage(PDF_LINES_READING, "ok");
+    ensurePageLinework(store.doc.underlay.sheetPage).then(() => {
+      if (gate !== pdfSnapClickGate || tool !== toolAtClick) {
+        dismissStatus(PDF_LINES_READING);
+        return;
+      }
+      dismissStatus(PDF_LINES_READING);
+      replayingPdfSnapClick = true;
+      try { onPointerDown(ev); }
+      finally { replayingPdfSnapClick = false; }
+    });
     return;
   }
   const [wx, wy] = pointerWorld(ev);
+  hoverPoint = { x: wx, y: wy };
 
   // Endpoint handles are the selection's own; while a target pick or draw
   // tool is armed the click belongs to that tool, not to stretching a wall.
@@ -8568,13 +9614,19 @@ function onPointerDown(ev) {
     }
   }
 
+  if (tool === "align") {
+    const p = applyPdfPick(wx, wy);
+    placeAlignmentPoint(p.x, p.y);
+    return;
+  }
   if (tool === "calibrate") {
-    if (!calibration.a) calibration.a = captureCalibrationPoint(wx, wy);
+    const p = applyPdfPick(wx, wy);
+    if (!calibration.a) calibration.a = captureCalibrationPoint(p.x, p.y);
     else if (!calibration.b) {
-      calibration.b = captureCalibrationPoint(wx, wy);
+      calibration.b = captureCalibrationPoint(p.x, p.y);
       promptCalibrationDistance();
       return;
-    } else if (hitUnderlay(wx, wy)) {
+    } else if (hitUnderlay(wx, wy) && !store.doc.underlay.pinned) {
       store.pushUndo();
       drag = {
         kind: "underlay-move",
@@ -8667,6 +9719,11 @@ function onPointerDown(ev) {
     finishMeasure(p);
     return;
   }
+  // A route still being drawn keeps the click, so the next point can land
+  // on a wall. Once the route is finished, Draw route / Connect / Add node
+  // still treat a wall or floor click as Exit. Select does not: a drag has
+  // to move the route, and that decision waits until the pointer comes up.
+  if (!ev.shiftKey && !serviceRoute?.fromNodeId && tool !== "select" && leaveRouteForPlanClick(ev, wx, wy)) return;
   if (tool === "service-route") {
     underlaySelected = false;
     clickServicePoint(wx, wy);
@@ -8780,6 +9837,11 @@ function onPointerDown(ev) {
     return;
   }
 
+  // The route is already selected. A drag moves that route, even where a wall
+  // or annotation shares the point. A press that does not move selects the
+  // object underneath instead, which closes the profile.
+  if (tool === "select" && !ev.shiftKey && selectionIsRoute() && beginRouteDrag(ev, wx, wy)) return;
+
   // A ghost node on a selected run: one normal click makes it real, and the new
   // node can be dragged straight away.
   const ghost = tool === "select" && !ev.shiftKey ? serviceGhost() : null;
@@ -8803,6 +9865,11 @@ function onPointerDown(ev) {
     store.pushUndo();
     drag = { kind: "move", snaps: store.snapshotMoveTargets(store.selected), x0: wx, y0: wy, moved: false };
   } else if (tool === "select" && underlaySelected && hitUnderlay(wx, wy)) {
+    if (store.doc.underlay.pinned) {
+      setStatusMessage("This sheet is pinned. Unpin it in the bar above the plan to move it.", "warn");
+      render();
+      return;
+    }
     store.pushUndo();
     drag = {
       kind: "underlay-move",
@@ -8818,8 +9885,11 @@ function onPointerDown(ev) {
     const wasUnderlay = underlaySelected;
     underlaySelected = false;
     propertySelected = false;
-    if (!ev.shiftKey) store.clearSelection();
-    drag = { kind: "marquee", x0: wx, y0: wy, x1: wx, y1: wy, shift: ev.shiftKey };
+    // A click on empty plan used to drop the route and shut the profile.
+    // Keep a service selection until Exit, Escape, or a real marquee.
+    const holdRoute = tool === "select" && !ev.shiftKey && selectionIsRoute();
+    if (!ev.shiftKey && !holdRoute) store.clearSelection();
+    drag = { kind: "marquee", x0: wx, y0: wy, x1: wx, y1: wy, shift: ev.shiftKey, holdRoute };
     if (wasUnderlay) drawRibbon();
   }
   render();
@@ -8937,7 +10007,7 @@ function clickServicePoint(wx, wy) {
  * never got a run is removed again rather than left as an orphan, but only while
  * nothing else has happened since (otherwise it is somebody else's undo entry).
  */
-function finishServiceRoute() {
+function finishServiceRoute({ select = true } = {}) {
   const r = serviceRoute;
   serviceRoute = null;
   snapGuide = null;
@@ -8946,9 +10016,81 @@ function finishServiceRoute() {
     store.undo();
     return;
   }
-  if (r.lastEdgeId && (store.doc.serviceEdges || []).some((e) => e.id === r.lastEdgeId)) {
+  if (select && r.lastEdgeId && (store.doc.serviceEdges || []).some((e) => e.id === r.lastEdgeId)) {
     store.setSelection([{ kind: "serviceEdge", id: r.lastEdgeId }]);
   }
+}
+
+/** The route profile is on screen (a route is selected, or one was just drawn). */
+function routeProfileOpen() {
+  return Boolean(el.serviceProfileDock && !el.serviceProfileDock.hidden);
+}
+
+/** The open route profile is showing this selection, and only this selection. */
+function selectionIsRoute() {
+  return store.selected.length > 0 && store.selected.every((r) => r.kind === "serviceNode" || r.kind === "serviceEdge");
+}
+
+/**
+ * While Draw route, Connect or Add node is armed and the profile is open, a
+ * click on a wall or floor is the Exit button: close the profile and the
+ * Services panel, then select that object. Select does not use this. A drag
+ * there moves the route, and only a click that does not move leaves it.
+ * Returns true when the click was consumed.
+ */
+function leaveRouteForPlanClick(ev, wx, wy) {
+  if (tool !== "select" && tool !== "service-route" && tool !== "service-connect" && tool !== "service-node") return false;
+  if (!routeProfileOpen()) return false;
+  const under = wallOrFloorAt(wx, wy);
+  if (!under) return false;
+  exitRouteProfile();
+  underlaySelected = false;
+  propertySelected = false;
+  store.selectOne(under);
+  store.pushUndo();
+  drag = { kind: "move", snaps: store.snapshotMoveTargets(store.selected), x0: wx, y0: wy, moved: false };
+  el.canvas.setPointerCapture(ev.pointerId);
+  render();
+  return true;
+}
+
+/**
+ * A draw tool other than Select or a service tool takes the inspector.
+ * The route selection is what keeps the Services panel and route profile up,
+ * so it has to go when that tool is armed, not when the first point is placed.
+ */
+function clearRouteIfLeavingServices() {
+  if (tool === "select" || tool === "service-route" || tool === "service-connect" || tool === "service-node") return;
+  if (!store.selected.some((r) => r.kind === "serviceNode" || r.kind === "serviceEdge")) return;
+  const rest = store.selected.filter((r) => r.kind !== "serviceNode" && r.kind !== "serviceEdge");
+  if (rest.length) store.setSelection(rest);
+  else store.clearSelection();
+}
+
+/**
+ * Close the route profile and the Services inspector. Leaves Draw route /
+ * Connect / Add node as well, otherwise the inspector stays on Services and
+ * the run just drawn brings the profile straight back.
+ */
+function exitRouteProfile() {
+  if (serviceRoute?.fromNodeId) finishServiceRoute({ select: false });
+  else serviceRoute = null;
+  serviceConnect = null;
+  snapGuide = null;
+  if (tool === "service-route" || tool === "service-connect" || tool === "service-node") {
+    tool = "select";
+    activeFunction = null;
+    syncToolButtons();
+    drawRibbon();
+    renderPalette();
+    updateRibbonHint();
+  }
+  if (store.selected.some((r) => r.kind === "serviceNode" || r.kind === "serviceEdge")) {
+    const rest = store.selected.filter((r) => r.kind !== "serviceNode" && r.kind !== "serviceEdge");
+    if (rest.length) store.setSelection(rest);
+    else store.clearSelection();
+  }
+  render();
 }
 
 function itemAt(wx, wy) {
@@ -8970,14 +10112,61 @@ function itemAt(wx, wy) {
  * while Add node is armed, or on a run that is already selected. Clicking it
  * (once) makes it a real node.
  */
-function serviceGhost() {
-  if (!hoverPoint || drag) return null;
+function serviceGhost(at) {
+  const point = at || hoverPoint;
+  if (!point || drag) return null;
   if (tool !== "service-node" && tool !== "select") return null;
-  const hit = serviceHit(hoverPoint.x, hoverPoint.y);
+  const hit = serviceHit(point.x, point.y);
   if (hit?.kind !== "serviceEdge") return null;
   if (tool === "select" && !store.isSelected("serviceEdge", hit.id)) return null;
-  const p = projectOnEdge(store.doc, hit.id, hoverPoint);
+  const p = projectOnEdge(store.doc, hit.id, point);
   return p ? { edgeId: hit.id, x: p.x, y: p.y } : null;
+}
+
+/**
+ * Pointer-down on an already selected route. Starts a move of that route and
+ * remembers the wall, annotation or other object under the pointer, which a
+ * click that does not move will select. Returns false when this press is not
+ * that gesture (empty plan, or a different route), so the caller can pick or
+ * window-select as usual.
+ */
+function beginRouteDrag(ev, wx, wy) {
+  const hit = hitTest(wx, wy);
+  if (!hit) return false;
+  const serviceKind = hit.kind === "serviceNode" || hit.kind === "serviceEdge";
+  const onSelected = serviceKind && store.isSelected(hit.kind, hit.id);
+  // A different route is an ordinary pick: select it, and this drag moves it.
+  if (serviceKind && !onSelected) return false;
+
+  const under = objectUnderRoute(wx, wy);
+  // Nothing else under a selected run: a click adds a node, and the new node
+  // can be dragged straight away. A wall or annotation under the run wins the
+  // click instead, so the node is not inserted on the way out of the profile.
+  if (onSelected && !under) {
+    const ghost = serviceGhost({ x: wx, y: wy });
+    if (ghost && commitServiceGhost(ghost)) {
+      store.pushUndo(); // dropped again below if the pointer never moves
+      drag = { kind: "move", snaps: store.snapshotMoveTargets(store.selected), x0: wx, y0: wy, moved: false };
+      el.canvas.setPointerCapture(ev.pointerId);
+      return true;
+    }
+  }
+
+  if (underlaySelected) drawRibbon();
+  underlaySelected = false;
+  propertySelected = false;
+  store.pushUndo();
+  drag = {
+    kind: "move",
+    snaps: store.snapshotMoveTargets(store.selected),
+    x0: wx,
+    y0: wy,
+    moved: false,
+    switchTo: under,
+  };
+  el.canvas.setPointerCapture(ev.pointerId);
+  render();
+  return true;
 }
 
 /** Turn a ghost into a real, selected node. */
@@ -9128,11 +10317,31 @@ function finishShapeRect() {
 }
 
 
+/** Select-tool cursor. A crosshair picks or window-selects. The move cursor
+ *  appears only once the thing under the pointer is already selected, which
+ *  is when a left-drag will move it. Handles keep their own cursors. */
+function planSelectCursor(wx, wy, uHandle) {
+  if (endpointHandleHit(wx, wy)) return "ew-resize";
+  if (uHandle?.kind === "underlay-rotate") return "grab";
+  if (uHandle?.kind === "underlay-scale") return "nwse-resize";
+  if (hover && store.isSelected(hover.kind, hover.id)) return "move";
+  if (propertyHover && propertySelected) return "move";
+  if (underlaySelected && hitUnderlay(wx, wy)) return store.doc.underlay.pinned ? "not-allowed" : "move";
+  return "crosshair";
+}
+
 function onPointerMove(ev) {
   if (drag?.kind === "pan") {
     cam.ox = drag.ox0 + (ev.clientX - drag.startX);
     cam.oy = drag.oy0 + (ev.clientY - drag.startY);
+    el.canvas.style.cursor = "grabbing";
     render();
+    return;
+  }
+  // While Pan is on, the pointer only moves the view. Drafts stay where
+  // they were until Pan is put down.
+  if (panMode) {
+    el.canvas.style.cursor = "grab";
     return;
   }
   const [wx, wy] = pointerWorld(ev);
@@ -9163,6 +10372,10 @@ function onPointerMove(ev) {
   }
 
   if (tool === "calibrate") {
+    if (!calibration?.b) {
+      const p = applyPdfPick(wx, wy);
+      hoverPoint = { x: p.x, y: p.y };
+    }
     if (calibration?.b && !drag) {
       const uHandle = underlayHandleHit(wx, wy);
       el.canvas.style.cursor = uHandle?.kind === "underlay-rotate" ? "grab"
@@ -9170,22 +10383,33 @@ function onPointerMove(ev) {
         : hitUnderlay(wx, wy) ? "move"
         : "crosshair";
     }
-    if (calibration?.a) render();
+    if (calibration?.a || snapToPdf) render();
+    return;
+  }
+  if (tool === "align") {
+    const p = applyPdfPick(wx, wy);
+    hoverPoint = { x: p.x, y: p.y };
+    el.canvas.style.cursor = "crosshair";
+    render();
     return;
   }
   if (tool === "camera") {
+    el.canvas.style.cursor = "crosshair";
     if (cameraDraft?.a) render();
     return;
   }
   if (tool === "section") {
+    el.canvas.style.cursor = "crosshair";
     if (sectionDraft?.a) render();
     return;
   }
   if (tool === "callout") {
+    el.canvas.style.cursor = "crosshair";
     if (calloutDraft?.a) render();
     return;
   }
   if (tool === "revision") {
+    el.canvas.style.cursor = "crosshair";
     if (revisionCloudDraft?.a) render();
     return;
   }
@@ -9196,6 +10420,7 @@ function onPointerMove(ev) {
     return;
   }
   if (tool === "property" || tool === "sg-ref") {
+    el.canvas.style.cursor = "crosshair";
     applySnap(wx, wy);
     render();
     return;
@@ -9314,13 +10539,10 @@ function onPointerMove(ev) {
   if (!drag && tool === "select") {
     const uHandle = underlayHandleHit(wx, wy);
     propertyHover = hover ? null : propertyHitAt(wx, wy);
-    el.canvas.style.cursor = endpointHandleHit(wx, wy) ? "ew-resize"
-      : uHandle?.kind === "underlay-rotate" ? "grab"
-      : uHandle?.kind === "underlay-scale" ? "nwse-resize"
-      : hover ? "move"
-      : propertyHover ? "move"
-      : underlaySelected && hitUnderlay(wx, wy) ? "move"
-      : "default";
+    el.canvas.style.cursor = planSelectCursor(wx, wy, uHandle);
+  } else if (!drag) {
+    propertyHover = null;
+    el.canvas.style.cursor = "crosshair";
   } else {
     propertyHover = null;
   }
@@ -9361,17 +10583,32 @@ function rectFromDrag(x0, y0, wx, wy) {
 }
 
 function onPointerUp(ev) {
-  if (drag?.kind === "pan") { drag = null; return; }
+  if (drag?.kind === "pan") {
+    drag = null;
+    el.canvas.style.cursor = panMode ? "grab" : "crosshair";
+    return;
+  }
   if (!drag) return;
 
   if (drag.kind === "marquee") {
     const box = marqueeBox(drag.x0, drag.y0, drag.x1, drag.y1);
     const hits = refsInMarquee(box);
+    const tap = Math.hypot(box.w, box.h) * cam.scale < 4;
     if (drag.shift) store.toggleRefs(hits);
-    else store.setSelection(hits);
+    else if (!(tap && drag.holdRoute)) store.setSelection(hits);
   } else if (drag.kind === "move") {
-    if (!drag.moved) store.undoStack.pop(); // no-op click: drop the speculative undo entry
-    else settleServicesAfterMove(drag.snaps);
+    if (!drag.moved) {
+      // No-op click: drop the speculative undo entry. Put the document back
+      // first, so a sub-threshold nudge cannot stay behind when the click is
+      // really selecting the wall or annotation under the route.
+      const prev = store.undoStack.pop();
+      if (drag.switchTo) {
+        if (prev) store.doc = prev;
+        underlaySelected = false;
+        propertySelected = false;
+        store.selectOne(drag.switchTo);
+      }
+    } else settleServicesAfterMove(drag.snaps);
   } else if (drag.kind === "underlay-move" || drag.kind === "underlay-scale" || drag.kind === "underlay-rotate") {
     if (!drag.moved) store.undoStack.pop(); // no-op click: drop the speculative undo entry
   } else if (drag.kind === "segment-end") {
@@ -9379,7 +10616,7 @@ function onPointerUp(ev) {
   } else if (drag.kind === "property-vertex" || drag.kind === "property-move") {
     if (!drag.moved) store.undoStack.pop();
     else if (drag.hadDerived) {
-      setStatusMessage("Property line updated. Run Building line again — the old setback was cleared.", "ok");
+      setStatusMessage("Property line updated. Run Building line again � the old setback was cleared.", "ok");
     }
   }
 
@@ -9484,6 +10721,12 @@ function wireKeyboard() {
         else closeSchedule();
         return;
       }
+      // Pan sits on top of the current tool. The first Escape puts it down
+      // and leaves the draft; the next Escape cancels the draft as usual.
+      if (panMode) {
+        setPanMode(false);
+        return;
+      }
       cancelDrawing();
     } else if (el.typeDetailOverlay && !el.typeDetailOverlay.hidden && (ev.key === "ArrowLeft" || ev.key === "ArrowRight")) {
       // Overlay is open: arrows page through the other options instead of
@@ -9546,6 +10789,9 @@ function wireKeyboard() {
       finishShapeRect();
     } else if (ev.key === "Enter" && tool === "property" && siteDraft?.length >= 3) {
       finishPropertyLine();
+    } else if (ev.key === "Enter" && (currentUnderlayMode() === "align" || currentUnderlayMode() === "adjust") && !el.modeDone.disabled) {
+      ev.preventDefault();
+      doneUnderlayMode();
     } else if (ev.key === "Enter" && tool === "room" && roomDraft?.length >= 3) {
       ev.preventDefault();
       finishRoomDraft();
@@ -9943,7 +11189,7 @@ function syncInspectStatus(obj, draft) {
 
 function syncInspectKicker(text) {
   if (!el.inspectKicker) return;
-  el.inspectKicker.textContent = text || "—";
+  el.inspectKicker.textContent = text || "�";
 }
 
 function syncObjectLevel(obj) {
@@ -10014,7 +11260,7 @@ function syncServiceProfileDock() {
   setHidden(dock, false);
   fitServiceProfileHeight();
   if (el.serviceProfileTitle) {
-    el.serviceProfileTitle.textContent = `Route profile · ${network?.name || "Route"} · height against distance along the plan`;
+    el.serviceProfileTitle.textContent = `Route profile � ${network?.name || "Route"} � height against distance along the plan`;
   }
   profileEdgeId = edge.id;
   syncProfileModeButtons();
@@ -10222,6 +11468,7 @@ if (el.serviceProfileCanvas) {
     if (profileHit(profilePointer(ev))?.kind === "segment") selectWholeRoute();
   });
   document.getElementById("v2-profile-select-all")?.addEventListener("click", selectWholeRoute);
+  document.getElementById("v2-profile-exit")?.addEventListener("click", exitRouteProfile);
   el.serviceProfileCanvas.addEventListener("pointercancel", () => { profileDrag = null; render(); });
   el.serviceProfileCanvas.addEventListener("pointerleave", () => {
     if (profileDrag || profileHoverGhost === null) return;
@@ -10536,11 +11783,11 @@ function syncPlanContext() {
     const group = store.groupForRef(refs[0]);
     syncInspectKicker(group ? group.name : `${refs.length} selected`);
   } else if (creating) {
-    syncInspectKicker(pack.name || "—");
+    syncInspectKicker(pack.name || "�");
   } else if (draft) {
-    syncInspectKicker(skuById(placeSkuId)?.name || "—");
+    syncInspectKicker(skuById(placeSkuId)?.name || "�");
   } else if (obj) {
-    syncInspectKicker(obj.name || obj.id || "—");
+    syncInspectKicker(obj.name || obj.id || "�");
   } else {
     syncInspectKicker("");
   }
@@ -10872,7 +12119,7 @@ el.underlayOpacity?.addEventListener("change", () => {
 });
 
 el.underlayRotation?.addEventListener("change", (ev) => {
-  if (!store.doc.underlay) return;
+  if (!store.doc.underlay || store.doc.underlay.pinned) return;
   store.pushUndo();
   setUnderlayRotation(store.doc, parseDegrees(ev.target.value, store.doc.underlay.rotation || 0));
   store.persist();
@@ -10880,14 +12127,14 @@ el.underlayRotation?.addEventListener("change", (ev) => {
 });
 
 el.underlayRotateCcw?.addEventListener("click", () => {
-  if (!store.doc.underlay) return;
+  if (!store.doc.underlay || store.doc.underlay.pinned) return;
   store.pushUndo();
   rotateUnderlayBy(store.doc, -90);
   store.persist();
   render();
 });
 el.underlayRotateCw?.addEventListener("click", () => {
-  if (!store.doc.underlay) return;
+  if (!store.doc.underlay || store.doc.underlay.pinned) return;
   store.pushUndo();
   rotateUnderlayBy(store.doc, 90);
   store.persist();
@@ -10896,8 +12143,38 @@ el.underlayRotateCw?.addEventListener("click", () => {
 
 // --- set-scale panel -----------------------------------------------------
 
-el.calibrateConfirm?.addEventListener("click", confirmCalibration);
-el.calibrateCancel?.addEventListener("click", cancelCalibration);
+el.modeDone?.addEventListener("click", doneUnderlayMode);
+el.modeCancel?.addEventListener("click", () => cancelUnderlayMode());
+// The close button is Cancel in Set scale and Align sheets, and Done in Adjust,
+// where leaving the mode is not a reason to throw the move away.
+el.modeClose?.addEventListener("click", () => {
+  if (currentUnderlayMode() === "adjust") doneUnderlayMode();
+  else cancelUnderlayMode();
+});
+el.calibrateRestart?.addEventListener("click", () => {
+  if (tool !== "calibrate") return;
+  calibration = { a: null, b: null };
+  render();
+});
+el.underlayPin?.addEventListener("click", () => {
+  const u = store.doc.underlay;
+  if (!u) return;
+  store.pushUndo();
+  setUnderlayPinned(store.doc, !u.pinned);
+  store.persist();
+  render();
+});
+el.alignNext?.addEventListener("click", () => {
+  const index = Number(el.alignNext.dataset.index);
+  if (Number.isInteger(index)) sheetUi.goToSheet(index, { fit: false });
+});
+el.alignClear?.addEventListener("click", () => {
+  if (tool !== "align" || !barSnapshot) return;
+  restoreUnderlayState(barSnapshot);
+  store.persist();
+  render();
+});
+el.calibrateSnap?.addEventListener("change", () => setSnapToPdf(el.calibrateSnap.checked));
 el.calibrateDistance?.addEventListener("input", () => {
   if (calibration) calibration.distanceEdited = true;
 });
@@ -10960,15 +12237,15 @@ function runCompile() {
   el.compileKicker.textContent = `${out.instances.length} instances`;
   const warnings = out.warnings || [];
   el.compileOut.innerHTML = `
-    ${warnings.length ? `<div class="compile-warnings">${warnings.map((w) => `<p class="warn">⚠ ${escapeHtml(w)}</p>`).join("")}</div>` : ""}
+    ${warnings.length ? `<div class="compile-warnings">${warnings.map((w) => `<p class="warn">? ${escapeHtml(w)}</p>`).join("")}</div>` : ""}
     <dl class="meta">
-      <div><dt>Rooms</dt><dd>${out.rooms.length} (${totalArea.toFixed(1)} m² total)</dd></div>
+      <div><dt>Rooms</dt><dd>${out.rooms.length} (${totalArea.toFixed(1)} m� total)</dd></div>
       <div><dt>Walls</dt><dd>${walls.length} (${external} external)</dd></div>
       <div><dt>Openings</dt><dd>${doors} doors, ${windows} windows</dd></div>
       <div><dt>Implied quantities</dt><dd>${implied.length ? implied.map((r) => `${r.model} (${(r.length ?? r.area ?? 0).toFixed(1)})`).join(", ") : "none"}</dd></div>
     </dl>
     <p class="hint">Full extract logged to the console as <code>window.__extract</code>.</p>
-    <pre>${escapeHtml(JSON.stringify(out.instances.slice(0, 6), null, 2))}${out.instances.length > 6 ? "\n…" : ""}</pre>
+    <pre>${escapeHtml(JSON.stringify(out.instances.slice(0, 6), null, 2))}${out.instances.length > 6 ? "\n�" : ""}</pre>
   `;
   window.__extract = out;
   // eslint-disable-next-line no-console
@@ -11039,12 +12316,12 @@ function clearSchedulePicks() {
 function syncSchedule3dChrome(hits) {
   if (el.schedule3dDrawing) el.schedule3dDrawing.disabled = !schedule3dTarget;
   if (!el.schedule3dNote) return;
-  const hint = scheduleModelIs2d() ? "scroll to zoom" : "drag to orbit · scroll to zoom";
+  const hint = scheduleModelIs2d() ? "scroll to zoom" : "drag to orbit � scroll to zoom";
   if (!schedule3dTarget) {
     el.schedule3dNote.textContent = "Click a line to pick it out.";
   } else if (hits) {
     const n = schedule3dTarget.refs.length;
-    el.schedule3dNote.textContent = `${schedule3dTarget.label || "Selection"} · ${n} element${n === 1 ? "" : "s"} in orange · ${hint}`;
+    el.schedule3dNote.textContent = `${schedule3dTarget.label || "Selection"} � ${n} element${n === 1 ? "" : "s"} in orange � ${hint}`;
   } else {
     el.schedule3dNote.textContent = "Not a solid in the model (e.g. derived from a room) - use Exit to drawing.";
   }
@@ -11100,7 +12377,7 @@ function fmtQty(qty, unit) {
 }
 
 function levelName(levelId) {
-  if (!levelId) return "—";
+  if (!levelId) return "�";
   return (pack?.levels || []).find((l) => l.id === levelId)?.name || levelId;
 }
 
@@ -11121,10 +12398,10 @@ function scheduleGroupRefs(row) {
 
 function elementRowHtml(groupIndex, element, elementIndex) {
   const detail = [
-    Number.isFinite(element.angle) ? `${element.angle.toFixed(0)}°` : null,
+    Number.isFinite(element.angle) ? `${element.angle.toFixed(0)}�` : null,
     element.gradient || null,
-  ].filter(Boolean).join(" · ");
-  const label = `${element.id}${element.status ? ` · ${element.status}` : ""}${detail ? ` · ${detail}` : ""}`;
+  ].filter(Boolean).join(" � ");
+  const label = `${element.id}${element.status ? ` � ${element.status === "planned" ? "proposed" : element.status}` : ""}${detail ? ` � ${detail}` : ""}`;
   const locatable = Boolean(element.kind);
   return `
     <div class="schedule-element${locatable ? " locatable" : ""}" data-group="${groupIndex}" data-element="${elementIndex}"
@@ -11151,8 +12428,8 @@ function scheduleRowsHtml(rows, { priced }) {
       <td>${escapeHtml(row.unit || "")}</td>`;
     const priceCells = priced
       ? `
-      <td class="num">${row.priced ? money(row.rate, symbol) : "—"}</td>
-      <td class="num">${row.priced ? money(row.amount, symbol) : "—"}</td>`
+      <td class="num">${row.priced ? money(row.rate, symbol) : "�"}</td>
+      <td class="num">${row.priced ? money(row.amount, symbol) : "�"}</td>`
       : "";
     const refCount = scheduleGroupRefs(row).length;
     const elements = (row.elements || [])
@@ -11188,13 +12465,13 @@ function scheduleCompactHtml(rows, { priced }) {
     const rowTitle = refCount
       ? `Click to pick out all ${refCount} drawn element${refCount === 1 ? "" : "s"} on this line`
       : "Nothing drawn on this line";
-    const amount = priced ? (row.priced ? money(row.amount, symbol) : "—") : "";
+    const amount = priced ? (row.priced ? money(row.amount, symbol) : "�") : "";
     return `
       <div class="schedule-line">
         <div class="schedule-group-row${open ? " open" : ""}" data-group="${i}" title="${rowTitle}">
           <button type="button" class="schedule-caret-btn" aria-expanded="${open}" aria-label="Show or hide the elements on this line" title="Show or hide the elements on this line"></button>
           <div class="schedule-line-body">
-            <div class="schedule-line-model">${escapeHtml(row.model || "—")}</div>
+            <div class="schedule-line-model">${escapeHtml(row.model || "�")}</div>
             <div class="schedule-line-desc">${escapeHtml(row.description || "")}</div>
             <div class="schedule-line-meta">
               <span class="schedule-line-cat">${escapeHtml(row.category || "")}</span>
@@ -11260,7 +12537,7 @@ function openSchedule(title, rows, { priced }) {
     el.scheduleKicker.textContent = [
       `${rows.length} lines`,
       ...(priced ? [rateBook?.name, rateBookEffective()] : []),
-    ].filter(Boolean).join(" · ");
+    ].filter(Boolean).join(" � ");
   }
   // Warnings are inserted after this returns. Clear first so a second open
   // does not keep the previous banner.
@@ -11295,15 +12572,15 @@ function runBoq() {
   const rows = boqRows(out, rateBook);
   const unpriced = rows.filter((r) => !r.priced).length;
   const derived = rows.filter((r) => r.derived).length;
-  openSchedule("BOQ — bill of quantities", rows, { priced: true });
+  openSchedule("BOQ � bill of quantities", rows, { priced: true });
   const warnings = [
     derived ? `${derived} fitting ${derived === 1 ? "line is" : "lines are"} counted from the route's bends. The template names no fitting type for ${derived === 1 ? "it" : "them"}, so price by the line's code.` : null,
-    !rateBook ? 'No rate book loaded — every line prices at "—".' : null,
-    rateBook && unpriced ? `${unpriced} of ${rows.length} lines have no rate on file and price at "—".` : null,
+    !rateBook ? 'No rate book loaded � every line prices at "�".' : null,
+    rateBook && unpriced ? `${unpriced} of ${rows.length} lines have no rate on file and price at "�".` : null,
   ].filter(Boolean);
   if (warnings.length && el.scheduleBody) {
     el.scheduleBody.insertAdjacentHTML("afterbegin",
-      `<div class="compile-warnings">${warnings.map((w) => `<p class="warn">⚠ ${escapeHtml(w)}</p>`).join("")}</div>`);
+      `<div class="compile-warnings">${warnings.map((w) => `<p class="warn">? ${escapeHtml(w)}</p>`).join("")}</div>`);
   }
   window.__boq = rows;
   // eslint-disable-next-line no-console
@@ -11314,7 +12591,7 @@ function runBom() {
   const out = compile(store.doc, pack);
   if (!out) return;
   const rows = bomRows(out);
-  openSchedule("BOM — bill of materials", rows, { priced: false });
+  openSchedule("BOM � bill of materials", rows, { priced: false });
   window.__bom = rows;
   // eslint-disable-next-line no-console
   console.log("v2 BOM:", rows);
@@ -11380,7 +12657,7 @@ function elementLevel(ref, obj, walls = null) {
 /** Bring these points into the visible plan without changing zoom. If any
  *  part is already on screen, the camera stays put. Otherwise it shifts only
  *  along the axes where they sit off-screen, and only until the near edge
- *  clears the border — not until they are centred. */
+ *  clears the border � not until they are centred. */
 function framePlanPoints(points) {
   if (!points.length || !el.canvas) return;
   const rect = el.canvas.getBoundingClientRect();
@@ -11613,7 +12890,7 @@ function showExportPanel(title, fileName, report, extraHints) {
   el.compilePanel.querySelector("h2").textContent = title;
   el.compileKicker.textContent = fileName || "not exported";
   el.compileOut.innerHTML = `
-    ${notes.length ? `<div class="compile-warnings">${notes.map(([, m]) => `<p class="warn">⚠ ${escapeHtml(m)}</p>`).join("")}</div>` : ""}
+    ${notes.length ? `<div class="compile-warnings">${notes.map(([, m]) => `<p class="warn">? ${escapeHtml(m)}</p>`).join("")}</div>` : ""}
     <dl class="meta">
       <div><dt>Levels</dt><dd>${c.levels} storeys</dd></div>
       <div><dt>Walls</dt><dd>${c.walls}</dd></div>
@@ -11628,7 +12905,7 @@ function showExportPanel(title, fileName, report, extraHints) {
 // --- CAD export -----------------------------------------------------------
 //
 // Output > Exchange > Export CAD. A DXF is 2D linework. Revit inserts it with
-// Insert → Link CAD; File → Open will not, because that command only lists
+// Insert ? Link CAD; File ? Open will not, because that command only lists
 // Revit projects. No add-in is involved.
 
 function runExportDxf() {
@@ -11640,19 +12917,19 @@ function runExportDxf() {
   const { text, fileName, report } = result;
   if (text) {
     downloadText(fileName, text, "application/dxf");
-    setStatusMessage(`${fileName}: in Revit, Insert → Link CAD. File → Open will not load a DXF.`);
+    setStatusMessage(`${fileName}: in Revit, Insert ? Link CAD. File ? Open will not load a DXF.`);
   } else {
     setStatusMessage("Nothing could be exported - see the report.", "warn");
   }
   showExportPanel("CAD export", text ? fileName : "not exported", report, `
     <p class="hint"><strong>This is not a .rvt</strong> and not a model. It is a 2D CAD drawing of the plan (millimetres, one layer per storey).</p>
-    <p class="hint">In Revit, with <em>no add-in</em>: open the firm's template, then <strong>Insert → Link CAD</strong> (or Import CAD). Set Files of type to DXF. File → Open will ignore this file the same way it ignores IFC.</p>
+    <p class="hint">In Revit, with <em>no add-in</em>: open the firm's template, then <strong>Insert ? Link CAD</strong> (or Import CAD). Set Files of type to DXF. File ? Open will ignore this file the same way it ignores IFC.</p>
   `);
 }
 
 // --- IFC export -----------------------------------------------------------
 //
-// Still available for a machine that can File → Open → IFC. The receiving
+// Still available for a machine that can File ? Open ? IFC. The receiving
 // Revit user is not assumed to have this add-in.
 
 function runExportIfc() {
@@ -11665,11 +12942,11 @@ function runExportIfc() {
   const { text, fileName, report } = result;
   if (text) {
     downloadText(fileName, text, "application/x-step");
-    setStatusMessage(`${fileName}: in Revit, File → Open → IFC (not Open → Project), then Save As .rvt.`);
+    setStatusMessage(`${fileName}: in Revit, File ? Open ? IFC (not Open ? Project), then Save As .rvt.`);
   } else {
     setStatusMessage("Nothing could be exported - see the report.", "warn");
   }
   showExportPanel("IFC export", text ? fileName : "not exported", report, `
-    <p class="hint"><strong>This is not a .rvt.</strong> File → Open → Project will not load it. Use File → Open → IFC, then File → Save As a project.</p>
+    <p class="hint"><strong>This is not a .rvt.</strong> File ? Open ? Project will not load it. Use File ? Open ? IFC, then File ? Save As a project.</p>
   `);
 }

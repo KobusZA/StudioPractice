@@ -14,8 +14,9 @@ import {
   ACTIVITY_TYPES, BILLING_BASES, PROJECT_STATUSES, WRITE_DOWN_REASONS,
 } from "./defaults.js";
 import { withTransaction } from "./db.js";
+import { MAX_UNDERLAY_BYTES } from "./assets.js";
 import {
-  HttpError, clearedCookie, createRouter, parseCookies, readJsonBody, sendJson, sessionCookie,
+  HttpError, clearedCookie, createRouter, parseCookies, readJsonBody, readRawBody, sendBytes, sendJson, sessionCookie,
 } from "./http.js";
 import { generateVisualization } from "./visualize.js";
 import { validDate } from "./team-report.js";
@@ -64,6 +65,9 @@ export function createApi(pool, options = {}, env = process.env) {
     ["POST", "/api/projects/:id/restore", handleRestoreProject],
 
     ["POST", "/api/projects/:id/drawing", handleAttachDrawing],
+    ["POST", "/api/projects/:id/assets", handlePutUnderlay],
+    ["POST", "/api/projects/:id/assets/lookup", handleLookupUnderlay],
+    ["GET", "/api/assets/:id", handleGetUnderlay],
     ["GET", "/api/drawings/:id", handleGetDrawing],
     ["PUT", "/api/drawings/:id", handlePutDrawing],
 
@@ -371,6 +375,50 @@ async function handleRestoreProject({ req, res, pool, params }) {
   ));
   if (!restored) throw new HttpError(404, "No such deleted job");
   sendJson(res, 200, { project: restored });
+}
+
+// --- the underlay file -----------------------------------------------------
+
+/**
+ * The plan PDF or image, stored beside the drawing rather than inside it.
+ * The drawing's next save names the id this returns; until that save lands,
+ * the previous file stays, so a failed save does not blank the sheet.
+ */
+async function handlePutUnderlay({ req, res, pool, params }) {
+  const session = await requireSession(pool, req);
+  const bytes = await readRawBody(req, {
+    limit: MAX_UNDERLAY_BYTES,
+    message: "That file is larger than 128 MB",
+  });
+  const asset = await withTransaction(pool, (client) => (
+    openStore(client, session).putUnderlayAsset(params.id, {
+      mime: req.headers["content-type"],
+      bytes,
+    })
+  ));
+  if (!asset) throw new HttpError(404, "No such job");
+  sendJson(res, 201, { asset });
+}
+
+/**
+ * Ask before uploading: `{ sha256, mime }` -> `{ asset }`, the live file on this
+ * job with those bytes, or `{ asset: null }` and the client sends them.
+ */
+async function handleLookupUnderlay({ req, res, pool, params }) {
+  const session = await requireSession(pool, req);
+  const body = (await readJsonBody(req)) || {};
+  const asset = await withTransaction(pool, (client) => (
+    openStore(client, session).findUnderlayByHash(params.id, { sha256: body.sha256, mime: body.mime })
+  ));
+  sendJson(res, 200, { asset: asset ?? null });
+}
+
+/** Bytes, not JSON. The drawing's placement is what says where they go. */
+async function handleGetUnderlay({ req, res, pool, params }) {
+  const store = await requireStore(pool, req);
+  const asset = await store.getUnderlayAsset(params.id);
+  if (!asset) throw new HttpError(404, "No such file");
+  sendBytes(res, 200, asset.bytes, asset.mime);
 }
 
 // --- the drawing -----------------------------------------------------------

@@ -176,7 +176,8 @@ create index if not exists project_note_project_live
 
 -- `underlay` is the first `kind`, not the only one this is built for: quote
 -- PDFs, signed drawings and supplier attachments are the same row with a
--- different kind. Unserved until step 6.
+-- different kind. The drawing stores the placement and this row's id, never
+-- the bytes: an autosave must not copy a scanned sheet into every revision.
 create table if not exists asset (
   id          text primary key,
   org_id      text not null references org (id),
@@ -191,6 +192,13 @@ create table if not exists asset (
 
 create index if not exists asset_project_live
   on asset (project_id, kind) where deleted_at is null;
+
+-- SHA-256 of the bytes, hex. A second upload of the same file on the same job
+-- returns the row that already exists instead of storing a copy.
+alter table asset add column if not exists sha256 text;
+
+create index if not exists asset_project_sha
+  on asset (project_id, sha256) where deleted_at is null and sha256 is not null;
 
 -- ---------------------------------------------------------------------------
 -- Practice operations. See .cursor/skills/practice-ops/SKILL.md.

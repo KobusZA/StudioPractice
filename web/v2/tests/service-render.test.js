@@ -5,7 +5,7 @@ globalThis.window = { devicePixelRatio: 1 };
 
 import { normalizeDoc } from "../model.js";
 import { routeProfile } from "../services.js";
-import { drawServiceProfile } from "../service-render.js";
+import { drawServiceLevel, drawServiceProfile } from "../service-render.js";
 
 const pack = {
   system: { defaultLevel: "L0" },
@@ -180,6 +180,59 @@ test("a route with a riser still names the level run's height off the floor", ()
   const texts = view.texts().map((t) => t.text);
   assert.ok(texts.includes("0.30 m above floor"));
   assert.equal(texts.filter((t) => t.startsWith("Rise")).length, 1);
+});
+
+test("a plan run is its true diameter, and only a hairline when that would vanish", () => {
+  const widths = [];
+  const arcs = [];
+  const ctx = {
+    strokeStyle: "", fillStyle: "", lineWidth: 1, globalAlpha: 1, font: "",
+    save() {}, restore() {}, beginPath() {}, moveTo() {}, lineTo() {},
+    rect() {}, fill() {},
+    arc(_x, _y, r) { arcs.push(r); },
+    stroke() { widths.push(ctx.lineWidth); },
+    setLineDash() {},
+  };
+  const levelPack = {
+    system: { defaultLevel: "L0" },
+    levels: [{ id: "L0", name: "Ground", elevation: 0 }],
+    skus: [
+      { id: "DRAIN110", geometry: { diameter: 0.11 } },
+      { id: "GAS22", geometry: { diameter: 0.022 } },
+      { id: "NOSIZE", geometry: {} },
+    ],
+  };
+  function draw(sku, scale) {
+    widths.length = 0;
+    arcs.length = 0;
+    const doc = normalizeDoc({
+      serviceNetworks: [{ id: "n1", name: "SV-01", system: "drainage", status: "planned" }],
+      serviceNodes: [
+        { id: "a", networkId: "n1", x: 0, y: 0, level: "L0", offset: 0 },
+        { id: "b", networkId: "n1", x: 2, y: 0, level: "L0", offset: 0 },
+      ],
+      serviceEdges: [{ id: "run", networkId: "n1", fromNode: "a", toNode: "b", sku, mode: "measured" }],
+    });
+    drawServiceLevel(ctx, { doc, pack: levelPack, levelId: "L0", worldToScreen: (x, y) => [x, y], scale });
+    return { width: widths[0], joints: arcs.slice() };
+  }
+  const drain = draw("DRAIN110", 48);
+  assert.equal(drain.width, 0.11 * 48);
+  assert.deepEqual(drain.joints, [2.5, 2.5]);
+  assert.equal(ctx.strokeStyle, "#1a1612");
+  assert.equal(ctx.fillStyle, "#fffdf8");
+  const gas = draw("GAS22", 100);
+  assert.equal(gas.width, 0.022 * 100);
+  assert.deepEqual(gas.joints, [0.022 * 100 / 2, 0.022 * 100 / 2]);
+  const far = draw("GAS22", 20);
+  assert.equal(far.width, 1.5);
+  assert.deepEqual(far.joints, [0.75, 0.75]);
+  const bare = draw("NOSIZE", 200);
+  assert.equal(bare.width, 1.5);
+  assert.deepEqual(bare.joints, [0.75, 0.75]);
+  const close = draw("DRAIN110", 400);
+  assert.equal(close.width, 0.11 * 400);
+  assert.deepEqual(close.joints, [2.5, 2.5]);
 });
 
 test("dragging a selected profile node moves its ring to the new height", () => {

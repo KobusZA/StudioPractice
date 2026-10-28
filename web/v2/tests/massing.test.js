@@ -12,9 +12,11 @@ import {
   facesFromPayload,
   faceStyle,
   hatchPolygon,
+  strokeFaceEdges,
   lookFromClicks,
   lookAxes,
   projectLookPoint,
+  projectPoint,
   EYE_HEIGHT_M,
   LOOK_NEAR,
   MASSING_PITCH_MIN,
@@ -80,6 +82,32 @@ test("default 3D camera looks down over a typical pitched roof", () => {
   assert.ok(cam.pitch > (40 * Math.PI) / 180);
   assert.ok(MASSING_PITCH_MIN < (20 * Math.PI) / 180, "orbit can drop toward an elevation");
   assert.ok(MASSING_PITCH_MAX > (80 * Math.PI) / 180, "orbit can rise toward plan");
+});
+
+test("the top-down 3D view is the plan, not a mirror of it", () => {
+  // Plan y points down the page. A flat view must put the plan's top at the
+  // top of the screen and its east on the right, or every window and door
+  // lands at the wrong end of its wall.
+  const flat = { yaw: 0, pitch: Math.PI / 2 - 0.0001 };
+  const o = [5, 10, 0];
+  const top = projectPoint(5, 0, 0, o, 0, 0, 10, flat);
+  const bottom = projectPoint(5, 20, 0, o, 0, 0, 10, flat);
+  const west = projectPoint(0, 10, 0, o, 0, 0, 10, flat);
+  const east = projectPoint(10, 10, 0, o, 0, 0, 10, flat);
+  assert.ok(top[1] < bottom[1], "plan top is higher on screen than plan bottom");
+  assert.ok(east[0] > west[0], "plan east is to the right of plan west");
+});
+
+test("orbit depth grows away from the camera", () => {
+  const cam = createCamera();
+  const origin = [0, 0, 0];
+  const here = projectPoint(0, 0, 0, origin, 400, 300, 20, cam);
+  // Plan north is -y, so the far side of the ground is negative y.
+  const farther = projectPoint(0, -4, 0, origin, 400, 300, 20, cam);
+  const higher = projectPoint(0, 0, 2, origin, 400, 300, 20, cam);
+  assert.ok(farther[1] < here[1], "farther along the ground sits higher on screen");
+  assert.ok(farther[2] > here[2], "that same point has the larger depth");
+  assert.ok(higher[2] < here[2], "a higher point is closer when the camera looks down");
 });
 
 test("a portrait footprint is framed off the long wall, not along the ridge", () => {
@@ -159,6 +187,110 @@ test("hatchPolygon skips a near-zero-area (flattened) polygon rather than sprayi
   const ctx = mockCtx();
   hatchPolygon(ctx, [[0, 0], [1, 0], [1, 0.001], [0, 0.001]], "#111");
   assert.equal(ctx.calls.length, 0);
+});
+
+function jambStrokes(faces, ax, ay, bx, by) {
+  const near = (p) => Math.min(Math.hypot(p[0] - ax, p[1] - ay), Math.hypot(p[0] - bx, p[1] - by)) < 0.2;
+  const spans = [];
+  for (const face of faces) {
+    if (face.kind !== "wall") continue;
+    const pts = face.pts;
+    for (let i = 0; i < pts.length; i += 1) {
+      const a = pts[i];
+      const b = pts[(i + 1) % pts.length];
+      if (Math.hypot(a[0] - b[0], a[1] - b[1]) > 1e-4) continue;
+      if (Math.abs(a[2] - b[2]) < 0.05) continue;
+      if (!near(a)) continue;
+      const bare = (face.bare || []).some(([p, q]) => {
+        const same = (u, v) => Math.hypot(u[0] - v[0], u[1] - v[1], u[2] - v[2]) < 1e-6;
+        return (same(a, p) && same(b, q)) || (same(a, q) && same(b, p));
+      });
+      if (bare) continue;
+      spans.push([Math.min(a[2], b[2]), Math.max(a[2], b[2])]);
+    }
+  }
+  return spans;
+}
+
+function openingDoc(sku, openings) {
+  return normalizeDoc({
+    rooms: [{
+      id: "r1",
+      name: "Room",
+      level: pack.system.defaultLevel,
+      wallSku: pack.system.defaultWallSku,
+      status: "planned",
+      shape: rectShape(0, 0, 6, 4),
+    }],
+    openings,
+  });
+}
+
+test("a window's jamb line stops at the opening", () => {
+  const sku = pack.skus.find((s) => s.id === "TSP_WN0606");
+  const doc = openingDoc(sku, [
+    { id: "o1", sku: sku.id, roomId: "r1", edgeIndex: 0, t: 0.5, status: "planned" },
+  ]);
+  const payload = compile(doc, pack);
+  const win = payload.sketchForms.find((f) => (f.kind || "").toLowerCase() === "window");
+  assert.ok(win, "window compiled");
+  const line = win.profileLoops[0].curves[0];
+  const z0 = Number(win.elevation) || 0;
+  const sill = z0 + Number(win.sill);
+  const head = sill + Number(win.depth);
+  const spans = jambStrokes(
+    facesFromPayload(payload),
+    line.start[0], line.start[1], line.end[0], line.end[1],
+  );
+  assert.ok(spans.length > 0, "the jamb corner is drawn");
+  for (const [lo, hi] of spans) {
+    assert.ok(lo >= sill - 0.03, `line continues below the sill (${lo} < ${sill})`);
+    assert.ok(hi <= head + 0.03, `line continues above the head (${hi} > ${head})`);
+  }
+  assert.ok(spans.some(([lo, hi]) => hi - lo > (head - sill) * 0.5), "the opening's own edge is kept");
+  assert.ok(facesFromPayload(payload).some((f) => f.kind === "window"));
+});
+
+test("a door's jamb line stops at the head", () => {
+  const sku = pack.skus.find((s) => s.category === "door");
+  const doc = openingDoc(sku, [
+    { id: "o1", sku: sku.id, roomId: "r1", edgeIndex: 0, t: 0.5, status: "planned" },
+  ]);
+  const payload = compile(doc, pack);
+  const door = payload.sketchForms.find((f) => (f.kind || "").toLowerCase() === "opening");
+  assert.ok(door, "door compiled");
+  const line = door.profileLoops[0].curves[0];
+  const z0 = Number(door.elevation) || 0;
+  const sill = z0 + (Number(door.sill) || 0);
+  const head = sill + Number(door.depth);
+  const spans = jambStrokes(
+    facesFromPayload(payload),
+    line.start[0], line.start[1], line.end[0], line.end[1],
+  );
+  assert.ok(spans.length > 0, "the jamb corner is drawn");
+  for (const [lo, hi] of spans) {
+    assert.ok(lo >= sill - 0.03, `line continues below the sill (${lo} < ${sill})`);
+    assert.ok(hi <= head + 0.03, `line continues above the head (${hi} > ${head})`);
+  }
+});
+
+test("strokeFaceEdges leaves a coplanar joint undrawn", () => {
+  const calls = [];
+  const ctx = {
+    beginPath() {},
+    moveTo(x, y) { calls.push(["m", x, y]); },
+    lineTo(x, y) { calls.push(["l", x, y]); },
+    closePath() { calls.push(["c"]); },
+    stroke() { calls.push(["s"]); },
+  };
+  const face = {
+    pts: [[0, 0, 0], [2, 0, 0], [2, 0, 2], [0, 0, 2]],
+    bare: [[[2, 0, 0], [2, 0, 2]]],
+  };
+  strokeFaceEdges(ctx, [[0, 0], [2, 0], [2, 2], [0, 2]], face);
+  const lines = calls.filter((c) => c[0] === "l").map((c) => [c[1], c[2]]);
+  assert.ok(lines.some(([x, y]) => x === 0 && y === 2), "the far corner is stroked");
+  assert.equal(lines.some(([x, y]) => x === 2 && y === 2), false, "the seam is not stroked");
 });
 
 test("a section keeps the service run on the look side and cuts one that crosses", () => {

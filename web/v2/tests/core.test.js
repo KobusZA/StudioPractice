@@ -18,6 +18,7 @@ import {
   PlanStore,
   emptyDoc,
   hasJobContent,
+  hasPlanDrawing,
   normalizeDoc,
   rectShape,
   rectsShape,
@@ -665,5 +666,40 @@ test("hasContent stays narrower than hasJobContent, because the legend is about 
   store.doc.site = { propertyLine: [[0, 0], [10, 0], [10, 10]] };
   assert.equal(store.hasContent(), false);
   assert.equal(hasJobContent(store.doc), true);
+});
+
+test("hasPlanDrawing hides the empty hint for services and other marks, without turning on the legend", () => {
+  const blank = emptyDoc();
+  assert.equal(hasPlanDrawing(blank), false);
+  assert.equal(hasPlanDrawing(null), false);
+
+  const erfOnly = emptyDoc();
+  erfOnly.site = { erfNumber: "123", sgReference: null, propertyLine: null, buildingLine: null };
+  assert.equal(hasPlanDrawing(erfOnly), false, "an erf number is not a mark on the plan");
+
+  const services = emptyDoc();
+  services.serviceNetworks = [{ id: "net" }];
+  assert.equal(hasPlanDrawing(services), false, "a network with no route is not drawn");
+  services.serviceNodes = [{ id: "n1" }];
+  services.serviceEdges = [{ id: "e1" }];
+  assert.equal(hasPlanDrawing(services), true);
+  assert.equal(new PlanStore(services).hasContent(), false);
+
+  const boundary = emptyDoc();
+  boundary.site = { propertyLine: { kind: "poly", points: [[0, 0], [10, 0], [10, 10]] } };
+  assert.equal(hasPlanDrawing(boundary), true);
+  assert.equal(new PlanStore(boundary).hasContent(), false);
+
+  for (const key of ["openings", "items", "beams", "stairs", "lines", "separations", "regions", "dimensions", "revisionClouds"]) {
+    const doc = emptyDoc();
+    doc[key] = [{ id: "x" }];
+    assert.equal(hasPlanDrawing(doc), true, key);
+    assert.equal(new PlanStore(doc).hasContent(), false, key);
+  }
+
+  const walls = emptyDoc();
+  walls.segments = [{ id: "w" }];
+  assert.equal(hasPlanDrawing(walls), true);
+  assert.equal(new PlanStore(walls).hasContent(), true);
 });
 

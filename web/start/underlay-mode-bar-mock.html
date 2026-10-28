@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Underlay mode bar mock — StudioPractice</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,560&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #e8e2d8;
+      --paper: #fffdf8;
+      --ink: #1a1612;
+      --soft: #665d52;
+      --muted: #91877b;
+      --line: rgba(26, 22, 18, 0.14);
+      --copper: #b2451e;
+      --copper-soft: #f6e4dc;
+      --guide: #3a5f7a;
+      --ok: #2f7a47;
+      --shadow: 0 12px 35px rgba(45, 36, 27, 0.11);
+      --font: "Source Sans 3", "Segoe UI", sans-serif;
+      --display: Fraunces, Georgia, serif;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font); font-size: 15px; }
+    header { background: #1d1915; color: #fffdf8; padding: 14px 22px; display: flex; align-items: baseline; gap: 14px; }
+    header strong { font-family: var(--display); font-weight: 560; font-size: 19px; }
+    header span { color: rgba(255,255,255,.6); font-size: 13px; }
+    .chip { padding: 2px 8px; border: 1px solid rgba(255,255,255,.25); border-radius: 999px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+    main { max-width: 1180px; margin: 0 auto; padding: 20px; }
+    .intro { color: var(--soft); max-width: 82ch; margin: 0 0 16px; line-height: 1.45; }
+
+    .app { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow); overflow: hidden; }
+
+    /* Ribbon: only the Sheet group, enough to show the active state. */
+    .ribbon { display: flex; align-items: stretch; gap: 4px; padding: 8px 10px; border-bottom: 1px solid var(--line); background: #f7f2e8; }
+    .ribbon .group { display: flex; gap: 4px; align-items: stretch; padding-right: 10px; margin-right: 6px; border-right: 1px solid var(--line); }
+    .ribbon .group:last-child { border-right: 0; margin-left: auto; }
+    .ribbon button { position: relative; font: inherit; font-size: 13.5px; padding: 6px 12px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--ink); cursor: pointer; }
+    .ribbon button:hover { background: rgba(26,22,18,.06); }
+    .ribbon button.is-active { background: var(--copper); color: #fff; border-color: var(--copper); font-weight: 600; }
+    .ribbon button.is-active::after { content: ""; position: absolute; left: 50%; bottom: -9px; transform: translateX(-50%); border: 6px solid transparent; border-top-color: var(--copper); }
+    .ribbon button.danger { color: var(--copper); }
+    .ribbon .label { align-self: center; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-right: 4px; }
+
+    /* Stage: the plan, with the mode bar pinned across its top edge. */
+    .stage { position: relative; background: #efe9de; transition: box-shadow .15s; }
+    .stage.in-mode { box-shadow: inset 0 0 0 2px var(--copper); }
+    svg { display: block; width: 100%; height: auto; touch-action: none; }
+    .stage.mode-scale svg, .stage.mode-align svg { cursor: crosshair; }
+    .stage.mode-adjust svg { cursor: grab; }
+    .stage.mode-adjust.pinned svg { cursor: not-allowed; }
+
+    .modebar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; min-height: 46px; padding: 6px 8px 6px 10px; background: #fff8f4; border-bottom: 1px solid rgba(178,69,30,.35); font-size: 13.5px; white-space: nowrap; }
+    .modebar.is-idle { background: #f7f2e8; border-bottom-color: var(--line); color: var(--muted); }
+    .mode-pill { background: var(--copper); color: #fff; font-weight: 600; padding: 4px 10px; border-radius: 5px; letter-spacing: .02em; }
+    .mode-step { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+    .mode-prompt { flex: 1 1 26ch; min-width: 26ch; color: var(--ink); font-weight: 600; white-space: normal; line-height: 1.25; }
+    .mode-controls { display: flex; align-items: center; gap: 8px; color: var(--soft); }
+    .mode-controls input[type=text] { width: 76px; padding: 4px 6px; border: 1.5px solid var(--guide); border-radius: 4px; font: inherit; font-weight: 600; text-align: right; }
+    .mode-controls input[type=range] { width: 90px; }
+    .mode-exit { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; padding-left: 10px; border-left: 1px solid var(--line); }
+    .sep { width: 1px; align-self: stretch; background: var(--line); }
+    .modebar button { font: inherit; font-size: 13px; padding: 5px 11px; border-radius: 5px; border: 1px solid var(--line); background: #fff; cursor: pointer; }
+    .modebar button:hover:not(:disabled) { background: #f5efe5; }
+    .modebar button.primary { background: var(--copper); border-color: var(--copper); color: #fff; font-weight: 600; }
+    .modebar button.primary:hover:not(:disabled) { background: #9a3a17; }
+    .modebar button:disabled { opacity: .45; cursor: default; }
+    .modebar button[aria-pressed=true] { background: var(--copper-soft); border-color: var(--copper); color: var(--copper); font-weight: 600; }
+    .modebar .link { border: 0; background: none; color: var(--guide); text-decoration: underline; padding: 5px 4px; }
+    .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 5px; overflow: hidden; }
+    .seg button { border: 0; border-radius: 0; border-right: 1px solid var(--line); }
+    .seg button:last-child { border-right: 0; }
+    .seg button.is-on { background: var(--copper-soft); color: var(--copper); font-weight: 600; }
+    .snap { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 12.5px; }
+    kbd { font: 11px/1 var(--font); padding: 3px 5px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; color: var(--soft); background: #faf7f1; }
+    .close { border: 0 !important; font-size: 17px !important; line-height: 1; padding: 3px 7px !important; color: var(--soft); }
+
+    .toast { position: absolute; bottom: 12px; left: 12px; display: flex; gap: 10px; align-items: center; padding: 8px 12px; background: #1d1915; color: #fffdf8; border-radius: 6px; font-size: 13.5px; box-shadow: var(--shadow); }
+    .toast[hidden] { display: none; }
+    .toast button { font: inherit; font-size: 13px; background: none; border: 1px solid rgba(255,255,255,.35); color: #fff; border-radius: 4px; padding: 3px 9px; cursor: pointer; }
+
+    .confirm { position: absolute; inset: 0; background: rgba(29,25,21,.35); display: grid; place-items: center; }
+    .confirm[hidden] { display: none; }
+    .confirm .card { background: #fff; border-radius: 8px; box-shadow: var(--shadow); padding: 16px 18px; max-width: 420px; }
+    .confirm h3 { margin: 0 0 6px; font-family: var(--display); font-weight: 560; font-size: 17px; }
+    .confirm p { margin: 0 0 8px; color: var(--soft); line-height: 1.4; font-size: 14px; }
+    .confirm ul { margin: 0 0 12px; padding-left: 18px; color: var(--soft); font-size: 14px; }
+    .confirm .actions { display: flex; justify-content: flex-end; gap: 8px; }
+    .confirm button { font: inherit; font-size: 13.5px; padding: 6px 12px; border-radius: 5px; border: 1px solid var(--line); background: #fff; cursor: pointer; }
+    .confirm button.primary { background: var(--ink); color: #fff; border-color: var(--ink); }
+    .confirm button.danger { color: var(--copper); border-color: rgba(178,69,30,.5); }
+
+    .notes { margin-top: 18px; display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+    @media (max-width: 960px) { .notes { grid-template-columns: 1fr; } }
+    .notes section { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 12px 16px; color: var(--soft); font-size: 14px; line-height: 1.5; }
+    .notes h2 { margin: 0 0 6px; font-family: var(--display); font-weight: 560; font-size: 16px; color: var(--ink); }
+    .notes ul { margin: 0; padding-left: 18px; }
+    .notes b { color: var(--ink); }
+  </style>
+</head>
+<body>
+  <header>
+    <strong>Underlay mode bar</strong>
+    <span class="chip">Mock</span>
+    <span>One bar for every modal underlay tool: what mode you are in, what to do next, how to get out.</span>
+  </header>
+  <main>
+    <p class="intro">Click <b>Set scale</b>, <b>Adjust</b> or <b>Align sheets</b> on the ribbon. Each opens the same bar across the top of the plan, with the mode's name, the current step, its own controls, and Cancel / Done. <kbd>Esc</kbd> cancels, <kbd>Enter</kbd> confirms, and clicking the lit ribbon button again closes the mode. Starting another mode cancels the current one and says so. <b>Remove</b> asks first and can be undone.</p>
+
+    <div class="app">
+      <div class="ribbon" id="ribbon">
+        <div class="group">
+          <span class="label">Sheet</span>
+          <button type="button" data-cmd="scale">Set scale</button>
+          <button type="button" data-cmd="adjust">Adjust</button>
+          <button type="button" data-cmd="align">Align sheets</button>
+          <button type="button" data-cmd="hide" id="hide-btn">Hide</button>
+        </div>
+        <div class="group">
+          <button type="button" data-cmd="remove" class="danger">Remove…</button>
+        </div>
+      </div>
+      <div class="modebar is-idle" id="modebar" role="toolbar" aria-live="polite"></div>
+      <div class="stage" id="stage">
+        <svg id="plan" viewBox="0 0 1000 540"></svg>
+        <div class="toast" id="toast" hidden></div>
+        <div class="confirm" id="confirm" hidden>
+          <div class="card" role="alertdialog" aria-labelledby="confirm-title">
+            <h3 id="confirm-title">Remove the plan set?</h3>
+            <p>This removes <b>Riverglen concept.pdf</b> from the drawing, including:</p>
+            <ul>
+              <li>2 placed floor sheets and their levels</li>
+              <li>the scale check on Ground floor</li>
+              <li>alignment marks between sheets</li>
+            </ul>
+            <p>Your walls and other drawing are not affected.</p>
+            <div class="actions">
+              <button type="button" id="confirm-cancel">Cancel</button>
+              <button type="button" class="primary" id="confirm-hide">Hide instead</button>
+              <button type="button" class="danger" id="confirm-remove">Remove</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="notes">
+      <section>
+        <h2>What the bar always shows</h2>
+        <ul>
+          <li><b>Mode name</b> in the copper pill, matching the lit ribbon button and the copper outline around the plan. The mode shows in three places, so you always know it's on.</li>
+          <li><b>Step and prompt</b>: "2 of 3 · Click the second point." This replaces the status line, which disappears once you've read it.</li>
+          <li><b>Mode controls</b> sit in the bar, not in a separate floating panel, so nothing else needs its own close button.</li>
+          <li><b>Cancel</b> reverts everything done in the mode. <b>Done</b> keeps it. <b>✕</b> is the same as Cancel.</li>
+          <li><b>Snap to PDF lines</b> has a slot already, greyed out until Phase 2 adds it to the point-picking modes.</li>
+        </ul>
+      </section>
+      <section>
+        <h2>Per mode</h2>
+        <ul>
+          <li><b>Set scale</b>: three steps. A distance field appears at step 3 and Set scale becomes available. "Restart" clears the points.</li>
+          <li><b>Adjust</b>: opacity, 90° rotation and <b>Pin</b>. When the sheet is pinned it can't be dragged, which stops it moving by accident while you trace.</li>
+          <li><b>Align sheets</b>: the sheet switcher lives in the bar (✓ = marked), so you never go to the Sheets list mid-task. Mark the same point on each sheet. That can be two floors, or two drawings of one floor (walls on one, something else on the other). The other sheet moves, and shows faintly underneath.</li>
+          <li><b>Switching modes</b> cancels the current mode and shows a toast saying so, so no change is lost without you knowing. Done shows a toast with Undo.</li>
+          <li><b>Docked, not floating.</b> The bar sits between the ribbon and the plan, like Revit's options bar, so it never covers the sheet. When no mode is on it falls back to a quiet "Select" line, so its appearance is the signal.</li>
+        </ul>
+      </section>
+    </div>
+  </main>
+
+<script>
+(() => {
+  const NS = "http://www.w3.org/2000/svg";
+  const SHEET_W = 520, SHEET_H = 340;
+  const MM_PER_UNIT = 26;          // what the uncalibrated sheet claims, so the first guess is wrong
+
+  const svg = document.getElementById("plan");
+  const stage = document.getElementById("stage");
+  const bar = document.getElementById("modebar");
+  const toastEl = document.getElementById("toast");
+  const confirmEl = document.getElementById("confirm");
+  const ribbon = document.getElementById("ribbon");
+
+  const WALLS = {
+    ground: "M60 60 H380 V280 H60 Z M220 60 V280 M220 170 H380 M60 200 H140",
+    first: "M60 60 H380 V280 H60 Z M300 60 V280 M60 150 H300 M150 150 V280",
+  };
+  const TITLES = { ground: "GROUND FLOOR PLAN", first: "FIRST FLOOR PLAN" };
+  const LABELS = { ground: "Ground floor", first: "First floor" };
+
+  let doc = freshDoc();
+  let removed = null;
+  let mode = null;          // null | "scale" | "adjust" | "align"
+  let m = null;             // per-mode working state
+  let snapshot = null;      // doc at mode start, for Cancel
+  let drag = null;
+
+  function freshDoc() {
+    return {
+      present: true,
+      hidden: false,
+      showing: "ground",
+      sheets: {
+        ground: { x: 150, y: 110, rot: 0, opacity: 0.85, pinned: false, mark: null },
+        first: { x: 330, y: 150, rot: 0, opacity: 0.85, pinned: false, mark: null },
+      },
+      scaleChecked: false,
+    };
+  }
+  const clone = (o) => JSON.parse(JSON.stringify(o));
+
+  // --- drawing ------------------------------------------------------------
+
+  function node(tag, attrs, parent) {
+    const n = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+    parent?.appendChild(n);
+    return n;
+  }
+
+  function drawSheet(key, ghost) {
+    const s = doc.sheets[key];
+    const g = node("g", {
+      transform: `translate(${s.x} ${s.y}) rotate(${s.rot} ${SHEET_W / 2} ${SHEET_H / 2})`,
+      opacity: ghost ? 0.28 : s.opacity,
+      "data-sheet": key,
+    }, svg);
+    if (!ghost) node("rect", { width: SHEET_W, height: SHEET_H, fill: "#fff", stroke: "#cfc5b6" }, g);
+    node("path", { d: WALLS[key], fill: "none", stroke: ghost ? "#2675b8" : "#3d352c", "stroke-width": 7, "stroke-linejoin": "miter" }, g);
+    if (!ghost) {
+      node("rect", { x: 440, y: 0, width: 80, height: SHEET_H, fill: "#faf7f1", stroke: "#cfc5b6" }, g);
+      const t = node("text", { x: 480, y: 300, "font-size": 10, fill: "#665d52", "text-anchor": "middle", transform: "rotate(-90 480 300)", "font-family": "Source Sans 3" }, g);
+      t.textContent = TITLES[key];
+      const dim = node("text", { x: 220, y: 46, "font-size": 11, fill: "#665d52", "text-anchor": "middle", "font-family": "Source Sans 3" }, g);
+      dim.textContent = "9 600";
+      node("path", { d: "M60 52 H380 M60 48 V56 M380 48 V56", stroke: "#91877b", "stroke-width": 1, fill: "none" }, g);
+    }
+    if (s.mark && mode === "align") {
+      const c = ghost ? "#2675b8" : "#b2451e";
+      node("path", { d: `M${s.mark.x - 11} ${s.mark.y} H${s.mark.x + 11} M${s.mark.x} ${s.mark.y - 11} V${s.mark.y + 11}`, stroke: c, "stroke-width": 2 }, g);
+      node("circle", { cx: s.mark.x, cy: s.mark.y, r: 6, fill: "none", stroke: c, "stroke-width": 2 }, g);
+    }
+    if (!ghost && mode === "adjust") {
+      node("rect", { width: SHEET_W, height: SHEET_H, fill: "none", stroke: "#b2451e", "stroke-dasharray": "6 4", "stroke-width": 1.5 }, g);
+      if (!s.pinned) {
+        for (const [cx, cy] of [[0, 0], [SHEET_W, 0], [SHEET_W, SHEET_H], [0, SHEET_H]]) {
+          node("rect", { x: cx - 5, y: cy - 5, width: 10, height: 10, fill: "#fff", stroke: "#b2451e", "stroke-width": 1.5 }, g);
+        }
+        node("line", { x1: SHEET_W / 2, y1: 0, x2: SHEET_W / 2, y2: -22, stroke: "#b2451e", "stroke-width": 1.5 }, g);
+        node("circle", { cx: SHEET_W / 2, cy: -26, r: 5, fill: "#fff", stroke: "#b2451e", "stroke-width": 1.5 }, g);
+      } else {
+        const pin = node("text", { x: SHEET_W - 10, y: 18, "font-size": 13, fill: "#b2451e", "text-anchor": "end", "font-family": "Source Sans 3", "font-weight": 600 }, g);
+        pin.textContent = "📌 Pinned";
+      }
+    }
+    return g;
+  }
+
+  function render() {
+    svg.replaceChildren();
+    node("rect", { width: 1000, height: 540, fill: "#efe9de" }, svg);
+    if (doc.present && !doc.hidden) {
+      const other = doc.showing === "ground" ? "first" : "ground";
+      drawSheet(doc.showing, false);
+      if (mode === "align") drawSheet(other, true);
+    }
+    if (!doc.present) {
+      const t = node("text", { x: 500, y: 270, "text-anchor": "middle", fill: "#91877b", "font-size": 15, "font-family": "Source Sans 3" }, svg);
+      t.textContent = "No underlay. (Undo in the toast brings it back.)";
+    }
+    if (mode === "scale") drawScale();
+    stage.className = "stage" + (mode ? ` in-mode mode-${mode}` : "") + (mode === "adjust" && doc.sheets[doc.showing].pinned ? " pinned" : "");
+    for (const b of ribbon.querySelectorAll("[data-cmd]")) b.classList.toggle("is-active", b.dataset.cmd === mode);
+    document.getElementById("hide-btn").textContent = doc.hidden ? "Show" : "Hide";
+    renderBar();
+  }
+
+  function drawScale() {
+    const { a, b, hover } = m;
+    const end = b || (a && hover);
+    if (a && end) {
+      node("line", { x1: a.x, y1: a.y, x2: end.x, y2: end.y, stroke: "#b2451e", "stroke-width": 2, "stroke-dasharray": b ? "" : "5 4" }, svg);
+      const t = node("text", { x: (a.x + end.x) / 2, y: (a.y + end.y) / 2 - 10, "text-anchor": "middle", fill: "#b2451e", "font-size": 13, "font-weight": 600, "font-family": "Source Sans 3" }, svg);
+      t.textContent = `${guessMm(a, end).toLocaleString("en-ZA")} mm`;
+    }
+    for (const p of [a, b]) if (p) node("circle", { cx: p.x, cy: p.y, r: 5, fill: "#b2451e" }, svg);
+  }
+
+  const guessMm = (a, b) => Math.round(Math.hypot(b.x - a.x, b.y - a.y) * MM_PER_UNIT / 10) * 10;
+
+  // --- the mode bar -------------------------------------------------------
+
+  function h(tag, attrs = {}, ...kids) {
+    const n = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) {
+      if (v == null || v === false) continue;
+      if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+      else if (k === "text") n.textContent = v;
+      else n.setAttribute(k, v === true ? "" : v);
+    }
+    for (const k of kids.flat()) if (k != null && k !== false) n.append(k.nodeType ? k : document.createTextNode(k));
+    return n;
+  }
+
+  const snapSlot = () => h("label", { class: "snap", title: "Snap to the PDF's own linework — Phase 2" },
+    h("input", { type: "checkbox", disabled: true }), "Snap to PDF lines");
+
+  function renderBar() {
+    bar.classList.toggle("is-idle", !mode);
+    if (!mode) {
+      bar.replaceChildren(h("span", {}, doc.present ? `Select · ${LABELS[doc.showing]} sheet${doc.hidden ? " (hidden)" : ""}` : "Select"));
+      bar.primaryRun = null;
+      return;
+    }
+    const parts = { name: "", step: "", prompt: "", controls: [], primary: null, snap: false };
+
+    if (mode === "scale") {
+      const step = !m.a ? 1 : !m.b ? 2 : 3;
+      parts.name = "Set scale";
+      parts.step = `${step} of 3`;
+      parts.prompt = ["Click the first point of a dimension you know.", "Click the second point.", "Type the real distance."][step - 1];
+      parts.snap = true;
+      if (step === 3) {
+        const input = h("input", { type: "text", inputmode: "decimal", value: m.dist ?? String(guessMm(m.a, m.b)), "aria-label": "Real distance in millimetres" });
+        input.addEventListener("input", () => { m.dist = input.value; });
+        parts.controls.push(h("label", {}, "Real distance ", input, " mm"));
+        queueMicrotask(() => { if (document.activeElement === document.body) { input.focus(); input.select(); } });
+      }
+      if (m.a) parts.controls.push(h("button", { type: "button", class: "link", onclick: () => { m = { a: null, b: null }; render(); } }, "Restart"));
+      parts.primary = { label: "Set scale", disabled: step < 3, run: finishScale };
+    }
+
+    if (mode === "adjust") {
+      const s = doc.sheets[doc.showing];
+      parts.name = "Adjust";
+      parts.step = LABELS[doc.showing];
+      parts.prompt = s.pinned ? "Pinned. Unpin to move, resize or rotate." : "Drag the sheet to move it. Corners resize, the top handle rotates.";
+      const opacity = h("input", { type: "range", min: 10, max: 100, value: Math.round(s.opacity * 100), "aria-label": "Opacity" });
+      opacity.addEventListener("input", () => { s.opacity = opacity.value / 100; renderSheetsOnly(); });
+      parts.controls.push(
+        h("label", {}, "Opacity ", opacity),
+        h("button", { type: "button", title: "Rotate 90° left", disabled: s.pinned, onclick: () => { s.rot = (s.rot + 270) % 360; render(); } }, "⟲ 90°"),
+        h("button", { type: "button", title: "Rotate 90° right", disabled: s.pinned, onclick: () => { s.rot = (s.rot + 90) % 360; render(); } }, "⟳ 90°"),
+        h("button", { type: "button", "aria-pressed": String(s.pinned), title: "Lock the sheet so it can't be moved by accident", onclick: () => { s.pinned = !s.pinned; render(); } }, s.pinned ? "Pinned" : "Pin"),
+      );
+      parts.primary = { label: "Done", run: () => exitMode(true, "Sheet position kept.") };
+    }
+
+    if (mode === "align") {
+      const g = doc.sheets.ground, f = doc.sheets.first;
+      const marked = (g.mark ? 1 : 0) + (f.mark ? 1 : 0);
+      parts.name = "Align sheets";
+      parts.step = `${marked} of 2 marked`;
+      parts.snap = true;
+      if (!g.mark && doc.showing === "ground") parts.prompt = "Click a fixed corner on Ground floor. It stays put.";
+      else if (!g.mark) parts.prompt = "Switch to Ground floor and mark the same corner first.";
+      else if (!f.mark && doc.showing === "ground") parts.prompt = "Now switch to First floor.";
+      else if (!f.mark) parts.prompt = "Click the same corner on First floor. The blue ghost is Ground floor.";
+      else parts.prompt = "Aligned. Check the faint overlay, then Done.";
+      const seg = h("span", { class: "seg", role: "group", "aria-label": "Sheet" },
+        ["ground", "first"].map((k) => h("button", {
+          type: "button",
+          class: doc.showing === k ? "is-on" : null,
+          onclick: () => { doc.showing = k; render(); },
+        }, `${doc.sheets[k].mark ? "✓" : "○"} ${LABELS[k]}`)));
+      parts.controls.push(seg);
+      if (g.mark && !f.mark && doc.showing === "ground") {
+        parts.controls.push(h("button", { type: "button", onclick: () => { doc.showing = "first"; render(); } }, "Next sheet ▸"));
+      }
+      if (marked) parts.controls.push(h("button", { type: "button", class: "link", onclick: clearMarks }, "Clear marks"));
+      parts.primary = { label: "Done", disabled: marked === 1, run: () => exitMode(true, marked === 2 ? "Sheets aligned." : "Nothing aligned.") };
+    }
+
+    bar.replaceChildren(...[
+      h("span", { class: "mode-pill" }, parts.name),
+      parts.step ? h("span", { class: "mode-step" }, parts.step) : null,
+      h("span", { class: "mode-prompt" }, parts.prompt),
+      parts.controls.length ? h("span", { class: "sep" }) : null,
+      parts.controls.length ? h("span", { class: "mode-controls" }, parts.controls) : null,
+      parts.snap ? h("span", { class: "sep" }) : null,
+      parts.snap ? snapSlot() : null,
+      h("span", { class: "mode-exit" },
+        h("button", { type: "button", onclick: () => cancelMode() }, "Cancel"),
+        parts.primary ? h("button", { type: "button", class: "primary", disabled: parts.primary.disabled, onclick: parts.primary.run }, parts.primary.label) : null,
+        h("kbd", { title: "Escape cancels" }, "Esc"),
+        h("button", { type: "button", class: "close", "aria-label": "Close (cancel)", title: "Close (same as Cancel)", onclick: () => cancelMode() }, "✕")),
+    ].filter(Boolean));
+    bar.primaryRun = parts.primary && !parts.primary.disabled ? parts.primary.run : null;
+  }
+
+  /** Opacity drags shouldn't rebuild the bar under the pointer. */
+  function renderSheetsOnly() {
+    const g = svg.querySelector(`[data-sheet="${doc.showing}"]`);
+    if (g) g.setAttribute("opacity", doc.sheets[doc.showing].opacity);
+  }
+
+  // --- modes ----------------------------------------------------------------
+
+  const NAMES = { scale: "Set scale", adjust: "Adjust", align: "Align sheets" };
+
+  function enterMode(next) {
+    if (!doc.present) { toast("Load a PDF or image first."); return; }
+    if (mode === next) { cancelMode(); return; }
+    if (mode) cancelMode(`${NAMES[mode]} cancelled, nothing changed. ${NAMES[next]} is on.`);
+    if (doc.hidden) doc.hidden = false;
+    mode = next;
+    snapshot = clone(doc);
+    m = next === "scale" ? { a: null, b: null } : {};
+    if (next === "align") doc.showing = doc.sheets.ground.mark ? "first" : "ground";
+    render();
+  }
+
+  function cancelMode(message) {
+    if (!mode) return;
+    const name = NAMES[mode];
+    doc = snapshot;
+    mode = null; m = null; snapshot = null;
+    render();
+    toast(message || `${name} cancelled, nothing changed.`);
+  }
+
+  function exitMode(keep, message) {
+    const before = snapshot;
+    mode = null; m = null; snapshot = null;
+    render();
+    toast(message, keep ? () => { doc = before; render(); toast("Undone."); } : null);
+  }
+
+  function finishScale() {
+    const n = Number(String(m.dist ?? guessMm(m.a, m.b)).replace(/\s/g, ""));
+    if (!(n > 0)) { toast("Type the real distance in millimetres."); return; }
+    doc.scaleChecked = true;
+    exitMode(true, `Scale set: ${n.toLocaleString("en-ZA")} mm. Ground floor is now ✓ verified.`);
+  }
+
+  function clearMarks() {
+    doc.sheets.ground.mark = null;
+    doc.sheets.first.mark = null;
+    doc.sheets.first.x = snapshot.sheets.first.x;
+    doc.sheets.first.y = snapshot.sheets.first.y;
+    doc.showing = "ground";
+    render();
+  }
+
+  // --- canvas input ---------------------------------------------------------
+
+  function toWorld(ev) {
+    const pt = svg.createSVGPoint();
+    pt.x = ev.clientX; pt.y = ev.clientY;
+    const p = pt.matrixTransform(svg.getScreenCTM().inverse());
+    return { x: p.x, y: p.y };
+  }
+
+  svg.addEventListener("pointerdown", (ev) => {
+    const w = toWorld(ev);
+    if (mode === "scale") {
+      if (!m.a || m.b) m = { a: w, b: null };
+      else m.b = w;
+      render();
+    } else if (mode === "align") {
+      const s = doc.sheets[doc.showing];
+      if (doc.showing === "first" && !doc.sheets.ground.mark) { toast("Mark Ground floor first; it is the one that stays put."); return; }
+      s.mark = { x: w.x - s.x, y: w.y - s.y };
+      const g = doc.sheets.ground, f = doc.sheets.first;
+      if (g.mark && f.mark) {
+        f.x += (g.x + g.mark.x) - (f.x + f.mark.x);
+        f.y += (g.y + g.mark.y) - (f.y + f.mark.y);
+      }
+      render();
+    } else if (mode === "adjust") {
+      const s = doc.sheets[doc.showing];
+      if (!ev.target.closest(`[data-sheet="${doc.showing}"]`)) return;
+      if (s.pinned) { toast("This sheet is pinned. Unpin it in the bar to move it."); return; }
+      drag = { from: w, x: s.x, y: s.y };
+      svg.setPointerCapture(ev.pointerId);
+    }
+  });
+  svg.addEventListener("pointermove", (ev) => {
+    const w = toWorld(ev);
+    if (mode === "scale" && m.a && !m.b) { m.hover = w; render(); }
+    if (drag) {
+      const s = doc.sheets[doc.showing];
+      s.x = drag.x + (w.x - drag.from.x);
+      s.y = drag.y + (w.y - drag.from.y);
+      render();
+    }
+  });
+  svg.addEventListener("pointerup", () => { drag = null; });
+
+  // --- ribbon, keyboard, remove ---------------------------------------------
+
+  ribbon.addEventListener("click", (ev) => {
+    const cmd = ev.target.closest("[data-cmd]")?.dataset.cmd;
+    if (!cmd) return;
+    if (cmd === "hide") {
+      if (!doc.present) return;
+      if (mode) cancelMode(`${NAMES[mode]} cancelled because the sheet was hidden.`);
+      doc.hidden = !doc.hidden;
+      render();
+      return;
+    }
+    if (cmd === "remove") {
+      if (!doc.present) { toast("Nothing to remove."); return; }
+      if (mode) cancelMode();
+      confirmEl.hidden = false;
+      document.getElementById("confirm-hide").focus();
+      return;
+    }
+    enterMode(cmd);
+  });
+
+  document.getElementById("confirm-cancel").onclick = () => { confirmEl.hidden = true; };
+  document.getElementById("confirm-hide").onclick = () => { confirmEl.hidden = true; doc.hidden = true; render(); toast("Sheet hidden. Show brings it back."); };
+  document.getElementById("confirm-remove").onclick = () => {
+    confirmEl.hidden = true;
+    removed = clone(doc);
+    doc = { ...freshDoc(), present: false };
+    render();
+    toast("Plan set removed.", () => { doc = removed; removed = null; render(); toast("Plan set restored."); });
+  };
+
+  document.addEventListener("keydown", (ev) => {
+    if (!confirmEl.hidden && ev.key === "Escape") { confirmEl.hidden = true; return; }
+    if (!mode) return;
+    if (ev.key === "Escape") { ev.preventDefault(); cancelMode(); }
+    else if (ev.key === "Enter" && bar.primaryRun) { ev.preventDefault(); bar.primaryRun(); }
+  });
+
+  let toastTimer = 0;
+  function toast(text, undo) {
+    clearTimeout(toastTimer);
+    toastEl.replaceChildren(h("span", {}, text));
+    if (undo) toastEl.append(h("button", { type: "button", onclick: () => { toastEl.hidden = true; undo(); } }, "Undo"));
+    toastEl.hidden = false;
+    toastTimer = setTimeout(() => { toastEl.hidden = true; }, undo ? 7000 : 4000);
+  }
+
+  render();
+})();
+</script>
+</body>
+</html>

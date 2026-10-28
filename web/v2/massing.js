@@ -222,13 +222,183 @@ function pushWallPrism(faces, start, end, z0, z1, thick, id, kind, fill, stroke,
   for (const quad of quads) faces.push({ pts: quad, id, fill, stroke, kind, status });
 }
 
-function pushWallBox(faces, start, end, z0, height, thick, id, openings, status) {
+function pushQuad(faces, pts, bare, id, fill, stroke, status) {
+  const face = { pts, id, fill, stroke, kind: "wall", status };
+  if (bare && bare.length) face.bare = bare;
+  faces.push(face);
+}
+
+function stationsOf(values) {
+  const sorted = [...values].sort((a, b) => a - b);
+  const out = [];
+  for (const value of sorted) {
+    if (!out.length || Math.abs(value - out[out.length - 1]) > 1e-4) out.push(value);
+  }
+  return out;
+}
+
+/** Inclusive start index, exclusive end index, over cells where `pred` holds. */
+function indexRuns(count, pred) {
+  const out = [];
+  let start = -1;
+  for (let i = 0; i <= count; i += 1) {
+    const on = i < count && pred(i);
+    if (on && start < 0) start = i;
+    if (!on && start >= 0) {
+      out.push([start, i]);
+      start = -1;
+    }
+  }
+  return out;
+}
+
+/**
+ * One wall surface with holes, not a stack of boxes. A seam between two solid
+ * cells is the same plaster, so that edge is marked bare and the outline
+ * skips it. The only stroked lines are real corners: wall ends, the opening,
+ * and the glass.
+ */
+function pushOpenedWall(faces, start, end, z0, height, thick, id, hits, fill, stroke, status) {
   const dx = end[0] - start[0];
   const dy = end[1] - start[1];
   const len = Math.hypot(dx, dy) || 1;
   const ux = dx / len;
   const uy = dy / len;
+  const nx = (-dy / len) * (thick / 2);
+  const ny = (dx / len) * (thick / 2);
   const along = (t) => [start[0] + ux * t, start[1] + uy * t];
+  const corner = (t, side, z) => {
+    const p = along(t);
+    return [p[0] + nx * side, p[1] + ny * side, z];
+  };
+  const cuts = [];
+  for (const hit of hits) {
+    const t0 = Math.max(0, hit.t0);
+    const t1 = Math.min(len, hit.t1);
+    const sill = Math.min(height, Math.max(0, hit.sill));
+    const head = Math.min(height, Math.max(0, hit.head));
+    if (t1 - t0 <= 0.02 || head - sill <= 0.02) continue;
+    cuts.push({ t0, t1, sill, head });
+  }
+  if (!cuts.length) {
+    pushWallPrism(faces, start, end, z0, z0 + height, thick, id, "wall", fill, stroke, status);
+    return;
+  }
+  const ts = stationsOf([0, len, ...cuts.flatMap((cut) => [cut.t0, cut.t1])]);
+  const zs = stationsOf([z0, z0 + height, ...cuts.flatMap((cut) => [z0 + cut.sill, z0 + cut.head])]);
+  const nT = ts.length - 1;
+  const nZ = zs.length - 1;
+  const solid = Array.from({ length: nT }, () => Array(nZ).fill(false));
+  for (let i = 0; i < nT; i += 1) {
+    for (let j = 0; j < nZ; j += 1) {
+      const tm = (ts[i] + ts[i + 1]) / 2;
+      const zm = (zs[j] + zs[j + 1]) / 2;
+      const hole = cuts.some((cut) => tm > cut.t0 && tm < cut.t1 && zm > z0 + cut.sill && zm < z0 + cut.head);
+      solid[i][j] = !hole;
+    }
+  }
+  const quad = (pts, bare) => pushQuad(faces, pts, bare, id, fill, stroke, status);
+
+  for (let i = 0; i < nT; i += 1) {
+    for (let j = 0; j < nZ; j += 1) {
+      if (!solid[i][j]) continue;
+      const seamL = i > 0 && solid[i - 1][j];
+      const seamR = i + 1 < nT && solid[i + 1][j];
+      const seamB = j > 0 && solid[i][j - 1];
+      const seamT = j + 1 < nZ && solid[i][j + 1];
+      const tA = ts[i];
+      const tB = ts[i + 1];
+      const zA = zs[j];
+      const zB = zs[j + 1];
+      const flb = corner(tA, 1, zA);
+      const frb = corner(tB, 1, zA);
+      const frt = corner(tB, 1, zB);
+      const flt = corner(tA, 1, zB);
+      const frontBare = [];
+      if (seamB) frontBare.push([flb, frb]);
+      if (seamR) frontBare.push([frb, frt]);
+      if (seamT) frontBare.push([frt, flt]);
+      if (seamL) frontBare.push([flt, flb]);
+      quad([flb, frb, frt, flt], frontBare);
+      const blb = corner(tB, -1, zA);
+      const brb = corner(tA, -1, zA);
+      const brt = corner(tA, -1, zB);
+      const blt = corner(tB, -1, zB);
+      const backBare = [];
+      if (seamB) backBare.push([blb, brb]);
+      if (seamL) backBare.push([brb, brt]);
+      if (seamT) backBare.push([brt, blt]);
+      if (seamR) backBare.push([blt, blb]);
+      quad([blb, brb, brt, blt], backBare);
+    }
+  }
+
+  for (const [i0, i1] of indexRuns(nT, (i) => solid[i][nZ - 1])) {
+    const z = zs[nZ];
+    quad([
+      corner(ts[i0], 1, z),
+      corner(ts[i1], 1, z),
+      corner(ts[i1], -1, z),
+      corner(ts[i0], -1, z),
+    ]);
+  }
+  for (const [j0, j1] of indexRuns(nZ, (j) => solid[0][j])) {
+    quad([
+      corner(0, -1, zs[j0]),
+      corner(0, 1, zs[j0]),
+      corner(0, 1, zs[j1]),
+      corner(0, -1, zs[j1]),
+    ]);
+  }
+  for (const [j0, j1] of indexRuns(nZ, (j) => solid[nT - 1][j])) {
+    quad([
+      corner(len, 1, zs[j0]),
+      corner(len, -1, zs[j0]),
+      corner(len, -1, zs[j1]),
+      corner(len, 1, zs[j1]),
+    ]);
+  }
+  for (let k = 1; k < ts.length - 1; k += 1) {
+    const t = ts[k];
+    for (const [j0, j1] of indexRuns(nZ, (j) => solid[k - 1][j] && !solid[k][j])) {
+      quad([
+        corner(t, 1, zs[j0]),
+        corner(t, -1, zs[j0]),
+        corner(t, -1, zs[j1]),
+        corner(t, 1, zs[j1]),
+      ]);
+    }
+    for (const [j0, j1] of indexRuns(nZ, (j) => !solid[k - 1][j] && solid[k][j])) {
+      quad([
+        corner(t, -1, zs[j0]),
+        corner(t, 1, zs[j0]),
+        corner(t, 1, zs[j1]),
+        corner(t, -1, zs[j1]),
+      ]);
+    }
+  }
+  for (let m = 1; m < zs.length - 1; m += 1) {
+    const z = zs[m];
+    for (const [i0, i1] of indexRuns(nT, (i) => solid[i][m - 1] && !solid[i][m])) {
+      quad([
+        corner(ts[i0], 1, z),
+        corner(ts[i1], 1, z),
+        corner(ts[i1], -1, z),
+        corner(ts[i0], -1, z),
+      ]);
+    }
+    for (const [i0, i1] of indexRuns(nT, (i) => !solid[i][m - 1] && solid[i][m])) {
+      quad([
+        corner(ts[i0], 1, z),
+        corner(ts[i0], -1, z),
+        corner(ts[i1], -1, z),
+        corner(ts[i1], 1, z),
+      ]);
+    }
+  }
+}
+
+function pushWallBox(faces, start, end, z0, height, thick, id, openings, status) {
   const hits = openingsOnWall(start, end, openings);
   const wallFill = "rgba(26,22,18,0.45)";
   const wallStroke = "#1a1612";
@@ -236,22 +406,7 @@ function pushWallBox(faces, start, end, z0, height, thick, id, openings, status)
     pushWallPrism(faces, start, end, z0, z0 + height, thick, id, "wall", wallFill, wallStroke, status);
     return;
   }
-  let cursor = 0;
-  for (const hit of hits) {
-    if (hit.t0 - cursor > 0.02) {
-      pushWallPrism(faces, along(cursor), along(hit.t0), z0, z0 + height, thick, id, "wall", wallFill, wallStroke, status);
-    }
-    if (hit.sill > 0.02) {
-      pushWallPrism(faces, along(hit.t0), along(hit.t1), z0, z0 + hit.sill, thick, id, "wall", wallFill, wallStroke, status);
-    }
-    if (hit.head < height - 0.02) {
-      pushWallPrism(faces, along(hit.t0), along(hit.t1), z0 + hit.head, z0 + height, thick, id, "wall", wallFill, wallStroke, status);
-    }
-    cursor = Math.max(cursor, hit.t1);
-  }
-  if (len - cursor > 0.02) {
-    pushWallPrism(faces, along(cursor), along(len), z0, z0 + height, thick, id, "wall", wallFill, wallStroke, status);
-  }
+  pushOpenedWall(faces, start, end, z0, height, thick, id, hits, wallFill, wallStroke, status);
 }
 
 function pushOpeningFaces(faces, form, z0, id, status) {
@@ -520,9 +675,18 @@ export function facesFromPayload(payload, statusFilter = "both") {
   return faces;
 }
 
-function projectPoint(x, y, z, origin, cx, cy, scale, cam) {
+/** Orbit projection. The third component is depth, and it grows away from
+ *  the camera: a point higher on the screen (farther along the ground) or
+ *  lower in the building has a larger depth. Painter's sort is far-first,
+ *  the same rule look and section already use.
+ *
+ *  Plan y points DOWN the page (canvas convention, north is -y), while this
+ *  maths is right-handed with y away from the viewer. Without negating y the
+ *  whole model is a mirror image of the plan: top and bottom swap, so a
+ *  window at the south end of a wall appears at the north end. */
+export function projectPoint(x, y, z, origin, cx, cy, scale, cam) {
   const px = x - origin[0];
-  const py = y - origin[1];
+  const py = -(y - origin[1]);
   const pz = z - origin[2];
   const cyaw = Math.cos(cam.yaw);
   const syaw = Math.sin(cam.yaw);
@@ -680,6 +844,74 @@ export function massingLayer(face) {
   if (!pts.length) return 2;
   const z = pts.reduce((sum, p) => sum + p[2], 0) / pts.length;
   return z < -0.02 ? 0 : 2;
+}
+
+function pointOnSegment(p, a, b) {
+  const abx = b[0] - a[0];
+  const aby = b[1] - a[1];
+  const abz = b[2] - a[2];
+  const apx = p[0] - a[0];
+  const apy = p[1] - a[1];
+  const apz = p[2] - a[2];
+  const ab2 = abx * abx + aby * aby + abz * abz;
+  if (ab2 < 1e-12) return Math.hypot(apx, apy, apz) <= 1e-4;
+  const t = (apx * abx + apy * aby + apz * abz) / ab2;
+  if (t < -0.002 || t > 1.002) return false;
+  const cx = a[0] + abx * t - p[0];
+  const cy = a[1] + aby * t - p[1];
+  const cz = a[2] + abz * t - p[2];
+  return cx * cx + cy * cy + cz * cz <= 1e-8;
+}
+
+function edgeIsBare(a, b, bare) {
+  if (!bare) return false;
+  for (const [p, q] of bare) {
+    if (pointOnSegment(a, p, q) && pointOnSegment(b, p, q)) return true;
+  }
+  return false;
+}
+
+/** Stroke a face outline, leaving out edges marked bare (coplanar joints).
+ *  A clipped face keeps those joints bare: a new vertex on a seam still lies
+ *  on the original segment. */
+export function strokeFaceEdges(ctx, projected, face) {
+  const src = face?.pts || [];
+  const n = projected.length;
+  const bare = face?.bare;
+  if (!bare || !bare.length || src.length !== n) {
+    ctx.beginPath();
+    projected.forEach((p, i) => (i === 0 ? ctx.moveTo(p[0], p[1]) : ctx.lineTo(p[0], p[1])));
+    ctx.closePath();
+    ctx.stroke();
+    return;
+  }
+  const skip = [];
+  for (let i = 0; i < n; i += 1) {
+    const j = (i + 1) % n;
+    skip[i] = !!(src[i] && src[j] && edgeIsBare(src[i], src[j], bare));
+  }
+  // A clip can leave a face whose remaining edges are all real corners.
+  if (!skip.some(Boolean)) {
+    ctx.beginPath();
+    projected.forEach((p, i) => (i === 0 ? ctx.moveTo(p[0], p[1]) : ctx.lineTo(p[0], p[1])));
+    ctx.closePath();
+    ctx.stroke();
+    return;
+  }
+  ctx.beginPath();
+  for (let s = 0; s < n; s += 1) {
+    if (skip[s]) continue;
+    const prev = (s + n - 1) % n;
+    if (!skip[prev]) continue;
+    ctx.moveTo(projected[s][0], projected[s][1]);
+    let k = s;
+    do {
+      const j = (k + 1) % n;
+      ctx.lineTo(projected[j][0], projected[j][1]);
+      k = j;
+    } while (k !== s && !skip[k]);
+  }
+  ctx.stroke();
 }
 
 /** Fill/stroke for one face, by status and kind. Exported so a static
@@ -955,8 +1187,10 @@ export function createMassingView({ canvas, emptyEl, captionEl, titleEl, onDraw 
       if (isLook && depth < LOOK_NEAR) continue;
       projected.push({ face, pts, depth });
     }
-    projected.sort((a, b) => massingLayer(a.face) - massingLayer(b.face)
-      || ((isLook || isCutView) ? b.depth - a.depth : a.depth - b.depth));
+    // Every mode stores depth as "larger = farther" (orbit: projectPoint;
+    // look: distance along the gaze; section/elevation: along the look
+    // vector). Draw far faces first so a window's near leaf stays in front.
+    projected.sort((a, b) => massingLayer(a.face) - massingLayer(b.face) || b.depth - a.depth);
 
     const picking = highlight.size > 0;
     highlightHits = 0;
@@ -970,7 +1204,7 @@ export function createMassingView({ canvas, emptyEl, captionEl, titleEl, onDraw 
         ctx.strokeStyle = "#c2410c";
         ctx.lineWidth = 1.4;
         ctx.fill();
-        ctx.stroke();
+        strokeFaceEdges(ctx, item.pts, item.face);
         return;
       }
       ctx.fillStyle = item.face.cut
@@ -980,7 +1214,7 @@ export function createMassingView({ canvas, emptyEl, captionEl, titleEl, onDraw 
       ctx.lineWidth = projected.length > 8000 ? 0.2 : (item.face.cut ? 0.9 : 0.45);
       ctx.fill();
       if (item.face.cut) hatchPolygon(ctx, item.pts, style.stroke);
-      if (projected.length < 25000) ctx.stroke();
+      if (projected.length < 25000) strokeFaceEdges(ctx, item.pts, item.face);
     };
     const pickedItems = [];
     for (const item of projected) {

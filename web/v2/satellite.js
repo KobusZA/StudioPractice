@@ -338,6 +338,7 @@ export function normalizeSatelliteUnderlay(raw) {
     rotation: finite(raw.rotation) ? raw.rotation : 0,
     hidden: Boolean(raw.hidden),
     calibrated: raw.calibrated !== false,
+    ...(raw.pinned ? { pinned: true } : {}),
     source: {
       type: "satellite",
       lat: source.lat,

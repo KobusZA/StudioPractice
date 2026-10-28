@@ -126,6 +126,76 @@ export function createCloud({
       return (body?.rateBooks ?? []).find((book) => book.isDefault)?.id ?? null;
     },
 
+    /**
+     * Store the open plan file on the job. The bytes are not part of the
+     * drawing save: the drawing only records the id this returns.
+     */
+    async saveUnderlay(projectId, bytes, mime, { onProgress } = {}) {
+      const url = `${baseUrl}/api/projects/${encodeURIComponent(projectId)}/assets`;
+      // fetch cannot report upload progress, so an XHR is used only when asked.
+      if (typeof onProgress === "function" && typeof XMLHttpRequest !== "undefined") {
+        return new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open("POST", url);
+          xhr.withCredentials = true;
+          xhr.setRequestHeader("Content-Type", mime || "application/octet-stream");
+          xhr.upload.onprogress = (e) => {
+            if (e.lengthComputable && e.total > 0) onProgress(Math.min(100, Math.round((e.loaded / e.total) * 100)));
+          };
+          xhr.onerror = () => reject(new CloudError(0, "No connection to the server"));
+          xhr.onabort = () => reject(new CloudError(0, "No connection to the server"));
+          xhr.onload = () => {
+            const payload = xhr.responseText ? safeParse(xhr.responseText) : null;
+            if (xhr.status >= 200 && xhr.status < 300) resolve(payload?.asset ?? null);
+            else reject(new CloudError(xhr.status, payload?.error));
+          };
+          xhr.send(bytes);
+        });
+      }
+      let res;
+      try {
+        res = await fetchImpl(`${baseUrl}/api/projects/${encodeURIComponent(projectId)}/assets`, {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": mime || "application/octet-stream" },
+          body: bytes,
+        });
+      } catch {
+        throw new CloudError(0, "No connection to the server");
+      }
+      const text = await res.text();
+      const payload = text ? safeParse(text) : null;
+      if (!res.ok) throw new CloudError(res.status, payload?.error);
+      return payload?.asset ?? null;
+    },
+
+    /** The file already on this job with these bytes, or null. Asked before an upload so a copy is not sent twice. */
+    async findUnderlay(projectId, sha256, mime) {
+      const body = await call("POST", `/api/projects/${encodeURIComponent(projectId)}/assets/lookup`, { sha256, mime });
+      return body?.asset ?? null;
+    },
+
+    /** The stored file. `{ bytes, mime }`, or throws the same way a JSON call does. */
+    async fetchAsset(assetId) {
+      let res;
+      try {
+        res = await fetchImpl(`${baseUrl}/api/assets/${encodeURIComponent(assetId)}`, {
+          credentials: "include",
+        });
+      } catch {
+        throw new CloudError(0, "No connection to the server");
+      }
+      if (!res.ok) {
+        const text = await res.text();
+        const payload = text ? safeParse(text) : null;
+        throw new CloudError(res.status, payload?.error);
+      }
+      return {
+        bytes: await res.arrayBuffer(),
+        mime: (res.headers.get("content-type") || "").split(";")[0].trim(),
+      };
+    },
+
     /** Snapshot in, photorealistic visualization out. The key stays on the server. */
     async visualize({ image }) {
       const body = await call("POST", "/api/visualize", { image });

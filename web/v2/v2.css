@@ -364,6 +364,12 @@ canvas {
   height: 100%;
 }
 
+/* Pick cursor on the plan. A move cursor is set from the pointer only once
+   something is already selected; Pan sets grab / grabbing itself. */
+#v2-canvas {
+  cursor: crosshair;
+}
+
 .empty {
   position: absolute;
   inset: 0;
@@ -420,7 +426,7 @@ canvas {
   background-image: repeating-linear-gradient(90deg, var(--copper) 0 6px, transparent 6px 10px);
 }
 
-/* Show/hide for service runs. Sits above the existing/planned legend, and
+/* Show/hide for service runs. Sits above the existing/proposed legend, and
    drops to the corner when that legend is not on screen. */
 .svc-vis {
   position: absolute;
@@ -929,7 +935,8 @@ tbody tr:hover { background: rgba(26, 22, 18, 0.04); }
 }
 
 .planner-canvas-wrap.tool-opening canvas,
-.planner-canvas-wrap.tool-draw canvas {
+.planner-canvas-wrap.tool-draw canvas,
+.planner-canvas-wrap.tool-align canvas {
   cursor: crosshair;
 }
 
@@ -2329,19 +2336,28 @@ body.library-home {
   color: #fff;
 }
 
-.svc-profile-all {
+.svc-profile-all,
+.svc-profile-exit {
   font: inherit;
   font-size: 0.78rem;
   padding: 2px 10px;
-  margin-left: auto;
-  margin-right: 8px;
   border: 1px solid var(--line-strong, rgba(26, 22, 18, 0.25));
   border-radius: 5px;
   background: transparent;
   cursor: pointer;
 }
 
-.svc-profile-all:hover {
+.svc-profile-all {
+  margin-left: auto;
+  margin-right: 8px;
+}
+
+.svc-profile-exit {
+  margin-left: 8px;
+}
+
+.svc-profile-all:hover,
+.svc-profile-exit:hover {
   background: rgba(26, 22, 18, 0.06);
 }
 
@@ -2929,7 +2945,7 @@ body.library-home {
   position: absolute;
   top: 8px;
   left: 8px;
-  /* Leave room for the Select/Undo/Both/Existing/Planned toolbar floated at
+  /* Leave room for the Select/Undo/Both/Existing/Proposed toolbar floated at
      top-right (.plan-float-tools) so the two never collide. The hint now
      carries the arrow-key sentence as well, so this has to clear the whole
      toolbar, not only a short chip. */
@@ -2980,6 +2996,12 @@ body.library-home {
 .header-modify {
   display: inline-flex;
   gap: 6px;
+}
+
+/* Author display beats the hidden attribute, which left Delete on screen
+   with an empty selection (Rotate and Copy hide themselves). */
+.header-modify[hidden] {
+  display: none !important;
 }
 
 #v2-rules .rules-part {
@@ -5447,3 +5469,152 @@ body.library-home .library-foot {
   align-items: center;
   gap: 8px;
 }
+
+/* --- multi-page plan sets (sheet-ui.js) --- */
+.sheet-set-status { position: absolute; left: 12px; bottom: 12px; z-index: 5; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; font-size: 0.82rem; }
+.sheet-set-chips { position: absolute; left: 0; bottom: calc(100% + 6px); display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.sheet-set-chips:empty, .sheet-set-chips:not(:has(:not([hidden]))) { display: none; }
+.sheet-set-status [hidden] { display: none !important; }
+.sheet-set-chip { padding: 3px 8px; background: rgba(244, 237, 225, 0.96); border: 1px solid var(--ink); border-radius: 12px; }
+.sheet-set-chip[hidden] { display: none; }
+.sheet-set-chip.is-upload { display: inline-flex; gap: 8px; align-items: center; }
+.sheet-set-chip.is-upload button { font: inherit; padding: 1px 8px; border: 1px solid var(--ink); background: #fff; border-radius: 3px; cursor: pointer; }
+.sheet-set-chip.is-upload button[hidden] { display: none; }
+.sheet-set-snap { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; background: rgba(244, 237, 225, 0.96); border: 1px solid var(--ink); border-radius: 6px; font-size: 0.82rem; white-space: nowrap; cursor: pointer; }
+.sheet-set-snap[hidden] { display: none !important; }
+.sheet-set-snap-note { color: #5c5348; }
+.planner-underlay-panel .sheet-set-snap { background: transparent; border: 0; padding: 0; }
+.sheet-set-repick { display: flex; gap: 8px; align-items: center; padding: 6px 10px; background: rgba(244, 237, 225, 0.96); border: 1px solid #9a6b1f; border-radius: 6px; }
+.sheet-set-repick button, .sheet-set-notice button { font: inherit; padding: 3px 8px; border: 1px solid var(--ink); background: #fff; border-radius: 3px; cursor: pointer; }
+.sheet-set-dialog { width: min(820px, 100%); }
+.sheet-set-help { margin: 8px 12px; font-size: 0.86rem; color: #5c5348; }
+.sheet-set-notice { margin: 0 12px 8px; padding: 6px 10px; background: #f6e7c8; border: 1px solid #9a6b1f; border-radius: 4px; font-size: 0.84rem; }
+.sheet-set-rows { flex: 1; overflow: auto; padding: 0 12px 12px; display: flex; flex-direction: column; gap: 8px; }
+.sheet-set-row-item { display: flex; gap: 12px; align-items: center; padding: 8px; border: 1px solid rgba(0, 0, 0, 0.18); border-radius: 4px; background: #fff; }
+.sheet-set-thumb-slot { position: relative; width: 96px; height: 68px; flex: none; }
+.sheet-set-thumb { width: 100%; height: 100%; object-fit: contain; background: #eee; border: 1px solid rgba(0, 0, 0, 0.15); display: block; }
+.sheet-set-thumb-spin { display: none; position: absolute; inset: 0; margin: auto; width: 18px; height: 18px; border: 2px solid rgba(0, 0, 0, 0.12); border-top-color: var(--copper); border-radius: 50%; animation: sheet-set-spin 0.7s linear infinite; }
+.sheet-set-thumb-slot.is-loading .sheet-set-thumb-spin { display: block; }
+@keyframes sheet-set-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .sheet-set-thumb-spin, .sheet-set-list-eye.is-busy::after { animation: none; }
+}
+.sheet-set-fields { flex: 1; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.sheet-set-fields > div { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.sheet-set-use { white-space: nowrap; }
+.sheet-set-label { flex: 1; min-width: 12rem; }
+.sheet-set-scale { width: 5rem; }
+.sheet-set-ref { color: #5c5348; font-size: 0.84rem; }
+.sheet-set-panel-row { flex: 1 1 100%; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.sheet-set-panel-row[hidden] { display: none !important; }
+.sheet-set-panel-row input[type="text"] { width: 4.5rem; }
+.sheet-set-verify.is-unverified { color: #9a6b1f; }
+.sheet-set-ceiling-note { color: #5c5348; font-size: 0.84rem; }
+.sheet-set-card { background: rgba(244, 237, 225, 0.96); border: 1px solid var(--ink); border-radius: 6px; min-width: 15rem; max-width: 22rem; overflow: hidden; }
+.sheet-set-card.is-collapsed .sheet-set-list,
+.sheet-set-card.is-collapsed .sheet-set-tabs { display: none; }
+.sheet-set-list-head { width: 100%; text-align: left; font: inherit; font-weight: 600; padding: 5px 10px; border: 0; background: transparent; cursor: pointer; }
+.sheet-set-list-head::after { content: " \25BE"; }
+.sheet-set-card.is-collapsed .sheet-set-list-head::after { content: " \25B8"; }
+.sheet-set-tabs { display: flex; border-top: 1px solid rgba(0, 0, 0, 0.15); }
+.sheet-set-tab { flex: 1; font: inherit; font-size: 0.78rem; padding: 4px 8px; border: 0; border-right: 1px solid rgba(0, 0, 0, 0.12); background: transparent; color: #5c5348; cursor: pointer; }
+.sheet-set-tab:last-child { border-right: 0; }
+.sheet-set-tab.is-on { background: rgba(178, 69, 30, 0.16); color: var(--ink); font-weight: 600; }
+.sheet-set-list { display: flex; flex-direction: column; max-height: 16rem; overflow: auto; border-top: 1px solid rgba(0, 0, 0, 0.15); }
+.sheet-set-list-row { display: flex; flex-direction: column; align-items: stretch; gap: 3px; font: inherit; text-align: left; padding: 4px 10px; border: 0; background: transparent; cursor: pointer; }
+.sheet-set-list-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.sheet-set-list-row:hover:not(:disabled) { background: rgba(178, 69, 30, 0.1); }
+.sheet-set-list-row:disabled { opacity: 0.45; cursor: default; }
+.sheet-set-list-row.is-showing { background: rgba(178, 69, 30, 0.16); font-weight: 600; }
+.sheet-set-list-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sheet-set-list-where { color: #5c5348; font-size: 0.78rem; white-space: nowrap; }
+.sheet-set-list-row:focus-visible { outline: 2px solid #b2451e; outline-offset: -2px; }
+.sheet-set-list-row.is-other { opacity: 0.85; }
+.sheet-set-list-row.is-other .sheet-set-list-line { flex-wrap: nowrap; }
+.sheet-set-list-row.is-other .sheet-set-list-select { max-width: 6.2rem; flex: none; }
+.sheet-set-list-showas { display: flex; align-items: center; gap: 4px; flex: none; font-size: 0.75rem; color: #5c5348; white-space: nowrap; }
+.sheet-set-list-name { font: inherit; border: 1px solid transparent; background: transparent; padding: 1px 3px; }
+.sheet-set-list-name.is-text { padding: 1px 0; border: 0; }
+input.sheet-set-list-name:hover, input.sheet-set-list-name:focus { border-color: rgba(0, 0, 0, 0.3); background: #fff; }
+.sheet-set-list-scale { color: #5c5348; font-size: 0.78rem; white-space: nowrap; font-weight: 400; }
+.sheet-set-list-select { font: inherit; font-size: 0.75rem; max-width: 6.4rem; height: 1.35rem; padding: 0 2px; background: transparent; border: 1px solid rgba(0, 0, 0, 0.28); border-radius: 3px; }
+.sheet-set-list-move { max-width: 5.8rem; margin-left: auto; }
+.sheet-set-list-fit, .sheet-set-list-off { font: inherit; font-size: 0.72rem; font-weight: 400; height: 1.35rem; padding: 0 5px; border: 1px solid rgba(0, 0, 0, 0.28); background: transparent; border-radius: 3px; cursor: pointer; white-space: nowrap; }
+.sheet-set-list-eye { position: relative; font: inherit; font-size: 0.98rem; width: 1.35em; height: 1.35em; padding: 0; border: 0; background: transparent; border-radius: 3px; cursor: pointer; color: #5c5348; }
+.sheet-set-list-eye.is-on { color: #b2451e; }
+.sheet-set-list-eye.is-busy { color: transparent; cursor: progress; }
+.sheet-set-list-eye.is-busy::after { content: ""; position: absolute; inset: 0; margin: auto; width: 0.72em; height: 0.72em; border: 2px solid rgba(0, 0, 0, 0.15); border-top-color: var(--copper); border-radius: 50%; animation: sheet-set-spin 0.7s linear infinite; }
+.sheet-set-list-opacity { width: auto; flex: 1; min-width: 3rem; height: 1.15rem; margin: 0; accent-color: #b2451e; }
+.sheet-set-list-grip { cursor: grab; color: #5c5348; user-select: none; flex: none; }
+.sheet-set-list-actions { display: flex; align-items: center; gap: 6px; padding: 1px 0 2px; font-weight: 400; min-width: 0; }
+.sheet-set-list-row.is-drop-target { outline: 2px dashed #b2451e; outline-offset: -2px; }
+.sheet-set-list-group { display: flex; align-items: center; gap: 8px; padding: 4px 10px; background: rgba(0, 0, 0, 0.06); border-top: 1px solid rgba(0, 0, 0, 0.1); }
+.sheet-set-list-group strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.82rem; }
+.sheet-set-list-group.is-drop-target { background: rgba(178, 69, 30, 0.25); outline: 2px dashed #b2451e; outline-offset: -2px; }
+.sheet-set-list-source { display: flex; flex-direction: column; align-items: stretch; gap: 4px; padding: 6px 10px; background: rgba(0, 0, 0, 0.08); border-top: 1px solid rgba(0, 0, 0, 0.15); }
+.sheet-set-list-source-top { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.sheet-set-list-source-name { flex: 1; min-width: 0; font-size: 0.82rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sheet-set-list-source-actions { display: flex; gap: 12px; }
+.sheet-set-list-source-btn { flex: none; font: inherit; font-size: 0.75rem; padding: 0; border: 0; background: none; color: #3a5f7a; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; white-space: nowrap; }
+.sheet-set-list-count { color: #5c5348; font-size: 0.78rem; font-weight: 400; }
+.sheet-set-list-empty { padding: 8px 10px; color: #5c5348; font-size: 0.8rem; }
+.sheet-set-list-dot { flex: none; width: 0.8em; text-align: center; }
+.sheet-set-list-verify { flex: none; width: 1.1em; text-align: center; color: #2f6b3a; font-weight: 400; }
+.sheet-set-list-verify.is-unverified { color: #9a6b1f; }
+.sheet-set-toasts { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 8; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+.sheet-set-toast { pointer-events: auto; max-width: 28rem; padding: 12px 14px; background: #fbf7ee; border: 1px solid var(--ink); border-left: 4px solid var(--copper); border-radius: 6px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25); font-size: 0.88rem; }
+.sheet-set-toast.is-note { padding: 8px 12px; }
+.sheet-set-toast p { margin: 4px 0 10px; line-height: 1.4; }
+.sheet-set-toast-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.sheet-set-toast button { font: inherit; padding: 5px 10px; border: 1px solid var(--ink); background: #fff; border-radius: 3px; cursor: pointer; }
+.sheet-set-toast button.primary { background: var(--copper); border-color: var(--copper); color: #fff; }
+.sheet-set-ref-window { position: fixed; right: 12px; bottom: 12px; z-index: 36; width: min(780px, 60vw); height: 62vh; overflow: hidden; display: flex; flex-direction: column; background: #f4ede1; border: 1px solid var(--ink); border-radius: 6px; box-shadow: 0 8px 28px rgba(0, 0, 0, 0.3); font-size: 0.82rem; }
+.sheet-set-ref-head { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-bottom: 1px solid rgba(0, 0, 0, 0.18); flex-wrap: wrap; cursor: grab; }
+.sheet-set-ref-drag { flex: none; padding: 0 2px; color: #5c5348; user-select: none; touch-action: none; }
+.sheet-set-ref-head button, .sheet-set-ref-foot button, .sheet-set-ref-pages button { font: inherit; padding: 3px 9px; border: 1px solid var(--ink); background: #fff; border-radius: 3px; cursor: pointer; }
+.sheet-set-ref-head button[aria-pressed="true"], .sheet-set-ref-kinds button[aria-selected="true"], .sheet-set-ref-pages button[aria-selected="true"] { background: var(--copper); border-color: var(--copper); color: #fff; }
+.sheet-set-ref-kinds { display: flex; gap: 4px; margin-right: auto; }
+.sheet-set-ref-pages { display: flex; gap: 4px; overflow-x: auto; padding: 4px 8px; border-bottom: 1px solid rgba(0, 0, 0, 0.12); }
+.sheet-set-ref-pages[hidden] { display: none; }
+.sheet-set-ref-pages button { white-space: nowrap; max-width: 14rem; overflow: hidden; text-overflow: ellipsis; }
+.sheet-set-ref-empty { margin: 28px 16px; color: #5c5348; }
+.sheet-set-ref-scroll { flex: 1; min-height: 0; overflow: auto; background: #d8d2c6; cursor: grab; touch-action: none; }
+.sheet-set-ref-scroll.is-measuring { cursor: crosshair; }
+.sheet-set-ref-page { position: relative; background: #fff; }
+.sheet-set-ref-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.sheet-set-ref-overlay { position: absolute; inset: 0; width: 100%; height: 100%; }
+.sheet-set-ref-foot { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; padding: 6px 18px 6px 10px; border-top: 1px solid rgba(0, 0, 0, 0.18); }
+.sheet-set-ref-foot label { display: flex; align-items: center; gap: 4px; }
+.sheet-set-ref-foot input { width: 4.5rem; }
+.sheet-set-ref-spacer { flex: 1; }
+.sheet-set-ref-resize { position: absolute; right: 0; bottom: 0; width: 16px; height: 16px; cursor: nwse-resize; touch-action: none; z-index: 2; }
+.sheet-set-ref-resize::after { content: ""; position: absolute; right: 3px; bottom: 3px; width: 7px; height: 7px; border-right: 2px solid #5c5348; border-bottom: 2px solid #5c5348; }
+.sheet-set-measure-readout { font-weight: 600; color: var(--copper); }
+/* --- Underlay mode bar: Set scale, Adjust, Align sheets --------------------
+   Docked above the plan (not floating over the sheet) so it never covers what
+   is being traced. The copper pill, the lit ribbon button and the outline on
+   the plan all say the same thing: a mode is on. */
+.mode-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-height: 46px; padding: 6px 10px; background: #fbf1ea; border-bottom: 1px solid rgba(178, 69, 30, 0.45); font-size: 0.86rem; }
+.mode-bar[hidden], .mode-bar [hidden] { display: none !important; }
+.mode-pill { padding: 4px 10px; background: var(--copper, #b2451e); color: #fff; font-weight: 600; border-radius: 4px; white-space: nowrap; }
+.mode-step { color: #6b6256; font-size: 0.78rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mode-prompt { flex: 1 1 22ch; min-width: 22ch; font-weight: 600; line-height: 1.25; }
+.mode-controls { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding-left: 12px; border-left: 1px solid rgba(0, 0, 0, 0.15); }
+.mode-controls label, .mode-bar .sheet-set-snap { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.mode-controls input[type="text"] { width: 4.6rem; font: inherit; padding: 4px 6px; border: 1px solid var(--ink, #1a1612); border-radius: 3px; text-align: right; }
+.mode-controls input[type="range"] { width: 6rem; }
+.mode-bar button { font: inherit; padding: 5px 10px; border: 1px solid var(--ink, #1a1612); background: #fff; border-radius: 3px; cursor: pointer; }
+.mode-bar button:disabled { opacity: 0.45; cursor: default; }
+.mode-bar button.primary { background: var(--copper, #b2451e); border-color: var(--copper, #b2451e); color: #fff; font-weight: 600; }
+.mode-bar button[aria-pressed="true"], .mode-seg button.is-on { background: rgba(178, 69, 30, 0.14); border-color: var(--copper, #b2451e); color: var(--copper, #b2451e); font-weight: 600; }
+.mode-bar button.mode-link { border: 0; background: none; color: #3a5f7a; text-decoration: underline; padding: 5px 2px; }
+.mode-seg { display: inline-flex; }
+.mode-seg button { border-radius: 0; margin-left: -1px; }
+.mode-seg button:first-child { border-radius: 3px 0 0 3px; margin-left: 0; }
+.mode-seg button:last-child { border-radius: 0 3px 3px 0; }
+.mode-exit { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; padding-left: 12px; border-left: 1px solid rgba(0, 0, 0, 0.15); }
+.mode-exit kbd { font-size: 0.72rem; padding: 2px 5px; border: 1px solid rgba(0, 0, 0, 0.25); border-bottom-width: 2px; border-radius: 3px; background: #faf7f1; color: #6b6256; white-space: nowrap; }
+.mode-bar button.mode-close { border: 0; background: none; font-size: 1.05rem; line-height: 1; padding: 3px 7px; color: #6b6256; }
+.mode-bar .sheet-set-panel-row { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.planner-canvas-wrap.in-underlay-mode { box-shadow: inset 0 0 0 2px var(--copper, #b2451e); }
+.sheet-set-toast.has-action { display: flex; align-items: center; gap: 12px; }

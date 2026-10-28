@@ -26,8 +26,11 @@ export const RIBBON = [
           { id: "satellite", label: "Satellite", command: "satellite", anchor: true },
           { id: "underlay-adjust", label: "Adjust", command: "underlay-adjust" },
           { id: "calibrate", label: "Set scale", command: "calibrate" },
+          { id: "reference", label: "Elevations & sections", command: "reference" },
+          { id: "sheet-list", label: "Sheet list", command: "sheet-list" },
+          { id: "align-floors", label: "Align sheets", command: "align-floors" },
           { id: "underlay-toggle", label: "Hide", command: "underlay-toggle" },
-          { id: "underlay-off", label: "Remove", command: "underlay-off" },
+          { id: "underlay-off", label: "Remove…", command: "underlay-off" },
           { id: "dwg", label: "DWG", todo: "DWG is vector; the raster underlay lands first and a DWG parser follows." },
           { id: "cad", label: "CAD", todo: "DXF shares the DWG parser and lands with it." },
         ],
@@ -285,10 +288,13 @@ const ITEM_INDEX = ribbonItems();
 export const HINTS = {
   underlay: "Load a PDF or image to trace.",
   satellite: "Load a satellite view of an address or coordinates, already at true scale.",
+  "sheet-list": "Show or hide the list of pages in the inspector.",
+  "align-floors": "Click the same point on each sheet, such as a building corner. That lines up different floors, or two drawings of one floor — walls on one sheet, something else on the other. The other sheets move onto the one that stays put.",
+  reference: "Open the elevations and sections from the imported PDF, and type each floor-to-ceiling height.",
   calibrate: "Click two points on the sheet, then type the real distance or drag a corner to resize.",
   "underlay-adjust": "Drag the sheet to move, a corner to resize, the top handle to rotate.",
   "underlay-toggle": "Hide the sheet without removing it.",
-  "underlay-off": "Remove the sheet from the plan.",
+  "underlay-off": "Remove the sheet, or the whole imported plan set, from the plan. Asks first, and can be undone for a few seconds.",
   "level-isolate": "Show only this cut. A ceiling plan keeps the ceiling and walls; a roof plan keeps the roof. Off ghosts the neighbouring level and shows the tracing sheet.",
   walls: "Click to start a wall, click again to end. Draw on the centreline or a face. Space flips the face. Esc to stop.",
   boundary: "Click to start a boundary wall, click again to end. Draw on the centreline or a face. Space flips the face. Esc to stop.",
@@ -364,7 +370,7 @@ const SIMPLE_TABS = [
     id: "draw",
     label: "Draw",
     groups: [
-      { label: "Sheet", collapseAfterLoad: true, items: ["underlay", "satellite", "calibrate", "underlay-adjust", "underlay-toggle"] },
+      { label: "Sheet", collapseAfterLoad: true, items: ["underlay", "satellite", "calibrate", "reference", "sheet-list", "align-floors", "underlay-adjust", "underlay-toggle"] },
       { label: "Levels", items: ["level-isolate"] },
       { label: "Walls", items: ["walls"] },
       { label: "Floors & roofs", items: ["floors", "roofs"] },
@@ -416,7 +422,8 @@ function visibleInSimple(item, group, state, sheetLoaded) {
   if (!item) return false;
   if (item.todo) return false;
   if (item.categories && state.skuCount(item.categories) === 0) return false;
-  if (group.collapseAfterLoad) return sheetLoaded ? !SHEET_LOADERS.has(item.id) : SHEET_LOADERS.has(item.id);
+  // The loaders stay after a sheet is there, so a second file can still be added.
+  if (group.collapseAfterLoad) return SHEET_LOADERS.has(item.id) || sheetLoaded;
   return true;
 }
 
