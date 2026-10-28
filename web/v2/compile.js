@@ -15,7 +15,7 @@
 
 import { area as polyArea, perimeter as polyPerimeter, pointInPoly } from "./geom.js";
 import { syncRoomBounds } from "./room-bound.js";
-import { lookDownLevelId } from "./level-view.js";
+import { levelAboveRise, lookDownLevelId } from "./level-view.js";
 import {
   ATTACHABLE_KINDS,
   attachChainReaches,
@@ -36,12 +36,14 @@ import {
   beamHostsOk,
   hostOk,
   openingOnWall,
+  openingSize,
   skuById,
   wallForOpening,
   wallNormal,
 } from "./openings.js";
 import { deriveDrawnWalls, deriveWalls, isExternalWall, skuDrawnHeight } from "./walls.js";
 import { edgeHomeLevel, runGradient, serviceTakeoff } from "./services.js";
+import { finishRegionAreas, resolveFinishes } from "./finish-model.js";
 
 const CATEGORY_TO_SCHEDULE = {
   wall: "Walls",
@@ -119,6 +121,10 @@ export function objectLabel(pack, obj) {
  */
 export function statedHeight(pack, obj) {
   if (Number.isFinite(obj?.height)) return obj.height;
+  if (obj?.top === "level-above") {
+    const rise = levelAboveRise(pack?.levels, effectiveLevel(obj, pack));
+    if (rise !== null) return rise;
+  }
   return skuDrawnHeight(skuById(pack, obj?.sku));
 }
 
@@ -357,6 +363,9 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
   // is about the pack's SKUs, not what the firm actually drew.
   const warnings = [];
   let floorSeq = 1;
+  // Floor finish regions inside a room are measured out of that room's floor.
+  const regionAreas = finishRegionAreas(doc, pack).byRoom;
+  const coreBasis = doc.finishSettings?.volumeBasis === "core";
 
   // --- rooms: floor finish plus the room record the compliance engine reads --
   for (const room of doc.rooms || []) {
@@ -406,12 +415,14 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
 
     if (floor && !slabUnder) {
       const row = baseRow(pack, floor, `F${floorSeq}`, objectStatus(room));
+      const net = Math.max(0, a - (regionAreas.get(room.id) || 0));
       applyMeasures(row, floor, {
-        area: a,
+        area: net,
         perimeter: p,
-        volume: a * (floor.geometry?.thickness || 0.085),
+        volume: net * (floor.geometry?.thickness || 0.085),
         count: 1,
       });
+      if (net < a) row.areaGross = a;
       row.level = level;
       row.kind = "room";
       row.phaseCreated = phase;
@@ -515,9 +526,24 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
   // same elevation the wall itself got rather than resolving it a second time
   // (and warning about the same broken attach twice).
   const wallBases = new Map();
+  // Full-storey walls whose top is fixed no longer reach the level above after
+  // a level edit; they are listed once, never silently stretched.
+  const shortWalls = [];
   for (const wall of walls) {
     const sku = skuById(pack, wall.sku);
     if (!sku) continue;
+    if (wall.drawn && wall.top !== "level-above" && wall.category !== "foundation") {
+      const level = (pack.levels || []).find((l) => l.id === wall.level);
+      const rise = levelAboveRise(pack.levels, wall.level);
+      if (
+        rise !== null
+        && Number.isFinite(level?.floorToFloor)
+        && Math.abs(wall.height - level.floorToFloor) < 1e-6
+        && Math.abs(rise - wall.height) > 1e-3
+      ) {
+        shortWalls.push(`${objectLabel(pack, { sku: wall.sku, id: wall.id })} on ${levelName(pack, wall.level)} (${Math.round(wall.height * 1000)} mm vs ${Math.round(rise * 1000)} mm to the level above)`);
+      }
+    }
     // A base attach raises this wall's base and takes the difference out of its
     // height, so `area`/`volume` below are the attached wall's, not the
     // as-drawn wall's. Room-derived walls carry no attach and resolve to the
@@ -532,7 +558,9 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
     applyMeasures(row, sku, {
       length: wall.length,
       area: a,
-      volume: a * wall.thickness,
+      // Core thickness only when the job asks for it and the type states one;
+      // plaster is then its own quantity (finish-model.js).
+      volume: a * (coreBasis && sku.geometry?.coreThickness > 0 ? sku.geometry.coreThickness : wall.thickness),
       count: 1,
     });
     row.external = isExternalWall(wall);
@@ -563,18 +591,31 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
       }],
     });
   }
+  if (shortWalls.length) {
+    warnings.push(`Fixed-height walls no longer meet the level above: ${shortWalls.join("; ")}. Set their top to "up to level above", or change their height.`);
+  }
+
+  const conflictWalls = walls.filter((w) => w.heightConflict);
+  if (conflictWalls.length) {
+    warnings.push(`${conflictWalls.length} shared wall${conflictWalls.length === 1 ? "" : "s"} sit between rooms with different wall heights; the taller height is used: ${conflictWalls.slice(0, 5).map((w) => `${levelName(pack, w.level)} ${Math.round(w.height * 1000)} mm`).join("; ")}${conflictWalls.length > 5 ? "; ..." : ""}.`);
+  }
 
   // --- openings ------------------------------------------------------------
+  const nonStandardOpenings = [];
   for (const opening of doc.openings || []) {
     const wall = wallForOpening(doc, pack, walls, opening);
     if (!wall || !hostOk(pack, opening.sku, wall)) continue;
     const placed = openingOnWall(doc, pack, opening, wall);
     const sku = placed.sku;
     if (!sku) continue;
-    const g = sku.geometry || {};
+    const size = openingSize(pack, opening);
 
     const row = baseRow(pack, sku, opening.id, objectStatus(opening));
-    applyMeasures(row, sku, { count: 1, area: (g.width || 0) * (g.height || 0) });
+    applyMeasures(row, sku, { count: 1, area: (size.width || 0) * (size.height || 0) });
+    if (size.nonStandard) {
+      row.nonStandardSize = true;
+      nonStandardOpenings.push(`${sku.name} ${Math.round(size.width * 1000)} x ${Math.round(size.height * 1000)} mm on ${levelName(pack, wall.level)}`);
+    }
     row.hostWallId = wall.id;
     row.external = isExternalWall(wall);
     row.level = wall.level;
@@ -586,8 +627,8 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
       elementId: opening.id,
       name: sku.name,
       hostWallId: wall.id,
-      depth: g.height || (sku.category === "window" ? 1.2 : 2.1),
-      sill: sku.category === "window" ? (g.sill ?? 0.9) : 0,
+      depth: size.height || (sku.category === "window" ? 1.2 : 2.1),
+      sill: sku.category === "window" ? (size.sill ?? 0.9) : 0,
       // Follows its host wall's base, so a door in a wall attached to a
       // foundation is not left sitting at the level datum below it.
       elevation: wallBases.get(wall.id)?.elevation ?? levelElevation(pack, wall.level),
@@ -613,6 +654,17 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
     }
     sketchForms.push(tick);
   }
+
+  if (nonStandardOpenings.length) {
+    warnings.push(`Non-standard window size, firm to confirm: ${nonStandardOpenings.join("; ")}.`);
+  }
+
+  // --- finishes ------------------------------------------------------------
+  // After walls and openings, because a finish is measured net of the openings
+  // on its face and up to the wall's resolved top.
+  const finishes = resolveFinishes(doc, pack, walls, { wallBases });
+  instances.push(...finishes.rows);
+  warnings.push(...finishes.warnings);
 
   // --- items ---------------------------------------------------------------
   for (const item of doc.items || []) {

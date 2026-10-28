@@ -27,10 +27,15 @@ import {
   nid,
   objectByRef,
   sameRef,
+  finishRegionPolygon,
+  hostedFinishRegions,
+  hostedFinishRegionsOf,
+  polyShape,
   shapePolygon,
   shapeRects,
   uniqueRefs,
 } from "./model.js";
+import { finishId } from "./finish-data.js";
 import { drawnWallThickness } from "./walls.js";
 
 const SHAPED = new Set(["room", "slab", "roof", "region"]);
@@ -96,6 +101,12 @@ export function rotateSelection(doc, refs, { degrees = 90 } = {}) {
     return [roundGrid(cx + px), roundGrid(cy + py)];
   };
 
+  // A floor's tiles and waterproofing turn with it. Found first, while the
+  // floor is still where they sit.
+  for (const region of hostedFinishRegionsOf(doc, rows.map((r) => r.ref))) {
+    region.shape = rotateShape(region.shape, turn);
+  }
+
   for (const { ref, obj } of rows) {
     if (SHAPED.has(ref.kind)) {
       obj.shape = rotateShape(obj.shape, turn);
@@ -157,6 +168,10 @@ export function mirrorSelection(doc, refs, { axis = "v" } = {}) {
     ? [roundGrid(x), roundGrid(2 * cy - y)]
     : [roundGrid(2 * cx - x), roundGrid(y)]);
 
+  for (const region of hostedFinishRegionsOf(doc, rows.map((r) => r.ref))) {
+    region.shape = rotateShape(region.shape, flip);
+  }
+
   for (const { ref, obj } of rows) {
     if (SHAPED.has(ref.kind)) {
       obj.shape = rotateShape(obj.shape, flip); // corner mapping is the same job
@@ -217,8 +232,18 @@ export function copySelection(doc, refs, { dx = null, dy = 0 } = {}) {
       // would land on the same spot on the same wall.
       continue;
     }
+    // The copy of a floor carries its own copy of the tiles on it.
+    const hosted = SHAPED.has(ref.kind) ? hostedFinishRegions(doc, ref) : [];
     collectionFor(doc, ref.kind).push(copy);
     created.push({ kind: ref.kind, id: copy.id });
+    for (const region of hosted) {
+      const twin = structuredClone(region);
+      twin.id = finishId("fg");
+      twin.shape = translateAny(twin.shape, offsetX, dy);
+      if (ref.kind === "slab") twin.slabId = copy.id;
+      else if (ref.kind === "room") twin.roomId = copy.id;
+      doc.finishRegions.push(twin);
+    }
   }
 
   if (!created.length) return fail("Openings are anchored to a wall; copy the wall or place another.");
@@ -256,14 +281,19 @@ export function alignSelection(doc, refs, { edge = "left", anchorRef = null } = 
     else if (edge === "bottom") dy = anchorBox.y - box.y;
     else dy = (anchorBox.y + anchorBox.h) - (box.y + box.h);
     if (Math.abs(dx) < 1e-9 && Math.abs(dy) < 1e-9) continue;
-    translateObject(row.ref, row.obj, dx, dy);
+    translateObject(row.ref, row.obj, dx, dy, doc);
     moved += 1;
   }
   return done(`Aligned ${moved} object${moved === 1 ? "" : "s"} to the ${edge} of ${anchor.obj.name || anchor.ref.kind}.`);
 }
 
-function translateObject(ref, obj, dx, dy) {
-  if (SHAPED.has(ref.kind)) obj.shape = translateAny(obj.shape, dx, dy);
+function translateObject(ref, obj, dx, dy, doc = null) {
+  if (SHAPED.has(ref.kind)) {
+    // Found before the floor moves, while the tiles still sit on it.
+    const hosted = doc ? hostedFinishRegions(doc, ref) : [];
+    obj.shape = translateAny(obj.shape, dx, dy);
+    for (const region of hosted) region.shape = translateAny(region.shape, dx, dy);
+  }
   else if (ENDPOINTED.has(ref.kind)) {
     obj.x1 = obj.x1 + dx;
     obj.y1 = obj.y1 + dy;
@@ -297,6 +327,15 @@ export function mergeSelection(doc, refs) {
   }
 
   const keeper = rows[0].obj;
+  // Tiles on the floors folded into the keeper stay on the merged floor.
+  for (const region of hostedFinishRegionsOf(doc, rows.map((r) => r.ref))) {
+    if (kind === "slab") {
+      // A whole-floor region must keep the outline it had; the merged floor is bigger.
+      if (region.whole) region.shape = polyShape(finishRegionPolygon(doc, region));
+      delete region.whole;
+      region.slabId = keeper.id;
+    } else if (kind === "room") region.roomId = keeper.id;
+  }
   keeper.shape = { kind: "rects", rects };
 
   const list = collectionFor(doc, kind);

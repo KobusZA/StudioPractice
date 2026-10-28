@@ -25,6 +25,8 @@ export const PACK_SCHEMA = "sp.pack/3";
 /** Every SKU geometry key that is millimetres in the pack/JSON representation. */
 export const GEOMETRY_LENGTH_KEYS = [
   "thickness", "width", "height", "depth", "sill", "diameter", "riser", "going",
+  // Optional: a masonry wall's core (110 or 220), without its plaster.
+  "coreThickness",
 ];
 
 /**

@@ -29,6 +29,63 @@ test("collectSnapTargets can omit objects hidden by the status filter", () => {
   assert.ok(points.every((p) => p.y === 1));
 });
 
+test("dragging a floor corner aligns to the other corners, not to itself", () => {
+  const doc = emptyDoc();
+  // Bottom-right has been pulled in, so it shares Y with the other bottom
+  // corner and shares X with nothing. The middle bottom point is collinear
+  // and drops out of the outline; the corner at (0, 0) is the alignment.
+  doc.slabs.push({
+    id: "sl1",
+    shape: { kind: "poly", points: [[0, 0], [5, 0], [8, 0], [10, 4]] },
+  });
+  const opts = { activeShape: { kind: "slab", id: "sl1", x: 8, y: 0 } };
+  const targets = collectSnapTargets(doc, opts);
+  assert.equal(targets.some((p) => p.x === 8 && p.y === 0), false, "the corner being dragged is not a target");
+  assert.equal(targets.some((p) => p.x === 0 && p.y === 0), true, "the other bottom corner stays");
+  assert.equal(targets.some((p) => p.x === 10 && p.y === 4), true);
+  assert.equal(collectSnapEdges(doc, opts).length, 0, "its own outline is not a face to land on");
+  const result = snapPoint(8.02, 0.02, targets, 0.1);
+  assert.equal(result.guideY, 0);
+  assert.equal(result.guideX, null);
+  assert.equal(isExactPointSnap(result), false);
+});
+
+test("dragging a finish corner aligns to the other corners of that finish", () => {
+  const doc = emptyDoc();
+  doc.finishRegions.push({
+    id: "fr1",
+    shape: { kind: "poly", points: [[1, 1], [3, 1], [3, 2], [1, 2]] },
+  });
+  doc.finishRegions.push({
+    id: "fr2",
+    whole: true,
+    shape: { kind: "poly", points: [[0, 0], [4, 0], [4, 4]] },
+  });
+  assert.equal(collectSnapTargets(doc).some((p) => p.x === 3 && p.y === 1), false, "finishes are not targets while drawing a wall");
+  const opts = { finishes: true, activeShape: { kind: "finish", id: "fr1", x: 3, y: 2 } };
+  const targets = collectSnapTargets(doc, opts);
+  assert.equal(targets.some((p) => p.x === 3 && p.y === 2), false, "the corner being dragged is not a target");
+  assert.equal(targets.some((p) => p.x === 3 && p.y === 1), true, "the other corner on this edge stays");
+  assert.equal(targets.some((p) => p.x === 1 && p.y === 2), true);
+  assert.equal(targets.some((p) => p.x === 0 && p.y === 0), false, "a whole-floor finish adds no corners of its own");
+  const result = snapPoint(3.02, 2.4, targets, 0.1);
+  assert.equal(result.guideX, 3);
+  assert.equal(result.guideY, null);
+  assert.equal(isExactPointSnap(result), false);
+});
+
+test("a floor corner still joins a different object's corner at the same place", () => {
+  const doc = emptyDoc();
+  doc.slabs.push({ id: "sl1", shape: rectShape(0, 0, 4, 3) });
+  doc.rooms.push({ id: "r1", shape: rectShape(0, 0, 4, 3) });
+  const opts = { activeShape: { kind: "slab", id: "sl1", x: 4, y: 3 } };
+  const targets = collectSnapTargets(doc, opts);
+  assert.equal(targets.filter((p) => p.x === 4 && p.y === 3).length, 1);
+  const result = snapPoint(4.02, 3.02, targets, 0.1);
+  assert.equal(result.guideX, 4);
+  assert.equal(result.guideY, 3);
+});
+
 test("collectSnapTargets includes room, slab and roof corners", () => {
   const doc = emptyDoc();
   doc.rooms.push({ id: "r1", shape: rectShape(0, 0, 4, 3) });

@@ -122,6 +122,33 @@ export function pointInPoly(x, y, poly) {
   return inside;
 }
 
+/**
+ * Keep a point on or inside a polygon. Already-inside points are unchanged;
+ * points outside land on the nearest edge or vertex. Used so a finish drawn
+ * on a floor cannot leave that floor.
+ */
+export function clampToPoly(x, y, poly) {
+  if (!poly || poly.length < 3) return { x, y, inside: true };
+  if (pointInPoly(x, y, poly)) return { x, y, inside: true };
+  let bestX = x;
+  let bestY = y;
+  let bestD = Infinity;
+  for (let i = 0; i < poly.length; i += 1) {
+    const [x1, y1] = poly[i];
+    const [x2, y2] = poly[(i + 1) % poly.length];
+    const t = Math.min(1, Math.max(0, paramOnSeg(x1, y1, x2, y2, x, y)));
+    const px = x1 + (x2 - x1) * t;
+    const py = y1 + (y2 - y1) * t;
+    const d = Math.hypot(px - x, py - y);
+    if (d < bestD) {
+      bestD = d;
+      bestX = px;
+      bestY = py;
+    }
+  }
+  return { x: bestX, y: bestY, inside: false };
+}
+
 /** Drop repeated and collinear vertices so wall derivation sees clean edges. */
 export function simplify(poly, eps = 1e-9) {
   const pts = [];
@@ -419,4 +446,115 @@ export function offsetPolygonInward(poly, distance) {
   // A collapsed or inverted result means `distance` ate through the shape.
   if (clean.length < 3 || !isCCW(clean) || area(clean) < EPS) return null;
   return clean;
+}
+
+// --- polygon intersection ---------------------------------------------------
+//
+// Used to say how much of a floor two finishes share. The clip polygon is cut
+// into convex pieces (a triangle, when it is concave); Sutherland–Hodgman then
+// clips the subject, which may itself be concave, against each piece.
+
+function turn(a, b, c) {
+  return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+}
+
+function ringIsConvex(ring) {
+  for (let i = 0; i < ring.length; i += 1) {
+    const a = ring[(i + ring.length - 1) % ring.length];
+    const c = ring[(i + 1) % ring.length];
+    if (turn(a, ring[i], c) < -1e-9) return false;
+  }
+  return true;
+}
+
+function pointInTriangle(p, a, b, c) {
+  const c1 = turn(a, b, p);
+  const c2 = turn(b, c, p);
+  const c3 = turn(c, a, p);
+  const eps = 1e-10;
+  return (c1 > eps && c2 > eps && c3 > eps) || (c1 < -eps && c2 < -eps && c3 < -eps);
+}
+
+/** Ear-clip a simple polygon into triangles. Degenerate input returns what it could. */
+function triangulate(poly) {
+  const ring = normalizeWinding(simplify(poly)).map((p) => [p[0], p[1]]);
+  const tris = [];
+  let guard = ring.length * ring.length + 4;
+  while (ring.length > 3 && guard-- > 0) {
+    let clipped = false;
+    for (let i = 0; i < ring.length; i += 1) {
+      const prev = (i + ring.length - 1) % ring.length;
+      const next = (i + 1) % ring.length;
+      const a = ring[prev];
+      const b = ring[i];
+      const c = ring[next];
+      if (turn(a, b, c) <= 1e-12) continue;
+      let ear = true;
+      for (let j = 0; j < ring.length; j += 1) {
+        if (j === i || j === prev || j === next) continue;
+        if (pointInTriangle(ring[j], a, b, c)) { ear = false; break; }
+      }
+      if (!ear) continue;
+      tris.push([a, b, c]);
+      ring.splice(i, 1);
+      clipped = true;
+      break;
+    }
+    if (!clipped) break;
+  }
+  if (ring.length === 3 && Math.abs(turn(ring[0], ring[1], ring[2])) > 1e-12) tris.push([ring[0], ring[1], ring[2]]);
+  return tris;
+}
+
+function convexParts(poly) {
+  const ring = normalizeWinding(simplify(poly));
+  if (ring.length < 3) return [];
+  if (ring.length === 3 || ringIsConvex(ring)) return [ring];
+  const tris = triangulate(ring);
+  return tris.length ? tris : [ring];
+}
+
+/** Clip `poly` to the half-plane on the left of the directed edge a → b. */
+function clipToEdge(poly, a, b) {
+  const out = [];
+  const inside = (p) => turn(a, b, p) >= -1e-9;
+  const n = poly.length;
+  for (let i = 0; i < n; i += 1) {
+    const cur = poly[i];
+    const prev = poly[(i + n - 1) % n];
+    const cin = inside(cur);
+    const pin = inside(prev);
+    if (cin !== pin) {
+      const d1 = turn(a, b, prev);
+      const d2 = turn(a, b, cur);
+      const t = d1 / (d1 - d2);
+      out.push([prev[0] + (cur[0] - prev[0]) * t, prev[1] + (cur[1] - prev[1]) * t]);
+    }
+    if (cin) out.push(cur);
+  }
+  return out;
+}
+
+function sutherlandHodgman(subject, clip) {
+  const edge = normalizeWinding(clip);
+  let out = subject.map((p) => [p[0], p[1]]);
+  for (let i = 0; i < edge.length; i += 1) {
+    if (out.length < 3) return [];
+    out = clipToEdge(out, edge[i], edge[(i + 1) % edge.length]);
+  }
+  return out.length >= 3 ? out : [];
+}
+
+/**
+ * `subject` ∩ `clip`, as polygons that do not overlap each other.
+ * Empty when the two shapes miss.
+ */
+export function clipPolygon(subject, clip) {
+  if (!subject || subject.length < 3 || !clip || clip.length < 3) return [];
+  const out = [];
+  for (const part of convexParts(clip)) {
+    const clipped = sutherlandHodgman(subject, part);
+    if (clipped.length >= 3 && area(clipped) > 1e-8) out.push(clipped);
+  }
+  return out;
 }

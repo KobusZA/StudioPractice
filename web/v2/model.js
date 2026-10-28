@@ -14,11 +14,20 @@ import {
   centroid as polyCentroid,
   normalizeWinding,
   perimeter as polyPerimeter,
+  pointInPoly,
   rectPoly,
   roundGrid,
   simplify,
   unionRectsOuter,
 } from "./geom.js";
+import {
+  normalizeFinishPresets,
+  normalizeFinishProducts,
+  normalizeFinishRegions,
+  normalizeFinishRuns,
+  normalizeFinishSettings,
+  normalizeRoomFinishes,
+} from "./finish-data.js";
 import { knownConvention } from "./region.js";
 import { normalizeSatelliteUnderlay } from "./satellite.js";
 import { normalizeSheetSet } from "./sheet-set.js";
@@ -186,6 +195,16 @@ export function emptyDoc() {
     // level-view.js's insertLevel(). Kept on the document, never merged into
     // the pack, because the pack is regenerated from the template.
     levels: [],
+    // Per-job elevation overrides, { [levelId]: metres } - level-view.js's
+    // applyLevelElevations(). Empty means the template/inserted values stand.
+    levelElevations: {},
+    // Finishes (finish-model.js). Products the job uses, drawn runs on wall
+    // faces, floor regions, saved room-finish presets, and two job settings.
+    finishProducts: [],
+    finishRuns: [],
+    finishRegions: [],
+    finishPresets: [],
+    finishSettings: normalizeFinishSettings(null),
   };
 }
 
@@ -205,6 +224,14 @@ export function rectsShape(rects) {
 
 export function polyShape(points) {
   return { kind: "poly", points };
+}
+
+/** A rect or rects shape as an editable polygon, so corners can be dragged. */
+export function shapeAsPoly(shape) {
+  if (!shape) return null;
+  if (shape.kind === "poly") return shape;
+  const points = shapePolygon(shape);
+  return points.length >= 3 ? polyShape(points) : null;
 }
 
 /** Resolve any shape kind to a simplified, CCW-wound polygon. */
@@ -363,6 +390,10 @@ const KIND_TO_ARRAY = {
   dimension: "dimensions",
   serviceNode: "serviceNodes",
   serviceEdge: "serviceEdges",
+  // A floor finish region is not an entity of its own on the plan (it is never
+  // in ENTITY_KINDS, so select-all, groups and the marquee never see it); it is
+  // addressable by ref only so a move can carry it with the floor it is on.
+  finishRegion: "finishRegions",
 };
 
 export function collectionFor(doc, kind) {
@@ -396,6 +427,86 @@ export function uniqueRefs(refs) {
 export function objectByRef(doc, ref) {
   const list = ref ? collectionFor(doc, ref.kind) : null;
   return list?.find((row) => row.id === ref.id) || null;
+}
+
+// --- floor finish regions ---------------------------------------------------
+//
+// A region (tiles, waterproofing, screed...) is a polygon laid on a floor. It is
+// stored on `doc.finishRegions` with the floor it belongs to (`slabId`, and/or
+// `roomId`), and it must travel with that floor: moving, rotating, mirroring,
+// copying or deleting the slab does the same to its regions.
+
+function centreOfPoly(poly) {
+  const n = poly.length || 1;
+  return [poly.reduce((s, p) => s + p[0], 0) / n, poly.reduce((s, p) => s + p[1], 0) / n];
+}
+
+/** The slab a region sits on: the one it names, else the one holding its centre. */
+export function finishRegionSlab(doc, region) {
+  const named = region.slabId ? (doc.slabs || []).find((s) => s.id === region.slabId) : null;
+  if (named) return named;
+  const poly = shapePolygon(region.shape);
+  if (poly.length < 3) return null;
+  const [cx, cy] = centreOfPoly(poly);
+  return (doc.slabs || []).find((slab) => {
+    if (region.level && slab.level && region.level !== slab.level) return false;
+    const sp = shapePolygon(slab.shape);
+    return sp.length >= 3 && pointInPoly(cx, cy, sp);
+  }) || null;
+}
+
+/**
+ * The outline a region is drawn and measured with. A "whole floor" region has
+ * no outline of its own: it is its slab's, so reshaping the floor reshapes it.
+ */
+export function finishRegionPolygon(doc, region) {
+  if (region?.whole) {
+    const slab = (doc.slabs || []).find((s) => s.id === region.slabId);
+    if (slab) {
+      const poly = shapePolygon(slab.shape);
+      if (poly.length >= 3) return poly;
+    }
+  }
+  return shapePolygon(region?.shape);
+}
+
+/** Regions that follow a slab or a room when it is moved, turned, copied or deleted. */
+export function hostedFinishRegions(doc, ref) {
+  if (!ref || !Array.isArray(doc.finishRegions) || !doc.finishRegions.length) return [];
+  if (ref.kind === "slab") {
+    return doc.finishRegions.filter((r) => finishRegionSlab(doc, r)?.id === ref.id);
+  }
+  // A room only hosts regions that were drawn on the room and sit on no slab.
+  if (ref.kind === "room") {
+    return doc.finishRegions.filter((r) => r.roomId === ref.id && !r.slabId && !finishRegionSlab(doc, r));
+  }
+  return [];
+}
+
+/**
+ * The floor or room is about to change level. Its finishes go with it.
+ * Call this before the host's own level changes: a region with no slab id is
+ * found by sitting inside the slab, and that match requires the same level.
+ */
+export function carryFinishRegionsToLevel(doc, ref, level) {
+  if (level == null) return [];
+  const regions = hostedFinishRegions(doc, ref);
+  for (const region of regions) region.level = level;
+  return regions;
+}
+
+/** Hosted regions of every ref, each once, and never one that is itself in `refs`. */
+export function hostedFinishRegionsOf(doc, refs) {
+  const seen = new Set();
+  const out = [];
+  for (const ref of refs || []) {
+    for (const region of hostedFinishRegions(doc, ref)) {
+      if (seen.has(region.id)) continue;
+      seen.add(region.id);
+      out.push(region);
+    }
+  }
+  return out;
 }
 
 export function allRefs(doc) {
@@ -631,7 +742,11 @@ export class PlanStore {
     const snaps = [];
     // A service edge moves its two nodes and a node moves its whole riser
     // column, so a riser is never left standing in two places.
-    for (const ref of expandServiceRefs(this.doc, uniqueRefs(refs))) {
+    const moving = expandServiceRefs(this.doc, uniqueRefs(refs));
+    // A floor's finish regions (tiles, waterproofing) travel with it.
+    const carried = hostedFinishRegionsOf(this.doc, moving)
+      .map((r) => ({ kind: "finishRegion", id: r.id }));
+    for (const ref of [...moving, ...carried]) {
       const obj = objectByRef(this.doc, ref);
       if (!obj) continue;
       if (obj.shape) snaps.push({ ref, shape: clone(obj.shape), seed: obj.seed ? clone(obj.seed) : null });
@@ -698,6 +813,7 @@ const PLAN_MARK_ARRAYS = [
   "lines",
   "separations",
   "regions",
+  "finishRegions",
   "dimensions",
   "serviceNodes",
   "serviceEdges",
@@ -732,6 +848,9 @@ const JOB_CONTENT_ARRAYS = [
   "lines",
   "separations",
   "regions",
+  "finishRegions",
+  "finishRuns",
+  "finishProducts",
   "dimensions",
   "serviceNetworks",
   "serviceNodes",
@@ -814,6 +933,10 @@ export function normalizeDoc(raw) {
     wallSku: room.wallSku || null,
     floorSku: room.floorSku || null,
     ceilingSku: room.ceilingSku || null,
+    // This room's wall height in metres; null follows the wall type / level above.
+    wallHeight: Number.isFinite(room.wallHeight) && room.wallHeight > 0 ? room.wallHeight : null,
+    // Finish rules: what goes on this room's walls and floor.
+    finishes: normalizeRoomFinishes(room.finishes),
     // A bound room keeps the point the user clicked inside the walls. Absent
     // on every room drawn before that, which must keep the polygon it stored.
     bound: room.bound === true,
@@ -836,6 +959,7 @@ export function normalizeDoc(raw) {
     x2: seg.x2,
     y2: seg.y2,
     status: seg.status === "existing" ? "existing" : "planned",
+    top: seg.top === "level-above" ? "level-above" : null,
     ...baseAttachFields(seg),
   }));
 
@@ -1042,7 +1166,20 @@ export function normalizeDoc(raw) {
       floorToFloor: num(l.floorToFloor),
       floorToCeiling: num(l.floorToCeiling),
       userSupplied: true,
+      ...(l.kind === "reference" ? { kind: "reference" } : {}),
+      ...(typeof l.parentId === "string" && l.parentId && l.kind !== "reference" ? { parentId: l.parentId } : {}),
     }));
+
+  doc.levelElevations = {};
+  if (raw.levelElevations && typeof raw.levelElevations === "object") {
+    for (const [k, v] of Object.entries(raw.levelElevations)) if (num(v) !== null) doc.levelElevations[k] = v;
+  }
+
+  doc.finishProducts = normalizeFinishProducts(raw.finishProducts);
+  doc.finishRuns = normalizeFinishRuns(raw.finishRuns);
+  doc.finishRegions = normalizeFinishRegions(raw.finishRegions);
+  doc.finishPresets = normalizeFinishPresets(raw.finishPresets);
+  doc.finishSettings = normalizeFinishSettings(raw.finishSettings);
 
   if (isV1) doc.migratedFrom = raw.schema || "sp.doc/1";
   return doc;
@@ -1093,6 +1230,10 @@ export function migrateOpening(o) {
     }
     delete row.edge;
   }
+  // Size overrides: metres, or null meaning "use the type's value".
+  row.sill = Number.isFinite(row.sill) && row.sill >= 0 ? row.sill : null;
+  row.width = Number.isFinite(row.width) && row.width > 0 ? row.width : null;
+  row.height = Number.isFinite(row.height) && row.height > 0 ? row.height : null;
   return row;
 }
 

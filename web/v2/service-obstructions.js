@@ -22,7 +22,7 @@
 // This file imports compile.js, so services.js must never import it back.
 
 import { compile } from "./compile.js";
-import { skuById } from "./openings.js";
+import { openingSize, skuById } from "./openings.js";
 
 /** Plan distance, metres, from the route within which an opening is reported. */
 export const OBSTRUCTION_NEAR = 1;
@@ -177,7 +177,7 @@ function openingObstruction(doc, pack, form, segs, near) {
 
   const isWindow = String(form.kind).toLowerCase() === "window";
   const opening = (doc.openings || []).find((o) => o.id === form.elementId);
-  const g = skuById(pack, opening?.sku)?.geometry || {};
+  const g = opening ? openingSize(pack, opening) : {};
   const base = isNum(form.elevation) ? form.elevation : null;
   const known = base !== null && isNum(g.height) && (isWindow ? isNum(g.sill) : true);
   const sill = isWindow ? g.sill : 0;

@@ -155,6 +155,7 @@ export const RIBBON = [
         items: [
           { id: "project-info", label: "Project information", command: "project-info" },
           { id: "finishes", label: "Floor finishes", command: "finishes" },
+          { id: "wall-finishes", label: "Wall finishes", command: "wall-finishes" },
         ],
       },
       {

@@ -16,6 +16,10 @@ import {
   buildHouseStations,
   inspectorStations,
   selectedInspectorStationId,
+  applyLevelElevations,
+  validateLevelEdit,
+  setLevelElevation,
+  storeyLevels,
 } from "../level-view.js";
 import { ribbonItems } from "../ribbon.js";
 import { normalizeDoc, emptyDoc } from "../model.js";
@@ -249,3 +253,91 @@ test("the inspector stays on the active cut when that cut belongs to the object'
   assert.equal(selectedInspectorStationId(stations, "01 GFL", "roof"), "roof");
   assert.equal(selectedInspectorStationId(stations, "00 FOUNDATION", "01 GFL::floor"), "00 FOUNDATION::floor");
 });
+
+test("level elevation overrides lay over the stack without mutating it", () => {
+  const out = applyLevelElevations(levels, { "02 L1": 3.2 });
+  assert.equal(out.find((l) => l.id === "02 L1").elevation, 3.2);
+  assert.equal(levels.find((l) => l.id === "02 L1").elevation, 3);
+  assert.equal(applyLevelElevations(levels, {}), levels);
+});
+
+test("a level edit may not pass a neighbour or land on another level", () => {
+  assert.equal(validateLevelEdit(levels, "02 L1", 3.2).ok, true);
+  assert.match(validateLevelEdit(levels, "02 L1", 6).message, /cannot share/);
+  assert.match(validateLevelEdit(levels, "02 L1", 6.5).message, /above/);
+  assert.match(validateLevelEdit(levels, "02 L1", -1).message, /below/);
+  assert.match(validateLevelEdit(levels, "02 L1", "").message, /millimetres/);
+  assert.match(validateLevelEdit(levels, "nope", 1).message, /no longer exists/);
+  assert.equal(validateLevelEdit(levels, "00 FOUNDATION", -0.9).ok, true);
+});
+
+test("setLevelElevation sets and clears, and normalizeDoc keeps only finite overrides", () => {
+  const set = setLevelElevation({}, "02 L1", 3.2);
+  assert.deepEqual(set, { "02 L1": 3.2 });
+  assert.deepEqual(setLevelElevation(set, "02 L1", null), {});
+  assert.deepEqual(emptyDoc().levelElevations, {});
+  const doc = normalizeDoc({ ...emptyDoc(), levelElevations: { a: 3, b: "x", c: null } });
+  assert.deepEqual(doc.levelElevations, { a: 3 });
+});
+
+import { levelAboveRise, defaultWallTop, planLevelOf, onPlanOf, fflLabel, isReferenceLevel } from "../level-view.js";
+import { deriveDrawnWalls } from "../walls.js";
+
+const ftf = [
+  { id: "00 FOUNDATION", elevation: -0.6, floorToFloor: 0.6 },
+  { id: "01 GFL", elevation: 0, floorToFloor: 3 },
+  { id: "02 L1", elevation: 3, floorToFloor: 3 },
+];
+
+test("wall top rise is the gap to the next real storey, skipping reference and split levels", () => {
+  const stack = [...ftf, { id: "NGL", elevation: 0.5, kind: "reference" }, { id: "Garage", elevation: -0.15, parentId: "01 GFL" }];
+  assert.equal(levelAboveRise(stack, "01 GFL"), 3);
+  assert.equal(levelAboveRise(stack, "02 L1"), null);
+  assert.equal(levelAboveRise(applyLevelElevations(stack, { "02 L1": 3.2 }), "01 GFL"), 3.2);
+});
+
+test("a full-storey wall type defaults to level-above; others stay fixed", () => {
+  assert.equal(defaultWallTop(ftf, "01 GFL", 3), "level-above");
+  assert.equal(defaultWallTop(ftf, "01 GFL", 1.97), null);
+  assert.equal(defaultWallTop(ftf, "02 L1", 3), null);
+});
+
+test("a drawn wall set to level-above follows a level edit; a fixed one does not", () => {
+  const pack = {
+    system: { wallHeight: 3 },
+    levels: applyLevelElevations(ftf, { "02 L1": 3.2 }),
+    skus: [{ id: "w", category: "wall", geometry: { thickness: 0.22, height: 3 } }],
+  };
+  const mk = (id, top) => ({ id, sku: "w", level: "01 GFL", x1: 0, y1: 0, x2: 4, y2: 0, top, baseAttach: null, baseOffset: 0 });
+  const walls = deriveDrawnWalls({ segments: [mk("a", "level-above"), mk("b", null)], rooms: [] }, pack);
+  assert.equal(walls.find((w) => w.id === "a").height, 3.2);
+  assert.equal(walls.find((w) => w.id === "b").height, 3);
+});
+
+test("split levels draw on the parent plan and read as FFL; reference levels are not cuts", () => {
+  const stack = [...ftf, { id: "Garage", name: "Garage", elevation: -0.15, parentId: "01 GFL", userSupplied: true }, { id: "NGL", elevation: -0.3, kind: "reference" }];
+  assert.equal(planLevelOf(stack, "Garage"), "01 GFL");
+  assert.equal(onPlanOf(stack, "Garage", "01 GFL"), true);
+  assert.equal(onPlanOf(stack, "01 GFL", "Garage"), false);
+  assert.equal(fflLabel(stack, "Garage"), "FFL \u22120.150");
+  assert.equal(fflLabel(stack, "01 GFL"), null);
+  assert.equal(isReferenceLevel(stack[4]), true);
+  const ids = buildHouseStations(stack).map((s) => s.levelId);
+  assert.ok(!ids.includes("NGL"));
+  assert.equal(buildHouseStations(stack).find((s) => s.levelId === "Garage").kind, "floor");
+  assert.ok(!storeyLevelIds(stack).includes("Garage") && !storeyLevelIds(stack).includes("NGL"));
+});
+
+test("inserting a split or reference level validates parent and persists through normalizeDoc", () => {
+  const stack = [...ftf];
+  assert.equal(validateLevelInsert(stack, { name: "Garage", elevation: -0.15, parentId: "01 GFL" }).ok, true);
+  assert.match(validateLevelInsert(stack, { name: "G", elevation: -0.15, parentId: "zz" }).message, /does not exist/);
+  assert.match(validateLevelInsert(stack, { name: "G", elevation: -0.15, parentId: "01 GFL", kind: "reference" }).message, /no parent/);
+  const split = insertLevel([], { name: "Garage", elevation: -0.15, parentId: "01 GFL" });
+  const ref = insertLevel([], { name: "NGL", elevation: -0.3, kind: "reference" });
+  const doc = normalizeDoc({ ...emptyDoc(), levels: [...split, ...ref] });
+  assert.equal(doc.levels[0].parentId, "01 GFL");
+  assert.equal(doc.levels[1].kind, "reference");
+  assert.equal(normalizeDoc({ ...emptyDoc(), segments: [{ id: "s", sku: "w", top: "level-above" }] }).segments[0].top, "level-above");
+});
+function storeyLevelIds(l) { return storeyLevels(l).map((x) => x.id); }

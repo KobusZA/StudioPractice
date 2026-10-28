@@ -18,6 +18,28 @@ export function skuById(pack, id) {
   return pack?.skus?.find((s) => s.id === id) || null;
 }
 
+/**
+ * An opening's size on this job: its own sill, width and height where it has
+ * set them, otherwise its type's. `nonStandard` is true when a window has been
+ * resized to a width x height that matches no window type in the pack, so the
+ * firm must confirm it (made to order, not a catalogue size).
+ */
+export function openingSize(pack, opening) {
+  const sku = skuById(pack, opening?.sku);
+  const g = sku?.geometry || {};
+  const pick = (own, fromType) => (Number.isFinite(own) && own > 0 ? own : fromType);
+  const width = pick(opening?.width, g.width);
+  const height = pick(opening?.height, g.height);
+  const sill = Number.isFinite(opening?.sill) && opening.sill >= 0 ? opening.sill : (g.sill ?? null);
+  let nonStandard = false;
+  if (sku?.category === "window" && (Number.isFinite(opening?.width) || Number.isFinite(opening?.height))) {
+    nonStandard = !(pack?.skus || []).some((s) => s.category === "window"
+      && Math.abs((s.geometry?.width ?? -1) - width) < 0.0005
+      && Math.abs((s.geometry?.height ?? -1) - height) < 0.0005);
+  }
+  return { width, height, sill, nonStandard };
+}
+
 export function allowedHosts(pack, skuId) {
   return pack?.recipes?.allowedHosts?.[skuId] || null;
 }
@@ -97,7 +119,7 @@ export function wallForOpening(doc, pack, walls, opening) {
   const t = Math.min(1, Math.max(0, Number(opening.t) || 0.5));
   const px = edge.x1 + (edge.x2 - edge.x1) * t;
   const py = edge.y1 + (edge.y2 - edge.y1) * t;
-  const width = skuById(pack, opening.sku)?.geometry?.width || 0.9;
+  const width = openingSize(pack, opening).width || 0.9;
 
   let best = null;
   let bestD = 0.2;
@@ -124,7 +146,7 @@ function clampT(t, wall, width) {
 /** Where an opening physically lands on its wall, plus its two jamb points. */
 export function openingOnWall(doc, pack, opening, wall) {
   const sku = skuById(pack, opening.sku);
-  const width = sku?.geometry?.width || 0.9;
+  const width = openingSize(pack, opening).width || 0.9;
   const room = !opening.wallId ? roomById(doc, opening.roomId) : null;
   const anchor = room ? roomEdgeSegment(room, opening.edgeIndex ?? 0) : wall;
   const tAnchor = Math.min(1, Math.max(0, Number(opening.t) || 0.5));
@@ -247,7 +269,8 @@ export function roomOpeningAreas(doc, pack, walls) {
     if (!sku) continue;
     const g = sku.geometry || {};
     const c = sku.compliance || {};
-    const openingArea = (g.width || 0) * (g.height || 0);
+    const size = openingSize(pack, opening);
+    const openingArea = (size.width || 0) * (size.height || 0);
     if (openingArea < EPS) continue;
 
     const roomIds = opening.roomId ? [opening.roomId] : wall.roomIds;

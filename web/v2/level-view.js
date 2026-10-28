@@ -9,9 +9,19 @@ function orderedLevels(levels) {
   return [...list].sort((a, b) => a.elevation - b.elevation);
 }
 
+/** A reference level (e.g. NGL) is drawn in elevations and checks, but it is
+ * not a storey and not a cut, so it never counts as a neighbour. */
+export function isReferenceLevel(level) {
+  return level?.kind === "reference";
+}
+
+function cutLevels(levels) {
+  return orderedLevels(levels).filter((l) => !isReferenceLevel(l));
+}
+
 /** The storey immediately below `activeId`, or null at the bottom of the stack. */
 export function lookDownLevelId(levels, activeId) {
-  const ordered = orderedLevels(levels);
+  const ordered = cutLevels(levels);
   const i = ordered.findIndex((l) => l.id === activeId);
   if (i <= 0) return null;
   return ordered[i - 1].id;
@@ -19,7 +29,7 @@ export function lookDownLevelId(levels, activeId) {
 
 /** The storey immediately above `activeId`, or null at the top of the stack. */
 export function lookUpLevelId(levels, activeId) {
-  const ordered = orderedLevels(levels);
+  const ordered = cutLevels(levels);
   const i = ordered.findIndex((l) => l.id === activeId);
   if (i < 0 || i >= ordered.length - 1) return null;
   return ordered[i + 1].id;
@@ -83,7 +93,7 @@ export const MAX_FLOORS_TO_ADD = 2;
  * "floor" here; it is always part of the level switcher regardless of how
  * many storeys are revealed. */
 export function storeyLevels(levels) {
-  return orderedLevels(levels).filter((l) => l.elevation >= 0);
+  return cutLevels(levels).filter((l) => l.elevation >= 0 && !l.parentId);
 }
 
 /** The subset of `storeyLevels` that "+ Add floor" is about: storeys the
@@ -178,7 +188,69 @@ export function validateLevelInsert(levels, spec) {
     };
   }
 
+  const parentId = spec?.parentId || null;
+  if (parentId) {
+    if (spec?.kind === "reference") return { ok: false, message: "A reference level is not a storey, so it has no parent storey." };
+    const parent = (levels || []).find((l) => l.id === parentId);
+    if (!parent) return { ok: false, message: `The parent storey "${parentId}" does not exist.` };
+    if (parent.parentId || isReferenceLevel(parent)) {
+      return { ok: false, message: `"${parent.name || parent.id}" is itself a split or reference level; pick a full storey as the parent.` };
+    }
+  }
+
   return { ok: true, message: `${name} at ${Math.round(elevation * 1000)} mm.` };
+}
+
+// --- Split levels ---------------------------------------------------------
+
+/** The level whose plan draws `levelId`'s objects: its parent storey if it
+ * has one, else itself. */
+export function planLevelOf(levels, levelId) {
+  const level = (levels || []).find((l) => l.id === levelId);
+  return level?.parentId || levelId;
+}
+
+/** True if an object on `objLevelId` appears on the plan of `planLevelId`
+ * (its own level, or a split level that names it as parent). */
+export function onPlanOf(levels, objLevelId, planLevelId) {
+  return objLevelId === planLevelId || planLevelOf(levels, objLevelId) === planLevelId;
+}
+
+/** "FFL -0.150" for a split level, relative to its parent storey's floor; null otherwise. */
+export function fflLabel(levels, levelId) {
+  const level = (levels || []).find((l) => l.id === levelId);
+  const parent = level?.parentId && (levels || []).find((l) => l.id === level.parentId);
+  if (!parent || !Number.isFinite(level.elevation) || !Number.isFinite(parent.elevation)) return null;
+  const rel = level.elevation - parent.elevation;
+  const sign = rel < 0 ? "\u2212" : rel > 0 ? "+" : "";
+  return `FFL ${sign}${Math.abs(rel).toFixed(3)}`;
+}
+
+// --- Wall tops follow the level above -------------------------------------
+
+/**
+ * Height from `levelId`'s floor to the next storey above it, or null when
+ * there is none (top storey). Reference and split levels are not storeys, so
+ * a wall never tops out against them.
+ */
+export function levelAboveRise(levels, levelId) {
+  const ordered = orderedLevels(levels);
+  const self = ordered.find((l) => l.id === levelId);
+  if (!self || !Number.isFinite(self.elevation)) return null;
+  const above = ordered.find(
+    (l) => l.elevation > self.elevation + 1e-6 && !isReferenceLevel(l) && !l.parentId
+  );
+  return above ? above.elevation - self.elevation : null;
+}
+
+/** "level-above" when a wall type of `height` is a full storey on `levelId`
+ * (its height equals the level's floor-to-floor); otherwise null, meaning the
+ * type's own height stands. */
+export function defaultWallTop(levels, levelId, height) {
+  const level = (levels || []).find((l) => l.id === levelId);
+  if (!Number.isFinite(height) || !Number.isFinite(level?.floorToFloor)) return null;
+  if (Math.abs(level.floorToFloor - height) > 1e-6) return null;
+  return levelAboveRise(levels, levelId) === null ? null : "level-above";
 }
 
 /**
@@ -199,8 +271,54 @@ export function insertLevel(docLevels, spec) {
       floorToFloor: null,
       floorToCeiling: null,
       userSupplied: true,
+      ...(spec.kind === "reference" ? { kind: "reference" } : {}),
+      ...(spec.parentId && spec.kind !== "reference" ? { parentId: spec.parentId } : {}),
     },
   ];
+}
+
+// --- Edit a level's elevation per job -----------------------------------
+//
+// `doc.levelElevations[levelId] = metres` lays over the template (or
+// inserted) level, like `sheetSet.ceilingHeights`. The pack is never mutated.
+
+/** Overlay per-job elevations on a level list (new objects, input untouched). */
+export function applyLevelElevations(levels, overrides) {
+  if (!overrides || !Object.keys(overrides).length) return levels;
+  return levels.map((l) => (Number.isFinite(overrides[l.id]) ? { ...l, elevation: overrides[l.id] } : l));
+}
+
+/**
+ * Whether `levelId` may move to `metres`, one message per cause. `levels` is
+ * the stack as currently seen (overrides already applied).
+ */
+export function validateLevelEdit(levels, levelId, metres) {
+  const ordered = orderedLevels(levels);
+  const i = ordered.findIndex((l) => l.id === levelId);
+  if (i < 0) return { ok: false, message: "That level no longer exists." };
+  const raw = metres === null || metres === undefined || String(metres).trim() === "" ? NaN : Number(metres);
+  if (!Number.isFinite(raw)) return { ok: false, message: "Enter the elevation in millimetres, e.g. 3000." };
+  const label = (l) => l.name || l.id;
+  const mm = Math.round(raw * 1000);
+  const same = ordered.find((l) => l.id !== levelId && Math.abs(l.elevation - raw) < 1e-6);
+  if (same) return { ok: false, message: `"${label(same)}" is already at ${mm} mm; two levels cannot share an elevation.` };
+  const below = ordered[i - 1];
+  if (below && raw < below.elevation) {
+    return { ok: false, message: `${mm} mm is below "${label(below)}" (${Math.round(below.elevation * 1000)} mm); a level cannot pass the one under it.` };
+  }
+  const above = ordered[i + 1];
+  if (above && raw > above.elevation) {
+    return { ok: false, message: `${mm} mm is above "${label(above)}" (${Math.round(above.elevation * 1000)} mm); a level cannot pass the one over it.` };
+  }
+  return { ok: true, message: `${label(ordered[i])} at ${mm} mm.` };
+}
+
+/** Return the new `levelElevations` map with `levelId` set (or cleared on null). Pure. */
+export function setLevelElevation(overrides, levelId, metres) {
+  const next = { ...(overrides || {}) };
+  if (metres === null) delete next[levelId];
+  else next[levelId] = Number(metres);
+  return next;
 }
 
 // --- Active-cut stations (floor / ceiling / roof) ------------------------
@@ -218,10 +336,10 @@ export function insertLevel(docLevels, spec) {
  * that level's rail position falls physically.
  */
 export function buildHouseStations(levels) {
-  const list = Array.isArray(levels) ? levels : [];
+  const list = (Array.isArray(levels) ? levels : []).filter((l) => !isReferenceLevel(l));
   const out = [];
   list.forEach((level, i) => {
-    const isFoundation = Number.isFinite(level.elevation) && level.elevation < 0;
+    const isFoundation = Number.isFinite(level.elevation) && level.elevation < 0 && !level.parentId;
     const name = level.name || level.id;
     out.push({
       id: `${level.id}::floor`,

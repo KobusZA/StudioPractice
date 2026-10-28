@@ -18,7 +18,8 @@ import {
   projectOnBasis,
   segLength,
 } from "./geom.js";
-import { effectiveLevel, roomPolygon } from "./model.js";
+import { effectiveLevel, nid, roomPolygon } from "./model.js";
+import { defaultWallTop, levelAboveRise } from "./level-view.js";
 
 function skuById(pack, id) {
   return pack?.skus?.find((s) => s.id === id) || null;
@@ -165,6 +166,20 @@ export function deriveRoomWalls(doc, pack) {
       const [x1, y1] = pointFromBasis(g.basis, lo, g.offset);
       const [x2, y2] = pointFromBasis(g.basis, hi, g.offset);
 
+      const typeHeight =
+        (defaultWallTop(pack.levels, g.level, sku?.geometry?.height) ? levelAboveRise(pack.levels, g.level) : null)
+        ?? sku?.geometry?.height
+        ?? pack.system.wallHeight;
+      // A room that states its own wall height overrides the type's. Where two
+      // rooms share the wall at different heights the taller wins, and the
+      // disagreement is kept on the wall so Check can say so.
+      const roomHeights = rooms.map((r) => ({
+        roomId: r.id,
+        height: Number.isFinite(r.wallHeight) && r.wallHeight > 0 ? r.wallHeight : typeHeight,
+      }));
+      const height = Math.max(...roomHeights.map((h) => h.height));
+      const conflict = roomHeights.some((h) => Math.abs(h.height - height) > 1e-6);
+
       walls.push({
         id: `w:${key}:${lo.toFixed(3)}:${hi.toFixed(3)}`,
         x1,
@@ -175,7 +190,10 @@ export function deriveRoomWalls(doc, pack) {
         sku: skuId,
         category: sku?.category || "wall",
         thickness: sku?.geometry?.thickness ?? 0.22,
-        height: sku?.geometry?.height ?? pack.system.wallHeight,
+        // A full-storey type tops out at the level above, so a level edit
+        // moves it; any other type keeps its own height.
+        height,
+        heightConflict: conflict ? roomHeights : null,
         level: g.level,
         // Room-derived walls are level-datum-only: attach belongs to linear
         // objects a person placed directly, and a shared wall has no single
@@ -235,7 +253,12 @@ export function deriveDrawnWalls(doc, pack, minLength = 0.3) {
       // wall at the height its attach had resolved to; everything else falls
       // through to the SKU and the document default as before. A strip footing
       // uses its depth here so it is not extruded to `system.wallHeight`.
-      height: seg.height ?? skuDrawnHeight(sku) ?? pack.system.wallHeight,
+      height:
+        seg.height
+        ?? (seg.top === "level-above" ? levelAboveRise(pack.levels, effectiveLevel(seg, pack)) : null)
+        ?? skuDrawnHeight(sku)
+        ?? pack.system.wallHeight,
+      top: seg.top ?? null,
       level: effectiveLevel(seg, pack),
       // Passed through untouched - compile.js resolves it, because that is
       // where the level datums and the target's height already are.
@@ -251,6 +274,32 @@ export function deriveDrawnWalls(doc, pack, minLength = 0.3) {
     walls.push(drawnWall);
   }
   return walls;
+}
+
+/**
+ * The drawn segment that replaces a room-derived wall: same line, type, level
+ * and height. `coveredByDrawn` then drops the generated piece, so the wall
+ * stops following its rooms and can be selected and edited on its own.
+ * A wall that tops out at the level above keeps following it; any other
+ * height is frozen into `seg.height`.
+ */
+export function drawnSegmentFromWall(wall, pack) {
+  if (!wall || wall.drawn) return null;
+  const follows = wall.height != null
+    && levelAboveRise(pack.levels, wall.level) !== null
+    && Math.abs(levelAboveRise(pack.levels, wall.level) - wall.height) < 1e-6;
+  return {
+    id: nid("s"),
+    sku: wall.sku,
+    level: wall.level,
+    x1: wall.x1,
+    y1: wall.y1,
+    x2: wall.x2,
+    y2: wall.y2,
+    status: wall.status === "existing" ? "existing" : "planned",
+    top: follows ? "level-above" : null,
+    height: follows ? null : wall.height,
+  };
 }
 
 /** How far past a drawn wall's own face a room outline may sit and still count as bounded by it, metres. */

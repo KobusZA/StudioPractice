@@ -39,6 +39,11 @@ export function findRate(rateBook, row) {
   return rates.find((rate) => !rate.model && rate.category === category) || null;
 }
 
+/** Whole boxes to order, only where a product states its box coverage. */
+function boxFields(group) {
+  return Number.isFinite(group.boxesExact) ? { boxes: Math.ceil(group.boxesExact - 1e-9) } : {};
+}
+
 function sortByCategoryModel(a, b) {
   return (a.category || "").localeCompare(b.category || "")
     || (a.model || "").localeCompare(b.model || "");
@@ -85,6 +90,11 @@ function groupByModel(instances) {
     // Material wastage on a measured length (compile.js: only where the SKU
     // states a wasteFactor). Kept beside `length`, never inside it.
     if (Number.isFinite(row.orderLength)) group.orderLength = (group.orderLength || 0) + row.orderLength;
+    // Finishes (finish-model.js): an allowance is flagged, and the product's
+    // waste is carried beside the measured quantity, never inside it.
+    if (row.pcAllowance) group.pcAllowance = true;
+    if (Number.isFinite(row.orderQuantity)) group.orderQuantity = (group.orderQuantity || 0) + row.orderQuantity;
+    if (Number.isFinite(row.boxes)) group.boxesExact = (group.boxesExact || 0) + row.boxes;
     if (row.elementId) {
       group.elements.push({
         id: row.elementId,
@@ -112,6 +122,7 @@ export function bomRows(compiled) {
   return groupByModel(compiled?.instances)
     .map((group) => ({
       ...group,
+      ...boxFields(group),
       description: `${group.family} ${group.type}`.trim(),
       qty: qtyForUnit(group, group.unit),
       // What to order once the SKU's wastage is added to the measured qty.
@@ -135,6 +146,7 @@ export function boqRows(compiled, rateBook) {
       const qty = qtyForUnit(group, unit);
       return {
         ...group,
+        ...boxFields(group),
         unit,
         qty,
         description: rate?.description || `${group.family} ${group.type}`.trim(),

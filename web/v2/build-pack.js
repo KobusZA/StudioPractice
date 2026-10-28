@@ -247,6 +247,20 @@ function geometryFor(type, category, assumed) {
 
 // --- compliance ------------------------------------------------------------
 
+/**
+ * A masonry wall's core thickness (110 or 220) when its name states one. The
+ * overall thickness is the core plus plaster, so the two are kept apart: the
+ * key is absent, never null, when the name says nothing.
+ */
+function withCoreThickness(geometry, type, category, notes) {
+  if (category !== "wall") return geometry;
+  const name = `${type.family || ""} ${type.type || ""}`;
+  const m = /(?<![\d.])(110|220)\s*(?:mm)?(?![\d])/i.exec(name);
+  if (!m) return geometry;
+  notes.push({ id: type.id, name: name.trim(), field: "geometry.coreThickness", reason: `name states ${m[1]}` });
+  return { ...geometry, coreThickness: Number(m[1]) };
+}
+
 function complianceFor(type, category, notes) {
   const facts = complianceFactsFor(category);
   const out = {};
@@ -449,7 +463,7 @@ export function buildPack(catalog, { includeUnplaced = false, id, name, version 
       unit: UNIT_BY_CATEGORY[category] || "ea",
       draw: DRAW_BY_CATEGORY[category] || "box",
       revit: { category: type.category, family: type.family, type: type.type, placedCount: type.placedCount },
-      geometry: geometryFor(type, category, assumed),
+      geometry: withCoreThickness(geometryFor(type, category, assumed), type, category, notes),
       cost: { rateRef: null, wasteFactor: null },
       compliance: complianceFor(type, category, notes),
       drawing: { colourClass: colourClassFor(type, category), hatch: null, symbol: null },

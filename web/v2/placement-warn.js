@@ -7,7 +7,7 @@
 
 /** True if `level` is a below-datum (foundation-kind) storey. */
 export function isFoundationLevel(level) {
-  return Number.isFinite(level?.elevation) && level.elevation < 0;
+  return Number.isFinite(level?.elevation) && level.elevation < 0 && !level.parentId;
 }
 
 /** Categories that belong on a foundation storey: the foundation itself and

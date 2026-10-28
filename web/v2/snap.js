@@ -2,10 +2,11 @@
 //
 // Three things live here:
 //  - Point/alignment snapping: while drawing or moving a wall, beam, room,
-//    slab or roof, a corner/endpoint is pulled onto nearby wall/beam
-//    endpoints and room/slab/roof corners (an exact join), or onto the same
-//    X or Y as one of those points (an alignment guide, e.g. a roof eave
-//    lining up with a wall without touching it).
+//    slab, roof, or (while a finish is being drawn or its corners dragged)
+//    a floor finish, a corner/endpoint is pulled onto nearby wall/beam
+//    endpoints and room/slab/roof/finish corners (an exact join), or onto
+//    the same X or Y as one of those points (an alignment guide, e.g. a
+//    roof eave lining up with a wall without touching it).
 //  - Nice-length snapping: a free endpoint is attracted to round millimetre
 //    offsets (3500 mm before 3507 mm) from the wall's start, a nearby object,
 //    or the origin. The pull is a magnet, not a lock: zoom in and the same
@@ -149,6 +150,32 @@ function snapIncluded(obj, opts) {
 }
 
 /**
+ * The corner currently being dragged on a room, slab, roof, or floor finish.
+ * `{ kind, id, x, y }` — that one corner is not a join target (it would
+ * exact-join to itself and draw both guides on every move), and none of
+ * that shape's edges are face targets (the pointer is always on them, so
+ * a face hit would also draw both guides whether or not another node
+ * shares that X or Y). The shape's other corners stay, so a dragged floor
+ * or finish corner can still line up with them. A finish uses kind "finish".
+ */
+function activeShapeOf(opts) {
+  const a = opts.activeShape;
+  if (!a || a.id == null || a.kind == null) return null;
+  return a;
+}
+
+function isActiveShape(opts, kind, id) {
+  const a = activeShapeOf(opts);
+  return Boolean(a && a.kind === kind && a.id === id);
+}
+
+function isActiveCorner(opts, kind, id, x, y) {
+  const a = activeShapeOf(opts);
+  if (!a || a.kind !== kind || a.id !== id) return false;
+  return Math.abs(x - a.x) < 1e-9 && Math.abs(y - a.y) < 1e-9;
+}
+
+/**
  * The four corners of a segment's drawn thickness: each centreline end pushed
  * half a thickness out to either face.
  *
@@ -227,7 +254,10 @@ export function collectSnapTargets(doc, opts = {}) {
   }
   for (const room of doc.rooms || []) {
     if (!snapIncluded(room, opts)) continue;
-    for (const [x, y] of roomPolygon(room)) points.push({ x, y, kind: "corner" });
+    for (const [x, y] of roomPolygon(room)) {
+      if (isActiveCorner(opts, "room", room.id, x, y)) continue;
+      points.push({ x, y, kind: "corner" });
+    }
   }
   // Route points are snap targets only to the service tools (`opts.services`):
   // a wall should not be drawn onto a pipe. Routes snap to each other's points
@@ -240,11 +270,29 @@ export function collectSnapTargets(doc, opts = {}) {
   }
   for (const slab of doc.slabs || []) {
     if (!snapIncluded(slab, opts)) continue;
-    for (const [x, y] of shapePolygon(slab.shape)) points.push({ x, y, kind: "corner" });
+    for (const [x, y] of shapePolygon(slab.shape)) {
+      if (isActiveCorner(opts, "slab", slab.id, x, y)) continue;
+      points.push({ x, y, kind: "corner" });
+    }
   }
   for (const roof of doc.roofs || []) {
     if (!snapIncluded(roof, opts)) continue;
-    for (const [x, y] of shapePolygon(roof.shape)) points.push({ x, y, kind: "corner" });
+    for (const [x, y] of shapePolygon(roof.shape)) {
+      if (isActiveCorner(opts, "roof", roof.id, x, y)) continue;
+      points.push({ x, y, kind: "corner" });
+    }
+  }
+  // Finish corners are drafting alignments, not places a wall should join,
+  // so they are targets only while a finish is being drawn or edited
+  // (`opts.finishes`). A whole-floor finish has no corners of its own.
+  if (opts.finishes) {
+    for (const region of doc.finishRegions || []) {
+      if (region.whole || !snapIncluded(region, opts)) continue;
+      for (const [x, y] of shapePolygon(region.shape)) {
+        if (isActiveCorner(opts, "finish", region.id, x, y)) continue;
+        points.push({ x, y, kind: "corner" });
+      }
+    }
   }
   return points;
 }
@@ -292,13 +340,16 @@ export function collectSnapEdges(doc, opts = {}) {
     edges.push({ x1: beam.x1, y1: beam.y1, x2: beam.x2, y2: beam.y2 });
   }
   for (const room of doc.rooms || []) {
-    if (snapIncluded(room, opts)) pushPolyEdges(edges, roomPolygon(room));
+    if (isActiveShape(opts, "room", room.id) || !snapIncluded(room, opts)) continue;
+    pushPolyEdges(edges, roomPolygon(room));
   }
   for (const slab of doc.slabs || []) {
-    if (snapIncluded(slab, opts)) pushPolyEdges(edges, shapePolygon(slab.shape));
+    if (isActiveShape(opts, "slab", slab.id) || !snapIncluded(slab, opts)) continue;
+    pushPolyEdges(edges, shapePolygon(slab.shape));
   }
   for (const roof of doc.roofs || []) {
-    if (snapIncluded(roof, opts)) pushPolyEdges(edges, shapePolygon(roof.shape));
+    if (isActiveShape(opts, "roof", roof.id) || !snapIncluded(roof, opts)) continue;
+    pushPolyEdges(edges, shapePolygon(roof.shape));
   }
   return edges;
 }

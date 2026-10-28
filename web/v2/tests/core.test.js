@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 
 import {
   area,
+  clampToPoly,
   lineKey,
   perimeter,
   pointFromBasis,
@@ -23,6 +24,7 @@ import {
   rectShape,
   rectsShape,
   polyShape,
+  shapeAsPoly,
   roomArea,
   roomMinDimension,
   roomPerimeter,
@@ -124,6 +126,24 @@ test("polygon area and perimeter", () => {
   assert.equal(perimeter(poly), 14);
 });
 
+test("clampToPoly keeps interior points and pulls outsiders onto the nearest edge", () => {
+  const poly = rectPoly(0, 0, 4, 3);
+  assert.deepEqual(clampToPoly(2, 1.5, poly), { x: 2, y: 1.5, inside: true });
+  const corner = clampToPoly(0, 0, poly);
+  assert.equal(corner.x, 0);
+  assert.equal(corner.y, 0);
+  const east = clampToPoly(6, 1.5, poly);
+  assert.equal(east.inside, false);
+  assert.equal(east.x, 4);
+  assert.equal(east.y, 1.5);
+  const south = clampToPoly(2, -2, poly);
+  assert.equal(south.inside, false);
+  assert.equal(south.x, 2);
+  assert.equal(south.y, 0);
+  const short = clampToPoly(9, 9, [[0, 0], [1, 0]]);
+  assert.deepEqual(short, { x: 9, y: 9, inside: true });
+});
+
 test("simplify drops collinear vertices", () => {
   const poly = [[0, 0], [2, 0], [4, 0], [4, 3], [0, 3]];
   assert.equal(simplify(poly).length, 4);
@@ -175,6 +195,14 @@ test("rect, rects and poly shapes all resolve to polygons", () => {
   assert.equal(shapePolygon(rectShape(0, 0, 2, 2)).length, 4);
   assert.equal(shapePolygon(rectsShape([{ x: 0, y: 0, w: 2, h: 2 }])).length, 4);
   assert.equal(shapePolygon(polyShape([[0, 0], [3, 0], [3, 3]])).length, 3);
+});
+
+test("a rectangle converts to an editable polygon with the same corners", () => {
+  const poly = shapeAsPoly(rectShape(0, 0, 2, 3));
+  assert.equal(poly.kind, "poly");
+  assert.equal(poly.points.length, 4);
+  assert.deepEqual(shapeAsPoly(poly), poly);
+  assert.equal(shapeAsPoly(null), null);
 });
 
 test("room measures work for an L-shaped room", () => {

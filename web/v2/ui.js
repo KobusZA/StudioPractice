@@ -12,7 +12,7 @@
 //    overlap. Exact for rectangles, which is everything this UI draws.
 //  - Free-angle walls are drawable (a v1 impossibility) but not snapped to
 //    common angles; hold Shift while dragging an end to keep the current
-//    heading. Walls are click�click and chain from the last end. Length is
+//    heading. Walls are click–click and chain from the last end. Length is
 //    labelled on the visible part of the wall (so zooming into an end does
 //    not hide it), and in the options strip with angle.
 
@@ -30,11 +30,19 @@ import {
   mergedLevels,
   validateLevelInsert,
   insertLevel as insertLevelInto,
+  applyLevelElevations,
+  levelAboveRise,
+  defaultWallTop,
+  onPlanOf,
+  fflLabel,
+  isReferenceLevel,
+  validateLevelEdit,
+  setLevelElevation,
   buildHouseStations,
   inspectorStations,
   selectedInspectorStationId,
   isolateShows,
-} from "./level-view.js";
+} from "./level-view.js?v=20261028-level";
 import { foundationStorey, foundationsOffStorey, isFoundationLevel as levelIsFoundation, placementHintOverride } from "./placement-warn.js";
 import {
   alignSelection,
@@ -107,7 +115,7 @@ import {
   snapUnderlayWorld,
   snapReferencePixel,
 } from "./underlay.js?v=20261028-eye";
-import { alignablePages, applyCeilingHeights, isPlanPage, mirrorLegacySource, pagesOfSource, sameSheetGeometry } from "./sheet-set.js";
+import { alignablePages, applyCeilingHeights, setCeilingHeight, isPlanPage, mirrorLegacySource, pagesOfSource, sameSheetGeometry } from "./sheet-set.js";
 import { createSheetUi } from "./sheet-ui.js?v=20261028-eye";
 import { SATELLITE_ATTRIBUTION, locateSuggestion, suggestAddresses } from "./satellite.js?v=20261015-geocode";
 import { pickedDimension, planDimensionLines } from "./dimensions.js?v=20260917-measure";
@@ -128,8 +136,8 @@ import {
   setLineHeading,
   setLineLength,
 } from "./click-draw.js?v=20261022-wall-loc";
-import { area as polyArea, bbox, clipSegToRect, distToSeg, formatLengthMm, headingDeg, parseLengthMm, pointInPoly, roundGrid } from "./geom.js?v=20260915-offset";
-import { SNAP_PIXEL_TOL, GAP_MAX_M, ALIGN_ORIGIN_MAX_M, NICE_MIN_STEP_M, PROBE_VECTORS, applyNicePoint, bestEndpointSnap, collectSnapEdges, collectSnapTargets, isExactPointSnap, nearestAlignments, resolveProbes, snapLengthFrom, snapPoint, snapToFace } from "./snap.js?v=20261022-face-snap";
+import { area as polyArea, bbox, clampToPoly, clipSegToRect, distToSeg, formatLengthMm, headingDeg, parseLengthMm, pointInPoly, roundGrid } from "./geom.js?v=20260915-offset";
+import { SNAP_PIXEL_TOL, GAP_MAX_M, ALIGN_ORIGIN_MAX_M, NICE_MIN_STEP_M, PROBE_VECTORS, applyNicePoint, bestEndpointSnap, collectSnapEdges, collectSnapTargets, isExactPointSnap, nearestAlignments, resolveProbes, snapLengthFrom, snapPoint, snapToFace } from "./snap.js?v=20261028-finish-align";
 import { DEFAULT_ROOF_PITCH, roofGuideLines } from "./roof.js";
 import {
   ATTACHABLE_KINDS,
@@ -148,18 +156,30 @@ import {
   roomMinDimension,
   roomPerimeter,
   polyShape,
+  shapeAsPoly,
   roomPolygon,
   roomUse,
   shapePolygon,
+  finishRegionPolygon,
+  finishRegionSlab,
+  hostedFinishRegionsOf,
+  carryFinishRegionsToLevel,
+  translateShape,
 } from "./model.js";
 import { enclosedFace, syncRoomBounds } from "./room-bound.js";
 import { REGION_CONVENTIONS, regionConvention } from "./region.js";
-import { CORNER_JOIN_TOL, deriveWalls, drawnWallThickness, isStripFooting, skuDrawnHeight, statusVisible } from "./walls.js";
+import { ELEVATION_SNAP, applyBandEdit, applyOpeningEdit, applyOutlinePoints, applyWallTopEdit, elevationModel, faceRefForSelection, snapElevation } from "./wall-elevation.js";
+import { createFinishRegion, createFinishRun, finishProductById, libraryLine, presetFromRoom, rulesFromPreset, savePreset } from "./finish-model.js";
+import { finishId, finishSwatch, normalizeFinishProducts, normalizeFinishSettings } from "./finish-data.js";
+import { HEIGHT_PRESETS, faceFinishHtml, floorProductSuggestions, parseTarget, productsHtml, roomFinishHtml, slabFinishHtml, targetOptions } from "./finish-panel.js?v=20261028-add-sheet";
+import { elevationSvg } from "./wall-elevation-render.js";
+import { CORNER_JOIN_TOL, deriveWalls, drawnSegmentFromWall, drawnWallThickness, isStripFooting, skuDrawnHeight, statusVisible } from "./walls.js";
 import { findJoinTarget, resolveJoin, sideTowardTarget } from "./wall-join.js?v=20261022-corner-b";
 import {
   openingDraftAt,
   openingOnWall,
   openingSideGaps,
+  openingSize,
   roomEdgeSegment,
   wallForOpening,
   wallNormal,
@@ -458,6 +478,30 @@ const el = {
   ctxStatusWrap: document.getElementById("v2-ctx-status-wrap"),
   ctxOLevel: document.getElementById("v2-ctx-olevel"),
   ctxOLevelWrap: document.getElementById("v2-ctx-olevel-wrap"),
+  ctxTop: document.getElementById("v2-ctx-top"),
+  ctxTopWrap: document.getElementById("v2-ctx-top-wrap"),
+  ctxWallH: document.getElementById("v2-ctx-wallh"),
+  ctxWallHWrap: document.getElementById("v2-ctx-wallh-wrap"),
+  ctxSill: document.getElementById("v2-ctx-sill"),
+  ctxSillWrap: document.getElementById("v2-ctx-sill-wrap"),
+  ctxOWidth: document.getElementById("v2-ctx-owidth"),
+  ctxOWidthWrap: document.getElementById("v2-ctx-owidth-wrap"),
+  ctxOHeight: document.getElementById("v2-ctx-oheight"),
+  ctxOHeightWrap: document.getElementById("v2-ctx-oheight-wrap"),
+  ctxOSizeNote: document.getElementById("v2-ctx-osize-note"),
+  ctxConvert: document.getElementById("v2-ctx-convert"),
+  ctxOOffset: document.getElementById("v2-ctx-ooffset"),
+  ctxOOffsetWrap: document.getElementById("v2-ctx-ooffset-wrap"),
+  ctxElevWrap: document.getElementById("v2-ctx-elev-wrap"),
+  ctxElev: document.getElementById("v2-ctx-elev"),
+  ctxElevOpen: document.getElementById("v2-ctx-elev-open"),
+  ctxFinish: document.getElementById("v2-ctx-finish"),
+  ctxShapePoly: document.getElementById("v2-ctx-shape-poly"),
+  ctxShapePolyHint: document.getElementById("v2-ctx-shape-poly-hint"),
+  elevBody: document.getElementById("v2-elevation-body"),
+  elevFlip: document.getElementById("v2-elev-flip"),
+  levelParent: document.getElementById("v2-level-parent"),
+  levelReference: document.getElementById("v2-level-reference"),
   ctxAttach: document.getElementById("v2-ctx-attach"),
   ctxAttachWrap: document.getElementById("v2-ctx-attach-wrap"),
   ctxFlip: document.getElementById("v2-ctx-flip"),
@@ -579,7 +623,7 @@ let cam = { scale: 48, ox: 80, oy: 60 };
 const MIN_VIEW_SCALE = 0.1; // a 1:500 A1 site plan is ~420 m across, so the floor has to allow it
 const MAX_VIEW_SCALE = 3000;
 let drag = null;
-// Click�click wall: first click writes the start, the free end follows the
+// Click–click wall: first click writes the start, the free end follows the
 // pointer with the button up, second click commits and chains from that end.
 let wallDraft = null;
 // Where the line under the cursor sits on the wall being drawn: "center",
@@ -593,7 +637,7 @@ let wallCorner = "against";
 // Space on a wall that started against another: the side is chosen from that
 // wall, so this swaps it for the draft instead of changing the setting.
 let wallSideFlip = false;
-// Click�click room/slab/roof rectangle: first click is one corner, second
+// Click–click room/slab/roof rectangle: first click is one corner, second
 // click is the opposite. Not a press-and-hold box.
 let shapeDraft = null;
 let beamStart = null;
@@ -664,6 +708,47 @@ let sizeDraft = null;
 let hover = null;
 let hoverPoint = null;
 let wallsCache = [];
+// Wall elevation: the face the strip under the plan is showing, and a drag in
+// progress. `elevationOpen` is the "Open elevation" toggle; the face itself
+// follows the selection (see wall-elevation.js).
+let elevationOpen = false;
+let elevationFace = null;
+let elevationDrag = null;
+let elevationKey = "";
+let elevPreviewKey = "";
+// Finishes: the inspector section's last markup and whether Products is open,
+// and, while a floor finish region is being drawn, its { category, productId }
+// (finishing the draft then writes doc.finishRegions).
+let finishKey = "";
+let finishProductsOpen = false;
+// "floor" or "face" while the add-a-finish sheet covers that section.
+let finishAddOpen = null;
+let finishPanelHost = "";
+let regionFinish = null;
+// The floor finish region whose corners are being edited on the plan, and the
+// corner Delete would remove. A region is edited through its floor: it is only
+// live while that floor (or room) is the one thing selected.
+let editingRegionId = null;
+let selectedRegionVertex = null;
+// The card under the pointer, or the region under the pointer on the plan.
+// Kept off the markup key so a hover does not rebuild the inspector.
+let hoverFinishRegionId = null;
+// Which floor is showing its unfinished part, and which card just saved a product.
+let bareFinishHost = null;
+let finishSavedRegionId = null;
+// The wall finish picked in the panel or the elevation, the one the pointer is
+// over in the panel, and the one just saved.
+let selectedBandId = null;
+let hoverBandId = null;
+let finishSavedBandId = null;
+// A wall finish being drawn on the elevation: corners in viewing coordinates
+// (along the face, up from the base), the same click-the-corners flow as a floor.
+let elevFinishDraft = null;
+// The corner picked on a drawn wall finish, so Delete removes that corner.
+let selectedElevVertex = null;
+let finishSavedTimer = 0;
+let finishScrolledId = null;
+let bareLayer = null;
 
 // While a wall, beam, room, slab or roof tool is armed, the nearest
 // join/alignment (and, when not latched, how far the pointer is from it).
@@ -742,7 +827,7 @@ function probeAxis(side) {
 let activeLevel = null;
 
 // Off (default): ghost the neighbouring level, like Revit's look-down
-// underlay � or look-up when nothing sits below, so a foundation plan can
+// underlay — or look-up when nothing sits below, so a foundation plan can
 // still see the walls it carries. On: this cut only. The neighbour, the
 // tracing sheet, and (on a ceiling or roof cut) the rest of the storey are
 // not drawn. Hit-testing stays on what is drawn. The widget checkbox and
@@ -799,7 +884,7 @@ function syncLookPlan(cam, payload) {
   if (!isLook || !el.massPlanCanvas) return;
   drawLookPlan(el.massPlanCanvas, payload, cam);
   if (el.massCaption) {
-    el.massCaption.textContent = `${lookPlanCaption(payload, cam)} � drag to look around � scroll to zoom`;
+    el.massCaption.textContent = `${lookPlanCaption(payload, cam)} · drag to look around · scroll to zoom`;
   }
 }
 
@@ -944,7 +1029,7 @@ async function restoreSession() {
  * Signed in: recover anything left in the old browser slot, then land on the
  * job list. The canvas is a drawing that already has a row; opening one is a
  * choice, not the default. Reconnects that already have a job attached stay
- * there � the retry after a dropped connection must not yank the work away.
+ * there — the retry after a dropped connection must not yank the work away.
  */
 async function enterApp() {
   try {
@@ -1138,7 +1223,7 @@ function hideAuth() {
   resizeCanvas();
   // The ribbon's boot-time fit ran while .chrome was still display:none
   // (body.auth-pending), so every group measured as zero-width and stayed
-  // at its unshrunk "large" scale � the ribbon then looks like it belongs to
+  // at its unshrunk "large" scale — the ribbon then looks like it belongs to
   // a much wider window until something re-triggers fitRibbon (a resize, or
   // a Simple/Full click, which redraws and refits). Now that the chrome is
   // actually visible, refit for real once layout has settled.
@@ -1262,7 +1347,7 @@ function wireAuth() {
     const orgName = el.authOrg.value.trim();
 
     el.authSubmit.disabled = true;
-    el.authSubmit.textContent = authMode === "sign-in" ? "Signing in�" : "Creating�";
+    el.authSubmit.textContent = authMode === "sign-in" ? "Signing in…" : "Creating…";
     setAuthError("");
     try {
       currentSession = authMode === "sign-in"
@@ -1331,12 +1416,12 @@ function drawAccount() {
   setText(el.accountFirm, card.orgName);
   setText(el.accountAddress, card.address.lines.join("\n"));
   setText(el.accountMember, card.memberSince
-    ? `${card.memberFor} � since ${formatDate(card.memberSince)}`
-    : "�");
+    ? `${card.memberFor} · since ${formatDate(card.memberSince)}`
+    : "—");
   setText(el.accountJobs, card.jobCount === 1 ? "1 live job" : `${card.jobCount} live jobs`);
   if (el.accountMeter) el.accountMeter.style.width = `${Math.round(card.license.yearProgress * 100)}%`;
   if (el.accountOpen) {
-    el.accountOpen.title = `${card.name} � ${card.license.level}`;
+    el.accountOpen.title = `${card.name} · ${card.license.level}`;
   }
 }
 
@@ -1412,7 +1497,7 @@ function closeLibrary() {
   // With no job open there is nothing behind this but a canvas that belongs to
   // no row and cannot be saved, so the way out is New or Open, not Close.
   if (!openDrawingId) {
-    setLibraryMessage("Open a drawing or start a new one � there is nothing open behind this.");
+    setLibraryMessage("Open a drawing or start a new one — there is nothing open behind this.");
     return;
   }
   el.libraryOverlay.hidden = true;
@@ -1450,7 +1535,7 @@ function syncLibrarySurface() {
 
 /**
  * Deleted jobs are asked for too. A soft delete that disappeared from every
- * surface would not be undoable from anywhere, and the library is where �5 says
+ * surface would not be undoable from anywhere, and the library is where §5 says
  * the undo lives.
  */
 async function refreshLibrary({ keepMessage = false } = {}) {
@@ -1540,7 +1625,7 @@ function libraryRow(project, blocked) {
       fields.erfLabel,
       fields.deleted ? "Deleted" : isOpen ? "Open now" : null,
       fields.lastOpened ? `Last opened ${fields.lastOpened}` : "Never opened",
-    ].filter(Boolean).join(" � ");
+    ].filter(Boolean).join(" · ");
     main.append(name, meta);
     main.disabled = fields.deleted || isOpen;
     main.title = fields.deleted
@@ -1822,7 +1907,7 @@ function drawSyncState(state) {
 /**
  * A 409 is the one save state the user has to answer, so it gets a bar with two
  * buttons rather than a word in the chrome. Neither is a default and neither is
- * pre-selected: choosing for them is the silent merge �4 refuses.
+ * pre-selected: choosing for them is the silent merge §4 refuses.
  */
 function drawConflictBar(state) {
   if (!el.conflict) return;
@@ -1830,7 +1915,7 @@ function drawConflictBar(state) {
   el.conflict.hidden = !conflicted;
   if (!conflicted) return;
   el.conflictText.textContent = state.conflict?.doc
-    ? "This drawing changed somewhere else � another tab, or the tablet on site."
+    ? "This drawing changed somewhere else — another tab, or the tablet on site."
     : "This drawing changed somewhere else, and that version could not be read.";
   // Nothing to reload if their document did not arrive with the refusal.
   el.conflictTheirs.disabled = !state.conflict?.doc;
@@ -2010,6 +2095,8 @@ function snapFrom() {
   if (measureDraft?.a) return measureDraft.a;
   const routeFrom = serviceRouteFrom();
   if (routeFrom) return { x: routeFrom.x, y: routeFrom.y };
+  if (regionDraft?.length) return regionDraft[regionDraft.length - 1];
+  if (roomDraft?.length) return roomDraft[roomDraft.length - 1];
   return null;
 }
 
@@ -2019,6 +2106,22 @@ function drawingLineFrom() {
   if (beamStart) return beamStart;
   if (lineStart) return lineStart;
   if (measureDraft?.a) return measureDraft.a;
+  if (regionDraft?.length) return regionDraft[regionDraft.length - 1];
+  if (roomDraft?.length) return roomDraft[roomDraft.length - 1];
+  return null;
+}
+
+/** The slab or room outline a finish region must stay inside. */
+function finishHostPoly() {
+  if (!regionFinish) return null;
+  if (regionFinish.slabId) {
+    const slab = (store.doc.slabs || []).find((s) => s.id === regionFinish.slabId);
+    return slab ? shapePolygon(slab.shape) : null;
+  }
+  if (regionFinish.roomId) {
+    const room = (store.doc.rooms || []).find((r) => r.id === regionFinish.roomId);
+    return room ? roomPolygon(room) : null;
+  }
   return null;
 }
 
@@ -2039,6 +2142,11 @@ function serviceRouteFrom() {
  */
 function applySnap(wx, wy, exclude) {
   let targets = collectSnapTargets(store.doc, snapOpts(exclude));
+  // Corners already placed on the finish being drawn are not in the document
+  // yet. They still align, the same way the other corners of a floor do.
+  if (tool === "region" && regionDraft?.length) {
+    for (const placed of regionDraft) targets.push({ x: placed.x, y: placed.y, kind: "corner" });
+  }
   // A face-drawn wall starting on another wall's centreline end would sit half
   // a thickness across that wall; its face corners are the points that line up.
   if (tool === "wall" && isFaceLocation(wallLocation)) targets = targets.filter((p) => p.kind !== "endpoint");
@@ -2105,6 +2213,28 @@ function applySnap(wx, wy, exclude) {
     });
     if (j) point = { x: j.x, y: j.y };
   }
+  if (tool === "region" && regionFinish) {
+    const host = finishHostPoly();
+    if (host?.length >= 3) {
+      const hostEdges = [];
+      for (let i = 0; i < host.length; i += 1) {
+        const a = host[i];
+        const b = host[(i + 1) % host.length];
+        hostEdges.push({ x1: a[0], y1: a[1], x2: b[0], y2: b[1] });
+      }
+      const hostTol = tol * 1.8;
+      if (!isExactPointSnap(result)) {
+        const onHost = snapToFace(point.x, point.y, hostEdges, hostTol);
+        if (onHost.snapped) point = { x: onHost.x, y: onHost.y };
+      }
+      const clamped = clampToPoly(point.x, point.y, host);
+      point = { x: clamped.x, y: clamped.y };
+      const first = regionDraft?.[0];
+      if (first && Math.hypot(point.x - first.x, point.y - first.y) <= hostTol) {
+        point = { x: first.x, y: first.y };
+      }
+    }
+  }
   const origin = near ? align.nearest : null;
   snapGuide = {
     x: point.x,
@@ -2145,7 +2275,7 @@ function snapPreviewTool() {
   return tool === "wall" || tool === "beam" || tool === "room" || tool === "slab"
     || tool === "roof" || tool === "property" || tool === "sg-ref" || tool === "camera" || tool === "section"
     || tool === "callout" || tool === "revision" || tool === "model-line" || tool === "annot-line"
-    || tool === "measure" || tool === "service-route";
+    || tool === "measure" || tool === "service-route" || tool === "region";
 }
 
 function itemRect(item, sku) {
@@ -2261,6 +2391,9 @@ function segmentCategory(seg) {
 function snapOpts(extra = {}) {
   return {
     ...extra,
+    // Finish corners align while a finish is drawn or a corner of one is
+    // dragged. A wall or a floor corner does not join onto a tile.
+    finishes: tool === "region" || drag?.kind === "region-vertex",
     // Route points are targets for the route tool only (and for a route point
     // being dragged); a wall never snaps to a pipe.
     services: tool === "service-route" || Boolean(serviceMoveIds),
@@ -2292,7 +2425,7 @@ function routeRadius() {
 function onActiveLevel(obj) {
   // A run belongs to the storeys its ends are on, not to a level of its own.
   if (obj?.fromNode) return edgeLevels(store.doc, pack, obj).includes(activeLevel);
-  return effectiveLevel(obj, pack) === activeLevel;
+  return onPlanOf(pack.levels, effectiveLevel(obj, pack), activeLevel);
 }
 
 /**
@@ -2302,7 +2435,7 @@ function onActiveLevel(obj) {
  */
 function openingOnActiveLevel(opening, walls) {
   const wall = wallForOpening(store.doc, pack, walls, opening);
-  return !!wall && wall.level === activeLevel;
+  return !!wall && onPlanOf(pack.levels, wall.level, activeLevel);
 }
 
 /**
@@ -2357,15 +2490,95 @@ let levelInsertOpen = false;
 function syncPackLevels() {
   const own = store.doc?.levels || [];
   const typedCeilings = Object.keys(store.doc?.sheetSet?.ceilingHeights || {}).length > 0;
-  pack = own.length || typedCeilings
-    ? { ...templatePack, levels: applyCeilingHeights(mergedLevels(templatePack.levels, own), store.doc?.sheetSet) }
+  const elevEdits = store.doc?.levelElevations || {};
+  const editedElevations = Object.keys(elevEdits).length > 0;
+  pack = own.length || typedCeilings || editedElevations
+    ? {
+        ...templatePack,
+        levels: applyLevelElevations(
+          applyCeilingHeights(mergedLevels(templatePack.levels, own), store.doc?.sheetSet),
+          elevEdits
+        ),
+      }
     : templatePack;
+}
+
+/** Turn a station's elevation into a millimetre field; Enter commits, Escape cancels. */
+function editStationElevation(span, station) {
+  if (station.kind === "roof") return;
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "level-station-elev";
+  input.inputMode = "decimal";
+  input.value = String(Math.round(station.elevation * 1000));
+  span.replaceWith(input);
+  input.focus();
+  input.select();
+  let done = false;
+  const finish = (commit) => {
+    if (done) return;
+    done = true;
+    if (commit) commitStationEdit(station, input.value);
+    else drawLevelSwitcher();
+  };
+  input.addEventListener("click", (e) => e.stopPropagation());
+  input.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if (e.key === "Enter") finish(true);
+    else if (e.key === "Escape") finish(false);
+  });
+  input.addEventListener("blur", () => finish(false));
+}
+
+function commitStationEdit(station, text) {
+  const n = Number(String(text).trim().replace(",", "."));
+  if (String(text).trim() === "" || !Number.isFinite(n)) {
+    setStatusMessage("Enter the elevation in millimetres, e.g. 3000.", "warn");
+    drawLevelSwitcher();
+    return;
+  }
+  const metres = n / 1000;
+  if (station.kind === "ceiling") {
+    const level = (pack.levels || []).find((l) => l.id === station.levelId);
+    const height = metres - (level?.elevation ?? 0);
+    if (!store.doc.sheetSet) {
+      setStatusMessage("Floor-to-ceiling can only be typed once a sheet set is loaded.", "warn");
+    } else {
+      store.pushUndo();
+      if (!setCeilingHeight(store.doc.sheetSet, station.levelId, height)) {
+        setStatusMessage("Ceiling must sit above its floor, within 20 m.", "warn");
+      } else {
+        store.persist();
+      }
+    }
+  } else {
+    const check = validateLevelEdit(pack.levels || [], station.levelId, metres);
+    if (!check.ok) {
+      setStatusMessage(check.message, "warn");
+    } else {
+      store.pushUndo();
+      store.doc.levelElevations = setLevelElevation(store.doc.levelElevations, station.levelId, metres);
+      store.persist();
+      setStatusMessage(check.message, "ok");
+    }
+  }
+  syncPackLevels();
+  drawLevelSwitcher();
+  drawRibbon();
+  render();
 }
 
 function openLevelInsert() {
   levelInsertOpen = true;
   if (el.levelName) el.levelName.value = "";
   if (el.levelElevation) el.levelElevation.value = "";
+  if (el.levelReference) el.levelReference.checked = false;
+  if (el.levelParent) {
+    const storeys = (pack.levels || []).filter((l) => l.elevation >= 0 && !l.parentId && !isReferenceLevel(l));
+    el.levelParent.innerHTML = [`<option value="">None (its own storey)</option>`]
+      .concat(storeys.map((l) => `<option value="${escapeHtml(l.id)}">${escapeHtml(l.name || l.id)}</option>`))
+      .join("");
+  }
   render();
   el.levelName?.focus();
 }
@@ -2389,7 +2602,12 @@ function commitLevelInsert() {
   const elevationRaw = String(el.levelElevation?.value ?? "").trim();
   const elevationN = elevationRaw === "" ? NaN : Number(elevationRaw.replace(",", "."));
   const elevation = Number.isFinite(elevationN) ? elevationN / 1000 : "";
-  const spec = { name: el.levelName?.value, elevation };
+  const spec = {
+    name: el.levelName?.value,
+    elevation,
+    kind: el.levelReference?.checked ? "reference" : null,
+    parentId: el.levelParent?.value || null,
+  };
   if (elevationRaw === "") {
     const message = "Enter the level's elevation in millimetres above the ground floor, e.g. 6000.";
     if (el.levelHint) el.levelHint.textContent = message;
@@ -2774,8 +2992,8 @@ function selectStationIndex(idx, { keepSelection = false } = {}) {
     if (!keepSelection) store.clearSelection();
     drawRibbon();
   } else {
-    // Same storey, different cut (floor ? ceiling). The armed tool may now
-    // be the wrong kind of work for this plan � refresh the hint without
+    // Same storey, different cut (floor → ceiling). The armed tool may now
+    // be the wrong kind of work for this plan — refresh the hint without
     // rebuilding the whole ribbon.
     updateRibbonHint();
   }
@@ -2807,7 +3025,7 @@ function showHouseGhost(idx) {
 
 /** Paper chip beside the dashed preview cut. The old 8.5px copper text sat
  * at 40% opacity and was clipped by the viewBox, so long names such as
- * "First Floor (inferred) � Floor" were unreadable on hover. */
+ * "First Floor (inferred) · Floor" were unreadable on hover. */
 function layoutHouseGhostLabel(label, cutY) {
   if (!houseGhostLabel || !houseGhostBg) return;
   const xLeft = HOUSE_X0 - 8;
@@ -2899,6 +3117,14 @@ function wireLevelWidget() {
       e.preventDefault();
       selectStationIndex(houseStations.length - 1);
     }
+  });
+
+  el.levelStations?.addEventListener("dblclick", (e) => {
+    const span = e.target.closest(".level-station-elev");
+    const btn = e.target.closest("button");
+    if (!span || !btn) return;
+    const station = houseStations.find((s) => s.id === btn.dataset.id);
+    if (station) editStationElevation(span, station);
   });
 
   el.levelStations?.addEventListener("click", (e) => {
@@ -3065,6 +3291,12 @@ function draw() {
   if (beamStart) drawBeamStart();
   if (lineStart) drawLineDraft();
   if (tool === "property" && siteDraft) drawPropertyDraft();
+  if (tool === "region" && regionFinish) drawFinishHost();
+  if (tool === "select") {
+    drawBareFinish();
+    drawHoveredFinishRegion();
+    drawEditingFinishRegion();
+  }
   if (tool === "room" && roomDraft?.length) drawPolyDraft(roomDraft, "#b2451e");
   if (tool === "region" && regionDraft?.length) drawPolyDraft(regionDraft, "#8a7d6c");
   if (tool === "sg-ref" && sgPick) drawSgPick();
@@ -3500,7 +3732,7 @@ function syncModeBar() {
       el.alignSheets.replaceChildren(...pages.map((p) => {
         const button = document.createElement("button");
         button.type = "button";
-        button.textContent = `${p.anchor ? "?" : "?"} ${p.label}`;
+        button.textContent = `${p.anchor ? "✓" : "○"} ${p.label}`;
         button.classList.toggle("is-on", p.index === u?.sheetPage);
         button.addEventListener("click", () => sheetUi.goToSheet(p.index, { fit: false }));
         return button;
@@ -3513,13 +3745,12 @@ function syncModeBar() {
     alignSheetsSignature = "";
   }
 
-  const canPdf = hasOpenPdf() && Number.isInteger(u?.sheetPage);
-  const snapping = (mode === "scale" || mode === "align") && canPdf;
+  const snapping = (mode === "scale" || mode === "align") && pdfSnapAvailable();
   if (el.calibrateSnapWrap) el.calibrateSnapWrap.hidden = !snapping;
   if (el.calibrateSnap && document.activeElement !== el.calibrateSnap) el.calibrateSnap.checked = snapToPdf;
   if (snapping && el.modeSnapNote) {
     const status = pageLineworkStatus(u.sheetPage);
-    el.modeSnapNote.textContent = status === "loading" ? " (reading�)" : status === "empty" ? " (no vector lines)" : status === "failed" ? " (could not read)" : "";
+    el.modeSnapNote.textContent = status === "loading" ? " (reading…)" : status === "empty" ? " (no vector lines)" : status === "failed" ? " (could not read)" : "";
   }
 
   el.modeStep.textContent = step;
@@ -3655,12 +3886,12 @@ function pathForPoly(poly) {
 }
 
 function onLevel(obj, levelId) {
-  return effectiveLevel(obj, pack) === levelId;
+  return onPlanOf(pack.levels, effectiveLevel(obj, pack), levelId);
 }
 
 function openingOnLevel(opening, walls, levelId) {
   const wall = wallForOpening(store.doc, pack, walls, opening);
-  return !!wall && wall.level === levelId;
+  return !!wall && onPlanOf(pack.levels, wall.level, levelId);
 }
 
 /** One storey's geometry. Ghosted geometry is faded and unlabelled so it
@@ -3670,7 +3901,7 @@ function openingOnLevel(opening, walls, levelId) {
 function drawPlanLevel(levelId, walls, { ghost = false, look = "down", allow = () => true } = {}) {
   ctx.save();
   if (ghost && look === "up") {
-    for (const wall of walls.filter((w) => w.level === levelId && planObjectVisible(w))) drawWall(wall, { marker: true });
+    for (const wall of walls.filter((w) => onPlanOf(pack.levels, w.level, levelId) && planObjectVisible(w))) drawWall(wall, { marker: true });
     for (const beam of store.doc.beams.filter((b) => onLevel(b, levelId) && planObjectVisible(b))) drawBeam(beam, { marker: true });
     ctx.restore();
     return;
@@ -3692,10 +3923,11 @@ function drawPlanLevel(levelId, walls, { ghost = false, look = "down", allow = (
     for (const room of store.doc.rooms.filter((r) => onLevel(r, levelId) && planObjectVisible(r))) {
       if (ghost) drawRoomGhost(room);
       else drawRoom(room);
+      drawSplitLevelLabel(room, levelId, ghost);
     }
   }
   if (allow("wall")) {
-    for (const wall of walls.filter((w) => w.level === levelId && planObjectVisible(w))) drawWall(wall);
+    for (const wall of walls.filter((w) => onPlanOf(pack.levels, w.level, levelId) && planObjectVisible(w))) drawWall(wall);
   }
   if (allow("beam")) {
     for (const beam of store.doc.beams.filter((b) => onLevel(b, levelId) && planObjectVisible(b))) drawBeam(beam);
@@ -3715,6 +3947,9 @@ function drawPlanLevel(levelId, walls, { ghost = false, look = "down", allow = (
       }
       for (const region of (store.doc.regions || []).filter((r) => onLevel(r, levelId) && planObjectVisible(r))) {
         drawRegion(region);
+      }
+      for (const region of (store.doc.finishRegions || []).filter((r) => onLevel(r, levelId))) {
+        drawFinishRegion(region);
       }
       for (const cloud of (store.doc.revisionClouds || []).filter((c) => onLevel(c, levelId))) {
         drawCloudMark(cloud.rect, cloud.rev || "");
@@ -3744,10 +3979,57 @@ function drawPlanLevel(levelId, walls, { ghost = false, look = "down", allow = (
   ctx.restore();
 }
 
+/** "FFL -0.150" on a room that sits on a split level but draws on its parent's plan. */
+function drawSplitLevelLabel(room, planLevelId, ghost) {
+  const roomLevel = effectiveLevel(room, pack);
+  if (ghost || roomLevel === planLevelId) return;
+  const label = fflLabel(pack.levels, roomLevel);
+  const poly = roomPolygon(room);
+  if (!label || poly.length < 3) return;
+  const b = bbox(poly);
+  const [sx, sy] = worldToScreen(b.x + b.w / 2, b.y + b.h / 2);
+  ctx.save();
+  ctx.font = "600 11px sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillStyle = COLOUR.selection;
+  ctx.fillText(label, sx, sy + 14);
+  ctx.restore();
+}
+
 function drawRoomGhost(room) {
   const poly = roomPolygon(room);
   if (poly.length < 3) return;
   drawPolyFill(poly, "rgba(26, 22, 18, 0.04)", COLOUR.existing);
+}
+
+/** Paint a finish, cut to the floor or room it sits on, so a moved outline cannot leave colour outside it. */
+function drawFinishRegion(region) {
+  const poly = finishRegionPolygon(store.doc, region);
+  if (poly.length < 3) return;
+  const paint = finishRegionPaint(region);
+  clipToFinishHost(region, () => drawPolyFill(poly, paint.fill, paint.stroke));
+}
+
+/** Run `draw` with the canvas clipped to the region's floor, or its room when it has no floor. */
+function clipToFinishHost(region, draw) {
+  const host = finishRegionHost(region);
+  ctx.save();
+  if (host.length >= 3) {
+    pathForPoly(host);
+    ctx.clip();
+  }
+  draw();
+  ctx.restore();
+}
+
+function finishRegionPaint(region) {
+  const category = region.category || finishProductById(store.doc, region.productId)?.category;
+  const hex = finishSwatch(category);
+  const n = Number.parseInt(hex.slice(1), 16);
+  return {
+    fill: `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, 0.28)`,
+    stroke: hex,
+  };
 }
 
 function drawPolyFill(poly, fill, stroke) {
@@ -3794,7 +4076,7 @@ function drawRoom(room) {
   ctx.fillStyle = "#5c5348";
   const useLabel = room.use && room.use !== "other" ? roomUse(room.use).label : "Use not set";
   ctx.fillText(useLabel, cx, cy);
-  ctx.fillText(`${roomArea(room).toFixed(1)} m�`, cx, cy + 14);
+  ctx.fillText(`${roomArea(room).toFixed(1)} m²`, cx, cy + 14);
   ctx.restore();
 }
 
@@ -4169,6 +4451,15 @@ function drawSelectionHighlights(walls) {
     if (ref.kind === "room" || ref.kind === "slab" || ref.kind === "roof") {
       pathForPoly(shapePolygon(obj.shape));
       ctx.stroke();
+      if (obj.shape?.kind === "poly" && refsToDraw().length === 1) {
+        ctx.fillStyle = "#f4ede1";
+        ctx.lineWidth = 1.6;
+        for (const [x, y] of obj.shape.points || []) {
+          const [hx, hy] = worldToScreen(x, y);
+          ctx.fillRect(hx - HANDLE / 2, hy - HANDLE / 2, HANDLE, HANDLE);
+          ctx.strokeRect(hx - HANDLE / 2, hy - HANDLE / 2, HANDLE, HANDLE);
+        }
+      }
     } else if (ref.kind === "region") {
       pathForPoly(shapePolygon(obj.shape));
       ctx.stroke();
@@ -4596,7 +4887,7 @@ function drawGapDimension(x1, y1, x2, y2, kind, note = "", flip = false) {
   // `note` names what the far end of the string actually is. A bare "300 mm"
   // beside a 600 mm footing leaves the reader guessing whether it measures to
   // the centreline it is aligned with or the face they can see.
-  const label = note ? `${formatLengthMm(len)} mm � ${note}` : `${formatLengthMm(len)} mm`;
+  const label = note ? `${formatLengthMm(len)} mm · ${note}` : `${formatLengthMm(len)} mm`;
   const off = 20;
   const dx = bx - ax;
   const dy = by - ay;
@@ -4718,6 +5009,322 @@ function endpointHandleHit(wx, wy) {
     return { kind: "handle", id: ref.id, target: ref.kind, end: 2 };
   }
   return null;
+}
+
+// --- room / slab / roof polygon editing -------------------------------------
+//
+// A rect shape converts to a poly shape (v2-ctx-shape-poly) so its corners can
+// be dragged and its edges split, the same gesture language as the property
+// line's corner drag. `selectedShapeVertex` remembers which corner Delete
+// should remove; it is reset on the next click so a stale one never survives
+// to delete the wrong thing.
+let selectedShapeVertex = null;
+
+function shapeEditTol() {
+  return (HANDLE / 2 + 2) / cam.scale;
+}
+
+/** The sole selection, when it is a room/slab/roof already drawn as a polygon. */
+function editableShapeRef() {
+  if (store.selected.length !== 1 || !store.primary) return null;
+  const ref = store.primary;
+  if (!["room", "slab", "roof"].includes(ref.kind)) return null;
+  const obj = objByRef(ref);
+  if (!obj || obj.shape?.kind !== "poly" || !Array.isArray(obj.shape.points)) return null;
+  return { ref, obj, points: obj.shape.points };
+}
+
+function hitPolyVertexIndex(points, wx, wy, tol) {
+  let best = null;
+  let bestD = tol;
+  points.forEach(([x, y], i) => {
+    const d = Math.hypot(x - wx, y - wy);
+    if (d <= bestD) { bestD = d; best = i; }
+  });
+  return best;
+}
+
+function hitPolyEdgeIndex(points, wx, wy, tol) {
+  let best = null;
+  let bestD = tol;
+  for (let i = 0; i < points.length; i += 1) {
+    const [x1, y1] = points[i];
+    const [x2, y2] = points[(i + 1) % points.length];
+    const d = distToSeg(x1, y1, x2, y2, wx, wy);
+    if (d <= bestD) { bestD = d; best = i; }
+  }
+  return best;
+}
+
+// --- floor finish regions: editing on the plan --------------------------------
+//
+// Tiles, waterproofing and the like are polygons stored in doc.finishRegions
+// (finish-model.js). They are edited through the floor they sit on: with that
+// floor (or room) selected, click inside a region, or press "Edit corners" in
+// the inspector, and its corners show. Drag a corner, drag an edge to add one,
+// Delete removes the selected corner, drag inside to move the region. Corners
+// stay inside the floor. Moving the floor itself carries its regions.
+
+/** Regions of the floor or room that is the one thing selected. */
+function regionsOfSelection() {
+  if (store.selected.length !== 1 || !store.primary) return [];
+  const ref = store.primary;
+  const regions = store.doc.finishRegions || [];
+  if (ref.kind === "slab") return regions.filter((r) => finishRegionSlab(store.doc, r)?.id === ref.id);
+  if (ref.kind === "room") return regions.filter((r) => r.roomId === ref.id);
+  return [];
+}
+
+/** The region being edited; dropped as soon as its floor is no longer the selection. */
+function editingFinishRegion() {
+  if (!editingRegionId) return null;
+  const region = regionsOfSelection().find((r) => r.id === editingRegionId) || null;
+  if (!region || tool !== "select") {
+    editingRegionId = null;
+    selectedRegionVertex = null;
+    return null;
+  }
+  return region;
+}
+
+/** The outline a region's corners may not leave: its floor, else its room. */
+function finishRegionHost(region) {
+  const slab = finishRegionSlab(store.doc, region);
+  if (slab) return shapePolygon(slab.shape);
+  const room = region.roomId ? (store.doc.rooms || []).find((r) => r.id === region.roomId) : null;
+  return room ? roomPolygon(room) : [];
+}
+
+/** The corners to hit-test: the stored ones for a free polygon, else the outline it resolves to. */
+function finishRegionRing(region) {
+  if (region.shape?.kind === "poly" && !region.whole && Array.isArray(region.shape.points)) return region.shape.points;
+  return finishRegionPolygon(store.doc, region);
+}
+
+/** Make the region a plain editable polygon (a whole-floor or rectangle region stops being one). */
+function finishRegionPoints(region) {
+  if (region.shape?.kind !== "poly" || region.whole || !Array.isArray(region.shape.points)) {
+    region.shape = polyShape(finishRegionPolygon(store.doc, region).map(([x, y]) => [x, y]));
+    delete region.whole;
+  }
+  return region.shape.points;
+}
+
+/** Begin a corner, edge or whole-region drag on the region being edited. */
+function beginFinishRegionDrag(ev, wx, wy) {
+  const region = editingFinishRegion();
+  selectedRegionVertex = null;
+  if (!region) return false;
+  const ring = finishRegionRing(region);
+  if (ring.length < 3) return false;
+  const grab = (next) => {
+    drag = { ...next, id: region.id, moved: false };
+    el.canvas.setPointerCapture(ev.pointerId);
+    return true;
+  };
+  const vi = hitPolyVertexIndex(ring, wx, wy, shapeEditTol());
+  if (vi != null) {
+    store.pushUndo();
+    finishRegionPoints(region);
+    selectedRegionVertex = { id: region.id, index: vi };
+    return grab({ kind: "region-vertex", index: vi });
+  }
+  const ei = hitPolyEdgeIndex(ring, wx, wy, propertyPickTol());
+  if (ei != null) {
+    store.pushUndo();
+    const points = finishRegionPoints(region);
+    const insertAt = ei + 1;
+    // The new corner sits on the edge it was added to, not where the pointer happens to be.
+    const [ax, ay] = points[ei];
+    const [bx, by] = points[(ei + 1) % points.length];
+    const len2 = (bx - ax) ** 2 + (by - ay) ** 2 || 1;
+    const t = Math.max(0, Math.min(1, ((wx - ax) * (bx - ax) + (wy - ay) * (by - ay)) / len2));
+    points.splice(insertAt, 0, [ax + (bx - ax) * t, ay + (by - ay) * t]);
+    selectedRegionVertex = { id: region.id, index: insertAt };
+    return grab({ kind: "region-vertex", index: insertAt, inserted: true });
+  }
+  if (pointInPoly(wx, wy, finishRegionPolygon(store.doc, region))) {
+    store.pushUndo();
+    return grab({
+      kind: "region-move",
+      x0: wx,
+      y0: wy,
+      origin: polyShape(finishRegionPolygon(store.doc, region).map(([x, y]) => [x, y])),
+    });
+  }
+  return false;
+}
+
+/** The region of the selected floor under the pointer, so its card and outline match. */
+function syncFinishRegionHover(wx, wy) {
+  const regions = regionsOfSelection();
+  let next = null;
+  for (let i = regions.length - 1; i >= 0; i -= 1) {
+    const poly = finishRegionPolygon(store.doc, regions[i]);
+    if (poly.length >= 3 && pointInPoly(wx, wy, poly)) { next = regions[i].id; break; }
+  }
+  hoverFinishRegionId = next;
+}
+
+/** A press inside a region of the selected floor picks it for editing; elsewhere puts it down. */
+function pickFinishRegionAt(wx, wy) {
+  const regions = regionsOfSelection();
+  if (!regions.length) { editingRegionId = null; return; }
+  for (let i = regions.length - 1; i >= 0; i -= 1) {
+    if (pointInPoly(wx, wy, finishRegionPolygon(store.doc, regions[i]))) {
+      if (editingRegionId !== regions[i].id) {
+        editingRegionId = regions[i].id;
+        finishKey = "";
+      }
+      return;
+    }
+  }
+  if (editingRegionId) {
+    editingRegionId = null;
+    finishKey = "";
+  }
+}
+
+/** A finish region's drag, from pointer move. Returns true when it handled the drag. */
+function dragFinishRegion(wx, wy) {
+  if (drag?.kind !== "region-vertex" && drag?.kind !== "region-move") return false;
+  const region = (store.doc.finishRegions || []).find((r) => r.id === drag.id);
+  if (!region) return true;
+  if (drag.kind === "region-vertex") {
+    const pt = region.shape?.points?.[drag.index];
+    if (pt) {
+      // The corner under the pointer is not a target (it would join to itself).
+      // The region's other corners stay, so a shared X or Y draws a guide.
+      const p = applySnap(wx, wy, {
+        activeShape: { kind: "finish", id: region.id, x: pt[0], y: pt[1] },
+      });
+      if (Math.hypot(p.x - pt[0], p.y - pt[1]) * cam.scale > 2) drag.moved = true;
+      if (drag.moved) {
+        const host = finishRegionHost(region);
+        const at = host.length >= 3 ? clampToPoly(p.x, p.y, host) : p;
+        // The corner cannot leave the floor. A guide whose axis the clamp
+        // had to give up is no longer where the corner sits.
+        if (snapGuide && (Math.abs(at.x - p.x) > 1e-6 || Math.abs(at.y - p.y) > 1e-6)) {
+          if (Math.abs(at.x - p.x) > 1e-6) {
+            snapGuide.guideX = null;
+            snapGuide.snapX = false;
+            snapGuide.guideXPoint = null;
+          }
+          if (Math.abs(at.y - p.y) > 1e-6) {
+            snapGuide.guideY = null;
+            snapGuide.snapY = false;
+            snapGuide.guideYPoint = null;
+          }
+          snapGuide.x = at.x;
+          snapGuide.y = at.y;
+          snapGuide.exactJoin = false;
+          snapGuide.snapped = Boolean(snapGuide.snapX || snapGuide.snapY);
+        }
+        region.shape.points[drag.index] = [at.x, at.y];
+      }
+    }
+  } else {
+    const dx = wx - drag.x0;
+    const dy = wy - drag.y0;
+    if (Math.hypot(dx, dy) * cam.scale > 2) drag.moved = true;
+    if (drag.moved) {
+      delete region.whole;
+      region.shape = translateShape(drag.origin, dx, dy, activeGrid());
+    }
+  }
+  render();
+  return true;
+}
+
+/** Amber on the part of the selected floor that no finish covers. */
+function drawBareFinish() {
+  if (!bareFinishHost || store.selected.length !== 1 || !store.primary) return;
+  const ref = store.primary;
+  if (ref.kind !== bareFinishHost.kind || ref.id !== bareFinishHost.id) return;
+  let host = [];
+  if (ref.kind === "slab") {
+    const slab = (store.doc.slabs || []).find((s) => s.id === ref.id);
+    host = slab ? shapePolygon(slab.shape) : [];
+  } else if (ref.kind === "room") {
+    const room = (store.doc.rooms || []).find((r) => r.id === ref.id);
+    host = room ? roomPolygon(room) : [];
+  }
+  if (host.length < 3) return;
+  const dpr = window.devicePixelRatio || 1;
+  if (!bareLayer) bareLayer = document.createElement("canvas");
+  if (bareLayer.width !== el.canvas.width || bareLayer.height !== el.canvas.height) {
+    bareLayer.width = el.canvas.width;
+    bareLayer.height = el.canvas.height;
+  }
+  const bctx = bareLayer.getContext("2d");
+  bctx.setTransform(1, 0, 0, 1, 0, 0);
+  bctx.clearRect(0, 0, bareLayer.width, bareLayer.height);
+  bctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  bctx.globalCompositeOperation = "source-over";
+  const trace = (poly) => {
+    bctx.beginPath();
+    poly.forEach(([x, y], i) => {
+      const [sx, sy] = worldToScreen(x, y);
+      if (i === 0) bctx.moveTo(sx, sy);
+      else bctx.lineTo(sx, sy);
+    });
+    bctx.closePath();
+  };
+  trace(host);
+  bctx.fillStyle = "rgba(176, 122, 46, 0.45)";
+  bctx.fill();
+  bctx.globalCompositeOperation = "destination-out";
+  for (const region of regionsOfSelection()) {
+    const poly = finishRegionPolygon(store.doc, region);
+    if (poly.length >= 3) { trace(poly); bctx.fill(); }
+  }
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.drawImage(bareLayer, 0, 0);
+  ctx.restore();
+}
+
+/** The finish under the pointer, on the plan or in the inspector. */
+function drawHoveredFinishRegion() {
+  if (!hoverFinishRegionId) return;
+  const region = (store.doc.finishRegions || []).find((r) => r.id === hoverFinishRegionId);
+  if (!region) return;
+  const poly = finishRegionPolygon(store.doc, region);
+  if (poly.length < 3) return;
+  clipToFinishHost(region, () => drawPolyOutline(poly, finishRegionPaint(region).stroke, false, 2.6));
+}
+
+/** The region's corners, drawn over the plan while it is being edited. */
+function drawEditingFinishRegion() {
+  const region = editingFinishRegion();
+  if (!region) return;
+  const ring = finishRegionRing(region);
+  if (ring.length < 3) return;
+  const paint = finishRegionPaint(region);
+  ctx.save();
+  clipToFinishHost(region, () => {
+    pathForPoly(ring);
+    ctx.strokeStyle = paint.stroke;
+    ctx.lineWidth = 2.4;
+    ctx.setLineDash([]);
+    ctx.stroke();
+  });
+  ctx.lineWidth = 1.6;
+  ring.forEach(([x, y], i) => {
+    const [hx, hy] = worldToScreen(x, y);
+    const picked = selectedRegionVertex?.id === region.id && selectedRegionVertex.index === i;
+    ctx.strokeStyle = paint.stroke;
+    ctx.fillStyle = picked ? paint.stroke : "#f4ede1";
+    ctx.fillRect(hx - HANDLE / 2, hy - HANDLE / 2, HANDLE, HANDLE);
+    ctx.strokeRect(hx - HANDLE / 2, hy - HANDLE / 2, HANDLE, HANDLE);
+  });
+  ctx.restore();
+  // The same edge lengths the draw shows, so a corner drag reads its new size.
+  for (let i = 0; i < ring.length; i += 1) {
+    const [x1, y1] = ring[i];
+    const [x2, y2] = ring[(i + 1) % ring.length];
+    drawLengthLabel(x1, y1, x2, y2);
+  }
 }
 
 /** The closed ring actually drawn for the property line, or null. */
@@ -5160,9 +5767,29 @@ function drawBeamStart() {
 
 /** Same shape as `drawBeamStart()` - a line is a beam-shaped click-click with
  * no SKU - dashed to read as a draft, not yet-placed geometry. */
+function drawFinishHost() {
+  const host = finishHostPoly();
+  if (!host?.length) return;
+  ctx.save();
+  ctx.beginPath();
+  host.forEach((p, i) => {
+    const [sx, sy] = worldToScreen(p[0], p[1]);
+    if (i === 0) ctx.moveTo(sx, sy);
+    else ctx.lineTo(sx, sy);
+  });
+  ctx.closePath();
+  ctx.fillStyle = "rgba(178, 69, 30, 0.07)";
+  ctx.strokeStyle = "#b2451e";
+  ctx.lineWidth = 2;
+  ctx.setLineDash([]);
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+}
+
 function drawPolyDraft(points, colour) {
   if (!points?.length) return;
-  const end = hoverPoint;
+  const end = snapGuide ? { x: snapGuide.x, y: snapGuide.y } : hoverPoint;
   ctx.save();
   ctx.strokeStyle = colour;
   ctx.fillStyle = colour;
@@ -5185,6 +5812,13 @@ function drawPolyDraft(points, colour) {
     ctx.fillRect(sx - 2, sy - 2, 4, 4);
   }
   ctx.restore();
+  for (let i = 1; i < points.length; i += 1) {
+    drawLengthLabel(points[i - 1].x, points[i - 1].y, points[i].x, points[i].y);
+  }
+  if (end) {
+    const last = points[points.length - 1];
+    drawLengthLabel(last.x, last.y, end.x, end.y);
+  }
 }
 
 function drawLineDraft() {
@@ -5626,10 +6260,10 @@ function inspectKindLabel(kind, sku) {
 function skuDimLabel(sku) {
   const g = sku.geometry || {};
   if (g.width && g.height && (sku.category === "door" || sku.category === "window")) {
-    return `${Math.round(g.width * 1000)} � ${Math.round(g.height * 1000)} mm`;
+    return `${Math.round(g.width * 1000)} × ${Math.round(g.height * 1000)} mm`;
   }
   if (isStripFooting(sku) && g.width && g.depth) {
-    return `${Math.round(g.width * 1000)} � ${Math.round(g.depth * 1000)} mm`;
+    return `${Math.round(g.width * 1000)} × ${Math.round(g.depth * 1000)} mm`;
   }
   if (g.thickness) return `${Math.round(g.thickness * 1000)} mm`;
   if (g.width) return `${Math.round(g.width * 1000)} mm`;
@@ -5774,7 +6408,7 @@ function renderPalette() {
       btn.type = "button";
       btn.className = "sku-item";
       if (placeSkuId === sku.id) btn.classList.add("active");
-      btn.innerHTML = `<span class="sku-name">${escapeHtml(sku.name)}</span><span class="sku-meta">${escapeHtml(sku.id)} � ${escapeHtml(skuDimLabel(sku))}</span>`;
+      btn.innerHTML = `<span class="sku-name">${escapeHtml(sku.name)}</span><span class="sku-meta">${escapeHtml(sku.id)} · ${escapeHtml(skuDimLabel(sku))}</span>`;
       btn.addEventListener("click", () => onSkuClick(sku));
       const expand = document.createElement("button");
       expand.type = "button";
@@ -5934,7 +6568,7 @@ function renderTypeDetailNav() {
 
 function renderTypeDetail(sku) {
   if (el.typeDetailName) el.typeDetailName.textContent = sku.name;
-  if (el.typeDetailMeta) el.typeDetailMeta.textContent = `${sku.id} � ${skuDimLabel(sku)}`;
+  if (el.typeDetailMeta) el.typeDetailMeta.textContent = `${sku.id} · ${skuDimLabel(sku)}`;
   if (el.typeDetailCategory) el.typeDetailCategory.textContent = CATEGORY_LABEL[sku.category] || sku.category;
   if (el.typeDetailCount) {
     const i = typeDetailList.findIndex((s) => s.id === sku.id);
@@ -6077,7 +6711,7 @@ function renderRulesReport() {
   const findings = evaluateCompliance(store.doc, pack);
   const counts = summarizeFindings(findings);
   el.rulesCount.textContent = findings.length
-    ? `${counts.fail} fail � ${counts.unknown} cannot check � ${counts.advisory} advisory � ${counts.pass} pass`
+    ? `${counts.fail} fail · ${counts.unknown} cannot check · ${counts.advisory} advisory · ${counts.pass} pass`
     : "Nothing to check yet";
   if (!findings.length) {
     el.rules.innerHTML = '<p class="hint">Draw a room, opening or stair, then reopen Check.</p>';
@@ -6143,7 +6777,7 @@ function drawRibbon() {
 
 /** Second sentence on a snap tool's hint: which side the live measurement
  * is using. Shown before any arrow is pressed, and updated in the same
- * chip when one is. A cut warning stays the whole hint � it is the thing
+ * chip when one is. A cut warning stays the whole hint — it is the thing
  * that has to be read, and the arrows still work once it is cleared. */
 function measureHintClause() {
   if (!snapPreviewTool()) return "";
@@ -6165,7 +6799,7 @@ function setRibbonHint(text, warn = false) {
  * compile, ...) already surface their own feedback, so they do not set this.
  *
  * Overridden by a warning when the armed tool does not belong on the current
- * cut (a roof on "00 FOUNDATION", a foundation on the ground floor � see
+ * cut (a roof on "00 FOUNDATION", a foundation on the ground floor — see
  * `placementCutWarning`). Arming Foundations is the one case that moves the
  * cut: the pack already names the storey, so `offerFoundationPlan` switches
  * there. Switching back stays available, and the hint then says so. */
@@ -6218,7 +6852,11 @@ function updateRibbonHint() {
     return;
   }
   if (tool === "region") {
-    setRibbonHint(regionDraft?.length ? "Click the next corner. Enter closes the region." : HINTS.region);
+    setRibbonHint(regionFinish
+      ? (regionDraft?.length
+        ? "Click the next corner on this floor. Enter closes the shape."
+        : "Click corners on this floor. They snap to its edges. Enter closes the shape.")
+      : (regionDraft?.length ? "Click the next corner. Enter closes the region." : HINTS.region));
     return;
   }
   if (tool === "measure") {
@@ -6447,6 +7085,7 @@ function runCommand(name) {
     case "room-sep": startSeparation(); return;
     case "region": startRegion(); return;
     case "finishes": openFloorFinishes(); return;
+    case "wall-finishes": openWallFinishes(); return;
     case "sheets": case "view-section": openSheets(); return;
     case "project-info": openProjectInfo(); return;
     case "underlay": openUnderlayPicker(); return;
@@ -6594,7 +7233,7 @@ async function generateModel() {
   if (el.massGenerate) {
     el.massGenerate.dataset.busy = "1";
     el.massGenerate.disabled = true;
-    el.massGenerate.textContent = "Generating�";
+    el.massGenerate.textContent = "Generating…";
   }
   if (el.massRender) {
     el.massRender.hidden = false;
@@ -6603,7 +7242,7 @@ async function generateModel() {
   }
   if (el.massRenderStatus) {
     el.massRenderStatus.hidden = false;
-    el.massRenderStatus.textContent = "Generating a photorealistic view�";
+    el.massRenderStatus.textContent = "Generating a photorealistic view…";
   }
   try {
     const rendered = await cloud.visualize({ image });
@@ -6636,7 +7275,7 @@ async function generateModel() {
     if (el.massGenerate) {
       delete el.massGenerate.dataset.busy;
       syncGenerateEnabled();
-      if (!el.massGenerate.textContent || el.massGenerate.textContent === "Generating�") {
+      if (!el.massGenerate.textContent || el.massGenerate.textContent === "Generating…") {
         el.massGenerate.textContent = "Generate model";
       }
     }
@@ -6883,23 +7522,30 @@ function commitSeparation(a, b) {
   store.persist();
 }
 
-function startRegion() {
+function startRegion(opts = null) {
+  regionFinish = opts?.finish || null;
   regionDraft = [];
   roomDraft = null;
   lineStart = null;
   tool = "region";
   activeFunction = "region";
   underlaySelected = false;
-  store.clearSelection();
+  if (!regionFinish) store.clearSelection();
   syncToolButtons();
   drawRibbon();
-  setStatusMessage(HINTS.region, "ok");
+  setStatusMessage(regionFinish
+    ? "Click corners on this floor. They snap to its edges. Enter closes the shape."
+    : HINTS.region, "ok");
   render();
 }
 
 function finishRegionDraft() {
   if (!regionDraft || regionDraft.length < 3) {
     setStatusMessage("A region needs at least three corners.", "warn");
+    return;
+  }
+  if (regionFinish) {
+    finishFloorRegionDraft();
     return;
   }
   if (!Array.isArray(store.doc.regions)) store.doc.regions = [];
@@ -6977,6 +7623,21 @@ function openFloorFinishes() {
   setStatusMessage(selectedRoom
     ? "Pick a floor type. It is assigned to the selected room."
     : "Pick a floor type, then place the room.", "ok");
+  render();
+}
+
+/** Wall finishes live in the inspector of the selected wall; this opens it with the elevation beside it. */
+function openWallFinishes() {
+  tool = "select";
+  activeFunction = null;
+  syncToolButtons();
+  drawRibbon();
+  if (selectedElevationFace()) {
+    elevationOpen = true;
+    setStatusMessage("Add finishes in the inspector, or drag the edges of a band in the elevation.", "ok");
+  } else {
+    setStatusMessage("Select a wall to finish it, or a room to finish all its walls.", "ok");
+  }
   render();
 }
 
@@ -7086,7 +7747,7 @@ function renderSheetList() {
   el.sheetList.innerHTML = sheets.map((s) => `
     <button type="button" class="sheet-list-item${s.id === activeSheetId ? " active" : ""}" data-sheet-id="${escapeHtml(s.id)}">
       <strong>${escapeHtml(s.number)}</strong>
-      <span>${escapeHtml(s.name)} � ${escapeHtml(s.size)}</span>
+      <span>${escapeHtml(s.name)} · ${escapeHtml(s.size)}</span>
     </button>
   `).join("") || '<p class="hint">No sheets yet.</p>';
   el.sheetList.querySelectorAll("[data-sheet-id]").forEach((btn) => {
@@ -7150,8 +7811,8 @@ function renderSheetFields() {
     ? sheet.revisions.map((r) => `
         <div class="sheet-rev-row">
           <span class="sheet-rev-letter">${escapeHtml(r.rev)}</span>
-          <span>${escapeHtml(r.description || "�")}</span>
-          <span class="sheet-rev-date">${escapeHtml(r.date)}${r.by ? ` � ${escapeHtml(r.by)}` : ""}</span>
+          <span>${escapeHtml(r.description || "—")}</span>
+          <span class="sheet-rev-date">${escapeHtml(r.date)}${r.by ? ` · ${escapeHtml(r.by)}` : ""}</span>
         </div>
       `).join("")
     : '<p class="hint">No revisions issued yet.</p>';
@@ -7179,7 +7840,7 @@ function renderSheetClouds() {
     return;
   }
   const revOptions = (sheet.revisions || [])
-    .map((r) => `<option value="${escapeHtml(r.rev)}">${escapeHtml(r.rev)} � ${escapeHtml(r.description || "�")}</option>`)
+    .map((r) => `<option value="${escapeHtml(r.rev)}">${escapeHtml(r.rev)} — ${escapeHtml(r.description || "—")}</option>`)
     .join("");
   el.sheetCloudList.innerHTML = clouds.map((c, i) => `
     <div class="sheet-rev-row">
@@ -7496,7 +8157,7 @@ function drawActiveSheet() {
     sctx.fillText(row.label, tbX + 5, y + rowH * 0.28);
     sctx.font = `600 ${Math.max(9, rowH * 0.3)}px "Source Sans 3", sans-serif`;
     sctx.fillStyle = "#1a1612";
-    sctx.fillText(String(fields[row.key] ?? "�"), tbX + 5, y + rowH * 0.66, tbW - 10);
+    sctx.fillText(String(fields[row.key] ?? "—"), tbX + 5, y + rowH * 0.66, tbW - 10);
   });
 
   if (!extent || extent.w <= 0 || extent.h <= 0) return;
@@ -7614,7 +8275,7 @@ function drawActiveSheet() {
       sctx.fillStyle = "#5c5348";
       const useLabel = room.use && room.use !== "other" ? roomUse(room.use).label : "Use not set";
       sctx.fillText(useLabel, tx, ty + 2);
-      const areaText = Number.isFinite(room.area) ? `${room.area.toFixed(1)} m�` : "";
+      const areaText = Number.isFinite(room.area) ? `${room.area.toFixed(1)} m²` : "";
       if (areaText) sctx.fillText(areaText, tx, ty + 14);
     }
     if (view.kind === "plan") {
@@ -7646,7 +8307,7 @@ function drawActiveSheet() {
     }
     drawSheetNorthAndScale(sctx, areaX, areaY, areaH, pxPerM, scaleN);
   } else if (sectionGeom || elevationGeom) {
-    // Same faces (and, for a section, the same poch�) the interactive
+    // Same faces (and, for a section, the same poché) the interactive
     // Section/Elevation (massing.js) views draw, projected orthographically
     // at the sheet's own scale instead of the camera's pan/zoom - a drafted
     // view, not a screenshot of the 3D one. An elevation's faces never carry
@@ -7935,7 +8596,7 @@ const sheetUi = createSheetUi({
   pdfSnap: {
     enabled: () => snapToPdf,
     setEnabled: (on) => setSnapToPdf(on),
-    available: () => hasOpenPdf() && Boolean(store.doc?.sheetSet),
+    available: () => pdfSnapAvailable(),
     status: () => {
       const index = store.doc.underlay?.sheetPage;
       return Number.isInteger(index) ? pageLineworkStatus(index) : "idle";
@@ -8068,7 +8729,7 @@ function openUnderlayPicker() {
       return;
     }
     if (!(await sheetUi.confirmReplace())) return;
-    setStatusMessage(`Reading ${file.name}�`, "ok");
+    setStatusMessage(`Reading ${file.name}…`, "ok");
     const result = await loadUnderlayFile(store.doc, file);
     setStatusMessage(result.message, result.ok ? "ok" : "warn");
     if (result.ok) {
@@ -8114,7 +8775,7 @@ function syncSatellitePanel() {
   el.satellitePanel.hidden = !satelliteOpen;
   if (el.satelliteConfirm) {
     el.satelliteConfirm.disabled = satelliteBusy;
-    el.satelliteConfirm.textContent = satelliteBusy ? "Loading�" : "Load";
+    el.satelliteConfirm.textContent = satelliteBusy ? "Loading…" : "Load";
   }
 }
 
@@ -8218,7 +8879,7 @@ async function commitSatellite(place) {
   clearSatelliteSuggestions();
   let known = place && Number.isFinite(place.lat) && Number.isFinite(place.lng) ? place : null;
   if (place && !known) {
-    setStatusMessage("Looking up that address�", "ok");
+    setStatusMessage("Looking up that address…", "ok");
     const located = await locateSuggestion(place);
     if (!located.ok) {
       satelliteBusy = false;
@@ -8230,7 +8891,7 @@ async function commitSatellite(place) {
     }
     known = located;
   }
-  setStatusMessage("Fetching the satellite view�", "ok");
+  setStatusMessage("Fetching the satellite view…", "ok");
   const result = await loadSatelliteUnderlay(store.doc, query, { x: cx, y: cy }, undefined, known);
   satelliteBusy = false;
   setStatusMessage(result.message, result.ok ? "ok" : "warn");
@@ -8440,7 +9101,7 @@ function restoreSatelliteBitmap() {
   });
 }
 
-/** "{sheet} � {floor} � 1:{scale} � scale checked" at the sheet's own top-left corner, kept on screen when zoomed in. */
+/** "{sheet} · {floor} · 1:{scale} · scale checked" at the sheet's own top-left corner, kept on screen when zoomed in. */
 function drawSheetCaption(rect) {
   const set = store.doc.sheetSet;
   const page = set?.pages.find((p) => p.index === store.doc.underlay?.sheetPage);
@@ -8448,7 +9109,7 @@ function drawSheetCaption(rect) {
   const corners = underlayCorners(store.doc);
   if (!corners?.length) return;
   const floor = visibleLevels().find((l) => l.id === page.levelId)?.name || page.levelId || "no floor";
-  const text = `${page.label} � ${floor} � 1:${page.printedScale} � ${page.verified ? "scale checked" : "scale not checked"}`;
+  const text = `${page.label} · ${floor} · 1:${page.printedScale} · ${page.verified ? "scale checked" : "scale not checked"}`;
   ctx.save();
   ctx.font = "11px Source Sans 3, sans-serif";
   const pad = 5;
@@ -8630,7 +9291,7 @@ function captureCalibrationPoint(wx, wy) {
   return { x: wx, y: wy, pixel };
 }
 
-/** World position of a calibration pick � follows the sheet when it is resized. */
+/** World position of a calibration pick — follows the sheet when it is resized. */
 function liveCalibrationPoint(pt) {
   if (!pt) return null;
   if (pt.pixel && store.doc.underlay) return underlayWorldFromPixel(store.doc.underlay, pt.pixel.x, pt.pixel.y);
@@ -8959,7 +9620,7 @@ function fillAttachList() {
   el.attachList.innerHTML = attachPick.candidates.map((ref) => {
     const obj = objByRef(ref);
     const level = (pack.levels || []).find((l) => l.id === effectiveLevel(obj, pack))?.name || effectiveLevel(obj, pack);
-    return `<option value="${escapeHtml(attachRefKey(ref))}">${escapeHtml(`${objectLabel(pack, obj)} � ${level}`)}</option>`;
+    return `<option value="${escapeHtml(attachRefKey(ref))}">${escapeHtml(`${objectLabel(pack, obj)} — ${level}`)}</option>`;
   }).join("");
 }
 
@@ -9070,11 +9731,11 @@ function attachStateText(obj) {
   const base = resolvedBase(store.doc, pack, obj, drawnObjectHeight(pack, obj));
   const level = (pack.levels || []).find((l) => l.id === effectiveLevel(obj, pack));
   const levelLabel = level?.name || effectiveLevel(obj, pack) || "level";
-  if (base.warning) return `Attached, but unresolved � falls back to ${levelLabel}. See Check.`;
+  if (base.warning) return `Attached, but unresolved — falls back to ${levelLabel}. See Check.`;
   if (base.attachedTo) {
     return `On "${base.attachedTo.label}" at ${formatLengthMm(base.elevation)} mm, ${formatLengthMm(base.height)} mm high`;
   }
-  return `Not attached � ${levelLabel} + ${formatLengthMm(obj.baseOffset || 0)} mm`;
+  return `Not attached — ${levelLabel} + ${formatLengthMm(obj.baseOffset || 0)} mm`;
 }
 
 /** Drawn foundations filed on a storey that is not the foundation storey.
@@ -9084,7 +9745,7 @@ function renderFoundationReport() {
   if (!el.foundationReport) return;
   const home = foundationStorey(pack.levels || []);
   if (!home) {
-    el.foundationCount.textContent = "�";
+    el.foundationCount.textContent = "—";
     el.foundationReport.innerHTML = '<p class="hint">This template has no foundation storey, so a foundation stays on the plan it is drawn on.</p>';
     return;
   }
@@ -9120,7 +9781,7 @@ function renderAttachReport() {
   const rows = attachReport(store.doc, pack);
   const broken = rows.filter((r) => r.warning).length;
   el.attachCount.textContent = rows.length
-    ? `${rows.length} attached${broken ? ` � ${broken} unresolved` : ""}`
+    ? `${rows.length} attached${broken ? ` · ${broken} unresolved` : ""}`
     : "None";
   if (!rows.length) {
     el.attachReport.innerHTML = '<p class="hint">No object\'s base follows another one. Every elevation here is its level\'s datum.</p>';
@@ -9131,7 +9792,7 @@ function renderAttachReport() {
       <span>${escapeHtml(row.label)}</span>
       <span>${escapeHtml(row.warning
         ? row.warning
-        : `on "${row.attachedTo.label}" � base ${formatLengthMm(row.elevation)} mm, ${formatLengthMm(row.height)} mm high`)}</span>
+        : `on "${row.attachedTo.label}" — base ${formatLengthMm(row.elevation)} mm, ${formatLengthMm(row.height)} mm high`)}</span>
     </div>
   `).join("");
 }
@@ -9237,10 +9898,10 @@ function beginPan(ev) {
 // Drags that edit geometry already in the document mutate it live, off the
 // speculative undo entry pushed on pointer-down. Cancelling one therefore
 // means rolling that entry back, not just forgetting the drag.
-const REVERTIBLE_DRAGS = new Set(["move", "segment-end", "property-vertex", "property-move", "underlay-move", "underlay-scale", "underlay-rotate"]);
+const REVERTIBLE_DRAGS = new Set(["move", "segment-end", "shape-vertex", "region-vertex", "region-move", "property-vertex", "property-move", "underlay-move", "underlay-scale", "underlay-rotate"]);
 
 /**
- * Drop the in-progress click�click segment (or last property-line vertex)
+ * Drop the in-progress click–click segment (or last property-line vertex)
  * without leaving the tool. Returns true when there was something to abort,
  * so Escape can stay in the wall/beam/roof tool the way Revit does.
  */
@@ -9270,7 +9931,7 @@ function abortClickDraft() {
 }
 
 /**
- * Escape: first drop the live click�click preview (keep the tool armed);
+ * Escape: first drop the live click–click preview (keep the tool armed);
  * a second press leaves the tool, which is what the ribbon hints
  * ("Esc to stop") promise once there is no segment in flight.
  */
@@ -9576,6 +10237,46 @@ function onPointerDown(ev) {
       render();
       return;
     }
+  }
+
+  // A floor finish region being edited (tiles, waterproofing): its own corners
+  // and edges come first, since they usually sit right on the floor's.
+  if (tool === "select" && !attachPick && !ev.shiftKey && beginFinishRegionDrag(ev, wx, wy)) {
+    render();
+    return;
+  }
+
+  // A room/slab/roof already shown as a polygon: a corner wins over moving
+  // the whole shape, and an edge (no corner there yet) adds one and starts
+  // dragging it straight away, the way a stray click used to miss.
+  if (tool === "select" && !attachPick && !ev.shiftKey) {
+    const editable = editableShapeRef();
+    selectedShapeVertex = null;
+    if (editable) {
+      const vi = hitPolyVertexIndex(editable.points, wx, wy, shapeEditTol());
+      if (vi != null) {
+        store.pushUndo();
+        selectedShapeVertex = { ref: editable.ref, index: vi };
+        drag = { kind: "shape-vertex", ref: editable.ref, index: vi, moved: false };
+        el.canvas.setPointerCapture(ev.pointerId);
+        render();
+        return;
+      }
+      const ei = hitPolyEdgeIndex(editable.points, wx, wy, propertyPickTol());
+      if (ei != null) {
+        store.pushUndo();
+        const insertAt = ei + 1;
+        editable.obj.shape.points.splice(insertAt, 0, [wx, wy]);
+        selectedShapeVertex = { ref: editable.ref, index: insertAt };
+        drag = { kind: "shape-vertex", ref: editable.ref, index: insertAt, moved: false };
+        el.canvas.setPointerCapture(ev.pointerId);
+        render();
+        return;
+      }
+    }
+    // A press inside a region of the floor that is selected picks that region
+    // for editing; the press itself still goes on to select or move the floor.
+    pickFinishRegionAt(wx, wy);
   }
 
   if (underlayHandlesActive()) {
@@ -10023,7 +10724,12 @@ function finishServiceRoute({ select = true } = {}) {
 
 /** The route profile is on screen (a route is selected, or one was just drawn). */
 function routeProfileOpen() {
-  return Boolean(el.serviceProfileDock && !el.serviceProfileDock.hidden);
+  return Boolean(el.serviceProfileDock && !el.serviceProfileDock.hidden && !elevationShowing());
+}
+
+/** The strip under the plan is showing a wall elevation, not a route profile. */
+function elevationShowing() {
+  return Boolean(el.elevBody && !el.elevBody.hidden);
 }
 
 /** The open route profile is showing this selection, and only this selection. */
@@ -10073,6 +10779,11 @@ function clearRouteIfLeavingServices() {
  * the run just drawn brings the profile straight back.
  */
 function exitRouteProfile() {
+  if (elevationShowing()) {
+    elevationOpen = false;
+    render();
+    return;
+  }
   if (serviceRoute?.fromNodeId) finishServiceRoute({ select: false });
   else serviceRoute = null;
   serviceConnect = null;
@@ -10317,9 +11028,11 @@ function finishShapeRect() {
 }
 
 
-/** Select-tool cursor. A crosshair picks or window-selects. The move cursor
- *  appears only once the thing under the pointer is already selected, which
- *  is when a left-drag will move it. Handles keep their own cursors. */
+/** Select-tool cursor. A crosshair window-selects on empty space. The pointer
+ *  appears over an unselected object a click will pick (the same objects that
+ *  draw a hover highlight). The move cursor appears only once that object is
+ *  already selected, which is when a left-drag will move it. Handles keep
+ *  their own cursors. */
 function planSelectCursor(wx, wy, uHandle) {
   if (endpointHandleHit(wx, wy)) return "ew-resize";
   if (uHandle?.kind === "underlay-rotate") return "grab";
@@ -10327,6 +11040,8 @@ function planSelectCursor(wx, wy, uHandle) {
   if (hover && store.isSelected(hover.kind, hover.id)) return "move";
   if (propertyHover && propertySelected) return "move";
   if (underlaySelected && hitUnderlay(wx, wy)) return store.doc.underlay.pinned ? "not-allowed" : "move";
+  if (hover && refShownOnPlan(hover)) return "pointer";
+  if (propertyHover) return "pointer";
   return "crosshair";
 }
 
@@ -10513,6 +11228,23 @@ function onPointerMove(ev) {
     render();
     return;
   }
+  if (dragFinishRegion(wx, wy)) return;
+  if (drag?.kind === "shape-vertex") {
+    const obj = objByRef(drag.ref);
+    const pt = obj?.shape?.points?.[drag.index];
+    if (pt) {
+      // Keep the other corners of this floor (so a shared X or Y still draws
+      // one guide) but not this corner or the outline itself — those are
+      // always under the pointer and would light both guides on every move.
+      const p = applySnap(wx, wy, {
+        activeShape: { kind: drag.ref.kind, id: drag.ref.id, x: pt[0], y: pt[1] },
+      });
+      if (Math.hypot(p.x - pt[0], p.y - pt[1]) * cam.scale > 2) drag.moved = true;
+      if (drag.moved) obj.shape.points[drag.index] = [p.x, p.y];
+    }
+    render();
+    return;
+  }
   if (drag?.kind === "property-vertex") {
     const p = applySnap(wx, wy);
     const [ox, oy] = drag.origin[drag.index];
@@ -10537,6 +11269,7 @@ function onPointerMove(ev) {
     return;
   }
   if (!drag && tool === "select") {
+    syncFinishRegionHover(wx, wy);
     const uHandle = underlayHandleHit(wx, wy);
     propertyHover = hover ? null : propertyHitAt(wx, wy);
     el.canvas.style.cursor = planSelectCursor(wx, wy, uHandle);
@@ -10613,10 +11346,15 @@ function onPointerUp(ev) {
     if (!drag.moved) store.undoStack.pop(); // no-op click: drop the speculative undo entry
   } else if (drag.kind === "segment-end") {
     store.persist();
+  } else if (drag.kind === "shape-vertex") {
+    if (!drag.moved) store.undoStack.pop();
+  } else if (drag.kind === "region-vertex" || drag.kind === "region-move") {
+    // A press that moved nothing leaves no undo step, unless it added a corner.
+    if (!drag.moved && !drag.inserted) store.undoStack.pop();
   } else if (drag.kind === "property-vertex" || drag.kind === "property-move") {
     if (!drag.moved) store.undoStack.pop();
     else if (drag.hadDerived) {
-      setStatusMessage("Property line updated. Run Building line again � the old setback was cleared.", "ok");
+      setStatusMessage("Property line updated. Run Building line again — the old setback was cleared.", "ok");
     }
   }
 
@@ -10627,7 +11365,68 @@ function onPointerUp(ev) {
   render();
 }
 
+function deleteElevCorner() {
+  if (selectedElevVertex == null || !selectedBandId || !elevationFace) return false;
+  const model = elevationModel(store.doc, pack, elevationFace, wallsCache);
+  const band = model?.finishBands.find((b) => b.id === selectedBandId);
+  if (!band?.outline) return false;
+  if (band.outline.length <= 3) {
+    setStatusMessage("A finish needs at least three corners.", "warn");
+    return true;
+  }
+  const points = band.outline.map(([s, z]) => ({ s, z }));
+  points.splice(selectedElevVertex, 1);
+  selectedElevVertex = null;
+  store.pushUndo();
+  applyOutlinePoints(store.doc, pack, elevationFace, band.id, points, wallsCache);
+  store.persist();
+  finishKey = "";
+  setStatusMessage("Corner removed.", "ok");
+  render();
+  return true;
+}
+
 function deleteSelection() {
+  if (deleteElevCorner()) return;
+  // While a region's corners are showing, Delete is about them, never the floor under them.
+  const editing = editingFinishRegion();
+  if (editing) {
+    const vref = selectedRegionVertex;
+    selectedRegionVertex = null;
+    const pts = editing.shape?.points;
+    if (vref && vref.id === editing.id && pts && pts[vref.index]) {
+      if (pts.length <= 3) {
+        setStatusMessage("A region needs at least three corners.", "warn");
+        return;
+      }
+      store.pushUndo();
+      pts.splice(vref.index, 1);
+      store.persist();
+      setStatusMessage("Corner removed.", "ok");
+      render();
+    } else {
+      setStatusMessage("Click a corner of the region, then Delete. Use Remove in the inspector to take the region off.", "warn");
+    }
+    return;
+  }
+  if (selectedShapeVertex) {
+    const vref = selectedShapeVertex;
+    selectedShapeVertex = null;
+    const obj = objByRef(vref.ref);
+    const pts = obj?.shape?.points;
+    if (pts && store.isSelected(vref.ref.kind, vref.ref.id)) {
+      if (pts.length <= 3) {
+        setStatusMessage("A shape needs at least three corners.", "warn");
+        return;
+      }
+      store.pushUndo();
+      pts.splice(vref.index, 1);
+      store.persist();
+      setStatusMessage("Corner removed.", "ok");
+      render();
+      return;
+    }
+  }
   if (propertySelected && !store.selected.length) {
     store.pushUndo();
     setPropertyLine(store.doc, null);
@@ -10663,6 +11462,12 @@ function deleteSelection() {
   // A lone route node dissolves like a GIS vertex: the run heals over it.
   if (serviceSel.length === 1 && serviceSel[0].kind === "serviceNode") removeServiceNode(store.doc, serviceSel[0].id);
   else deleteServiceRefs(store.doc, serviceSel);
+  // The tiles and waterproofing on a floor go with it, never left floating.
+  const goneRegions = new Set(hostedFinishRegionsOf(store.doc, store.selected.filter((r) => !isService(r))).map((r) => r.id));
+  if (goneRegions.size) {
+    store.doc.finishRegions = store.doc.finishRegions.filter((r) => !goneRegions.has(r.id));
+    editingRegionId = null;
+  }
   for (const ref of store.selected.filter((r) => !isService(r))) {
     const arr = collectionFor(store.doc, ref.kind);
     const idx = arr?.findIndex((row) => row.id === ref.id) ?? -1;
@@ -10727,6 +11532,19 @@ function wireKeyboard() {
         setPanMode(false);
         return;
       }
+      if (elevFinishDraft) {
+        if (elevFinishDraft.points.length) {
+          elevFinishDraft.points.pop();
+          setStatusMessage(elevFinishDraft.points.length
+            ? "Last corner removed."
+            : "Click the first corner on the elevation.", "ok");
+        } else {
+          elevFinishDraft = null;
+          setStatusMessage("Drawing cancelled.", "ok");
+        }
+        render();
+        return;
+      }
       cancelDrawing();
     } else if (el.typeDetailOverlay && !el.typeDetailOverlay.hidden && (ev.key === "ArrowLeft" || ev.key === "ArrowRight")) {
       // Overlay is open: arrows page through the other options instead of
@@ -10755,6 +11573,9 @@ function wireKeyboard() {
         }
       }
       render();
+    } else if (ev.key === "Enter" && elevFinishDraft) {
+      ev.preventDefault();
+      finishElevFinishDraft();
     } else if (ev.key === "Enter" && serviceRoute) {
       ev.preventDefault();
       finishServiceRoute();
@@ -10918,6 +11739,8 @@ function commitWall(a, b) {
     x1: line.x1, y1: line.y1, x2: line.x2, y2: line.y2,
     status: placementStatus(),
   };
+  const newSku = skuById(placeSkuId);
+  seg.top = defaultWallTop(pack.levels, activeLevel, skuDrawnHeight(newSku));
   if (isFaceLocation(location)) seg.location = location;
   store.doc.segments.push(seg);
   store.selectOne({ kind: "segment", id });
@@ -11189,7 +12012,7 @@ function syncInspectStatus(obj, draft) {
 
 function syncInspectKicker(text) {
   if (!el.inspectKicker) return;
-  el.inspectKicker.textContent = text || "�";
+  el.inspectKicker.textContent = text || "—";
 }
 
 function syncObjectLevel(obj) {
@@ -11207,6 +12030,143 @@ function syncObjectLevel(obj) {
   const id = selectedInspectorStationId(stations, obj.level || pack.system.defaultLevel, activeStationId);
   if (document.activeElement !== el.ctxOLevel) el.ctxOLevel.value = id;
 }
+
+/** "Top: up to [level] / fixed height" for a selected drawn wall. Only offered
+ * where a level above exists to top out against. */
+function syncWallTop(seg) {
+  const rise = seg ? levelAboveRise(pack.levels, effectiveLevel(seg, pack)) : null;
+  const show = seg && rise !== null && seg.category !== "foundation" && skuById(seg.sku)?.category !== "foundation";
+  setHidden(el.ctxTopWrap, !show);
+  if (!show || !el.ctxTop) return;
+  const above = (pack.levels || [])
+    .filter((l) => l.elevation > (pack.levels.find((x) => x.id === effectiveLevel(seg, pack))?.elevation ?? 0) + 1e-6 && l.kind !== "reference" && !l.parentId)
+    .sort((a, b) => a.elevation - b.elevation)[0];
+  el.ctxTop.options[0].textContent = `Up to ${above?.name || above?.id || "level above"}`;
+  if (document.activeElement !== el.ctxTop) el.ctxTop.value = seg.top === "level-above" ? "level-above" : "fixed";
+}
+
+/** Wall height for a drawn wall or a room, and sill / width / height for an
+ * opening. A blank field means "use the type's value" (or the level above). */
+function syncHeightFields(obj, kind) {
+  const seg = kind === "segment" ? obj : null;
+  const room = kind === "room" ? obj : null;
+  const opening = kind === "opening" ? obj : null;
+  const segWall = seg ? wallsCache.find((w) => w.id === seg.id) : null;
+  const showSegH = Boolean(seg && segWall && segWall.category !== "foundation");
+  setHidden(el.ctxWallHWrap, !(showSegH || room));
+  if (el.ctxWallH && (showSegH || room) && document.activeElement !== el.ctxWallH) {
+    if (showSegH) {
+      el.ctxWallH.value = formatLengthMm(segWall.height);
+      el.ctxWallH.placeholder = "";
+    } else {
+      const own = wallsCache.find((w) => !w.drawn && w.roomIds?.includes(room.id));
+      el.ctxWallH.value = Number.isFinite(room.wallHeight) ? formatLengthMm(room.wallHeight) : "";
+      el.ctxWallH.placeholder = own ? formatLengthMm(own.height) : "type";
+    }
+  }
+  setHidden(el.ctxConvert, !room);
+
+  const size = opening ? openingSize(pack, opening) : null;
+  const isWindow = Boolean(opening && skuById(opening.sku)?.category === "window");
+  setHidden(el.ctxSillWrap, !isWindow);
+  setHidden(el.ctxOWidthWrap, !opening);
+  setHidden(el.ctxOHeightWrap, !opening);
+  setHidden(el.ctxOSizeNote, !size?.nonStandard);
+  if (!opening) return;
+  const put = (input, metres) => {
+    if (input && document.activeElement !== input) input.value = Number.isFinite(metres) ? formatLengthMm(metres) : "";
+  };
+  put(el.ctxSill, size.sill);
+  put(el.ctxOWidth, size.width);
+  put(el.ctxOHeight, size.height);
+  const note = el.ctxOSizeNote?.querySelector("strong");
+  if (note) note.textContent = "Non-standard size: firm to confirm";
+}
+
+/** Metres from a typed mm field, `null` when blank (clear), `undefined` when unusable (ignore). */
+function typedMm(raw, { allowZero = false } = {}) {
+  const text = String(raw ?? "").trim();
+  if (text === "") return null;
+  const n = Number(text.replace(",", ".").replace(/mm$/i, "").trim());
+  if (!Number.isFinite(n) || n < 0 || (n === 0 && !allowZero) || n > 20000) return undefined;
+  return n / 1000;
+}
+
+el.ctxWallH?.addEventListener("change", (e) => {
+  const value = typedMm(e.target.value);
+  if (value === undefined) { render(); return; }
+  const seg = soleOf("segment");
+  const room = soleOf("room");
+  if (seg) {
+    store.pushUndo();
+    if (value === null) {
+      seg.height = null;
+      seg.top = defaultWallTop(pack.levels, effectiveLevel(seg, pack), skuDrawnHeight(skuById(seg.sku)));
+    } else {
+      seg.height = value;
+      seg.top = null;
+    }
+  } else if (room) {
+    store.pushUndo();
+    room.wallHeight = value;
+  } else {
+    return;
+  }
+  store.persist();
+  render();
+});
+
+function setOpeningSize(field, raw, { allowZero = false } = {}) {
+  const opening = soleOf("opening");
+  const value = typedMm(raw, { allowZero });
+  if (!opening || value === undefined) { render(); return; }
+  const g = skuById(opening.sku)?.geometry || {};
+  // Typing the type's own value is the same as having no override.
+  const typeValue = g[field];
+  store.pushUndo();
+  opening[field] = value === null || (Number.isFinite(typeValue) && Math.abs(typeValue - value) < 0.0005) ? null : value;
+  store.persist();
+  render();
+}
+el.ctxSill?.addEventListener("change", (e) => setOpeningSize("sill", e.target.value, { allowZero: true }));
+el.ctxOWidth?.addEventListener("change", (e) => setOpeningSize("width", e.target.value));
+el.ctxOHeight?.addEventListener("change", (e) => setOpeningSize("height", e.target.value));
+
+el.ctxConvert?.addEventListener("click", () => {
+  const room = soleOf("room");
+  if (!room) return;
+  const pieces = currentWalls().filter((w) => !w.drawn && w.roomIds?.includes(room.id));
+  const segs = pieces.map((w) => drawnSegmentFromWall(w, pack)).filter(Boolean);
+  if (!segs.length) return;
+  store.pushUndo();
+  store.doc.segments.push(...segs);
+  store.persist();
+  render();
+});
+
+el.ctxShapePoly?.addEventListener("click", () => {
+  const obj = store.selected.length === 1 ? objByRef(store.primary) : null;
+  const kind = store.primary?.kind;
+  if (!obj || !["room", "slab", "roof"].includes(kind) || obj.shape?.kind !== "rect") return;
+  const next = shapeAsPoly(obj.shape);
+  if (!next) return;
+  store.pushUndo();
+  obj.shape = next;
+  store.persist();
+  setStatusMessage("Now a polygon. Drag a corner to reshape it, or click an edge to add one.", "ok");
+  render();
+});
+
+el.ctxTop?.addEventListener("change", (e) => {
+  if (store.selected.length !== 1 || store.primary?.kind !== "segment") return;
+  const seg = objByRef(store.primary);
+  if (!seg) return;
+  store.pushUndo();
+  seg.top = e.target.value === "level-above" ? "level-above" : null;
+  if (seg.top === "level-above") seg.height = null;
+  store.persist();
+  render();
+});
 
 // --- services dock ---------------------------------------------------------
 
@@ -11246,10 +12206,1112 @@ function serviceProfileEdge() {
   return null;
 }
 
+// --- wall elevation (aansig) ---------------------------------------------
+
+/** The wall face the current selection stands for, or null. */
+function selectedElevationFace() {
+  if (!pack || wallDraft || store.selected.length !== 1 || !store.primary) return null;
+  return faceRefForSelection(store.doc, pack, wallsCache, store.primary, elevationFace);
+}
+
+function selectedOpeningId() {
+  return store.selected.length === 1 && store.primary?.kind === "opening" ? store.primary.id : null;
+}
+
+/** The edit a drag in progress implies, in viewing coordinates (metres). */
+function elevationDragEdit(d, scale) {
+  const dx = (d.x - d.x0) / scale;
+  const dy = -(d.y - d.y0) / scale; // up is positive
+  const o = d.orig;
+  const MIN = 0.15;
+  switch (d.part) {
+    // A finish band's edges: a run's ends, and the top and bottom of a run or a room rule.
+    case "band-top": return { top: o.top + dy };
+    case "band-bottom": return { bottom: o.bottom + dy };
+    case "band-left": return { from: o.from + dx };
+    case "band-right": return { to: o.to + dx };
+    case "move": return { left: o.left + dx, sill: o.category === "door" ? undefined : o.sill + dy };
+    case "l": {
+      const width = Math.max(MIN, o.width - dx);
+      return { left: o.left + o.width - width, width };
+    }
+    case "r": return { width: Math.max(MIN, o.width + dx) };
+    case "t": return { height: Math.max(MIN, o.height + dy) };
+    case "b": {
+      const height = Math.max(MIN, o.height - dy);
+      return { sill: Math.max(0, o.sill + o.height - height), height };
+    }
+    case "wall-top": return { height: o.height + dy };
+    default: return {};
+  }
+}
+
+/** Apply a drag (an opening, a finish band's edge, or the wall top) to `doc`. */
+function applyElevationDrag(doc, face, d) {
+  if (d.part === "outline") return applyOutlinePoints(doc, pack, face, d.bandId, d.points, wallsCache);
+  const edit = elevationDragEdit(d, d.scale);
+  if (d.part === "wall-top") return applyWallTopEdit(doc, pack, face, edit.height, wallsCache);
+  if (d.band) applyBandEdit(doc, pack, face, d.id, edit, wallsCache);
+  else applyOpeningEdit(doc, pack, face, d.id, edit, wallsCache);
+  return null;
+}
+
+/** The model for the open face, with a drag in progress already applied. */
+function elevationModelNow(face) {
+  if (elevationDrag && elevationDrag.face.wallId === face.wallId && (elevationDrag.moved || elevationDrag.part === "outline")) {
+    const preview = {
+      ...store.doc,
+      openings: structuredClone(store.doc.openings || []),
+      finishRuns: structuredClone(store.doc.finishRuns || []),
+      rooms: structuredClone(store.doc.rooms || []),
+      segments: structuredClone(store.doc.segments || []),
+    };
+    const applied = applyElevationDrag(preview, face, elevationDrag);
+    if (elevationDrag.part === "wall-top") {
+      const next = applied?.wallId ? { ...face, wallId: applied.wallId } : face;
+      return elevationModel(preview, pack, next);
+    }
+    return elevationModel(preview, pack, face, wallsCache);
+  }
+  return elevationModel(store.doc, pack, face, wallsCache);
+}
+
+let elevationLayout = null;
+
+/**
+ * Show the elevation in the strip under the plan while "Open elevation" is on
+ * and a wall face is selected. Returns true when it is showing, so the route
+ * profile leaves the strip alone.
+ */
+function syncElevationDock() {
+  const dock = el.serviceProfileDock;
+  const face = selectedElevationFace();
+  const show = Boolean(elevationOpen && face && !serviceDockActive());
+  if (elevationOpen && !show && !serviceDockActive()) elevationOpen = false;
+  if (!show) {
+    if (face) elevationFace = face;
+    elevationLayout = null;
+    elevationKey = "";
+    setHidden(el.elevBody, true);
+    setHidden(el.elevFlip, true);
+    setHidden(el.serviceProfileCanvas, false);
+    setHidden(dock.querySelector(".svc-profile-mode"), false);
+    setHidden(document.getElementById("v2-profile-select-all"), false);
+    return false;
+  }
+  elevationFace = face;
+  const model = elevationModelNow(face);
+  if (!model) {
+    elevationOpen = false;
+    return false;
+  }
+  setHidden(dock, false);
+  fitServiceProfileHeight();
+  setHidden(el.serviceProfileCanvas, true);
+  setHidden(dock.querySelector(".svc-profile-mode"), true);
+  setHidden(document.getElementById("v2-profile-select-all"), true);
+  setHidden(el.elevFlip, false);
+  setHidden(el.elevBody, false);
+  if (el.serviceProfileTitle) {
+    el.serviceProfileTitle.textContent = elevFinishDraft
+      ? "Click each corner of the finish. Enter closes the shape. Esc removes the last corner."
+      : `Wall elevation · ${model.name} · ${Math.round(model.length * 1000)} mm, ${model.side === 1 ? "face A" : "face B"} · drag the top of the wall to set its height. The line above is the next floor, or the roof on the top storey.`;
+  }
+  const w = el.elevBody.clientWidth;
+  const h = el.elevBody.clientHeight;
+  const selectedId = selectedOpeningId();
+  const draft = elevFinishDraft && elevFinishDraft.face.wallId === face.wallId ? elevFinishDraft : null;
+  const guides = elevationGuides();
+  const key = `${w}x${h}|${selectedId}|${selectedBandId}|${selectedElevVertex}|${JSON.stringify(model)}|${JSON.stringify(draft)}|${JSON.stringify(guides)}`;
+  if (key === elevationKey) return true;
+  elevationKey = key;
+  const drawn = elevationSvg(model, { width: w, height: h, interactive: true, selectedId, selectedBandId, selectedVertex: selectedElevVertex, draft, guides });
+  elevationLayout = { scale: drawn.scale, originX: drawn.originX, originY: drawn.originY };
+  el.elevBody.innerHTML = drawn.svg;
+  return true;
+}
+
+function elevationPointer(ev, host) {
+  const rect = host.getBoundingClientRect();
+  return { x: ev.clientX - rect.left, y: ev.clientY - rect.top };
+}
+
+function elevationGuides() {
+  if (elevFinishDraft && (elevFinishDraft.guideS != null || elevFinishDraft.guideZ != null)) {
+    return { s: elevFinishDraft.guideS, z: elevFinishDraft.guideZ };
+  }
+  if (elevationDrag?.part === "outline" && (elevationDrag.guideS != null || elevationDrag.guideZ != null)) {
+    return { s: elevationDrag.guideS, z: elevationDrag.guideZ };
+  }
+  return null;
+}
+
+/** Snap one elevation point to the grid, then to corners and edges on this face. */
+function elevAlign(rawS, rawZ, model, points, skipIndex = -1) {
+  const sTargets = [0, model.length];
+  const zTargets = [0, model.height];
+  points.forEach((p, i) => {
+    if (i === skipIndex) return;
+    sTargets.push(p.s);
+    zTargets.push(p.z);
+  });
+  for (const opening of model.openings || []) {
+    sTargets.push(opening.offset, opening.offset + opening.width);
+    zTargets.push(opening.sill, opening.sill + opening.height);
+  }
+  const axis = (raw, hi, targets) => {
+    let value = snapElevation(raw);
+    let guide = null;
+    let bestD = ELEVATION_SNAP * 2;
+    for (const t of targets) {
+      const d = Math.abs(value - t);
+      if (d <= bestD) { value = t; bestD = d; guide = t; }
+    }
+    value = Math.min(hi, Math.max(0, value));
+    if (guide != null && Math.abs(guide - value) > 1e-6) guide = null;
+    return { value, guide };
+  };
+  const s = axis(rawS, model.length, sTargets);
+  const z = axis(rawZ, model.height, zTargets);
+  return { s: s.value, z: z.value, guideS: s.guide, guideZ: z.guide };
+}
+
+function elevRawPoint(ev, host, layout) {
+  const p = elevationPointer(ev, host);
+  return {
+    s: (p.x - layout.originX) / layout.scale,
+    z: (layout.originY - p.y) / layout.scale,
+  };
+}
+
+/** A click on the elevation, in viewing coordinates: along the face, up from the base. */
+function elevDraftPoint(ev, host, layout) {
+  const model = elevationModelNow(elevFinishDraft.face);
+  if (!model) return null;
+  const raw = elevRawPoint(ev, host, layout);
+  const aligned = elevAlign(raw.s, raw.z, model, elevFinishDraft.points);
+  elevFinishDraft.guideS = aligned.guideS;
+  elevFinishDraft.guideZ = aligned.guideZ;
+  return { s: aligned.s, z: aligned.z };
+}
+
+/** Store the shape being clicked on the elevation as a finish on that face. */
+function finishElevFinishDraft() {
+  const draft = elevFinishDraft;
+  if (!draft || draft.points.length < 3) {
+    setStatusMessage("A finish needs at least three corners.", "warn");
+    return;
+  }
+  const model = elevationModel(store.doc, pack, draft.face, wallsCache);
+  const wall = model ? wallsCache.find((w) => w.id === model.wallId) : null;
+  if (!model || !wall) { elevFinishDraft = null; render(); return; }
+  const ss = draft.points.map((p) => p.s);
+  const zs = draft.points.map((p) => p.z);
+  if (Math.max(...ss) - Math.min(...ss) < ELEVATION_SNAP || Math.max(...zs) - Math.min(...zs) < ELEVATION_SNAP) {
+    setStatusMessage("The shape is too flat. Click corners that enclose an area.", "warn");
+    return;
+  }
+  // Points are in viewing order. A run keeps them from the wall's first end.
+  const outline = draft.points.map((p) => [model.flip ? model.length - p.s : p.s, p.z]);
+  const { category, productName } = draft;
+  elevFinishDraft = null;
+  finishCommit(() => {
+    const run = createFinishRun(store.doc, wall, model.side, {
+      category,
+      productId: productName && category !== "none" ? ensureFinishProduct(store.doc, category, productName) : null,
+      outline,
+    });
+    selectedBandId = `run:${run.id}:${wall.id}:${model.side}`;
+    noteBandSaved(selectedBandId);
+  });
+  setStatusMessage("Finish drawn on this face.", "ok");
+}
+
+function beginOutlineDrag(ev, layout, model, band, mode, index) {
+  const points = band.outline.map(([s, z]) => ({ s, z }));
+  let vertex = index;
+  let inserted = false;
+  if (mode === "edge") {
+    const a = points[index];
+    const b = points[(index + 1) % points.length];
+    const raw = elevRawPoint(ev, ev.currentTarget, layout);
+    const dx = b.s - a.s;
+    const dz = b.z - a.z;
+    const len2 = dx * dx + dz * dz || 1;
+    const t = Math.max(0, Math.min(1, ((raw.s - a.s) * dx + (raw.z - a.z) * dz) / len2));
+    points.splice(index + 1, 0, { s: a.s + dx * t, z: a.z + dz * t });
+    vertex = index + 1;
+    inserted = true;
+  }
+  const raw = elevRawPoint(ev, ev.currentTarget, layout);
+  selectedBandId = band.id;
+  selectedElevVertex = mode === "move" ? null : vertex;
+  elevationDrag = {
+    part: "outline",
+    bandId: band.id,
+    id: band.id,
+    band: false,
+    face: { ...elevationFace },
+    scale: layout.scale,
+    points,
+    origin: points.map((p) => ({ ...p })),
+    index: vertex,
+    moveAll: mode === "move",
+    grab: { s: raw.s, z: raw.z },
+    inserted,
+    moved: false,
+    guideS: null,
+    guideZ: null,
+    x0: 0,
+    y0: 0,
+    x: 0,
+    y: 0,
+    orig: {},
+  };
+  ev.currentTarget.setPointerCapture(ev.pointerId);
+  ev.preventDefault();
+  render();
+}
+
+function onElevationPointerDown(ev, layout) {
+  if (ev.button !== 0 || !elevationFace || !layout) return;
+  if (elevFinishDraft && layout.originX != null && elevFinishDraft.face.wallId === elevationFace.wallId) {
+    const pt = elevDraftPoint(ev, ev.currentTarget, layout);
+    if (!pt) return;
+    const first = elevFinishDraft.points[0];
+    if (first && elevFinishDraft.points.length >= 3 && Math.hypot(pt.s - first.s, pt.z - first.z) <= ELEVATION_SNAP) {
+      finishElevFinishDraft();
+      ev.preventDefault();
+      return;
+    }
+    const last = elevFinishDraft.points[elevFinishDraft.points.length - 1];
+    if (!last || last.s !== pt.s || last.z !== pt.z) elevFinishDraft.points.push(pt);
+    elevFinishDraft.hover = null;
+    const n = elevFinishDraft.points.length;
+    setStatusMessage(n >= 3
+      ? `Corner ${n} placed. Enter closes the shape, or click the first corner.`
+      : `Corner ${n} placed. Keep clicking each corner.`, "ok");
+    ev.preventDefault();
+    render();
+    return;
+  }
+  const outlineHit = ev.target.closest?.("[data-elev-op='outline-vertex'],[data-elev-op='outline-edge']");
+  if (outlineHit && layout.originX != null) {
+    const model = elevationModel(store.doc, pack, elevationFace, wallsCache);
+    const band = model?.finishBands.find((b) => b.id === outlineHit.dataset.elevBand);
+    if (band?.outline) {
+      beginOutlineDrag(
+        ev, layout, model, band,
+        outlineHit.dataset.elevOp === "outline-edge" ? "edge" : "vertex",
+        Number(outlineHit.dataset.elevIndex),
+      );
+      return;
+    }
+  }
+  const target = ev.target.closest?.("[data-elev-op]");
+  if (!target) {
+    const fill = ev.target.closest?.("[data-elev-fill]");
+    if (fill && layout.originX != null && fill.dataset.elevFill === selectedBandId) {
+      const model = elevationModel(store.doc, pack, elevationFace, wallsCache);
+      const band = model?.finishBands.find((b) => b.id === fill.dataset.elevFill);
+      if (band?.outline) {
+        beginOutlineDrag(ev, layout, model, band, "move", 0);
+        return;
+      }
+    }
+    if (fill && fill.dataset.elevFill !== selectedBandId) selectBand(fill.dataset.elevFill);
+    selectedElevVertex = null;
+    return;
+  }
+  const part = target.dataset.elevOp;
+  const model = elevationModel(store.doc, pack, elevationFace, wallsCache);
+  const bandId = target.dataset.elevBand;
+  const id = bandId || target.dataset.elevId;
+  const band = bandId ? model?.finishBands.find((b) => b.id === bandId) : null;
+  const row = !bandId && part !== "wall-top" ? model?.openings.find((o) => o.id === id) : null;
+  if (part === "wall-top") {
+    if (!model?.canDragTop) return;
+  } else if (!band && !row) {
+    return;
+  }
+  if (row && selectedOpeningId() !== id) {
+    store.selectOne({ kind: "opening", id });
+    render();
+  }
+  const p = elevationPointer(ev, ev.currentTarget);
+  elevationDrag = {
+    id: part === "wall-top" ? model.wallId : id,
+    part,
+    band: Boolean(band),
+    face: { ...elevationFace },
+    scale: layout.scale,
+    x0: p.x,
+    y0: p.y,
+    x: p.x,
+    y: p.y,
+    moved: false,
+    orig: part === "wall-top"
+      ? { height: model.height }
+      : band
+        ? { from: band.from, to: band.to, bottom: band.bottom, top: band.top }
+        : { left: row.offset, width: row.width, sill: row.sill, height: row.height, category: row.category },
+  };
+  ev.currentTarget.setPointerCapture(ev.pointerId);
+  ev.preventDefault();
+}
+
+function onElevationPointerMove(ev) {
+  if (elevationDrag?.part === "outline") {
+    const layout = ev.currentTarget === el.elevBody ? elevationLayout : elevPreviewLayout;
+    const model = elevationModel(store.doc, pack, elevationDrag.face, wallsCache);
+    if (!layout || layout.originX == null || !model) return;
+    const raw = elevRawPoint(ev, ev.currentTarget, layout);
+    const d = elevationDrag;
+    if (d.moveAll) {
+      let ds = raw.s - d.grab.s;
+      let dz = raw.z - d.grab.z;
+      let minS = Infinity;
+      let maxS = -Infinity;
+      let minZ = Infinity;
+      let maxZ = -Infinity;
+      for (const p of d.origin) {
+        minS = Math.min(minS, p.s);
+        maxS = Math.max(maxS, p.s);
+        minZ = Math.min(minZ, p.z);
+        maxZ = Math.max(maxZ, p.z);
+      }
+      ds = Math.min(model.length - maxS, Math.max(-minS, ds));
+      dz = Math.min(model.height - maxZ, Math.max(-minZ, dz));
+      d.points = d.origin.map((p) => ({ s: p.s + ds, z: p.z + dz }));
+      d.guideS = null;
+      d.guideZ = null;
+      if (Math.hypot(ds, dz) > 0.01) d.moved = true;
+    } else {
+      const aligned = elevAlign(raw.s, raw.z, model, d.origin, d.index);
+      d.points[d.index] = { s: aligned.s, z: aligned.z };
+      d.guideS = aligned.guideS;
+      d.guideZ = aligned.guideZ;
+      const was = d.origin[d.index];
+      if (was && Math.hypot(aligned.s - was.s, aligned.z - was.z) > 0.01) d.moved = true;
+    }
+    render();
+    return;
+  }
+  if (elevFinishDraft && !elevationDrag) {
+    const layout = ev.currentTarget === el.elevBody ? elevationLayout : elevPreviewLayout;
+    if (layout?.originX != null && elevFinishDraft.face.wallId === elevationFace?.wallId) {
+      elevFinishDraft.hover = elevDraftPoint(ev, ev.currentTarget, layout);
+      render();
+    }
+    return;
+  }
+  const d = elevationDrag;
+  if (!d) return;
+  const p = elevationPointer(ev, ev.currentTarget);
+  d.x = p.x;
+  d.y = p.y;
+  if (Math.hypot(p.x - d.x0, p.y - d.y0) > 3) d.moved = true;
+  if (d.moved) render();
+}
+
+function endElevationDrag(commit) {
+  const d = elevationDrag;
+  elevationDrag = null;
+  if (!d) return;
+  if (d.part === "outline") {
+    if (commit && (d.moved || d.inserted)) {
+      store.pushUndo();
+      applyOutlinePoints(store.doc, pack, d.face, d.bandId, d.points, wallsCache);
+      store.persist();
+      finishKey = "";
+    }
+    render();
+    return;
+  }
+  if (commit && d.moved) {
+    // One drag is one undo step.
+    store.pushUndo();
+    const applied = applyElevationDrag(store.doc, d.face, d);
+    if (d.part === "wall-top" && applied?.wallId && applied.wallId !== d.face.wallId) {
+      elevationFace = { ...d.face, wallId: applied.wallId };
+      if (store.primary?.kind === "segment") store.selectOne({ kind: "segment", id: applied.wallId });
+    }
+    store.persist();
+    finishKey = "";
+  }
+  render();
+}
+
+function bindElevationHost(node, layoutOf) {
+  if (!node) return;
+  node.addEventListener("pointerdown", (ev) => onElevationPointerDown(ev, layoutOf()));
+  node.addEventListener("pointermove", onElevationPointerMove);
+  node.addEventListener("pointerup", () => endElevationDrag(true));
+  node.addEventListener("pointercancel", () => endElevationDrag(false));
+}
+
+let elevPreviewLayout = null;
+bindElevationHost(el.elevBody, () => elevationLayout);
+bindElevationHost(el.ctxElev, () => elevPreviewLayout);
+
+el.ctxElevOpen?.addEventListener("click", () => {
+  elevationOpen = !elevationOpen;
+  render();
+});
+
+el.elevFlip?.addEventListener("click", () => {
+  if (!elevationFace) return;
+  elevationFace = { ...elevationFace, side: elevationFace.side === -1 ? 1 : -1 };
+  render();
+});
+
+el.ctxOOffset?.addEventListener("change", (e) => {
+  const opening = soleOf("opening");
+  const value = typedMm(e.target.value, { allowZero: true });
+  const face = selectedElevationFace();
+  if (!opening || !face || value === undefined || value === null) { render(); return; }
+  store.pushUndo();
+  applyOpeningEdit(store.doc, pack, face, opening.id, { left: value }, wallsCache);
+  store.persist();
+  render();
+});
+
+/** Inspector side of the elevation: the small preview, Open elevation, and the opening's offset. */
+function syncElevationPreview() {
+  const face = selectedElevationFace();
+  const model = face ? elevationModelNow(face) : null;
+  setHidden(el.ctxElevWrap, !model);
+  const opening = model && selectedOpeningId() ? model.openings.find((o) => o.id === selectedOpeningId()) : null;
+  setHidden(el.ctxOOffsetWrap, !opening);
+  if (opening && el.ctxOOffset && document.activeElement !== el.ctxOOffset) el.ctxOOffset.value = formatLengthMm(opening.offset);
+  if (!model) { elevPreviewKey = ""; elevPreviewLayout = null; return; }
+  if (el.ctxElevOpen) el.ctxElevOpen.textContent = elevationOpen ? "Close elevation" : "Open elevation";
+  const w = Math.max(120, Math.round(el.ctxElev?.clientWidth || 240));
+  const draft = elevFinishDraft && elevFinishDraft.face.wallId === face.wallId ? elevFinishDraft : null;
+  const key = `${w}|${selectedOpeningId()}|${JSON.stringify(model)}|${JSON.stringify(draft)}`;
+  if (key === elevPreviewKey) return;
+  elevPreviewKey = key;
+  const drawn = elevationSvg(model, { width: w, height: 130, dragTop: true, selectedId: selectedOpeningId(), draft, guides: elevationGuides() });
+  elevPreviewLayout = { scale: drawn.scale, originX: drawn.originX, originY: drawn.originY };
+  el.ctxElev.innerHTML = drawn.svg;
+}
+
+// --- finishes (finish-model.js) --------------------------------------------
+//
+// The inspector's finish section: room rules and presets, what is on the
+// selected wall face (and a form for drawing a run on it), and the products on
+// this job. Markup is finish-panel.js; the events are delegated here.
+
+function finishFaceModel() {
+  const face = selectedElevationFace();
+  return face ? elevationModel(store.doc, pack, face, wallsCache) : null;
+}
+
+function syncFinishPanel(room, slab) {
+  const host = el.ctxFinish;
+  if (!host) return;
+  const model = room || slab ? null : finishFaceModel();
+  if (!room && !slab && !model) {
+    setHidden(host, true);
+    finishKey = "";
+    finishAddOpen = null;
+    finishPanelHost = "";
+    return;
+  }
+  setHidden(host, false);
+  const hostId = room ? `room:${room.id}` : slab ? `slab:${slab.id}` : `face:${model.wallId}:${model.side}`;
+  if (hostId !== finishPanelHost) {
+    finishPanelHost = hostId;
+    finishAddOpen = null;
+  }
+  const editingId = editingFinishRegion()?.id || null;
+  const floorOpts = (kind, id) => ({
+    savedRegionId: finishSavedRegionId,
+    bareOn: bareFinishHost?.kind === kind && bareFinishHost?.id === id,
+    adding: finishAddOpen === "floor",
+  });
+  const html = (room ? roomFinishHtml(store.doc, room, editingId, floorOpts("room", room.id)) : slab ? slabFinishHtml(store.doc, slab, editingId, floorOpts("slab", slab.id)) : faceFinishHtml(store.doc, model, { selectedId: selectedBandId, savedId: finishSavedBandId, adding: finishAddOpen === "face" }))
+    + productsHtml(store.doc, { open: finishProductsOpen });
+  if (html !== finishKey) {
+    // A cleared key means the finish was just saved, so the panel has to catch up.
+    // Otherwise leave an input alone while someone is still typing in it.
+    const typing = host.contains(document.activeElement) && document.activeElement?.matches?.("input");
+    if (!(typing && finishKey)) {
+      finishKey = html;
+      host.innerHTML = html;
+    }
+  }
+  if (editingId !== finishScrolledId) {
+    finishScrolledId = editingId || null;
+    if (editingId) host.querySelector(`[data-fin-region="${editingId}"]`)?.scrollIntoView({ block: "nearest" });
+  }
+  for (const card of host.querySelectorAll("[data-fin-region]")) {
+    card.classList.toggle("fin-hot", card.dataset.finRegion === hoverFinishRegionId);
+  }
+  for (const card of host.querySelectorAll("[data-fin-band]")) {
+    card.classList.toggle("fin-hot", card.dataset.finBand === hoverBandId);
+  }
+  markHotBand();
+}
+
+function finishField(name) {
+  return el.ctxFinish?.querySelector(`[data-fin="${name}"]`) || null;
+}
+
+/** The finish and product name the new-finish form is aimed at. */
+function chosenRegionTarget(btn) {
+  const form = btn.closest("[data-fin-new]");
+  const category = form?.querySelector("[data-fin='region-category']")?.value;
+  if (!category) return null;
+  return { category, productName: String(form?.querySelector("[data-fin='new-product-name']")?.value || "").trim() };
+}
+
+/** Use a product of this finish with this name, creating it on the job when it is new. */
+function ensureFinishProduct(doc, category, name) {
+  const text = String(name || "").trim();
+  if (!text) return null;
+  const found = (doc.finishProducts || []).find((p) => p.category === category && (
+    (p.name || "").toLowerCase() === text.toLowerCase()
+    || [p.name, p.size, p.supplier].filter(Boolean).join(" · ").toLowerCase() === text.toLowerCase()
+  ));
+  if (found) return found.id;
+  const id = finishId("fp");
+  doc.finishProducts = normalizeFinishProducts([...(doc.finishProducts || []), { id, category, name: text }]);
+  return id;
+}
+
+function finishCommit(mutate) {
+  store.pushUndo();
+  mutate();
+  store.persist();
+  finishKey = "";
+  render();
+}
+
+function finishRule(room, node) {
+  const id = node?.closest("[data-fin-rule]")?.dataset.finRule;
+  return room && id ? (room.finishes || []).find((r) => r.id === id) || null : null;
+}
+
+/** The room a floor region is drawn in: the one on this level holding its centre. */
+function roomHoldingPoly(poly) {
+  const cx = poly.reduce((s, p) => s + p[0], 0) / poly.length;
+  const cy = poly.reduce((s, p) => s + p[1], 0) / poly.length;
+  return (store.doc.rooms || []).find((r) => effectiveLevel(r, pack) === activeLevel && pointInPoly(cx, cy, roomPolygon(r))) || null;
+}
+
+function finishFloorRegionDraft() {
+  const target = regionFinish;
+  const poly = regionDraft.map((p) => [p.x, p.y]);
+  const room = roomHoldingPoly(poly);
+  store.pushUndo();
+  const productId = target.productName ? ensureFinishProduct(store.doc, target.category, target.productName) : (target.productId || null);
+  createFinishRegion(store.doc, {
+    level: activeLevel,
+    roomId: room?.id || null,
+    slabId: target.slabId || null,
+    category: target.category || null,
+    productId,
+    shape: polyShape(poly),
+  });
+  const slabId = target.slabId || null;
+  regionDraft = null;
+  regionFinish = null;
+  tool = "select";
+  activeFunction = null;
+  // Back on whatever it was drawn from, so its corners can be edited straight away.
+  if (slabId) store.setSelection([{ kind: "slab", id: slabId }]);
+  else if (room) store.setSelection([{ kind: "room", id: room.id }]);
+  syncToolButtons();
+  drawRibbon();
+  store.persist();
+  finishKey = "";
+  setStatusMessage(room
+    ? `Floor region added; it comes out of ${room.name}'s floor.`
+    : slabId
+      ? "Floor region added on this floor."
+      : "Floor region added, but it is not inside a room, so nothing is taken out of a floor.", room || slabId ? "ok" : "warn");
+  render();
+}
+
+el.ctxFinish?.addEventListener("toggle", (e) => {
+  if (e.target?.matches?.("details[data-fin-block='products']")) finishProductsOpen = e.target.open;
+}, true);
+
+/** The stored run or room rule behind a wall finish band, or null for the computed default. */
+function bandSource(doc, band) {
+  if (band.source === "run") return (doc.finishRuns || []).find((r) => r.id === band.sourceId) || null;
+  if (band.source === "rule") {
+    for (const room of doc.rooms || []) {
+      const rule = (room.finishes || []).find((r) => r.id === band.sourceId);
+      if (rule) return rule;
+    }
+  }
+  return null;
+}
+
+/** Fill the add form's height fields from a preset; "custom" leaves them to be typed. */
+function applyHeightPreset(form, id) {
+  const preset = HEIGHT_PRESETS.find((p) => p.id === id);
+  const bottom = form?.querySelector("[data-fin='run-bottom']");
+  const top = form?.querySelector("[data-fin='run-top']");
+  const custom = form?.querySelector("[data-fin-custom]");
+  if (custom) custom.hidden = id !== "custom";
+  if (!preset || preset.bottom === null || !bottom || !top) return;
+  bottom.value = String(Math.round(preset.bottom * 1000));
+  top.value = preset.top === null ? "" : String(Math.round(preset.top * 1000));
+}
+
+function noteBandSaved(id) {
+  finishSavedBandId = id;
+  window.clearTimeout(finishSavedTimer);
+  finishSavedTimer = window.setTimeout(() => {
+    finishSavedBandId = null;
+    el.ctxFinish?.querySelectorAll(".fin-saved").forEach((node) => node.remove());
+  }, 1600);
+}
+
+/** Mark the elevation band the pointer is on in the list (or on the elevation) as hot. */
+function markHotBand() {
+  for (const host of [el.elevBody, el.ctxElev]) {
+    if (!host) continue;
+    for (const node of host.querySelectorAll("[data-elev-fill]")) {
+      node.classList.toggle("is-hot", node.dataset.elevFill === hoverBandId);
+    }
+  }
+}
+
+function setHoverBand(id) {
+  if (id === hoverBandId) return;
+  hoverBandId = id;
+  el.ctxFinish?.querySelectorAll("[data-fin-band]").forEach((card) => {
+    card.classList.toggle("fin-hot", card.dataset.finBand === id);
+  });
+  markHotBand();
+}
+
+/** Pick a wall finish, in the list or on the elevation, and bring its card into view. */
+function selectBand(id) {
+  selectedBandId = id;
+  finishKey = "";
+  render();
+  if (id) el.ctxFinish?.querySelectorAll("[data-fin-band]").forEach((card) => {
+    if (card.dataset.finBand === id) card.scrollIntoView({ block: "nearest" });
+  });
+}
+
+el.ctxFinish?.addEventListener("pointerover", (e) => {
+  setHoverBand(e.target.closest?.("[data-fin-band]")?.dataset.finBand || null);
+});
+el.ctxFinish?.addEventListener("pointerleave", () => setHoverBand(null));
+for (const host of [el.elevBody, el.ctxElev]) {
+  host?.addEventListener("pointerover", (e) => {
+    setHoverBand(e.target.closest?.("[data-elev-fill]")?.dataset.elevFill || null);
+  });
+  host?.addEventListener("pointerleave", () => setHoverBand(null));
+}
+
+function noteFinishSaved(id) {
+  finishSavedRegionId = id;
+  window.clearTimeout(finishSavedTimer);
+  finishSavedTimer = window.setTimeout(() => {
+    finishSavedRegionId = null;
+    el.ctxFinish?.querySelectorAll(".fin-saved").forEach((node) => node.remove());
+  }, 1600);
+}
+
+el.ctxFinish?.addEventListener("pointerover", (e) => {
+  const id = e.target.closest?.("[data-fin-region]")?.dataset.finRegion || null;
+  if (!id || id === hoverFinishRegionId) return;
+  hoverFinishRegionId = id;
+  render();
+});
+
+el.ctxFinish?.addEventListener("pointerout", (e) => {
+  const card = e.target.closest?.("[data-fin-region]");
+  if (!card || e.relatedTarget?.closest?.("[data-fin-region]") === card) return;
+  if (hoverFinishRegionId !== card.dataset.finRegion) return;
+  hoverFinishRegionId = null;
+  render();
+});
+
+el.ctxFinish?.addEventListener("click", (e) => {
+  const btn = e.target.closest?.("button[data-fin]");
+  if (!btn) {
+    const band = e.target.closest?.("[data-fin-band]");
+    if (band && !e.target.closest("input, select, textarea, label") && band.dataset.finBand !== selectedBandId) {
+      selectBand(band.dataset.finBand);
+      return;
+    }
+    const card = e.target.closest?.("[data-fin-region]");
+    if (card && !e.target.closest("input, select, textarea, label") && pack) {
+      const id = card.dataset.finRegion;
+      if (id && id !== editingRegionId) {
+        editingRegionId = id;
+        selectedRegionVertex = null;
+        finishKey = "";
+        render();
+      }
+    }
+    return;
+  }
+  if (!pack) return;
+  const action = btn.dataset.fin;
+  const room = soleOf("room");
+  const slab = soleOf("slab");
+  const row = btn.closest("[data-fin-rule],[data-fin-band],[data-fin-product],[data-fin-region]");
+  const doc = store.doc;
+
+  if (action === "rule-add" && room) {
+    const category = finishField("new-rule-category")?.value;
+    if (!category) return;
+    const name = String(finishField("new-rule-product")?.value || "").trim();
+    finishCommit(() => {
+      if (!Array.isArray(room.finishes)) room.finishes = [];
+      room.finishes.push({
+        id: finishId("fr"), surface: "wall", category,
+        productId: name ? ensureFinishProduct(doc, category, name) : null,
+        bottom: 0, top: null, faces: "all",
+      });
+    });
+  } else if (action === "rule-remove" && room) {
+    const rule = finishRule(room, btn);
+    if (rule) finishCommit(() => { room.finishes = room.finishes.filter((r) => r !== rule); });
+  } else if (action === "preset-save" && room) {
+    const name = String(finishField("preset-name")?.value || "").trim();
+    if (!name) { setStatusMessage("Give the preset a name first.", "warn"); return; }
+    const preset = presetFromRoom(room, name);
+    if (preset) finishCommit(() => { savePreset(doc, preset); });
+  } else if (action === "preset-apply" && room) {
+    const preset = (doc.finishPresets || []).find((p) => p.id === finishField("preset-pick")?.value);
+    if (preset) finishCommit(() => { room.finishes = rulesFromPreset(preset); });
+  } else if (action === "add-open") {
+    const surface = btn.closest("[data-fin-surface]")?.dataset.finSurface;
+    if (surface !== "floor" && surface !== "face") return;
+    finishAddOpen = surface;
+    finishKey = "";
+    render();
+  } else if (action === "add-close") {
+    finishAddOpen = null;
+    finishKey = "";
+    render();
+  } else if (action === "region-draw" && (room || slab)) {
+    const target = chosenRegionTarget(btn);
+    if (!target) return;
+    finishAddOpen = null;
+    editingRegionId = null;
+    startRegion({ finish: { ...target, slabId: slab?.id || null, roomId: room?.id || null } });
+  } else if (action === "region-whole" && slab) {
+    const target = chosenRegionTarget(btn);
+    if (!target) return;
+    finishAddOpen = null;
+    const room = roomHoldingPoly(shapePolygon(slab.shape));
+    finishCommit(() => {
+      createFinishRegion(doc, {
+        level: slab.level ?? activeLevel,
+        roomId: room?.id || null,
+        slabId: slab.id,
+        category: target.category,
+        productId: target.productName ? ensureFinishProduct(doc, target.category, target.productName) : null,
+        // Follows the floor's outline until its corners are edited.
+        whole: true,
+        shape: structuredClone(slab.shape),
+      });
+    });
+  } else if (action === "show-bare" && (room || slab)) {
+    const host = slab ? { kind: "slab", id: slab.id } : { kind: "room", id: room.id };
+    const same = bareFinishHost?.kind === host.kind && bareFinishHost?.id === host.id;
+    bareFinishHost = same ? null : host;
+    finishKey = "";
+    render();
+  } else if (action === "region-edit") {
+    const id = row?.dataset.finRegion;
+    if (id) {
+      editingRegionId = editingRegionId === id ? null : id;
+      selectedRegionVertex = null;
+      finishKey = "";
+      render();
+    }
+  } else if (action === "region-remove") {
+    const id = row?.dataset.finRegion;
+    if (editingRegionId === id) editingRegionId = null;
+    if (id) finishCommit(() => { doc.finishRegions = (doc.finishRegions || []).filter((r) => r.id !== id); });
+  } else if (action === "band-part") {
+    const form = btn.closest("[data-fin-newband]");
+    const span = form?.querySelector("[data-fin-span]");
+    const add = form?.querySelector("[data-fin='run-add']");
+    if (!span) return;
+    const show = span.hidden;
+    span.hidden = !show;
+    btn.setAttribute("aria-pressed", show ? "true" : "false");
+    btn.textContent = show ? "Whole face instead" : "Part of this face";
+    if (add) add.textContent = show ? "Add to face" : "Whole face";
+    if (!show) {
+      const from = form.querySelector("[data-fin='run-from']");
+      const to = form.querySelector("[data-fin='run-to']");
+      if (from) from.value = "";
+      if (to) to.value = "";
+    }
+  } else if (action === "band-draw") {
+    const face = selectedElevationFace();
+    const category = finishField("band-category")?.value;
+    if (!face || !category) { setStatusMessage("Select a wall, then draw on its elevation.", "warn"); return; }
+    finishAddOpen = null;
+    elevationOpen = true;
+    elevFinishDraft = {
+      points: [],
+      hover: null,
+      category,
+      productName: String(finishField("new-band-product")?.value || "").trim(),
+      face: { wallId: face.wallId, side: face.side },
+    };
+    setStatusMessage("Click each corner on the elevation. Enter closes the shape. Esc removes the last corner.", "ok");
+    render();
+  } else if (action === "run-add") {
+    const model = finishFaceModel();
+    const wall = model ? wallsCache.find((w) => w.id === model.wallId) : null;
+    const category = finishField("band-category")?.value;
+    if (!model || !wall || !category) return;
+    const productName = String(finishField("new-band-product")?.value || "").trim();
+    const form = btn.closest("[data-fin-newband]");
+    const spanOn = Boolean(form?.querySelector("[data-fin-span]") && !form.querySelector("[data-fin-span]").hidden);
+    const read = (name) => typedMm(finishField(name)?.value, { allowZero: true });
+    const bottom = read("run-bottom");
+    const top = read("run-top");
+    const from = spanOn ? read("run-from") : null;
+    const to = spanOn ? read("run-to") : null;
+    if ([from, to, bottom, top].includes(undefined)) { setStatusMessage("Type the sizes in millimetres.", "warn"); return; }
+    const partial = from !== null && to !== null;
+    if ((from !== null) !== (to !== null)) { setStatusMessage("Give both ends of the run, or neither for the whole face.", "warn"); return; }
+    finishAddOpen = null;
+    finishCommit(() => {
+      const run = createFinishRun(doc, wall, model.side, {
+        category,
+        productId: productName && category !== "none" ? ensureFinishProduct(doc, category, productName) : null,
+        // Typed in viewing order; a run keeps wall order.
+        from: partial ? (model.flip ? wall.length - to : from) : null,
+        to: partial ? (model.flip ? wall.length - from : to) : null,
+        bottom: bottom ?? 0,
+        top,
+      });
+      // The new finish is the one picked, in the list and on the elevation.
+      selectedBandId = `run:${run.id}:${wall.id}:${model.side}`;
+      noteBandSaved(selectedBandId);
+    });
+  } else if (action === "band-remove" || action === "band-remove-rule") {
+    const model = finishFaceModel();
+    const band = model?.finishBands.find((b) => b.id === row?.dataset.finBand);
+    if (band?.source === "run") {
+      finishCommit(() => { doc.finishRuns = doc.finishRuns.filter((r) => r.id !== band.sourceId); });
+    } else if (band?.source === "rule") {
+      finishCommit(() => {
+        for (const r of doc.rooms || []) r.finishes = (r.finishes || []).filter((x) => x.id !== band.sourceId);
+      });
+    }
+    if (band && selectedBandId === band.id) selectedBandId = null;
+  } else if (action === "default-remove") {
+    // Taking the default off is a "No finish" run over each remaining piece of it.
+    const model = finishFaceModel();
+    const wall = model ? wallsCache.find((w) => w.id === model.wallId) : null;
+    const named = row?.dataset.finBand;
+    const pieces = (model?.finishBands || []).filter((b) => b.source === "default" && (!named || b.id === named));
+    if (!model || !wall || !pieces.length) return;
+    finishCommit(() => {
+      for (const band of pieces) {
+        const wholeW = band.from <= 1e-6 && band.to >= model.length - 1e-6;
+        const wholeH = band.bottom <= 1e-6 && band.top >= model.height - 1e-6;
+        createFinishRun(doc, wall, model.side, {
+          category: "none",
+          from: wholeW ? null : (model.flip ? wall.length - band.to : band.from),
+          to: wholeW ? null : (model.flip ? wall.length - band.from : band.to),
+          bottom: band.bottom,
+          top: wholeH ? null : band.top,
+        });
+      }
+    });
+  } else if (action === "product-add") {
+    const read = (name) => String(finishField(name)?.value || "").trim();
+    if (!read("p-name") && !read("p-code")) { setStatusMessage("Give the product a name or a code.", "warn"); return; }
+    const coverage = Number(read("p-coverage").replace(",", "."));
+    const waste = Number(read("p-waste").replace(",", "."));
+    finishCommit(() => {
+      doc.finishProducts = normalizeFinishProducts([...(doc.finishProducts || []), {
+        id: finishId("fp"),
+        category: read("p-category"),
+        name: read("p-name"),
+        code: read("p-code"),
+        size: read("p-size"),
+        supplier: read("p-supplier"),
+        boxCoverage: read("p-coverage") && coverage > 0 ? coverage : null,
+        wasteFactor: read("p-waste") && waste >= 0 ? waste / 100 : null,
+      }]);
+    });
+    finishProductsOpen = true;
+  } else if (action === "product-remove") {
+    const id = row?.dataset.finProduct;
+    if (id) finishCommit(() => { doc.finishProducts = doc.finishProducts.filter((p) => p.id !== id); });
+  } else if (action === "product-library") {
+    const product = finishProductById(doc, row?.dataset.finProduct);
+    if (!product) return;
+    const line = libraryLine(product);
+    setStatusMessage("Adding to the firm's rate book...", "ok");
+    cloud.addRateBookLine(line).then(({ added, bookName }) => {
+      if (added && !product.rateRef) {
+        product.rateRef = line.model;
+        store.persist();
+      }
+      finishKey = "";
+      setStatusMessage(added
+        ? `${line.model} added to "${bookName}", unpriced. The firm sets its rate.`
+        : `${line.model} is already in "${bookName}".`, "ok");
+      render();
+    }).catch((error) => {
+      setStatusMessage(error.status === 403
+        ? "Only an owner can add to the firm's rate book."
+        : `Could not add to the rate book: ${error.message}`, "warn");
+    });
+  }
+});
+
+el.ctxFinish?.addEventListener("change", (e) => {
+  const field = e.target?.dataset?.fin;
+  if (!field) return;
+  const room = soleOf("room");
+  const doc = store.doc;
+  if (field === "new-rule-category") {
+    const list = e.target.closest("[data-fin-newrule]")?.querySelector("datalist");
+    if (list) list.innerHTML = floorProductSuggestions(doc, e.target.value);
+    return;
+  }
+  if (field === "band-category") {
+    const form = e.target.closest("[data-fin-newband]");
+    const list = form?.querySelector("datalist");
+    if (list) list.innerHTML = floorProductSuggestions(doc, e.target.value);
+    // Skirting is a run along the wall foot, so it starts at the skirting height.
+    const height = form?.querySelector("[data-fin='band-height']");
+    if (height) {
+      if (e.target.value === "skirting") height.value = "skirting";
+      else if (height.value === "skirting") height.value = "full";
+      applyHeightPreset(form, height.value);
+    }
+    return;
+  }
+  if (field === "band-height") {
+    applyHeightPreset(e.target.closest("[data-fin-newband]"), e.target.value);
+    return;
+  }
+  const bandId = e.target.closest?.("[data-fin-band]")?.dataset.finBand;
+  if (bandId && field.startsWith("band-")) {
+    const face = selectedElevationFace();
+    const model = finishFaceModel();
+    const band = model?.finishBands.find((b) => b.id === bandId);
+    const source = band ? bandSource(doc, band) : null;
+    if (!face || !band || !source) { finishKey = ""; render(); return; }
+    selectedBandId = bandId;
+    if (field === "band-type") {
+      const next = e.target.value;
+      if (!next || next === band.category) return;
+      noteBandSaved(bandId);
+      finishCommit(() => {
+        const product = finishProductById(doc, source.productId);
+        source.category = next;
+        if (next === "none" || !product || product.category !== next) source.productId = null;
+      });
+    } else if (field === "band-product-name") {
+      const name = String(e.target.value || "").trim();
+      noteBandSaved(bandId);
+      finishCommit(() => {
+        source.category = band.category;
+        source.productId = name ? ensureFinishProduct(doc, band.category, name) : null;
+      });
+    } else {
+      const value = typedMm(e.target.value, { allowZero: true });
+      if (value === undefined) { finishKey = ""; render(); return; }
+      const edit = {};
+      if (field === "band-from") edit.from = value ?? 0;
+      else if (field === "band-to") edit.to = value ?? model.length;
+      else if (field === "band-bottom") edit.bottom = value ?? 0;
+      else if (field === "band-top") edit.top = value && value > 0 ? value : model.height;
+      noteBandSaved(bandId);
+      finishCommit(() => { applyBandEdit(doc, pack, face, bandId, edit, wallsCache); });
+    }
+    return;
+  }
+  if (field === "region-category") {
+    const list = e.target.closest("[data-fin-new]")?.querySelector("datalist");
+    if (list) list.innerHTML = floorProductSuggestions(doc, e.target.value);
+    return;
+  }
+  if (field === "region-product-name") {
+    const id = e.target.closest("[data-fin-region]")?.dataset.finRegion;
+    const region = (doc.finishRegions || []).find((r) => r.id === id);
+    if (!region) return;
+    const category = region.category || finishProductById(doc, region.productId)?.category;
+    const name = String(e.target.value || "").trim();
+    if (!category) return;
+    noteFinishSaved(region.id);
+    finishCommit(() => {
+      region.category = category;
+      region.productId = name ? ensureFinishProduct(doc, category, name) : null;
+    });
+    return;
+  }
+  if (field === "region-type") {
+    const id = e.target.closest("[data-fin-region]")?.dataset.finRegion;
+    const region = (doc.finishRegions || []).find((r) => r.id === id);
+    const next = e.target.value;
+    const current = region?.category || finishProductById(doc, region?.productId)?.category;
+    if (!region || !next || next === current) return;
+    finishCommit(() => {
+      const product = finishProductById(doc, region.productId);
+      region.category = next;
+      if (!product || product.category !== next) region.productId = null;
+    });
+    return;
+  }
+  if (field === "external-finish") {
+    finishCommit(() => { doc.finishSettings = normalizeFinishSettings({ ...doc.finishSettings, externalFinish: e.target.value }); });
+    return;
+  }
+  if (field === "volume-basis") {
+    finishCommit(() => { doc.finishSettings = normalizeFinishSettings({ ...doc.finishSettings, volumeBasis: e.target.value }); });
+    return;
+  }
+  const rule = finishRule(room, e.target);
+  if (!rule) return;
+  if (field === "rule-type") {
+    const next = e.target.value;
+    if (!next) return;
+    finishCommit(() => {
+      const product = finishProductById(doc, rule.productId);
+      rule.category = next;
+      if (!product || product.category !== next) rule.productId = null;
+    });
+  } else if (field === "rule-product-name") {
+    const category = rule.category || finishProductById(doc, rule.productId)?.category;
+    const name = String(e.target.value || "").trim();
+    if (!category) return;
+    finishCommit(() => {
+      rule.category = category;
+      rule.productId = name ? ensureFinishProduct(doc, category, name) : null;
+    });
+  } else if (field === "rule-faces") {
+    finishCommit(() => { rule.faces = e.target.value; });
+  } else if (field === "rule-bottom" || field === "rule-top") {
+    const value = typedMm(e.target.value, { allowZero: true });
+    if (value === undefined) { finishKey = ""; render(); return; }
+    finishCommit(() => {
+      if (field === "rule-bottom") rule.bottom = value ?? 0;
+      else rule.top = value && value > 0 ? value : null;
+    });
+  }
+});
+
 /** Show, hide and redraw the route profile under the plan. Runs every render. */
 function syncServiceProfileDock() {
   const dock = el.serviceProfileDock;
   if (!dock) return;
+  if (syncElevationDock()) return;
   const edgeId = serviceDockActive() ? serviceProfileEdge() : null;
   const edge = edgeId ? (store.doc.serviceEdges || []).find((e) => e.id === edgeId) : null;
   if (!edge) {
@@ -11260,7 +13322,7 @@ function syncServiceProfileDock() {
   setHidden(dock, false);
   fitServiceProfileHeight();
   if (el.serviceProfileTitle) {
-    el.serviceProfileTitle.textContent = `Route profile � ${network?.name || "Route"} � height against distance along the plan`;
+    el.serviceProfileTitle.textContent = `Route profile · ${network?.name || "Route"} · height against distance along the plan`;
   }
   profileEdgeId = edge.id;
   syncProfileModeButtons();
@@ -11738,6 +13800,8 @@ function syncPlanContext() {
   const opening = Boolean(obj && ref.kind === "opening");
   const item = Boolean(obj && ref.kind === "item");
   const rect = (room || slab || roof) && obj.shape?.kind === "rect";
+  const shapePoly = (room || slab || roof) && obj.shape?.kind === "poly";
+  const floorSlab = slab && skuById(obj.sku)?.category !== "ceiling";
   const multi = !draft && refs.length > 1;
   // A multi-selection can be retyped (applySkuToSelection now covers the
   // whole selection, not just one object) as long as at least one member is
@@ -11746,7 +13810,7 @@ function syncPlanContext() {
   // those are still genuinely per-object.
   const multiTypeable = multi && refs.some((r) => TYPEABLE_KINDS.has(r.kind));
   const showType = linear || slab || roof || opening || item;
-  const showGeom = linear || rect;
+  const showGeom = linear || rect || shapePoly;
   const showInspect = Boolean(el.inspectFields) && (linear || room || region || slab || roof || opening || item);
   const editingProperty = propertySelected && !draft && refs.length === 0;
   const creating = !showInspect && !multi && !editingProperty && placingToolArmed();
@@ -11783,11 +13847,11 @@ function syncPlanContext() {
     const group = store.groupForRef(refs[0]);
     syncInspectKicker(group ? group.name : `${refs.length} selected`);
   } else if (creating) {
-    syncInspectKicker(pack.name || "�");
+    syncInspectKicker(pack.name || "—");
   } else if (draft) {
-    syncInspectKicker(skuById(placeSkuId)?.name || "�");
+    syncInspectKicker(skuById(placeSkuId)?.name || "—");
   } else if (obj) {
-    syncInspectKicker(obj.name || obj.id || "�");
+    syncInspectKicker(obj.name || obj.id || "—");
   } else {
     syncInspectKicker("");
   }
@@ -11824,6 +13888,9 @@ function syncPlanContext() {
 
   if (!showInspect && !showGeom && !creating && !editingProperty) {
     planContextKey = "";
+    setHidden(el.ctxElevWrap, true);
+    setHidden(el.ctxOOffsetWrap, true);
+    setHidden(el.ctxFinish, true);
     return;
   }
 
@@ -11838,6 +13905,8 @@ function syncPlanContext() {
   if (el.ctxH) el.ctxH.readOnly = linear;
   if (el.ctxWWrap) el.ctxWWrap.classList.toggle("readonly", linear);
   if (el.ctxHWrap) el.ctxHWrap.classList.toggle("readonly", linear);
+  setHidden(el.ctxShapePoly, !rect);
+  setHidden(el.ctxShapePolyHint, !shapePoly);
   setHidden(el.ctxFormWrap, !roof);
   const pitched = Boolean(roof && obj && obj.form !== "flat");
   setHidden(el.ctxPitchWrap, !pitched);
@@ -11849,6 +13918,10 @@ function syncPlanContext() {
   setHidden(el.ctxAttachWrap, !attachable);
   if (attachable && el.ctxAttach) el.ctxAttach.textContent = attachStateText(obj);
   syncObjectLevel(obj && ref.kind !== "opening" ? obj : null);
+  syncWallTop(obj && ref.kind === "segment" && !draft ? obj : null);
+  syncHeightFields(obj && !draft ? obj : null, ref?.kind);
+  syncElevationPreview();
+  syncFinishPanel(room && !draft ? obj : null, floorSlab && !draft ? obj : null);
 
   const skuId = draft ? placeSkuId : obj?.sku;
   const kind = draft ? "wall" : ref?.kind;
@@ -12086,6 +14159,9 @@ el.ctxOLevel?.addEventListener("change", (e) => {
   const newLevel = station.levelId;
   if (newLevel !== obj.level) {
     store.pushUndo();
+    // Before the host moves: a finish with no slab id is found by sitting on
+    // the slab, and that match requires the level they still share.
+    carryFinishRegionsToLevel(store.doc, store.primary, newLevel);
     obj.level = newLevel;
     store.persist();
   }
@@ -12237,15 +14313,15 @@ function runCompile() {
   el.compileKicker.textContent = `${out.instances.length} instances`;
   const warnings = out.warnings || [];
   el.compileOut.innerHTML = `
-    ${warnings.length ? `<div class="compile-warnings">${warnings.map((w) => `<p class="warn">? ${escapeHtml(w)}</p>`).join("")}</div>` : ""}
+    ${warnings.length ? `<div class="compile-warnings">${warnings.map((w) => `<p class="warn">⚠ ${escapeHtml(w)}</p>`).join("")}</div>` : ""}
     <dl class="meta">
-      <div><dt>Rooms</dt><dd>${out.rooms.length} (${totalArea.toFixed(1)} m� total)</dd></div>
+      <div><dt>Rooms</dt><dd>${out.rooms.length} (${totalArea.toFixed(1)} m² total)</dd></div>
       <div><dt>Walls</dt><dd>${walls.length} (${external} external)</dd></div>
       <div><dt>Openings</dt><dd>${doors} doors, ${windows} windows</dd></div>
       <div><dt>Implied quantities</dt><dd>${implied.length ? implied.map((r) => `${r.model} (${(r.length ?? r.area ?? 0).toFixed(1)})`).join(", ") : "none"}</dd></div>
     </dl>
     <p class="hint">Full extract logged to the console as <code>window.__extract</code>.</p>
-    <pre>${escapeHtml(JSON.stringify(out.instances.slice(0, 6), null, 2))}${out.instances.length > 6 ? "\n�" : ""}</pre>
+    <pre>${escapeHtml(JSON.stringify(out.instances.slice(0, 6), null, 2))}${out.instances.length > 6 ? "\n…" : ""}</pre>
   `;
   window.__extract = out;
   // eslint-disable-next-line no-console
@@ -12316,12 +14392,12 @@ function clearSchedulePicks() {
 function syncSchedule3dChrome(hits) {
   if (el.schedule3dDrawing) el.schedule3dDrawing.disabled = !schedule3dTarget;
   if (!el.schedule3dNote) return;
-  const hint = scheduleModelIs2d() ? "scroll to zoom" : "drag to orbit � scroll to zoom";
+  const hint = scheduleModelIs2d() ? "scroll to zoom" : "drag to orbit · scroll to zoom";
   if (!schedule3dTarget) {
     el.schedule3dNote.textContent = "Click a line to pick it out.";
   } else if (hits) {
     const n = schedule3dTarget.refs.length;
-    el.schedule3dNote.textContent = `${schedule3dTarget.label || "Selection"} � ${n} element${n === 1 ? "" : "s"} in orange � ${hint}`;
+    el.schedule3dNote.textContent = `${schedule3dTarget.label || "Selection"} · ${n} element${n === 1 ? "" : "s"} in orange · ${hint}`;
   } else {
     el.schedule3dNote.textContent = "Not a solid in the model (e.g. derived from a room) - use Exit to drawing.";
   }
@@ -12377,7 +14453,7 @@ function fmtQty(qty, unit) {
 }
 
 function levelName(levelId) {
-  if (!levelId) return "�";
+  if (!levelId) return "—";
   return (pack?.levels || []).find((l) => l.id === levelId)?.name || levelId;
 }
 
@@ -12398,10 +14474,10 @@ function scheduleGroupRefs(row) {
 
 function elementRowHtml(groupIndex, element, elementIndex) {
   const detail = [
-    Number.isFinite(element.angle) ? `${element.angle.toFixed(0)}�` : null,
+    Number.isFinite(element.angle) ? `${element.angle.toFixed(0)}°` : null,
     element.gradient || null,
-  ].filter(Boolean).join(" � ");
-  const label = `${element.id}${element.status ? ` � ${element.status === "planned" ? "proposed" : element.status}` : ""}${detail ? ` � ${detail}` : ""}`;
+  ].filter(Boolean).join(" · ");
+  const label = `${element.id}${element.status ? ` · ${element.status === "planned" ? "proposed" : element.status}` : ""}${detail ? ` · ${detail}` : ""}`;
   const locatable = Boolean(element.kind);
   return `
     <div class="schedule-element${locatable ? " locatable" : ""}" data-group="${groupIndex}" data-element="${elementIndex}"
@@ -12428,8 +14504,8 @@ function scheduleRowsHtml(rows, { priced }) {
       <td>${escapeHtml(row.unit || "")}</td>`;
     const priceCells = priced
       ? `
-      <td class="num">${row.priced ? money(row.rate, symbol) : "�"}</td>
-      <td class="num">${row.priced ? money(row.amount, symbol) : "�"}</td>`
+      <td class="num">${row.priced ? money(row.rate, symbol) : "—"}</td>
+      <td class="num">${row.priced ? money(row.amount, symbol) : "—"}</td>`
       : "";
     const refCount = scheduleGroupRefs(row).length;
     const elements = (row.elements || [])
@@ -12465,13 +14541,13 @@ function scheduleCompactHtml(rows, { priced }) {
     const rowTitle = refCount
       ? `Click to pick out all ${refCount} drawn element${refCount === 1 ? "" : "s"} on this line`
       : "Nothing drawn on this line";
-    const amount = priced ? (row.priced ? money(row.amount, symbol) : "�") : "";
+    const amount = priced ? (row.priced ? money(row.amount, symbol) : "—") : "";
     return `
       <div class="schedule-line">
         <div class="schedule-group-row${open ? " open" : ""}" data-group="${i}" title="${rowTitle}">
           <button type="button" class="schedule-caret-btn" aria-expanded="${open}" aria-label="Show or hide the elements on this line" title="Show or hide the elements on this line"></button>
           <div class="schedule-line-body">
-            <div class="schedule-line-model">${escapeHtml(row.model || "�")}</div>
+            <div class="schedule-line-model">${escapeHtml(row.model || "—")}</div>
             <div class="schedule-line-desc">${escapeHtml(row.description || "")}</div>
             <div class="schedule-line-meta">
               <span class="schedule-line-cat">${escapeHtml(row.category || "")}</span>
@@ -12537,7 +14613,7 @@ function openSchedule(title, rows, { priced }) {
     el.scheduleKicker.textContent = [
       `${rows.length} lines`,
       ...(priced ? [rateBook?.name, rateBookEffective()] : []),
-    ].filter(Boolean).join(" � ");
+    ].filter(Boolean).join(" · ");
   }
   // Warnings are inserted after this returns. Clear first so a second open
   // does not keep the previous banner.
@@ -12572,15 +14648,15 @@ function runBoq() {
   const rows = boqRows(out, rateBook);
   const unpriced = rows.filter((r) => !r.priced).length;
   const derived = rows.filter((r) => r.derived).length;
-  openSchedule("BOQ � bill of quantities", rows, { priced: true });
+  openSchedule("BOQ — bill of quantities", rows, { priced: true });
   const warnings = [
     derived ? `${derived} fitting ${derived === 1 ? "line is" : "lines are"} counted from the route's bends. The template names no fitting type for ${derived === 1 ? "it" : "them"}, so price by the line's code.` : null,
-    !rateBook ? 'No rate book loaded � every line prices at "�".' : null,
-    rateBook && unpriced ? `${unpriced} of ${rows.length} lines have no rate on file and price at "�".` : null,
+    !rateBook ? 'No rate book loaded — every line prices at "—".' : null,
+    rateBook && unpriced ? `${unpriced} of ${rows.length} lines have no rate on file and price at "—".` : null,
   ].filter(Boolean);
   if (warnings.length && el.scheduleBody) {
     el.scheduleBody.insertAdjacentHTML("afterbegin",
-      `<div class="compile-warnings">${warnings.map((w) => `<p class="warn">? ${escapeHtml(w)}</p>`).join("")}</div>`);
+      `<div class="compile-warnings">${warnings.map((w) => `<p class="warn">⚠ ${escapeHtml(w)}</p>`).join("")}</div>`);
   }
   window.__boq = rows;
   // eslint-disable-next-line no-console
@@ -12591,7 +14667,7 @@ function runBom() {
   const out = compile(store.doc, pack);
   if (!out) return;
   const rows = bomRows(out);
-  openSchedule("BOM � bill of materials", rows, { priced: false });
+  openSchedule("BOM — bill of materials", rows, { priced: false });
   window.__bom = rows;
   // eslint-disable-next-line no-console
   console.log("v2 BOM:", rows);
@@ -12657,7 +14733,7 @@ function elementLevel(ref, obj, walls = null) {
 /** Bring these points into the visible plan without changing zoom. If any
  *  part is already on screen, the camera stays put. Otherwise it shifts only
  *  along the axes where they sit off-screen, and only until the near edge
- *  clears the border � not until they are centred. */
+ *  clears the border — not until they are centred. */
 function framePlanPoints(points) {
   if (!points.length || !el.canvas) return;
   const rect = el.canvas.getBoundingClientRect();
@@ -12890,7 +14966,7 @@ function showExportPanel(title, fileName, report, extraHints) {
   el.compilePanel.querySelector("h2").textContent = title;
   el.compileKicker.textContent = fileName || "not exported";
   el.compileOut.innerHTML = `
-    ${notes.length ? `<div class="compile-warnings">${notes.map(([, m]) => `<p class="warn">? ${escapeHtml(m)}</p>`).join("")}</div>` : ""}
+    ${notes.length ? `<div class="compile-warnings">${notes.map(([, m]) => `<p class="warn">⚠ ${escapeHtml(m)}</p>`).join("")}</div>` : ""}
     <dl class="meta">
       <div><dt>Levels</dt><dd>${c.levels} storeys</dd></div>
       <div><dt>Walls</dt><dd>${c.walls}</dd></div>
@@ -12905,7 +14981,7 @@ function showExportPanel(title, fileName, report, extraHints) {
 // --- CAD export -----------------------------------------------------------
 //
 // Output > Exchange > Export CAD. A DXF is 2D linework. Revit inserts it with
-// Insert ? Link CAD; File ? Open will not, because that command only lists
+// Insert → Link CAD; File → Open will not, because that command only lists
 // Revit projects. No add-in is involved.
 
 function runExportDxf() {
@@ -12917,19 +14993,19 @@ function runExportDxf() {
   const { text, fileName, report } = result;
   if (text) {
     downloadText(fileName, text, "application/dxf");
-    setStatusMessage(`${fileName}: in Revit, Insert ? Link CAD. File ? Open will not load a DXF.`);
+    setStatusMessage(`${fileName}: in Revit, Insert → Link CAD. File → Open will not load a DXF.`);
   } else {
     setStatusMessage("Nothing could be exported - see the report.", "warn");
   }
   showExportPanel("CAD export", text ? fileName : "not exported", report, `
     <p class="hint"><strong>This is not a .rvt</strong> and not a model. It is a 2D CAD drawing of the plan (millimetres, one layer per storey).</p>
-    <p class="hint">In Revit, with <em>no add-in</em>: open the firm's template, then <strong>Insert ? Link CAD</strong> (or Import CAD). Set Files of type to DXF. File ? Open will ignore this file the same way it ignores IFC.</p>
+    <p class="hint">In Revit, with <em>no add-in</em>: open the firm's template, then <strong>Insert → Link CAD</strong> (or Import CAD). Set Files of type to DXF. File → Open will ignore this file the same way it ignores IFC.</p>
   `);
 }
 
 // --- IFC export -----------------------------------------------------------
 //
-// Still available for a machine that can File ? Open ? IFC. The receiving
+// Still available for a machine that can File → Open → IFC. The receiving
 // Revit user is not assumed to have this add-in.
 
 function runExportIfc() {
@@ -12942,11 +15018,11 @@ function runExportIfc() {
   const { text, fileName, report } = result;
   if (text) {
     downloadText(fileName, text, "application/x-step");
-    setStatusMessage(`${fileName}: in Revit, File ? Open ? IFC (not Open ? Project), then Save As .rvt.`);
+    setStatusMessage(`${fileName}: in Revit, File → Open → IFC (not Open → Project), then Save As .rvt.`);
   } else {
     setStatusMessage("Nothing could be exported - see the report.", "warn");
   }
   showExportPanel("IFC export", text ? fileName : "not exported", report, `
-    <p class="hint"><strong>This is not a .rvt.</strong> File ? Open ? Project will not load it. Use File ? Open ? IFC, then File ? Save As a project.</p>
+    <p class="hint"><strong>This is not a .rvt.</strong> File → Open → Project will not load it. Use File → Open → IFC, then File → Save As a project.</p>
   `);
 }

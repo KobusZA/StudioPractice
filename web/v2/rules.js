@@ -23,7 +23,7 @@
 
 import { pointInPoly } from "./geom.js";
 import { roomPolygon, shapePolygon } from "./model.js";
-import { skuById, wallForOpening } from "./openings.js";
+import { openingSize, skuById, wallForOpening } from "./openings.js";
 import { deriveWalls } from "./walls.js";
 import { compile } from "./compile.js";
 
@@ -190,7 +190,8 @@ function roomLightVentFacts(doc, pack, walls) {
     if (!sku) continue;
     const g = sku.geometry || {};
     const c = sku.compliance || {};
-    const openingArea = (g.width || 0) * (g.height || 0);
+    const size = openingSize(pack, opening);
+    const openingArea = (size.width || 0) * (size.height || 0);
     if (openingArea <= 0) continue;
 
     const roomIds = opening.roomId ? [opening.roomId] : wall.roomIds;

@@ -411,7 +411,7 @@ export function setUnderlayRotation(doc, degrees) {
   doc.underlay.rotation = d;
 }
 
-/** Nudge rotation by a delta - the 90° buttons and the free-rotate handle both go through this. */
+/** Nudge rotation by a delta - the 90Â° buttons and the free-rotate handle both go through this. */
 export function rotateUnderlayBy(doc, deltaDegrees) {
   if (!doc.underlay) return;
   setUnderlayRotation(doc, (doc.underlay.rotation || 0) + deltaDegrees);

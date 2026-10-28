@@ -127,6 +127,32 @@ export function createCloud({
     },
 
     /**
+     * Add one line to the firm's default rate book (the "Save to firm library"
+     * on a finish product). Owner-only: the server refuses anyone else, and the
+     * whole book is written back the way the rate book page does. A model the
+     * book already prices is left as it is, never overwritten.
+     * Resolves `{ added, bookName }`; `added` is false when it was already there.
+     */
+    async addRateBookLine(line) {
+      const books = (await call("GET", "/api/rate-books"))?.rateBooks ?? [];
+      const header = books.find((book) => book.isDefault);
+      if (!header) throw new CloudError(404, "The firm has no default rate book to add to");
+      const book = (await call("GET", `/api/rate-books/${encodeURIComponent(header.id)}`))?.rateBook;
+      const rates = book?.rates ?? [];
+      if (rates.some((r) => (r.model || "").toUpperCase() === String(line.model).toUpperCase())) {
+        return { added: false, bookName: book?.name ?? header.name };
+      }
+      await call("PUT", `/api/rate-books/${encodeURIComponent(header.id)}`, {
+        name: book.name,
+        effectiveFrom: book.effectiveFrom,
+        note: book.note,
+        symbol: book.symbol,
+        rates: [...rates, line],
+      });
+      return { added: true, bookName: book.name };
+    },
+
+    /**
      * Store the open plan file on the job. The bytes are not part of the
      * drawing save: the drawing only records the id this returns.
      */
