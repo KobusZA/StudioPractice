@@ -84,12 +84,30 @@ function centreOf(box) {
  * which keeps `roomMinDimension` exact. A free angle would silently downgrade
  * every rotated room to the convex-hull approximation.
  */
+/** Doors are hosted in a wall, so a selection of only openings has no box to turn. */
+function openingOnly(rows) {
+  return rows.length > 0 && rows.every(({ ref }) => ref.kind === "opening");
+}
+
+function doorsOf(rows) {
+  return rows.filter(({ obj }) => obj.hand === 1 || obj.hand === -1);
+}
+
 export function rotateSelection(doc, refs, { degrees = 90 } = {}) {
   const turns = Math.round(degrees / 90) % 4;
   if (turns === 0) return fail("Rotation must be a multiple of 90°.");
   const rows = resolve(doc, refs);
   if (!rows.length) return fail("Nothing selected.");
   const box = selectionBounds(doc, refs);
+  if (!box) {
+    if (!openingOnly(rows)) return fail("Nothing selected can be rotated.");
+    const doors = doorsOf(rows);
+    if (!doors.length) return fail("A window stays in its wall. Drag it along the wall to move it.");
+    for (const { obj } of doors) obj.hand = obj.hand === -1 ? 1 : -1;
+    return done(doors.length === 1
+      ? "Hinge flipped. Drag the door along the wall to move it."
+      : `Flipped the hinge on ${doors.length} doors.`);
+  }
   const [cx, cy] = centreOf(box);
 
   const turn = (x, y) => {
@@ -163,6 +181,15 @@ export function mirrorSelection(doc, refs, { axis = "v" } = {}) {
   const rows = resolve(doc, refs);
   if (!rows.length) return fail("Nothing selected.");
   const box = selectionBounds(doc, refs);
+  if (!box) {
+    if (!openingOnly(rows)) return fail("Nothing selected can be mirrored.");
+    const doors = doorsOf(rows);
+    if (!doors.length) return fail("A window stays in its wall. Drag it along the wall to move it.");
+    for (const { obj } of doors) obj.swing = -(obj.swing || 1);
+    return done(doors.length === 1
+      ? "Swing flipped to the other side of the wall."
+      : `Flipped the swing on ${doors.length} doors.`);
+  }
   const [cx, cy] = centreOf(box);
   const flip = (x, y) => (axis === "h"
     ? [roundGrid(x), roundGrid(2 * cy - y)]
@@ -184,7 +211,9 @@ export function mirrorSelection(doc, refs, { axis = "v" } = {}) {
     } else if (obj.x !== undefined) {
       [obj.x, obj.y] = flip(obj.x, obj.y);
     }
-    // A door's swing is handed, so mirroring the plan must swap it.
+    // swing is which side of the wall, and mirroring reverses that wall's
+    // normal, so it swaps. hand is which end of the same wall; those ends
+    // move with the mirror, so the hinge stays on its jamb.
     if (ref.kind === "opening" && obj.swing !== undefined) obj.swing = -obj.swing;
     if (ref.kind === "segment" && obj.location) obj.location = mirroredWallLocation(obj.location);
   }
@@ -246,7 +275,7 @@ export function copySelection(doc, refs, { dx = null, dy = 0 } = {}) {
     }
   }
 
-  if (!created.length) return fail("Openings are anchored to a wall; copy the wall or place another.");
+  if (!created.length) return fail("A door or window stays in its wall. Drag it along the wall to move it, or place another.");
   return done(`Copied ${created.length} object${created.length === 1 ? "" : "s"}.`, created);
 }
 

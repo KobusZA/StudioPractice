@@ -246,11 +246,22 @@ export function exportDxf(doc, pack) {
 
     const arc = (form.profileLoops?.[0]?.curves || []).find((c) => c.kind === "Arc");
     if (arc && !isWindow) {
-      const hinge = a;
       const leaf = toMmPts([arc.end])[0];
-      const radius = Math.hypot(b[0] - hinge[0], b[1] - hinge[1]);
+      const da = Math.hypot(leaf[0] - a[0], leaf[1] - a[1]);
+      const db = Math.hypot(leaf[0] - b[0], leaf[1] - b[1]);
+      const hinge = da <= db ? a : b;
+      const free = da <= db ? b : a;
+      const radius = Math.hypot(free[0] - hinge[0], free[1] - hinge[1]);
       dxf.line(layer, hinge, leaf);
-      dxf.arc(layer, hinge[0], hinge[1], radius, atanDeg(hinge[0], hinge[1], b[0], b[1]), atanDeg(hinge[0], hinge[1], leaf[0], leaf[1]));
+      // DXF arcs run counter-clockwise, so a clockwise quarter-turn is stored
+      // from the leaf back to the free jamb.
+      let start = atanDeg(hinge[0], hinge[1], free[0], free[1]);
+      let end = atanDeg(hinge[0], hinge[1], leaf[0], leaf[1]);
+      let sweep = end - start;
+      while (sweep > 180) sweep -= 360;
+      while (sweep < -180) sweep += 360;
+      if (sweep < 0) [start, end] = [end, start];
+      dxf.arc(layer, hinge[0], hinge[1], radius, start, end);
     }
 
     dxf.text(layerName("A-ANNO", levelNameOf(hostLevel)), (a[0] + b[0]) / 2, (a[1] + b[1]) / 2, 120, label);

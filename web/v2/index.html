@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,560&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="./v2.css?v=20261029-sheet-close" />
+  <link rel="stylesheet" href="./v2.css?v=20261029-door-hinge" />
 </head>
 <body class="auth-pending">
   <div class="chrome">
@@ -173,6 +173,13 @@
           </span>
         </div>
         <canvas id="v2-canvas"></canvas>
+        <span class="elev-edge-mode" id="v2-floor-edge-mode" hidden role="group" aria-label="Drag an edge to">
+          <span class="elev-edge-subject" data-edge-subject>Editing the floor</span>
+          <span class="elev-edge-actions">
+            <button type="button" data-floor-edge="line" title="Move this edge squarely. Hold Shift to add a corner instead.">Line</button>
+            <button type="button" data-floor-edge="corner" title="Add a corner on an edge. Hold Shift to move the edge instead.">Corner</button>
+          </span>
+        </span>
         <div class="canvas-status">
           <p class="ribbon-hint" id="v2-ribbon-hint" hidden></p>
           <div class="plan-options" id="v2-plan-options" hidden>
@@ -323,13 +330,19 @@
         <button type="button" class="svc-profile-resize" id="v2-resize-profile"
                 aria-label="Resize route profile" title="Drag to change height" tabindex="0"></button>
         <div class="svc-profile-head">
-          <p class="svc-profile-title" id="v2-service-profile-title">Route profile</p>
+          <div class="svc-profile-title-row">
+            <p class="svc-profile-title" id="v2-service-profile-title">Route profile</p>
+            <button type="button" class="elev-info" id="v2-elev-info" hidden aria-expanded="false" aria-controls="v2-elev-info-note" title="How this elevation works">i</button>
+            <p class="elev-info-note" id="v2-elev-info-note" hidden>Drag the top of the wall to set its height. The line above is the next floor, or the roof on the top storey. Scroll to zoom; middle-drag or Alt-drag to move around. Fit shows the whole wall.</p>
+          </div>
           <button type="button" class="svc-profile-all" id="v2-profile-select-all"
                   title="Select every run on this route, rises and drops included, so type and Include in BoQ can be changed in one go. Double-clicking a run does the same.">Select whole route</button>
           <span class="svc-profile-mode" role="group" aria-label="Drag a node in the profile to">
             <button type="button" data-profile-mode="step" title="Dragging a node makes a vertical rise or drop (90 degrees). Hold Shift to use Slope for one drag.">Step</button>
             <button type="button" data-profile-mode="slope" title="Dragging a node changes only its height, so the runs beside it slope (use for drainage falls). Hold Shift to use Step for one drag.">Slope</button>
           </span>
+          <button type="button" class="svc-profile-all" id="v2-elev-fit" hidden
+                  title="Show the whole wall again">Fit</button>
           <button type="button" class="svc-profile-all" id="v2-elev-flip" hidden
                   title="View the other face of this wall (mirrored left to right)">Flip face</button>
           <button type="button" class="svc-profile-exit" id="v2-profile-exit"
@@ -337,8 +350,11 @@
         </div>
         <canvas id="v2-service-profile-canvas"></canvas>
         <span class="elev-edge-mode" id="v2-elev-edge-mode" hidden role="group" aria-label="Drag an edge of the finish to">
-          <button type="button" data-elev-edge="corner" title="Add a corner on an edge">Corner</button>
-          <button type="button" data-elev-edge="line" title="Move this edge">Line</button>
+          <span class="elev-edge-subject">Editing the finish</span>
+          <span class="elev-edge-actions">
+            <button type="button" data-elev-edge="line" title="Move this edge">Line</button>
+            <button type="button" data-elev-edge="corner" title="Add a corner on an edge">Corner</button>
+          </span>
         </span>
         <div class="elev-dock-body" id="v2-elevation-body" hidden></div>
       </div>
@@ -479,6 +495,7 @@
             <strong id="v2-ctx-attach">Not attached</strong>
           </div>
           <button type="button" id="v2-ctx-flip" hidden>Flip swing</button>
+          <button type="button" id="v2-ctx-hinge" hidden>Flip hinge</button>
         </div>
         <!-- 2.5D services: route settings while Draw route is armed, and the
              properties of a selected route point or run. Rendered by
@@ -1009,6 +1026,6 @@
     </form>
   </div>
 
-  <script type="module" src="./ui.js?v=20261029-finish-callout-close"></script>
+  <script type="module" src="./ui.js?v=20261029-door-flip"></script>
 </body>
 </html>

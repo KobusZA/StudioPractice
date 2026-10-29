@@ -122,6 +122,67 @@ export function pointInPoly(x, y, poly) {
   return inside;
 }
 
+/** On the boundary counts: a finish edge often lies on the floor outline. */
+function pointOnOrInPoly(x, y, poly) {
+  if (pointInPoly(x, y, poly)) return true;
+  const c = clampToPoly(x, y, poly);
+  return Math.hypot(c.x - x, c.y - y) <= 1e-4;
+}
+
+/**
+ * Move one edge of a ring by the same amount at both ends, so the line keeps
+ * its length and direction. The delta is shortened until both ends stay inside
+ * `host` (or on its boundary). No host means the full delta. `points` are
+ * `[x, y]` pairs. Returns a new ring.
+ */
+export function translatePolyEdge(points, edgeIndex, dx, dy, host) {
+  const n = points.length;
+  if (!n) return [];
+  const i = ((edgeIndex % n) + n) % n;
+  const j = (i + 1) % n;
+  const fits = (t) => {
+    if (!host || host.length < 3) return true;
+    const ax = points[i][0] + dx * t;
+    const ay = points[i][1] + dy * t;
+    const bx = points[j][0] + dx * t;
+    const by = points[j][1] + dy * t;
+    return pointOnOrInPoly(ax, ay, host) && pointOnOrInPoly(bx, by, host);
+  };
+  const ax0 = points[i][0];
+  const ay0 = points[i][1];
+  const bx0 = points[j][0];
+  const by0 = points[j][1];
+  let t = 1;
+  if (!fits(1)) {
+    if (!fits(0)) t = 0;
+    else {
+      let lo = 0;
+      let hi = 1;
+      for (let k = 0; k < 24; k += 1) {
+        const mid = (lo + hi) / 2;
+        if (fits(mid)) lo = mid;
+        else hi = mid;
+      }
+      t = lo;
+      // The search stops a hair past the outline. Land on it, same delta at both ends.
+      const pull = (x, y, x0, y0) => {
+        if (pointInPoly(x, y, host)) return t;
+        const c = clampToPoly(x, y, host);
+        const len2 = dx * dx + dy * dy;
+        if (len2 < 1e-18) return t;
+        const hit = ((c.x - x0) * dx + (c.y - y0) * dy) / len2;
+        return Math.max(0, Math.min(t, hit));
+      };
+      const ax = ax0 + dx * t;
+      const ay = ay0 + dy * t;
+      const bx = bx0 + dx * t;
+      const by = by0 + dy * t;
+      t = Math.min(pull(ax, ay, ax0, ay0), pull(bx, by, bx0, by0));
+    }
+  }
+  return points.map((p, k) => (k === i || k === j ? [p[0] + dx * t, p[1] + dy * t] : [p[0], p[1]]));
+}
+
 /**
  * Keep a point on or inside a polygon. Already-inside points are unchanged;
  * points outside land on the nearest edge or vertex. Used so a finish drawn
@@ -557,4 +618,29 @@ export function clipPolygon(subject, clip) {
     if (clipped.length >= 3 && area(clipped) > 1e-8) out.push(clipped);
   }
   return out;
+}
+
+/**
+ * The part of `poly` that lies on `host`. Vertices past the host, including
+ * both ends of an edge the host cuts through, are dropped. A polygon already
+ * inside is returned as-is.
+ */
+export function fitPolygonToHost(poly, host) {
+  if (!poly || poly.length < 3 || !host || host.length < 3) return poly ? poly.map((p) => [p[0], p[1]]) : [];
+  const onHost = (x, y) => {
+    if (pointInPoly(x, y, host)) return true;
+    const c = clampToPoly(x, y, host);
+    return Math.hypot(c.x - x, c.y - y) <= 1e-4;
+  };
+  if (poly.every(([x, y]) => onHost(x, y))) return poly;
+  const pieces = clipPolygon(poly, host);
+  if (!pieces.length) return poly;
+  let best = pieces[0];
+  let bestA = area(best);
+  for (let i = 1; i < pieces.length; i += 1) {
+    const a = area(pieces[i]);
+    if (a > bestA) { best = pieces[i]; bestA = a; }
+  }
+  const clean = simplify(normalizeWinding(best));
+  return clean.length >= 3 ? clean : poly;
 }

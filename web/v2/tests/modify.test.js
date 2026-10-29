@@ -77,13 +77,45 @@ test("two rooms rotate about their shared centre, not their own", () => {
   assert.notEqual(boxes[0].y, boxes[1].y);
 });
 
+test("rotating a door on its own flips the hinge and leaves it in the wall", () => {
+  const doc = docWith({
+    openings: [{ id: "o1", sku: "D1", wallId: "w1", t: 0.4, swing: 1, hand: 1, status: "planned" }],
+  });
+  const result = rotateSelection(doc, [ref("opening", "o1")]);
+  assert.equal(result.ok, true);
+  assert.equal(doc.openings[0].hand, -1);
+  assert.equal(doc.openings[0].swing, 1);
+  assert.equal(doc.openings[0].t, 0.4);
+});
+
+test("mirroring a door on its own flips the swing and leaves it in the wall", () => {
+  const doc = docWith({
+    openings: [{ id: "o1", sku: "D1", wallId: "w1", t: 0.4, swing: 1, hand: -1, status: "planned" }],
+  });
+  const result = mirrorSelection(doc, [ref("opening", "o1")]);
+  assert.equal(result.ok, true);
+  assert.equal(doc.openings[0].swing, -1);
+  assert.equal(doc.openings[0].hand, -1);
+  assert.equal(doc.openings[0].t, 0.4);
+});
+
+test("rotating a window on its own is refused", () => {
+  const doc = docWith({
+    openings: [{ id: "o1", sku: "W1", wallId: "w1", t: 0.4, swing: 1, status: "planned" }],
+  });
+  const result = rotateSelection(doc, [ref("opening", "o1")]);
+  assert.equal(result.ok, false);
+  assert.equal(doc.openings[0].t, 0.4);
+});
+
 test("mirroring flips position and hands the door swing over", () => {
   const doc = docWith({
     rooms: [room("a", 0, 0, 4, 2)],
-    openings: [{ id: "o1", sku: "D1", wallId: "w1", t: 0.5, swing: 1, status: "planned" }],
+    openings: [{ id: "o1", sku: "D1", wallId: "w1", t: 0.5, swing: 1, hand: -1, status: "planned" }],
   });
   mirrorSelection(doc, [ref("room", "a"), ref("opening", "o1")]);
   assert.equal(doc.openings[0].swing, -1);
+  assert.equal(doc.openings[0].hand, -1);
 });
 
 test("mirroring twice returns the original", () => {
@@ -111,7 +143,7 @@ test("copying an opening on its own is refused with a reason", () => {
   const doc = docWith({ openings: [{ id: "o1", sku: "D1", wallId: "w1", t: 0.5, status: "planned" }] });
   const result = copySelection(doc, [ref("opening", "o1")]);
   assert.equal(result.ok, false);
-  assert.match(result.message, /anchored to a wall/);
+  assert.match(result.message, /stays in its wall/);
   assert.equal(doc.openings.length, 1);
 });
 

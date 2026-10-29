@@ -27,7 +27,7 @@ import {
   rulesFromPreset,
   savePreset,
 } from "../finish-model.js";
-import { faceFinishHtml, finishCalloutHtml, productsHtml, roomFinishHtml, slabFinishHtml } from "../finish-panel.js";
+import { faceFinishHtml, finishCalloutHtml, openingCalloutHtml, productsHtml, roomFinishHtml, slabFinishHtml } from "../finish-panel.js";
 
 const pack = normalizePackUnits(
   JSON.parse(readFileSync(new URL("../../samples/planner-pack-v2.json", import.meta.url))),
@@ -457,6 +457,11 @@ test("a wall face panel reads like the floor panel: summary, one add form, a car
   assert.ok(html.includes(`fin-editing" data-fin-band="${id}"`) && card.includes("Saved"), "the picked card is marked, and a save is acknowledged");
   assert.ok(html.includes('data-fin="band-height"') && html.includes("Skirting"));
   assert.ok(html.includes("from the wall type"), "the computed plaster stays in the summary, as the wall type");
+  assert.ok(html.includes("fin-kind-title") && card.includes("White · 300x600"), "a named product is the card's title");
+  assert.ok(card.includes("fin-mini"), "the card shows the shape on the face");
+  assert.ok(html.includes("1 area"), "each type says how many areas it is");
+  assert.ok(html.includes("Wall tile on the plaster") && html.includes("Paint on the plaster"), "a finish on the coat is named");
+  assert.ok(html.indexOf(">Wall tile<") < html.indexOf(`data-fin-band="${id}"`), "the type heading comes before its card");
   assert.ok(html.includes('data-fin="default-remove"'), "the default can be taken off from the summary");
   assert.ok(!html.includes("data-fin-band=\"default:"), "the default is not a card");
   assert.ok(html.includes(">Whole face<") && html.includes('data-fin-custom hidden'), "millimetre boxes stay hidden until asked for");
@@ -465,9 +470,31 @@ test("a wall face panel reads like the floor panel: summary, one add form, a car
   const callout = finishCalloutHtml(doc, model.finishBands.find((b) => b.id === id), model);
   assert.ok(callout.includes(`data-fin-band="${id}"`));
   assert.ok(callout.includes("Wall tile") && callout.includes("White · 300x600") && callout.includes("Up to 1.2 m"));
-  assert.ok(callout.includes('data-fin="band-close"') && callout.includes('data-fin="band-edit"'));
+  assert.ok(callout.includes('data-fin="callout-close"') && callout.includes(">×<") && callout.includes('aria-label="Close"'));
+  assert.ok(!callout.includes(">Close<"), "the callout closes with an X");
+  assert.ok(callout.includes('data-fin="band-edit"'));
   assert.ok(!callout.includes('data-fin="band-remove"'), "the callout does not remove the finish");
   assert.ok(!callout.includes('data-fin="band-from"'), "the callout does not edit the shape as four edges");
+});
+
+test("a window on the inspector graph is a callout, not a move handle", () => {
+  const html = openingCalloutHtml({
+    id: "o1",
+    name: "Window 1300",
+    category: "window",
+    width: 1.3,
+    height: 1.3,
+    sill: 0.75,
+    offset: 0.75,
+    nonStandard: true,
+  });
+  assert.ok(html.includes("Window 1300") && html.includes("1300 × 1300"));
+  assert.ok(html.includes("Sill 750 mm") && html.includes("750 mm from the left"));
+  assert.ok(html.includes("Non-standard size"));
+  assert.ok(html.includes('data-fin="opening-edit"') && html.includes('data-fin="callout-close"') && html.includes(">×<"));
+  const door = openingCalloutHtml({ id: "d1", name: "Door", category: "door", width: 0.9, height: 2.1, sill: 0, offset: 0.2, nonStandard: false });
+  assert.ok(!door.includes("Sill"), "a door has no sill line");
+  assert.ok(!door.includes("Non-standard"));
 });
 
 test("taking the default off leaves a listed No finish piece that can be removed again", () => {
@@ -483,6 +510,59 @@ test("taking the default off leaves a listed No finish piece that can be removed
   const html = faceFinishHtml(doc, elevationModel(doc, pack, face, walls));
   assert.ok(html.includes("Remove this to put it back"));
   assert.ok(!html.includes("data-fin-band=\"default:"), "taking plaster off does not leave a plaster card");
+});
+
+test("a finish under a window is described by the window", () => {
+  const doc = build({ openings: [{ id: "o1", sku: "TSP_WN1212", roomId: "r1", edgeIndex: 0, t: 0.5 }] });
+  const walls = deriveWalls(doc, pack).filter((w) => w.category === "wall");
+  let host = null;
+  let side = 1;
+  let model = null;
+  for (const wall of walls) {
+    for (const s of [1, -1]) {
+      const candidate = elevationModel(doc, pack, { wallId: wall.id, side: s }, walls);
+      if (candidate.openings.some((o) => o.category !== "door")) {
+        host = wall;
+        side = s;
+        model = candidate;
+        break;
+      }
+    }
+    if (host) break;
+  }
+  assert.ok(host && model, "the window is on a wall");
+  const opening = model.openings.find((o) => o.category !== "door");
+  const x0 = model.flip ? host.length - (opening.offset + opening.width) : opening.offset;
+  const x1 = model.flip ? host.length - opening.offset : opening.offset + opening.width;
+  createFinishRun(doc, host, side, {
+    category: "wallTile",
+    outline: [[x0, 0], [x1, 0], [x1, opening.sill], [x0, opening.sill]],
+  });
+  const html = faceFinishHtml(doc, elevationModel(doc, pack, { wallId: host.id, side }, walls));
+  assert.ok(html.includes("Under the window, up to 900 mm"), "the patch is named from the opening above it");
+});
+
+test("finishes of one type stay in wall order, and an overlap is named", () => {
+  const doc = normalizeDoc({
+    segments: [{ id: "w1", sku: "TSP_MAS009", level: "01 GFL", x1: 0, y1: 0, x2: 6, y2: 0 }],
+  });
+  const walls = deriveWalls(doc, pack);
+  const face = { wallId: "w1", side: 1 };
+  const right = createFinishRun(doc, walls[0], 1, { category: "paint", outline: [[4, 0], [6, 0], [6, 1], [4, 1]] });
+  const left = createFinishRun(doc, walls[0], 1, { category: "paint", outline: [[0, 0], [2, 0], [2, 1], [0, 1]] });
+  const model = elevationModel(doc, pack, face, walls);
+  const html = faceFinishHtml(doc, model);
+  const leftId = model.finishBands.find((b) => b.sourceId === left.id).id;
+  const rightId = model.finishBands.find((b) => b.sourceId === right.id).id;
+  assert.ok(html.indexOf(`data-fin-band="${leftId}"`) < html.indexOf(`data-fin-band="${rightId}"`), "the left patch is listed first");
+  assert.ok(html.includes("Paint 1 of 2") && html.includes("Left side, up to 1 m"));
+  assert.ok(html.includes("Paint 2 of 2") && html.includes("Right side, up to 1 m"));
+  assert.ok(html.includes("2 areas"));
+  assert.ok(html.includes("Paint on the plaster"));
+  assert.ok(!html.includes("Paint areas overlap"), "patches that miss each other are not an overlap");
+  createFinishRun(doc, walls[0], 1, { category: "paint", outline: [[1, 0], [3, 0], [3, 1], [1, 1]] });
+  const overlap = faceFinishHtml(doc, elevationModel(doc, pack, face, walls));
+  assert.ok(overlap.includes("Paint areas overlap"), "two paints on the same patch are named");
 });
 
 test("a shape drawn on a wall is measured as that shape, and a coat takes it off the default", () => {
@@ -504,7 +584,9 @@ test("a shape drawn on a wall is measured as that shape, and a coat takes it off
   assert.equal(band.outline.length, 3);
   assert.ok(Math.abs(before - plaster(after) - 1.5) < 1e-2, "the coat comes out of the default");
   const html = faceFinishHtml(doc, after);
-  assert.ok(html.includes("Drawn area, 3 corners"));
+  assert.ok(html.includes("Left side, up to 1.5 m"), "a drawn shape is described by where it sits");
+  assert.ok(!html.includes("Drawn area"), "a drawn shape is not described by its corner count");
+  assert.ok(!html.includes("on the plaster"), "a coat that replaces the plaster is not reported as sitting on it");
   assert.ok(!html.includes('data-fin="band-from"'), "a drawn shape is not edited as a rectangle");
   assert.ok(html.includes('data-fin="band-draw"'));
   const kept = normalizeDoc({ finishRuns: [run] });

@@ -35,11 +35,11 @@ import {
 import {
   beamHostsOk,
   hostOk,
+  doorSwing,
   openingOnWall,
   openingSize,
   skuById,
   wallForOpening,
-  wallNormal,
 } from "./openings.js";
 import { deriveDrawnWalls, deriveWalls, isExternalWall, skuDrawnHeight } from "./walls.js";
 import { edgeHomeLevel, runGradient, serviceTakeoff } from "./services.js";
@@ -644,12 +644,12 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
       }],
     };
     if (sku.category === "door") {
-      const n = wallNormal(wall, opening.swing || 1);
+      const swing = doorSwing(wall, placed, opening);
       tick.profileLoops[0].curves.push({
         kind: "Arc",
         length: placed.width * 1.57,
-        start: [placed.b.x, placed.b.y, 0],
-        end: [placed.a.x + n.x * placed.width, placed.a.y + n.y * placed.width, 0],
+        start: [swing.free.x, swing.free.y, 0],
+        end: [swing.leaf.x, swing.leaf.y, 0],
       });
     }
     sketchForms.push(tick);

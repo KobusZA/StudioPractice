@@ -7,6 +7,8 @@
 //    endpoints and room/slab/roof/finish corners (an exact join), or onto
 //    the same X or Y as one of those points (an alignment guide, e.g. a
 //    roof eave lining up with a wall without touching it).
+//    Moving a whole edge does not use those corner guides. The edge lines
+//    up with another edge, and only that coincidence draws an alignment line.
 //  - Nice-length snapping: a free endpoint is attracted to round millimetre
 //    offsets (3500 mm before 3507 mm) from the wall's start, a nearby object,
 //    or the origin. The pull is a magnet, not a lock: zoom in and the same
@@ -156,7 +158,9 @@ function snapIncluded(obj, opts) {
  * that shape's edges are face targets (the pointer is always on them, so
  * a face hit would also draw both guides whether or not another node
  * shares that X or Y). The shape's other corners stay, so a dragged floor
- * or finish corner can still line up with them. A finish uses kind "finish".
+ * or finish corner can still line up with them. `also: { x, y }` drops a
+ * second corner. A whole edge does not consult corners; it lines up with
+ * other edges. A finish uses kind "finish".
  */
 function activeShapeOf(opts) {
   const a = opts.activeShape;
@@ -172,7 +176,9 @@ function isActiveShape(opts, kind, id) {
 function isActiveCorner(opts, kind, id, x, y) {
   const a = activeShapeOf(opts);
   if (!a || a.kind !== kind || a.id !== id) return false;
-  return Math.abs(x - a.x) < 1e-9 && Math.abs(y - a.y) < 1e-9;
+  if (Math.abs(x - a.x) < 1e-9 && Math.abs(y - a.y) < 1e-9) return true;
+  const b = a.also;
+  return Boolean(b && Math.abs(x - b.x) < 1e-9 && Math.abs(y - b.y) < 1e-9);
 }
 
 /**
@@ -351,6 +357,15 @@ export function collectSnapEdges(doc, opts = {}) {
     if (isActiveShape(opts, "roof", roof.id) || !snapIncluded(roof, opts)) continue;
     pushPolyEdges(edges, shapePolygon(roof.shape));
   }
+  // Finish edges are line alignments while a finish is being edited, the
+  // same way its corners are point alignments. A whole-floor finish has no
+  // edge of its own.
+  if (opts.finishes) {
+    for (const region of doc.finishRegions || []) {
+      if (region.whole || isActiveShape(opts, "finish", region.id) || !snapIncluded(region, opts)) continue;
+      pushPolyEdges(edges, shapePolygon(region.shape));
+    }
+  }
   return edges;
 }
 
@@ -451,6 +466,63 @@ export function snapToFace(x, y, edges, tolWorld) {
   }
   if (!best) return { x, y, guideX: null, guideY: null, guideXPoint: null, guideYPoint: null, snapped: false };
   return { x: best.x, y: best.y, guideX: best.x, guideY: best.y, guideXPoint: best, guideYPoint: best, snapped: true };
+}
+
+/**
+ * Pull a moving edge onto the nearest parallel edge, so the two lines
+ * coincide. Corners are ignored: a shared X or Y on one end of the edge is
+ * not a line alignment. Returns the moved first endpoint. An axis-aligned
+ * hit sets `guideX` or `guideY` (the line the guide runs along). A diagonal
+ * hit sets `guideLine` instead, so the guide follows that line rather than
+ * drawing a horizontal and a vertical through a corner.
+ */
+export function snapEdgeToLine(x1, y1, x2, y2, edges, tolWorld) {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const len = Math.hypot(dx, dy);
+  const miss = {
+    x: x1, y: y1, snapped: false,
+    guideX: null, guideY: null, guideXPoint: null, guideYPoint: null, guideLine: null,
+  };
+  if (len < 1e-9) return miss;
+  const ux = dx / len;
+  const uy = dy / len;
+  const nx = -uy;
+  const ny = ux;
+  let best = null;
+  let bestD = tolWorld;
+  for (const edge of edges) {
+    const ex = edge.x2 - edge.x1;
+    const ey = edge.y2 - edge.y1;
+    const elen = Math.hypot(ex, ey);
+    if (elen < 1e-9) continue;
+    const cross = ux * (ey / elen) - uy * (ex / elen);
+    if (Math.abs(cross) > 1e-4) continue;
+    const dist = (edge.x1 - x1) * nx + (edge.y1 - y1) * ny;
+    const ad = Math.abs(dist);
+    if (ad <= bestD) {
+      bestD = ad;
+      best = { edge, dist };
+    }
+  }
+  if (!best) return miss;
+  const x = x1 + best.dist * nx;
+  const y = y1 + best.dist * ny;
+  const foot = closestOnSeg(best.edge, x, y);
+  const vertical = Math.abs(ux) < 1e-6;
+  const horizontal = Math.abs(uy) < 1e-6;
+  return {
+    x,
+    y,
+    snapped: true,
+    guideX: vertical ? x : null,
+    guideY: horizontal ? y : null,
+    guideXPoint: vertical ? foot : null,
+    guideYPoint: horizontal ? foot : null,
+    guideLine: vertical || horizontal ? null : {
+      x1: best.edge.x1, y1: best.edge.y1, x2: best.edge.x2, y2: best.edge.y2, point: foot,
+    },
+  };
 }
 
 /**

@@ -152,10 +152,24 @@ test("the SVG draws the wall and each opening, with handles only when interactiv
   const plain = elevationSvg(m, { width: 300, height: 130 });
   assert.match(plain.svg, /elev-wall/);
   assert.match(plain.svg, /data-elev-id="o1"/);
+  assert.doesNotMatch(plain.svg, /data-elev-op="move"/, "the preview opening is not a move handle");
   assert.doesNotMatch(plain.svg, /elev-handle/);
   const live = elevationSvg(m, { width: 600, height: 200, interactive: true, selectedId: "o1" });
+  assert.match(live.svg, /data-elev-op="move"/);
   assert.match(live.svg, /elev-handle-r/);
   assert.ok(live.scale > 0);
+});
+
+test("a selected door can be moved, and has no handles that change its width", async () => {
+  const { elevationSvg } = await import("../wall-elevation-render.js");
+  const doc = drawnDoc([{ id: "d1", sku: "TSP_DR900", wallId: "w1", t: 0.5 }]);
+  const m = elevationModel(doc, pack, { wallId: "w1" });
+  const live = elevationSvg(m, { width: 600, height: 200, interactive: true, selectedId: "d1" });
+  assert.match(live.svg, /data-elev-op="move"/);
+  assert.match(live.svg, /elev-handle-t/);
+  assert.doesNotMatch(live.svg, /elev-handle-l/);
+  assert.doesNotMatch(live.svg, /elev-handle-r/);
+  assert.doesNotMatch(live.svg, /elev-handle-b/);
 });
 
 function fillTag(svg, id) {
@@ -339,6 +353,42 @@ test("a long wall keeps the next floor above the wall", async () => {
   const fittedWall = fitted.svg.match(/<rect x="([^"]+)" y="([^"]+)" width="([^"]+)" height="[^"]+" class="elev-wall"/);
   const fittedRight = Number(fittedWall[1]) + Number(fittedWall[3]);
   assert.ok(Math.abs(Number(fittedWall[1]) - 7) < 1 && Math.abs(fittedRight - 633) < 1, "a shorter wall fills the width too");
+});
+
+test("zooming keeps the point under the cursor, and zooming out restores the fit", async () => {
+  const { elevationSvg, zoomElevationView } = await import("../wall-elevation-render.js");
+  const model = elevationModel(drawnDoc(), pack, { wallId: "w1" });
+  const fitted = elevationSvg(model, { width: 640, height: 280, interactive: true });
+  const px = 200;
+  const py = 100;
+  const s = (px - fitted.originX) / fitted.scaleX;
+  const z = model.base + (fitted.originY - py) / fitted.scaleY;
+  const view = zoomElevationView(fitted.fit, { zoom: 1, panX: 0, panY: 0 }, px, py, 2);
+  assert.ok(Math.abs(view.zoom - 2) < 1e-9);
+  const zoomed = elevationSvg(model, { width: 640, height: 280, interactive: true, view });
+  const x = zoomed.originX + s * zoomed.scaleX;
+  const y = zoomed.originY - (z - model.base) * zoomed.scaleY;
+  assert.ok(Math.abs(x - px) < 1e-6, "the cursor's point stays under the cursor");
+  assert.ok(Math.abs(y - py) < 1e-6, "the cursor's height stays under the cursor");
+  assert.ok(Math.abs(zoomed.scaleX / fitted.scaleX - 2) < 1e-9);
+  assert.ok(Math.abs(zoomed.scaleY / fitted.scaleY - 2) < 1e-9);
+
+  const back = zoomElevationView(fitted.fit, view, px, py, 0.01);
+  assert.deepEqual(back, { zoom: 1, panX: 0, panY: 0 });
+  const restored = elevationSvg(model, { width: 640, height: 280, interactive: true, view: back });
+  assert.equal(restored.originX, fitted.originX);
+  assert.equal(restored.originY, fitted.originY);
+  assert.equal(restored.scaleX, fitted.scaleX);
+  assert.equal(restored.scaleY, fitted.scaleY);
+
+  const { clampElevationView } = await import("../wall-elevation-render.js");
+  const shoved = clampElevationView(fitted.fit, { zoom: 2, panX: 5000, panY: -5000 }, 640, 280);
+  assert.ok(shoved.panX < 5000, "the wall cannot be panned clear of the strip");
+  assert.equal(shoved.zoom, 2);
+  const parked = elevationSvg(model, { width: 640, height: 280, interactive: true, view: shoved });
+  const wallLeft = parked.originX;
+  const wallRight = parked.originX + model.length * parked.scaleX;
+  assert.ok(wallRight > 16 && wallLeft < 640 - 16, "part of the wall stays in frame");
 });
 
 test("dragging the wall top sets a fixed height and will not pass the next floor", () => {

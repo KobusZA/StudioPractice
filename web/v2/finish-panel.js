@@ -8,7 +8,7 @@
 
 import { finishSwatch } from "./finish-data.js";
 import { floorCoverage, FINISH_CATEGORIES, categoriesForSurface, finishProductById, regionsOnSlab } from "./finish-model.js";
-import { area as polyArea } from "./geom.js";
+import { area as polyArea, clipPolygon } from "./geom.js";
 import { finishRegionPolygon, roomPolygon, shapePolygon } from "./model.js";
 
 const esc = (text) => String(text ?? "").replace(/[&<>"']/g, (c) => ({
@@ -236,7 +236,7 @@ function placedFinishHtml(doc, region, editingId, { area, index, total, saved })
       </span>
     </label>
     <div class="fin-btns">
-      <button type="button" data-fin="region-edit" aria-pressed="${editing ? "true" : "false"}" title="Show this region's corners on the plan: drag a corner, drag an edge to add one, Delete removes a corner">${editing ? "Done" : "Edit corners"}</button>
+      <button type="button" data-fin="region-edit" aria-pressed="${editing ? "true" : "false"}" title="Show this region's corners on the plan. Corner adds a point on an edge; Line moves the edge. Hold Shift to use the other one for a single drag. Delete removes a corner.">${editing ? "Done" : "Edit corners"}</button>
       <button type="button" data-fin="region-remove">Remove</button>
     </div>
   </div>`;
@@ -342,36 +342,22 @@ function faceCoverage(model, bands) {
   const defaults = areaBands(bands.filter((b) => b.source === "default"));
   const poly = (list) => list.map(bandPolygon).filter((p) => p?.length >= 3);
   const addedCover = floorCoverage(host, poly(added));
-  const both = floorCoverage(host, poly([...defaults, ...added]));
   const addedQty = added.reduce((sum, b) => sum + b.quantity, 0);
   return {
     face: model.length * model.height,
     finished: addedCover.excess >= 0.02 ? addedCover.finished : addedQty,
     plaster: defaults.reduce((sum, b) => sum + b.quantity, 0),
     plasterCategory: defaults[0]?.category || null,
-    excess: both.excess,
     hasAdded: added.length > 0,
   };
 }
 
-/** What is on this wall face: the face, finishes added once, and the plaster underneath. */
+/** What is on this wall face, before the finishes themselves: the face and the plaster underneath. */
 function faceSummaryHtml(model, bands) {
   const cover = faceCoverage(model, bands);
-  const byType = new Map();
-  for (const b of bands) {
-    if (b.source === "default" || b.category === "none") continue;
-    const row = byType.get(b.category) || { qty: 0, unit: b.unit };
-    row.qty += b.quantity;
-    byType.set(b.category, row);
-  }
-  const order = categoriesForSurface("wall");
-  const rows = order.filter((id) => byType.has(id)).map((id) => {
-    const row = byType.get(id);
-    return `<li class="fin-sum-row"><i class="fin-swatch" style="background:${esc(finishSwatch(id))}"></i><span class="fin-grow">${esc(FINISH_CATEGORIES[id].label)}</span><span>${formatQty(row.qty, row.unit)}</span></li>`;
-  }).join("");
   const plasterLabel = cover.plasterCategory ? FINISH_CATEGORIES[cover.plasterCategory]?.label : "Plaster";
   const plaster = cover.plaster >= 0.02
-    ? `<li class="fin-sum-row"><i class="fin-swatch" style="background:${esc(finishSwatch(cover.plasterCategory))}"></i><span class="fin-grow">${esc(plasterLabel)}, from the wall type</span><span>${formatM2(cover.plaster)}</span><button type="button" class="fin-bare" data-fin="default-remove">Take off</button></li>`
+    ? `<ul class="fin-sum-list"><li class="fin-sum-row"><i class="fin-swatch" style="background:${esc(finishSwatch(cover.plasterCategory))}"></i><span class="fin-grow">${esc(plasterLabel)}, from the wall type</span><span>${formatM2(cover.plaster)}</span><button type="button" class="fin-bare" data-fin="default-remove">Take off</button></li></ul>`
     : "";
   const finished = cover.hasAdded
     ? `<p class="fin-sum-line"><span>Finished ${formatM2(cover.finished)}</span></p>`
@@ -379,17 +365,106 @@ function faceSummaryHtml(model, bands) {
   const bare = !plaster && cover.face - cover.finished >= 0.02
     ? `<p class="fin-sum-line"><span>Bare ${formatM2(Math.max(0, cover.face - cover.finished))}</span></p>`
     : "";
-  const warn = cover.excess >= 0.02
-    ? `<p class="fin-warn">Some of this face is covered more than once (${formatM2(cover.excess)}).</p>`
-    : "";
-  const list = plaster || rows ? `<ul class="fin-sum-list">${plaster}${rows}</ul>` : "";
   return `<div class="fin-summary" data-fin-summary>
     <p class="fin-sum-head"><span>This face</span><span>${formatM2(cover.face)}</span></p>
     ${finished}
     ${bare}
-    ${list}
-    ${warn}
+    ${plaster}
   </div>`;
+}
+
+/** The box a band occupies, in metres along the face and up it. */
+function bandBox(band) {
+  const poly = bandPolygon(band);
+  if (!poly) return null;
+  let from = Infinity;
+  let to = -Infinity;
+  let bottom = Infinity;
+  let top = -Infinity;
+  for (const [s, z] of poly) {
+    from = Math.min(from, s);
+    to = Math.max(to, s);
+    bottom = Math.min(bottom, z);
+    top = Math.max(top, z);
+  }
+  if (!(to > from) || !(top > bottom)) return null;
+  return { from, to, bottom, top };
+}
+
+/** Left to right, then low to high: the order the cards read, matching the elevation. */
+function compareBands(a, b) {
+  const ba = bandBox(a);
+  const bb = bandBox(b);
+  if (!ba && !bb) return 0;
+  if (!ba) return 1;
+  if (!bb) return -1;
+  if (Math.abs(ba.from - bb.from) > 0.02) return ba.from - bb.from;
+  if (Math.abs(ba.bottom - bb.bottom) > 0.02) return ba.bottom - bb.bottom;
+  return 0;
+}
+
+function sideWords(box, length) {
+  if (box.to <= length / 2 + 0.02) return "Left side";
+  if (box.from >= length / 2 - 0.02) return "Right side";
+  return "Across the middle";
+}
+
+/** The opening this patch belongs to, when one opening explains it better than a side of the wall. */
+function nearestOpening(box, model) {
+  let best = null;
+  for (const opening of model.openings || []) {
+    if (!(opening.width > 0) || !(opening.height > 0)) continue;
+    const oFrom = opening.offset;
+    const oTo = opening.offset + opening.width;
+    const oBottom = opening.sill || 0;
+    const oTop = oBottom + opening.height;
+    const name = opening.category === "door" ? "door" : "window";
+    const bandW = box.to - box.from;
+    const openW = opening.width;
+    const hOverlap = Math.min(box.to, oTo) - Math.max(box.from, oFrom);
+    const vOverlap = Math.min(box.top, oTop) - Math.max(box.bottom, oBottom);
+    const horizShare = hOverlap / Math.min(bandW, openW);
+    const vertShare = vOverlap / Math.min(box.top - box.bottom, opening.height);
+    const extendsPast = Math.max(0, oFrom - box.from) + Math.max(0, box.to - oTo);
+    const close = extendsPast <= Math.max(0.45, openW);
+    const candidates = [];
+    const underGap = oBottom - box.top;
+    if (underGap >= -0.05 && underGap <= 0.3 && horizShare >= 0.5 && close) candidates.push({ kind: "under", name, gap: Math.abs(underGap) });
+    const aboveGap = box.bottom - oTop;
+    if (aboveGap >= -0.05 && aboveGap <= 0.3 && horizShare >= 0.5 && close) candidates.push({ kind: "above", name, gap: Math.abs(aboveGap) });
+    const leftGap = oFrom - box.to;
+    if (leftGap >= -0.05 && leftGap <= 0.35 && vertShare >= 0.35) candidates.push({ kind: "left", name, gap: Math.abs(leftGap) });
+    const rightGap = box.from - oTo;
+    if (rightGap >= -0.05 && rightGap <= 0.35 && vertShare >= 0.35) candidates.push({ kind: "right", name, gap: Math.abs(rightGap) });
+    for (const candidate of candidates) {
+      if (!best || candidate.gap < best.gap) best = candidate;
+    }
+  }
+  return best;
+}
+
+/** Where a finish sits, in words. A drawn shape uses its box, the same way a rectangle uses its height. */
+function placePhrase(band, model) {
+  const box = bandBox(band);
+  if (!box || !(model.length > 0) || !(model.height > 0)) return "";
+  const fullLen = box.from <= 0.02 && model.length - box.to <= 0.02;
+  const fullH = box.bottom <= 0.02 && model.height - box.top <= 0.02;
+  if (fullLen && fullH) return "Whole face";
+  const height = fullH ? "" : heightWords(box.bottom, box.top);
+  const opening = nearestOpening(box, model);
+  if (opening) {
+    const where = {
+      under: `Under the ${opening.name}`,
+      above: `Above the ${opening.name}`,
+      left: `Left of the ${opening.name}`,
+      right: `Right of the ${opening.name}`,
+    }[opening.kind];
+    return height ? `${where}, ${height}` : where;
+  }
+  if (fullLen) return height.charAt(0).toUpperCase() + height.slice(1);
+  const side = sideWords(box, model.length);
+  if (side && height) return `${side}, ${height}`;
+  return side || (height ? height.charAt(0).toUpperCase() + height.slice(1) : "");
 }
 
 /** A height in words: "up to 1.2 m", "up to 100 mm", "0.9 m to 1.5 m". */
@@ -405,17 +480,33 @@ function heightWords(bottom, top) {
   return `${say(bottom)} to ${say(top)}`;
 }
 
-/** One sentence for a finish, with no coordinates. A drawn shape is a polygon, so it is not described as four edges. */
+/** One sentence for a finish, with no coordinates. */
 function bandPlace(band, model) {
-  if (band.category === "none") return "Taken off this face. Remove this to put it back.";
-  if (band.outline?.length >= 3) return `Drawn area, ${band.outline.length} corners`;
-  const fullLen = band.from <= 0.02 && model.length - band.to <= 0.02;
-  const fullH = band.bottom <= 0.02 && model.height - band.top <= 0.02;
-  const height = fullH ? "" : heightWords(band.bottom, band.top);
-  if (band.source === "rule") return height ? `Every wall of this room, ${height}` : "Every wall of this room";
-  if (fullLen && fullH) return "Whole face";
-  if (fullLen) return height.charAt(0).toUpperCase() + height.slice(1);
-  return height ? `Part of this face, ${height}` : "Part of this face";
+  if (band.source === "rule") {
+    const box = bandBox(band);
+    const fullH = !box || (box.bottom <= 0.02 && model.height - box.top <= 0.02);
+    const height = !box || fullH ? "" : heightWords(box.bottom, box.top);
+    return height ? `Every wall of this room, ${height}` : "Every wall of this room";
+  }
+  const place = placePhrase(band, model);
+  if (band.category === "none") {
+    if (!place || place === "Whole face") return "Taken off this face. Remove this to put it back.";
+    return `Taken off, ${place.charAt(0).toLowerCase()}${place.slice(1)}. Remove this to put it back.`;
+  }
+  return place || "On this face";
+}
+
+/** The face in miniature, with this finish on it, so two similar sentences still look different. */
+function bandMiniHtml(band, model) {
+  const poly = bandPolygon(band);
+  if (!poly || !(model.length > 0) || !(model.height > 0)) return "";
+  const y = (z) => model.height - z;
+  const pts = poly.map(([s, z]) => `${s},${y(z)}`).join(" ");
+  const openings = (model.openings || []).filter((o) => o.width > 0 && o.height > 0).map((o) => {
+    const top = (o.sill || 0) + o.height;
+    return `<rect x="${o.offset}" y="${y(top)}" width="${o.width}" height="${o.height}" class="fin-mini-opening"/>`;
+  }).join("");
+  return `<svg class="fin-mini" viewBox="0 0 ${model.length} ${model.height}" aria-hidden="true"><rect class="fin-mini-face" x="0" y="0" width="${model.length}" height="${model.height}"/><polygon points="${pts}" class="fin-mini-shape" style="fill:${esc(finishSwatch(band.category))}"/>${openings}</svg>`;
 }
 
 /** One finish on a wall face: a card like a placed floor finish. */
@@ -425,6 +516,9 @@ function bandCardHtml(doc, b, model, { selectedId, savedId, index, total }) {
   const picked = b.id === selectedId;
   const label = spec?.label || b.category;
   const which = total > 1 ? `${label} ${index} of ${total} · ` : "";
+  const title = product && b.category !== "none"
+    ? `<p class="fin-kind-title">${esc(productChoiceLabel(product))}</p>`
+    : "";
   const badge = product || b.category === "none"
     ? ""
     : spec?.needsProduct
@@ -441,16 +535,20 @@ function bandCardHtml(doc, b, model, { selectedId, savedId, index, total }) {
   const remove = b.source === "rule"
     ? `<button type="button" data-fin="band-remove-rule" title="Removes the rule from every wall of its room">Remove</button>`
     : `<button type="button" data-fin="band-remove">Remove</button>`;
-  return `<div class="fin-kind${picked ? " fin-editing" : ""}" data-fin-band="${esc(b.id)}">
-    <div class="fin-kind-head">
-      <i class="fin-swatch" style="background:${esc(finishSwatch(b.category))}"></i>
-      <select data-fin="band-type" aria-label="Finish type">${surfaceTypeOptions("wall", b.category, { none: true })}</select>
-      <span class="fin-area">${b.category === "none" ? "" : formatQty(b.quantity, b.unit)}</span>
+  return `<div class="fin-kind fin-kind-face${picked ? " fin-editing" : ""}" data-fin-band="${esc(b.id)}">
+    ${bandMiniHtml(b, model)}
+    <div class="fin-kind-main">
+      ${title}
+      <div class="fin-kind-head">
+        <i class="fin-swatch" style="background:${esc(finishSwatch(b.category))}"></i>
+        <select data-fin="band-type" aria-label="Finish type">${surfaceTypeOptions("wall", b.category, { none: true })}</select>
+        <span class="fin-area">${b.category === "none" ? "" : formatQty(b.quantity, b.unit)}</span>
+      </div>
+      <p class="fin-where">${esc(which)}${esc(bandPlace(b, model))}</p>
+      ${badge}
+      ${productField}
+      <div class="fin-btns">${remove}</div>
     </div>
-    <p class="fin-where">${esc(which)}${esc(bandPlace(b, model))}</p>
-    ${badge}
-    ${productField}
-    <div class="fin-btns">${remove}</div>
   </div>`;
 }
 
@@ -463,60 +561,238 @@ export function finishCalloutHtml(doc, band, model) {
   const spec = FINISH_CATEGORIES[band.category];
   const product = finishProductById(doc, band.productId);
   const label = spec?.label || band.category;
-  const same = (model.finishBands || []).filter((b) => b.source !== "default" && b.category === band.category);
+  const same = (model.finishBands || [])
+    .filter((b) => b.source !== "default" && b.category === band.category)
+    .sort(compareBands);
   const index = same.findIndex((b) => b.id === band.id) + 1;
-  const which = same.length > 1 && index > 0 ? `${label} ${index} of ${same.length} · ` : "";
+  const named = Boolean(product) && band.category !== "none" && band.source !== "default";
+  const heading = named ? productChoiceLabel(product) : label;
+  const duplicate = same.length > 1 && index > 0 ? `${label} ${index} of ${same.length}` : "";
   const place = band.source === "default" ? "From the wall type" : bandPlace(band, model);
+  const which = duplicate ? `${duplicate} · ` : named ? `${label} · ` : "";
   const area = band.category === "none" ? "" : formatQty(band.quantity, band.unit);
-  const productLine = band.category === "none" || band.source === "default"
+  const productLine = named || band.category === "none" || band.source === "default"
     ? ""
-    : product
-      ? `<p class="fin-name">${esc(productChoiceLabel(product))}</p>`
-      : spec?.needsProduct
-        ? `<p class="fin-badge">Needs a product</p>`
-        : `<p class="fin-badge fin-badge-soft">No product named</p>`;
+    : spec?.needsProduct
+      ? `<p class="fin-badge">Needs a product</p>`
+      : `<p class="fin-badge fin-badge-soft">No product named</p>`;
   return `<div class="elev-callout" data-fin-band="${esc(band.id)}">
-    <div class="fin-kind-head">
-      <i class="fin-swatch" style="background:${esc(finishSwatch(band.category))}"></i>
-      <strong class="fin-grow">${esc(label)}</strong>
-      <span class="fin-area">${esc(area)}</span>
+    <div class="elev-callout-top">
+      <div class="fin-kind-head">
+        <i class="fin-swatch" style="background:${esc(finishSwatch(band.category))}"></i>
+        <strong class="fin-grow">${esc(heading)}</strong>
+        <span class="fin-area">${esc(area)}</span>
+      </div>
+      <button type="button" class="elev-callout-x" data-fin="callout-close" aria-label="Close">×</button>
     </div>
     <p class="fin-where">${esc(which)}${esc(place)}</p>
     ${productLine}
     <div class="fin-btns">
-      <button type="button" data-fin="band-close">Close</button>
       <button type="button" data-fin="band-edit" title="Open this finish on the elevation under the plan">Edit</button>
     </div>
   </div>`;
 }
 
 /**
- * Wall face finishes, laid out like the floor panel: a summary, one form to add a
- * finish, then a card for each finish on the face. `opts.selectedId` is the band
- * picked in the list or the elevation, `opts.savedId` the one just saved.
+ * The same temporary note for a window or door on the inspector graph.
+ * That graph does not move the opening; Edit opens the elevation that does.
+ */
+export function openingCalloutHtml(opening) {
+  const kind = opening.category === "door" ? "Door" : "Window";
+  const name = opening.name || kind;
+  const size = `${mm(opening.width)} × ${mm(opening.height)}`;
+  const place = [];
+  if (opening.category !== "door" && opening.sill > 0.005) place.push(`Sill ${mm(opening.sill)} mm`);
+  if (Number.isFinite(opening.offset)) place.push(`${mm(Math.max(0, opening.offset))} mm from the left`);
+  const note = opening.nonStandard ? `<p class="fin-badge">Non-standard size</p>` : "";
+  return `<div class="elev-callout" data-elev-callout="opening" data-opening-id="${esc(opening.id)}">
+    <div class="elev-callout-top">
+      <div class="fin-kind-head">
+        <strong class="fin-grow">${esc(name)}</strong>
+        <span class="fin-area">${esc(size)}</span>
+      </div>
+      <button type="button" class="elev-callout-x" data-fin="callout-close" aria-label="Close">×</button>
+    </div>
+    ${place.length ? `<p class="fin-where">${esc(place.join(" · "))}</p>` : ""}
+    ${note}
+    <div class="fin-btns">
+      <button type="button" data-fin="opening-edit" title="Open the elevation under the plan. The opening can be moved there.">Edit</button>
+    </div>
+  </div>`;
+}
+
+function polygonArea(poly) {
+  return poly?.length >= 3 ? Math.abs(polyArea(poly)) : 0;
+}
+
+function unionOnFace(model, polygons) {
+  const polys = (polygons || []).filter((p) => p?.length >= 3);
+  if (!polys.length || !(model.length > 0) || !(model.height > 0)) return 0;
+  const host = [[0, 0], [model.length, 0], [model.length, model.height], [0, model.height]];
+  return floorCoverage(host, polys).finished;
+}
+
+/** Area of `pieces` after the cut polygons (openings, coats) are taken out once. */
+function netArea(model, pieces, cuts) {
+  const kept = (pieces || []).filter((p) => p?.length >= 3);
+  if (!kept.length) return 0;
+  const islands = [];
+  for (const piece of kept) {
+    for (const cut of cuts || []) {
+      if (cut?.length >= 3) islands.push(...clipPolygon(piece, cut));
+    }
+  }
+  const cutArea = islands.length ? unionOnFace(model, islands) : 0;
+  return Math.max(0, unionOnFace(model, kept) - cutArea);
+}
+
+function openingPolys(model) {
+  return (model.openings || [])
+    .filter((o) => o.width > 0 && o.height > 0)
+    .map((o) => {
+      const bottom = o.sill || 0;
+      const top = bottom + o.height;
+      return [[o.offset, bottom], [o.offset + o.width, bottom], [o.offset + o.width, top], [o.offset, top]];
+    });
+}
+
+/**
+ * Which finishes sit on which. A finish on a coat is said quietly ("Paint on
+ * the plaster"). Two coats, or two finishes of the same kind, are a warning.
+ * The plaster drawn under a coat is the coat's own area, so that pair is not
+ * reported again.
+ */
+function overlapNotesHtml(model, bands) {
+  const areaBands = (bands || []).filter((b) => b.category !== "none" && b.unit !== "m" && bandPolygon(b));
+  const defaults = areaBands.filter((b) => b.source === "default");
+  const coats = areaBands.filter((b) => b.source !== "default" && FINISH_CATEGORIES[b.category]?.layer === "coat");
+  const finishes = areaBands.filter((b) => b.source !== "default" && FINISH_CATEGORIES[b.category]?.layer !== "coat");
+  const openings = openingPolys(model);
+  const coatPolys = coats.map(bandPolygon);
+  const labelOf = (b) => FINISH_CATEGORIES[b.category]?.label || b.category;
+  const quiet = new Map();
+  const warns = new Map();
+
+  const finishCats = [...new Set(finishes.map((b) => b.category))];
+  for (const category of finishCats) {
+    const ofType = finishes.filter((b) => b.category === category);
+    const onDefault = [];
+    for (const finish of ofType) {
+      const poly = bandPolygon(finish);
+      for (const def of defaults) onDefault.push(...clipPolygon(poly, bandPolygon(def)));
+    }
+    const onPlaster = netArea(model, onDefault, [...openings, ...coatPolys]);
+    if (onPlaster >= 0.02 && defaults.length) {
+      const coatLabel = labelOf(defaults[0]).toLowerCase();
+      quiet.set(`on:${category}:default`, { text: `${labelOf(ofType[0])} on the ${coatLabel}`, area: onPlaster });
+    }
+    const coatCats = [...new Set(coats.map((b) => b.category))];
+    for (const coatCategory of coatCats) {
+      const pieces = [];
+      for (const finish of ofType) {
+        for (const coat of coats) {
+          if (coat.category !== coatCategory) continue;
+          pieces.push(...clipPolygon(bandPolygon(finish), bandPolygon(coat)));
+        }
+      }
+      const area = netArea(model, pieces, openings);
+      if (area < 0.02) continue;
+      const coatLabel = (FINISH_CATEGORIES[coatCategory]?.label || coatCategory).toLowerCase();
+      quiet.set(`on:${category}:${coatCategory}`, { text: `${labelOf(ofType[0])} on the ${coatLabel}`, area });
+    }
+  }
+
+  const stack = [...coats, ...finishes];
+  const order = categoriesForSurface("wall");
+  const seen = new Set();
+  for (let i = 0; i < stack.length; i += 1) {
+    for (let j = i + 1; j < stack.length; j += 1) {
+      const a = stack[i];
+      const b = stack[j];
+      const coatA = FINISH_CATEGORIES[a.category]?.layer === "coat";
+      const coatB = FINISH_CATEGORIES[b.category]?.layer === "coat";
+      if (coatA !== coatB) continue;
+      const [first, second] = order.indexOf(a.category) <= order.indexOf(b.category) ? [a, b] : [b, a];
+      const key = `${first.category}|${second.category}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        warns.set(key, { pieces: [], first, second });
+      }
+      warns.get(key).pieces.push(...clipPolygon(bandPolygon(a), bandPolygon(b)));
+    }
+  }
+
+  const quietHtml = [...quiet.values()]
+    .filter((row) => row.area >= 0.02)
+    .map((row) => `<p class="fin-on">${esc(row.text)}, ${formatM2(row.area)}.</p>`)
+    .join("");
+  const warnHtml = [...warns.values()].map((row) => {
+    const area = netArea(model, row.pieces, openings);
+    if (area < 0.02) return "";
+    const a = labelOf(row.first);
+    const b = labelOf(row.second);
+    const text = row.first.category === row.second.category
+      ? `${a} areas overlap`
+      : `${a} overlaps ${b.toLowerCase()}`;
+    return `<p class="fin-warn">${esc(text)}, ${formatM2(area)}.</p>`;
+  }).join("");
+  return quietHtml + warnHtml;
+}
+
+function countWords(n, unit) {
+  const noun = unit === "m" ? "length" : "area";
+  return n === 1 ? `1 ${noun}` : `${n} ${noun}s`;
+}
+
+/** Cards under their type, in the order they sit along the wall. */
+function faceGroupsHtml(doc, model, opts) {
+  const added = (model.finishBands || []).filter((b) => b.source !== "default").sort(compareBands);
+  const byCat = new Map();
+  for (const b of added) {
+    const list = byCat.get(b.category) || [];
+    list.push(b);
+    byCat.set(b.category, list);
+  }
+  const known = categoriesForSurface("wall");
+  const ids = [...known.filter((id) => byCat.has(id)), ...[...byCat.keys()].filter((id) => !known.includes(id))];
+  return ids.map((id) => {
+    const list = byCat.get(id);
+    const spec = FINISH_CATEGORIES[id];
+    const label = spec?.label || id;
+    const unit = list[0]?.unit || spec?.unit;
+    const qty = list.reduce((sum, b) => sum + (b.category === "none" ? 0 : b.quantity), 0);
+    const cards = list.map((b, i) => bandCardHtml(doc, b, model, {
+      selectedId: opts.selectedId,
+      savedId: opts.savedId,
+      index: i + 1,
+      total: list.length,
+    })).join("");
+    const amount = id === "none" ? "" : `<span>${formatQty(qty, unit)}</span>`;
+    return `<section class="fin-group">
+      <div class="fin-sum-row"><i class="fin-swatch" style="background:${esc(finishSwatch(id))}"></i><span class="fin-grow">${esc(label)}</span>${amount}<span class="fin-sum-n">${countWords(list.length, unit)}</span></div>
+      <div class="fin-kinds">${cards}</div>
+    </section>`;
+  }).join("");
+}
+
+/**
+ * Wall face finishes: a summary, then each finish under its type, in the order
+ * it sits on the wall. `opts.selectedId` is the band picked in the list or the
+ * elevation, `opts.savedId` the one just saved.
  */
 export function faceFinishHtml(doc, model, opts = {}) {
-  const bands = (model.finishBands || []).filter((b) => b.source !== "default");
-  const counts = new Map();
-  const seen = new Map();
-  for (const b of bands) counts.set(b.category, (counts.get(b.category) || 0) + 1);
-  const cards = bands.map((b) => {
-    const n = (seen.get(b.category) || 0) + 1;
-    seen.set(b.category, n);
-    return bandCardHtml(doc, b, model, { selectedId: opts.selectedId, savedId: opts.savedId, index: n, total: counts.get(b.category) });
-  }).join("");
+  const bands = model.finishBands || [];
   const first = "wallTile";
   const adding = Boolean(opts.adding);
+  const groups = faceGroupsHtml(doc, model, opts);
   return `<section class="fin-sec" data-fin-block="face">
     <h4>Wall finishes</h4>
     <div class="fin-surface" data-fin-surface="face">
       <div class="fin-rest"${adding ? " hidden" : ""}>
-        ${faceSummaryHtml(model, model.finishBands || [])}
+        ${faceSummaryHtml(model, bands)}
+        ${groups || '<p class="fin-note">Nothing added on this face yet.</p>'}
+        ${overlapNotesHtml(model, bands)}
         <button type="button" class="fin-add-btn" data-fin="add-open">Add a finish</button>
-        <div class="fin-drawn">
-          <p class="fin-kicker">On this face (${bands.length})</p>
-          ${bands.length ? `<div class="fin-kinds">${cards}</div>` : '<p class="fin-note">Nothing added on this face yet.</p>'}
-        </div>
       </div>
       <div class="fin-add-floor fin-add-sheet" data-fin-newband${adding ? "" : " hidden"}>
         <div class="fin-sheet-head">

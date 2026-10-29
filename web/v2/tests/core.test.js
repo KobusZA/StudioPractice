@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import {
   area,
   clampToPoly,
+  translatePolyEdge,
   lineKey,
   perimeter,
   pointFromBasis,
@@ -14,6 +15,7 @@ import {
   unionRectsOuter,
   simplify,
   rectPoly,
+  fitPolygonToHost,
 } from "../geom.js";
 import {
   PlanStore,
@@ -142,6 +144,40 @@ test("clampToPoly keeps interior points and pulls outsiders onto the nearest edg
   assert.equal(south.y, 0);
   const short = clampToPoly(9, 9, [[0, 0], [1, 0]]);
   assert.deepEqual(short, { x: 9, y: 9, inside: true });
+});
+
+test("translatePolyEdge keeps the line and stays inside the floor", () => {
+  const host = rectPoly(0, 0, 4, 3);
+  const ring = [[1, 0], [3, 0], [3, 2], [1, 2]];
+  const stayed = translatePolyEdge(ring, 0, 0, -1, host);
+  assert.equal(stayed[0][1], 0);
+  assert.equal(stayed[1][1], 0);
+  assert.deepEqual(stayed[2], [3, 2]);
+  assert.deepEqual(stayed[3], [1, 2]);
+  const lifted = translatePolyEdge(ring, 0, 0, 0.5, host);
+  assert.deepEqual(lifted[0], [1, 0.5]);
+  assert.deepEqual(lifted[1], [3, 0.5]);
+  assert.equal(lifted[1][0] - lifted[0][0], 2);
+  const right = [[1, 1], [3, 1], [3, 2], [1, 2]];
+  const pushed = translatePolyEdge(right, 1, 5, 0, host);
+  assert.ok(Math.abs(pushed[1][0] - 4) < 1e-3);
+  assert.ok(Math.abs(pushed[2][0] - 4) < 1e-3);
+  assert.equal(pushed[0][0], 1);
+  const free = translatePolyEdge(ring, 0, 0, -1, null);
+  assert.equal(free[0][1], -1);
+  assert.equal(free[1][1], -1);
+});
+
+test("fitPolygonToHost drops the vertices past both ends of a cut", () => {
+  const host = rectPoly(0, 0, 6, 4);
+  // Wider than the floor: the edge runs out past the left end and the right end.
+  const finish = [[-1, 1], [3, 1], [7, 1], [7, 3], [3, 3], [-1, 3]];
+  const fitted = fitPolygonToHost(finish, host);
+  assert.ok(fitted.length >= 4);
+  assert.ok(fitted.every(([x, y]) => x >= -1e-6 && x <= 6 + 1e-6 && y >= -1e-6 && y <= 4 + 1e-6));
+  assert.ok(Math.abs(area(fitted) - 12) < 1e-6);
+  const inside = rectPoly(1, 1, 2, 2);
+  assert.equal(fitPolygonToHost(inside, host), inside);
 });
 
 test("simplify drops collinear vertices", () => {

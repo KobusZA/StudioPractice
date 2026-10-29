@@ -107,7 +107,7 @@ export function createSheetUi(ctx) {
       setListVisible(false);
     },
   });
-  const sheetsHead = h("div", { class: "sheet-set-list-bar" }, sheetsToggle, sheetsClose);
+  const sheetsHead = h("div", { class: "sheet-set-list-bar" }, sheetsToggle, snapLabel, sheetsClose);
   let listTab = "drawn";
   const tabDrawn = h("button", { type: "button", class: "sheet-set-tab is-on", role: "tab", "aria-selected": "true", text: "Drawn" });
   const tabOther = h("button", { type: "button", class: "sheet-set-tab", role: "tab", "aria-selected": "false", text: "Not drawn" });
@@ -124,7 +124,7 @@ export function createSheetUi(ctx) {
       pickTab(tab);
     });
   }
-  const sheetsCard = h("div", { class: "sheet-set-card", hidden: true }, sheetsHead, sheetsTabs, snapLabel, sheetsList);
+  const sheetsCard = h("div", { class: "sheet-set-card", hidden: true }, sheetsHead, sheetsTabs, sheetsList);
   const loadChip = h("span", { class: "sheet-set-chip", hidden: true });
   const uploadText = h("span", { text: "Saving plan file…" });
   const retryButton = h("button", { type: "button", text: "Retry", hidden: true });

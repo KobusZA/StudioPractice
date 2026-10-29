@@ -4,12 +4,85 @@
 // back into metres. The wall always spans the width of the level lines. Height
 // is fitted on its own, so a short wall is stretched across the graph and a
 // long one is squeezed, and the next floor stays above the wall.
+//
+// The open strip can zoom in on that fitted view (`view.zoom`) and slide it
+// (`view.panX`, `view.panY`, screen pixels). Zoom 1 with no pan is the fit.
+// The preview never passes a view, so it stays fitted.
 
 import { FINISH_CATEGORIES, finishSwatch } from "./finish-data.js";
 import { clipPolygon } from "./geom.js";
 
 const PAD = 14;
 const HANDLE = 5;
+
+/** Zoom out stops at the fitted wall. Further out would letterbox it. */
+export const ELEV_ZOOM_MIN = 1;
+/** Enough to work a window on a long face without the handles leaving the strip. */
+export const ELEV_ZOOM_MAX = 16;
+
+function clampZoom(zoom) {
+  const n = Number(zoom);
+  if (!Number.isFinite(n)) return 1;
+  return Math.min(ELEV_ZOOM_MAX, Math.max(ELEV_ZOOM_MIN, n));
+}
+
+/**
+ * Screen placement of a fitted elevation under a zoom/pan view.
+ * `fit.top` is the screen y of the top of the frame (the high level). The
+ * floor (`fit.originY`) moves down as the zoom grows; pan is extra pixels.
+ */
+export function elevationPlacement(fit, view) {
+  const zoom = clampZoom(view?.zoom);
+  const panX = Number(view?.panX) || 0;
+  const panY = Number(view?.panY) || 0;
+  const scaleX = fit.scaleX * zoom;
+  const scaleY = fit.scaleY * zoom;
+  const originX = fit.originX + panX;
+  const originY = fit.top + (fit.originY - fit.top) * zoom + panY;
+  return { zoom, scaleX, scaleY, originX, originY };
+}
+
+/**
+ * Next view after a wheel step about a screen point, so that point stays put.
+ * Zooming back to the fitted wall clears the pan: that view is exactly the
+ * unzoomed drawing.
+ */
+export function zoomElevationView(fit, view, px, py, factor) {
+  const prev = clampZoom(view?.zoom);
+  const zoom = clampZoom(prev * factor);
+  if (zoom === ELEV_ZOOM_MIN) return { zoom: 1, panX: 0, panY: 0 };
+  const placed = elevationPlacement(fit, { zoom: prev, panX: view?.panX, panY: view?.panY });
+  const s = (px - placed.originX) / placed.scaleX;
+  const above = (placed.originY - py) / placed.scaleY;
+  const originX = px - s * fit.scaleX * zoom;
+  const originY = py + above * fit.scaleY * zoom;
+  return {
+    zoom,
+    panX: originX - fit.originX,
+    panY: originY - fit.top - (fit.originY - fit.top) * zoom,
+  };
+}
+
+/**
+ * Keep some of the framed wall inside the strip. A zoom about the padding
+ * beside the wall would otherwise slide the drawing off the graph.
+ */
+export function clampElevationView(fit, view, width, height) {
+  const zoom = clampZoom(view?.zoom);
+  if (zoom === ELEV_ZOOM_MIN) return { zoom: 1, panX: 0, panY: 0 };
+  const margin = Math.min(48, Math.max(16, Math.min(width, height) / 4));
+  const clamp = (origin0, span, pan, viewSize) => {
+    let origin = origin0 + pan;
+    if (origin + span < margin) origin += margin - (origin + span);
+    if (origin > viewSize - margin) origin -= origin - (viewSize - margin);
+    return origin - origin0;
+  };
+  return {
+    zoom,
+    panX: clamp(fit.originX, fit.spanX * zoom, Number(view?.panX) || 0, width),
+    panY: clamp(fit.top, fit.spanY * zoom, Number(view?.panY) || 0, height),
+  };
+}
 
 function esc(text) {
   return String(text).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
@@ -19,8 +92,9 @@ function mm(metres) {
   return `${Math.round(metres * 1000)}`;
 }
 
-/** The resize arrow for pushing an edge sideways, the same cursors as a wall top. */
-function edgeResizeCursor(x1, y1, x2, y2) {
+/** The resize arrow for pushing an edge sideways, the same cursors as a wall top.
+ *  Screen pixels: "ns", "ew", "nwse", or "nesw" (append "-resize" for a CSS cursor). */
+export function edgeResizeCursor(x1, y1, x2, y2) {
   const dx = x2 - x1;
   const dy = y2 - y1;
   const px = -dy;
@@ -138,13 +212,16 @@ function dimensionOpening(parts, { x, y, w, h, opening, model, yOf, W, H }) {
 
 /**
  * @param {object} model elevationModel() result
- * @param {{width:number,height:number,interactive?:boolean,selectedId?:string|null}} opts
- * @returns {{svg:string, scale:number, scaleX:number, scaleY:number, originX:number, originY:number}}
+ * @param {{width:number,height:number,interactive?:boolean,selectedId?:string|null,view?:{zoom?:number,panX?:number,panY?:number}|null}} opts
+ * @returns {{svg:string, scale:number, scaleX:number, scaleY:number, originX:number, originY:number, fit:object}}
  */
-export function elevationSvg(model, { width, height, interactive = false, selectedId = null, selectedBandId = null, selectedVertex = null, draft = null, guides = null, edgeMode = "corner" } = {}) {
+export function elevationSvg(model, { width, height, interactive = false, selectedId = null, selectedBandId = null, selectedVertex = null, draft = null, guides = null, edgeMode = "corner", view = null } = {}) {
   const W = Math.max(80, Math.round(width));
   const H = Math.max(60, Math.round(height));
-  if (!model) return { svg: "", scale: 1, scaleX: 1, scaleY: 1, originX: 0, originY: 0 };
+  if (!model) {
+    const fit = { scaleX: 1, scaleY: 1, originX: 0, originY: 0, top: 0, spanX: 1, spanY: 1 };
+    return { svg: "", scale: 1, scaleX: 1, scaleY: 1, originX: 0, originY: 0, fit };
+  }
 
   // The next floor or the roof stays in frame even when the wall stops short
   // of it, so a shorter wall is still read against that line.
@@ -157,11 +234,24 @@ export function elevationSvg(model, { width, height, interactive = false, select
   // on the left for the height figure; the preview uses the whole graph.
   const x0 = interactive ? Math.max(PAD / 2, 32) : PAD / 2;
   const x1 = W - PAD / 2;
-  const scaleY = Math.max(1e-3, (H - PAD * 2) / Math.max(zHi - zLo, 0.1));
-  const scaleX = Math.max(1e-3, (x1 - x0) / Math.max(model.length, 0.1));
+  const fitScaleY = Math.max(1e-3, (H - PAD * 2) / Math.max(zHi - zLo, 0.1));
+  const fitScaleX = Math.max(1e-3, (x1 - x0) / Math.max(model.length, 0.1));
+  const fit = {
+    scaleX: fitScaleX,
+    scaleY: fitScaleY,
+    originX: x0,
+    originY: PAD + (zHi - model.base) * fitScaleY,
+    top: PAD,
+    spanX: model.length * fitScaleX,
+    spanY: (zHi - zLo) * fitScaleY,
+  };
+  // Zoom 1, no pan: the floor and the left of the wall sit where they always have.
+  const placed = elevationPlacement(fit, view);
+  const scaleY = placed.scaleY;
+  const scaleX = placed.scaleX;
   const scale = scaleY;
-  const originX = x0;
-  const yOf = (z) => PAD + (zHi - z) * scaleY;
+  const originX = placed.originX;
+  const yOf = (z) => placed.originY - (z - model.base) * scaleY;
   const xOf = (offset) => originX + offset * scaleX;
   const originY = yOf(model.base);
 
@@ -234,7 +324,10 @@ export function elevationSvg(model, { width, height, interactive = false, select
     const h = o.height * scaleY;
     const sel = o.id === selectedId;
     const cls = `elev-opening elev-${o.category === "door" ? "door" : "window"}${sel ? " is-selected" : ""}${o.nonStandard ? " is-nonstandard" : ""}`;
-    parts.push(`<rect x="${x}" y="${y}" width="${w}" height="${h}" class="${cls}" data-elev-op="move" data-elev-id="${esc(o.id)}"/>`);
+    // The inspector graph is a picture: the opening can be picked, not dragged.
+    // Move handles exist only on the open elevation.
+    const move = interactive ? ` data-elev-op="move"` : "";
+    parts.push(`<rect x="${x}" y="${y}" width="${w}" height="${h}" class="${cls}"${move} data-elev-id="${esc(o.id)}"/>`);
     if (sel) {
       // Setting-out, the way an elevation is dimensioned: the opening size
       // stays on the frame, the sill height is the run below it, and the
@@ -246,12 +339,13 @@ export function elevationSvg(model, { width, height, interactive = false, select
       dimensionOpening(parts, { x, y, w, h, opening: o, model, yOf, W, H });
     }
     if (interactive && sel) {
-      const hs = [
-        ["l", x, y + h / 2],
-        ["r", x + w, y + h / 2],
-        ["t", x + w / 2, y],
-      ];
-      if (o.category !== "door") hs.push(["b", x + w / 2, y + h]);
+      // A door keeps its type width. The body is the move target; the side
+      // handles that stretch a window are not drawn. The head still sets height,
+      // and a door has no sill, so there is no bottom handle either.
+      const hs = [["t", x + w / 2, y]];
+      if (o.category !== "door") {
+        hs.push(["l", x, y + h / 2], ["r", x + w, y + h / 2], ["b", x + w / 2, y + h]);
+      }
       for (const [part, hx, hy] of hs) {
         parts.push(`<rect x="${hx - HANDLE}" y="${hy - HANDLE}" width="${HANDLE * 2}" height="${HANDLE * 2}" class="elev-handle elev-handle-${part}" data-elev-op="${part}" data-elev-id="${esc(o.id)}"/>`);
       }
@@ -372,5 +466,6 @@ export function elevationSvg(model, { width, height, interactive = false, select
     scaleY,
     originX,
     originY,
+    fit,
   };
 }

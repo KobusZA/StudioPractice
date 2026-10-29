@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { emptyDoc, rectShape } from "../model.js";
-import { ALIGN_ORIGIN_MAX_M, GAP_MAX_M, applyNicePoint, bestEndpointSnap, collectSnapEdges, collectSnapTargets, faceCorners, faceEdges, isExactPointSnap, nearestAlignments, probeAlongEdge, probeAlongOccupiedEdge, probeDirection, resolveProbes, snapCoord, snapLengthFrom, snapNiceDelta, snapPoint, snapToFace } from "../snap.js";
+import { ALIGN_ORIGIN_MAX_M, GAP_MAX_M, applyNicePoint, bestEndpointSnap, collectSnapEdges, collectSnapTargets, faceCorners, faceEdges, isExactPointSnap, nearestAlignments, probeAlongEdge, probeAlongOccupiedEdge, probeDirection, resolveProbes, snapCoord, snapEdgeToLine, snapLengthFrom, snapNiceDelta, snapPoint, snapToFace } from "../snap.js";
 
 function docWithWall(x1, y1, x2, y2, id = "s1") {
   const doc = emptyDoc();
@@ -72,6 +72,49 @@ test("dragging a finish corner aligns to the other corners of that finish", () =
   assert.equal(result.guideX, 3);
   assert.equal(result.guideY, null);
   assert.equal(isExactPointSnap(result), false);
+});
+
+test("moving a whole edge lines up with another edge, not with a corner", () => {
+  // The moving edge's left end shares X with a vertical corner-to-corner run.
+  // That used to draw an alignment line. A line only aligns when it coincides
+  // with another line.
+  const vertical = { x1: 0, y1: 0, x2: 0, y2: 3 };
+  const missed = snapEdgeToLine(0.02, 1, 4, 1, [vertical], 0.1);
+  assert.equal(missed.snapped, false);
+  assert.equal(missed.guideX, null);
+  assert.equal(missed.guideY, null);
+
+  const horizontal = { x1: 10, y1: 1, x2: 14, y2: 1 };
+  const hit = snapEdgeToLine(0, 1.04, 4, 1.04, [vertical, horizontal], 0.1);
+  assert.equal(hit.snapped, true);
+  assert.equal(hit.y, 1);
+  assert.equal(hit.guideY, 1);
+  assert.equal(hit.guideX, null, "a shared X on one end is not a second guide");
+  assert.equal(hit.guideLine, null);
+
+  const upright = snapEdgeToLine(2.03, 0, 2.03, 3, [{ x1: 2, y1: 0, x2: 2, y2: 4 }], 0.1);
+  assert.equal(upright.snapped, true);
+  assert.equal(upright.x, 2);
+  assert.equal(upright.guideX, 2);
+  assert.equal(upright.guideY, null);
+});
+
+test("a diagonal edge aligns along the other line, not through a corner", () => {
+  const other = { x1: 0, y1: 0, x2: 2, y2: 2 };
+  const hit = snapEdgeToLine(0.05, 0, 2.05, 2, [other], 0.1);
+  assert.equal(hit.snapped, true);
+  assert.ok(Math.abs(hit.x - hit.y) < 1e-9, "the end lands on the other line");
+  assert.equal(hit.guideX, null);
+  assert.equal(hit.guideY, null);
+  assert.equal(hit.guideLine.x1, 0);
+  assert.equal(hit.guideLine.y2, 2);
+});
+
+test("moving an edge past the magnet does not align", () => {
+  const other = { x1: 0, y1: 1, x2: 4, y2: 1 };
+  const hit = snapEdgeToLine(0, 1.5, 4, 1.5, [other], 0.1);
+  assert.equal(hit.snapped, false);
+  assert.equal(hit.y, 1.5);
 });
 
 test("a floor corner still joins a different object's corner at the same place", () => {

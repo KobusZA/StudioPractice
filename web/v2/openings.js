@@ -7,6 +7,7 @@
 
 import {
   EPS,
+  distToSeg,
   paramOnSeg,
   pointInPoly,
   polyEdges,
@@ -78,6 +79,120 @@ export function distToWall(wall, x, y) {
 
 export function wallNormal(wall, sign = 1) {
   return segNormal(wall.x1, wall.y1, wall.x2, wall.y2, sign);
+}
+
+/**
+ * Which jamb a door hinges from. 1 is the low-t end (a); -1 is the other end.
+ * Missing means 1, so a door saved before this still opens from a.
+ */
+export function doorHand(opening) {
+  return opening?.hand === -1 ? -1 : 1;
+}
+
+/**
+ * Plan swing of a door: the hinge jamb, the free jamb, and where the leaf
+ * tip lands on the swing side of the wall.
+ */
+export function doorSwing(wall, placed, opening) {
+  const atA = doorHand(opening) === 1;
+  const hinge = atA ? placed.a : placed.b;
+  const free = atA ? placed.b : placed.a;
+  const n = wallNormal(wall, opening?.swing || 1);
+  const width = placed.width || 0;
+  return {
+    hinge,
+    free,
+    leaf: { x: hinge.x + n.x * width, y: hinge.y + n.y * width },
+  };
+}
+
+/**
+ * The straight plan strokes a click should land on: the opening in the wall,
+ * and for a door the open leaf. The swing itself is the quarter-circle, tested
+ * in `pointOnDoorArc`. The hinge of a normal door sits further from the
+ * opening's midpoint than a small circle around it.
+ */
+export function openingSymbolSegments(wall, placed, opening) {
+  if (!placed?.a || !placed?.b) return [];
+  const segs = [[placed.a, placed.b]];
+  if (placed.sku?.category === "door") {
+    const swing = doorSwing(wall, placed, opening);
+    segs.push([swing.hinge, swing.leaf]);
+  }
+  return segs;
+}
+
+/** Shortest signed turn from `from` to `to`, in (-π, π]. */
+function directedSweep(from, to) {
+  let sweep = to - from;
+  while (sweep <= -Math.PI) sweep += Math.PI * 2;
+  while (sweep > Math.PI) sweep -= Math.PI * 2;
+  return sweep;
+}
+
+/**
+ * True when (x, y) lies within `tol` metres of the door's quarter-circle
+ * swing: centre at the hinge, from the free jamb to the open leaf.
+ */
+/** The door's quarter-circle: distance from the hinge, the leaf radius, and
+ * whether the bearing from the hinge falls inside the sweep. */
+function swingSector(wall, placed, opening, x, y) {
+  if (placed?.sku?.category !== "door") return null;
+  const swing = doorSwing(wall, placed, opening);
+  const radius = Math.hypot(swing.free.x - swing.hinge.x, swing.free.y - swing.hinge.y);
+  if (!(radius > EPS)) return null;
+  const dx = x - swing.hinge.x;
+  const dy = y - swing.hinge.y;
+  const from = Math.atan2(swing.free.y - swing.hinge.y, swing.free.x - swing.hinge.x);
+  const sweep = directedSweep(from, Math.atan2(swing.leaf.y - swing.hinge.y, swing.leaf.x - swing.hinge.x));
+  let rel = Math.atan2(dy, dx) - from;
+  let inside = false;
+  if (sweep >= 0) {
+    while (rel < 0) rel += Math.PI * 2;
+    while (rel >= Math.PI * 2) rel -= Math.PI * 2;
+    inside = rel <= sweep + 1e-6;
+  } else {
+    while (rel > 0) rel -= Math.PI * 2;
+    while (rel <= -Math.PI * 2) rel += Math.PI * 2;
+    inside = rel >= sweep - 1e-6;
+  }
+  return { dist: Math.hypot(dx, dy), radius, inside };
+}
+
+export function pointOnDoorArc(wall, placed, opening, x, y, tol = 0.15) {
+  const sector = swingSector(wall, placed, opening, x, y);
+  if (!sector?.inside) return false;
+  const reach = Number.isFinite(tol) ? tol : 0.15;
+  return Math.abs(sector.dist - sector.radius) <= reach;
+}
+
+/** True when (x, y) sits inside the door's swing, not only on its stroke.
+ * The leaf and the quarter-circle are the door a person grabs. */
+export function pointInDoorSwing(wall, placed, opening, x, y, tol = 0) {
+  const sector = swingSector(wall, placed, opening, x, y);
+  if (!sector?.inside) return false;
+  const reach = Number.isFinite(tol) ? tol : 0;
+  return sector.dist <= sector.radius + reach;
+}
+
+/** True when (x, y) is within `tol` metres of any stroke of the opening symbol. */
+export function pointOnOpeningSymbol(wall, placed, opening, x, y, tol = 0.15) {
+  const reach = Number.isFinite(tol) ? tol : 0.15;
+  for (const [a, b] of openingSymbolSegments(wall, placed, opening)) {
+    if (distToSeg(a.x, a.y, b.x, b.y, x, y) <= reach) return true;
+  }
+  return pointOnDoorArc(wall, placed, opening, x, y, reach);
+}
+
+/**
+ * True when (x, y) is in the opening's cut through the wall: between the
+ * jambs, and no further from the wall line than `tol`. `tol` is the wall's
+ * own pick reach, which is wider than the thin swing stroke, so a click on
+ * the wall where the door is does not fall through to the wall.
+ */
+export function pointInOpeningCut(placed, x, y, tol) {
+  if (!placed?.a || !placed?.b || !(tol > 0)) return false;
+  return distToSeg(placed.a.x, placed.a.y, placed.b.x, placed.b.y, x, y) <= tol;
 }
 
 export function wallSnapDist(wall) {
@@ -213,16 +328,94 @@ export function swingToward(wall, x, y) {
  * The opening a click at (x, y) would commit: same host, t and swing the
  * canvas preview uses. Drawn walls store a wallId; room-derived walls store
  * the room edge under the pointer (or the first edge if the pointer is
- * outside every room).
+ * outside every room). A door also stores `hand` (which jamb it hinges from).
+ * The click is the centre of the opening, so both jambs are the same distance
+ * from the pointer; `handSign` is the choice made while placing (Space).
  */
-export function openingDraftAt(doc, pack, walls, skuId, x, y) {
+function sameOpeningHost(opening, draft) {
+  if (draft.wallId) return opening.wallId === draft.wallId;
+  return !opening.wallId && opening.roomId === draft.roomId && (opening.edgeIndex ?? 0) === (draft.edgeIndex ?? 0);
+}
+
+/**
+ * Where this opening would sit if the pointer landed on `wall`. A drawn wall
+ * stores a wallId. A room wall keeps the opening's own edge when that wall
+ * still carries it, so a drag does not hop to another edge of a shared wall.
+ */
+function draftAlongWall(doc, pack, wall, opening, x, y) {
+  const sku = skuById(pack, opening.sku);
+  if (!sku || !wall) return null;
+  const swing = swingToward(wall, x, y);
+  const hand = sku.category === "door" ? (opening.hand === -1 ? -1 : 1) : undefined;
+  const handFields = hand === undefined ? {} : { hand };
+  if (wall.drawn) {
+    return { sku: opening.sku, wallId: wall.id, t: wallT(wall, x, y), swing, ...handFields };
+  }
+  const own = (wall.edges || []).find((e) => e.roomId === opening.roomId && (e.edgeIndex ?? 0) === (opening.edgeIndex ?? 0));
+  const roomHit = (doc.rooms || []).find((r) => {
+    const poly = roomPolygon(r);
+    return poly.length >= 3 && pointInPoly(x, y, poly);
+  });
+  const edge = own || (wall.edges || []).find((e) => e.roomId === roomHit?.id) || wall.edges?.[0];
+  const room = edge ? (doc.rooms || []).find((r) => r.id === edge.roomId) : null;
+  if (!room) return null;
+  const edgeSeg = roomEdgeSegment(room, edge.edgeIndex);
+  if (!edgeSeg) return null;
+  return {
+    sku: opening.sku,
+    roomId: edge.roomId,
+    edgeIndex: edge.edgeIndex,
+    t: wallT(edgeSeg, x, y),
+    swing,
+    ...handFields,
+  };
+}
+
+/**
+ * Slide an opening with the pointer. It stays on its own wall and `t` follows
+ * the pointer along that wall, including when the pointer is out on a door's
+ * swing rather than on the wall line. The swing stays put while the pointer
+ * is still on the opening's own side, and flips only once the pointer is
+ * clearly on the other side — or on a different wall, once that wall is the
+ * closer one under the pointer. The hinge (`hand`) is left alone.
+ * Returns false when no wall will take this opening.
+ */
+export function slideOpening(doc, pack, walls, opening, x, y) {
+  const host = wallForOpening(doc, pack, walls, opening);
+  const other = nearestPlaceWall(walls, pack, x, y, opening.sku);
+  const hostDist = host ? distToWall(host, x, y) : Infinity;
+  const otherDist = other ? distToWall(other, x, y) : Infinity;
+  const switchHost = Boolean(other && (!host || other.id !== host.id) && otherDist + 0.02 < hostDist);
+  const wall = (switchHost ? other : host) || other;
+  if (!wall) return false;
+  const draft = draftAlongWall(doc, pack, wall, opening, x, y);
+  if (!draft) return false;
+  const clear = Math.max(0.06, (wall.thickness || 0.11) * 0.55);
+  if (!sameOpeningHost(opening, draft) || distToWall(wall, x, y) > clear) {
+    opening.swing = swingToward(wall, x, y);
+  }
+  if (draft.wallId) {
+    opening.wallId = draft.wallId;
+    delete opening.roomId;
+    delete opening.edgeIndex;
+  } else {
+    delete opening.wallId;
+    opening.roomId = draft.roomId;
+    opening.edgeIndex = draft.edgeIndex;
+  }
+  opening.t = draft.t;
+  return true;
+}
+
+export function openingDraftAt(doc, pack, walls, skuId, x, y, handSign = 1) {
   const sku = skuById(pack, skuId);
   if (!sku) return null;
   const wall = nearestPlaceWall(walls, pack, x, y, skuId);
   if (!wall) return null;
   const swing = swingToward(wall, x, y);
+  const hand = sku.category === "door" ? (handSign === -1 ? -1 : 1) : undefined;
   if (wall.drawn) {
-    return { sku: skuId, wallId: wall.id, t: wallT(wall, x, y), swing };
+    return { sku: skuId, wallId: wall.id, t: wallT(wall, x, y), swing, ...(hand === undefined ? {} : { hand }) };
   }
   const roomHit = (doc.rooms || []).find((r) => {
     const poly = roomPolygon(r);
@@ -239,6 +432,7 @@ export function openingDraftAt(doc, pack, walls, skuId, x, y) {
     edgeIndex: edge.edgeIndex,
     t: wallT(edgeSeg, x, y),
     swing,
+    ...(hand === undefined ? {} : { hand }),
   };
 }
 
