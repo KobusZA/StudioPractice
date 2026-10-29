@@ -405,10 +405,10 @@ function heightWords(bottom, top) {
   return `${say(bottom)} to ${say(top)}`;
 }
 
-/** One sentence for a finish, with no coordinates. */
+/** One sentence for a finish, with no coordinates. A drawn shape is a polygon, so it is not described as four edges. */
 function bandPlace(band, model) {
   if (band.category === "none") return "Taken off this face. Remove this to put it back.";
-  if (band.outline?.length >= 3) return "Drawn area";
+  if (band.outline?.length >= 3) return `Drawn area, ${band.outline.length} corners`;
   const fullLen = band.from <= 0.02 && model.length - band.to <= 0.02;
   const fullH = band.bottom <= 0.02 && model.height - band.top <= 0.02;
   const height = fullH ? "" : heightWords(band.bottom, band.top);
@@ -425,20 +425,11 @@ function bandCardHtml(doc, b, model, { selectedId, savedId, index, total }) {
   const picked = b.id === selectedId;
   const label = spec?.label || b.category;
   const which = total > 1 ? `${label} ${index} of ${total} · ` : "";
-  const drawn = Boolean(b.outline?.length >= 3);
   const badge = product || b.category === "none"
     ? ""
     : spec?.needsProduct
       ? `<p class="fin-badge">Needs a product</p>`
       : `<p class="fin-badge fin-badge-soft">No product named</p>`;
-  const sizes = picked && b.editable && !drawn
-    ? `<div class="fin-row fin-sizes">
-        ${b.source === "run" ? `<label>Along the wall, from <input data-fin="band-from" type="text" inputmode="decimal" value="${mm(b.from)}" aria-label="From, mm along the wall" /></label>
-        <label>to <input data-fin="band-to" type="text" inputmode="decimal" value="${mm(b.to)}" aria-label="To, mm along the wall" /></label>` : ""}
-        <label>up <input data-fin="band-bottom" type="text" inputmode="decimal" value="${mm(b.bottom)}" aria-label="Bottom, mm" /></label>
-        <label>to <input data-fin="band-top" type="text" inputmode="decimal" value="${mm(b.top)}" aria-label="Top, mm" /> mm</label>
-      </div>`
-    : "";
   const productField = b.category === "none"
     ? ""
     : `<label class="fin-pick">Product
@@ -459,8 +450,43 @@ function bandCardHtml(doc, b, model, { selectedId, savedId, index, total }) {
     <p class="fin-where">${esc(which)}${esc(bandPlace(b, model))}</p>
     ${badge}
     ${productField}
-    ${sizes}
     <div class="fin-btns">${remove}</div>
+  </div>`;
+}
+
+/**
+ * The box under the inspector's elevation preview. A click on a finish stays
+ * on the graph: this holds the same facts as its card, and Edit opens the
+ * elevation under the plan instead of scrolling the card into view.
+ */
+export function finishCalloutHtml(doc, band, model) {
+  const spec = FINISH_CATEGORIES[band.category];
+  const product = finishProductById(doc, band.productId);
+  const label = spec?.label || band.category;
+  const same = (model.finishBands || []).filter((b) => b.source !== "default" && b.category === band.category);
+  const index = same.findIndex((b) => b.id === band.id) + 1;
+  const which = same.length > 1 && index > 0 ? `${label} ${index} of ${same.length} · ` : "";
+  const place = band.source === "default" ? "From the wall type" : bandPlace(band, model);
+  const area = band.category === "none" ? "" : formatQty(band.quantity, band.unit);
+  const productLine = band.category === "none" || band.source === "default"
+    ? ""
+    : product
+      ? `<p class="fin-name">${esc(productChoiceLabel(product))}</p>`
+      : spec?.needsProduct
+        ? `<p class="fin-badge">Needs a product</p>`
+        : `<p class="fin-badge fin-badge-soft">No product named</p>`;
+  return `<div class="elev-callout" data-fin-band="${esc(band.id)}">
+    <div class="fin-kind-head">
+      <i class="fin-swatch" style="background:${esc(finishSwatch(band.category))}"></i>
+      <strong class="fin-grow">${esc(label)}</strong>
+      <span class="fin-area">${esc(area)}</span>
+    </div>
+    <p class="fin-where">${esc(which)}${esc(place)}</p>
+    ${productLine}
+    <div class="fin-btns">
+      <button type="button" data-fin="band-close">Close</button>
+      <button type="button" data-fin="band-edit" title="Open this finish on the elevation under the plan">Edit</button>
+    </div>
   </div>`;
 }
 
@@ -506,13 +532,14 @@ export function faceFinishHtml(doc, model, opts = {}) {
         <label class="fin-pick">Height
           <select data-fin="band-height" aria-label="Height of the finish">${HEIGHT_PRESETS.map((p) => `<option value="${p.id}">${esc(p.label)}</option>`).join("")}</select>
         </label>
-        <div class="fin-row fin-sizes" data-fin-custom hidden>
-          <label>up <input data-fin="run-bottom" type="text" inputmode="decimal" value="0" aria-label="Bottom, mm" /></label>
+        <div class="fin-sizes" data-fin-custom hidden>
+          <label>Up <input data-fin="run-bottom" type="text" inputmode="decimal" value="0" aria-label="Bottom, mm" /> mm</label>
           <label>to <input data-fin="run-top" type="text" inputmode="decimal" placeholder="top" aria-label="Top, mm" /> mm</label>
         </div>
-        <div class="fin-row fin-sizes" data-fin-span hidden>
-          <label>Along the wall, from <input data-fin="run-from" type="text" inputmode="decimal" aria-label="From, mm along the wall" /></label>
-          <label>to <input data-fin="run-to" type="text" inputmode="decimal" aria-label="To, mm along the wall" /></label>
+        <div class="fin-sizes" data-fin-span hidden>
+          <p class="fin-note">Along the wall</p>
+          <label>From <input data-fin="run-from" type="text" inputmode="decimal" aria-label="From, mm along the wall" /> mm</label>
+          <label>to <input data-fin="run-to" type="text" inputmode="decimal" aria-label="To, mm along the wall" /> mm</label>
         </div>
         <div class="fin-btns">
           <button type="button" data-fin="run-add">Whole face</button>

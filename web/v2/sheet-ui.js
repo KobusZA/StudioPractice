@@ -96,6 +96,18 @@ export function createSheetUi(ctx) {
     const collapsed = sheetsCard.classList.toggle("is-collapsed");
     sheetsToggle.setAttribute("aria-expanded", String(!collapsed));
   } }, "Sheets");
+  const sheetsClose = h("button", {
+    type: "button",
+    class: "sheet-set-list-close",
+    title: "Close the sheet list",
+    "aria-label": "Close sheet list",
+    text: "\u00d7",
+    onclick: (e) => {
+      e.stopPropagation();
+      setListVisible(false);
+    },
+  });
+  const sheetsHead = h("div", { class: "sheet-set-list-bar" }, sheetsToggle, sheetsClose);
   let listTab = "drawn";
   const tabDrawn = h("button", { type: "button", class: "sheet-set-tab is-on", role: "tab", "aria-selected": "true", text: "Drawn" });
   const tabOther = h("button", { type: "button", class: "sheet-set-tab", role: "tab", "aria-selected": "false", text: "Not drawn" });
@@ -112,12 +124,12 @@ export function createSheetUi(ctx) {
       pickTab(tab);
     });
   }
-  const sheetsCard = h("div", { class: "sheet-set-card", hidden: true }, sheetsToggle, sheetsTabs, sheetsList);
+  const sheetsCard = h("div", { class: "sheet-set-card", hidden: true }, sheetsHead, sheetsTabs, snapLabel, sheetsList);
   const loadChip = h("span", { class: "sheet-set-chip", hidden: true });
   const uploadText = h("span", { text: "Saving plan file…" });
   const retryButton = h("button", { type: "button", text: "Retry", hidden: true });
   const uploadChip = h("span", { class: "sheet-set-chip is-upload", hidden: true, role: "status" }, uploadText, retryButton);
-  const chips = h("div", { class: "sheet-set-chips" }, repickBar, snapLabel, loadChip, uploadChip, sharpChip);
+  const chips = h("div", { class: "sheet-set-chips" }, repickBar, loadChip, uploadChip, sharpChip);
   const bar = h("div", { class: "sheet-set-status" }, chips, sheetsCard);
 
   // --- saving the plan file ---------------------------------------------------
@@ -858,6 +870,7 @@ export function createSheetUi(ctx) {
   function setListVisible(visible = !listShown) {
     listShown = Boolean(visible);
     syncList();
+    ctx.onListVisible?.(listShown);
     return listShown;
   }
 

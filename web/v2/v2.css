@@ -426,26 +426,34 @@ canvas {
   background-image: repeating-linear-gradient(90deg, var(--copper) 0 6px, transparent 6px 10px);
 }
 
-/* Show/hide for service runs. Sits above the existing/proposed legend, and
-   drops to the corner when that legend is not on screen. */
-.svc-vis {
+/* Show/hide for finishes and service runs. Sits above the existing/proposed
+   legend, and drops to the corner when that legend is not on screen. */
+.plan-vis {
   position: absolute;
   left: 12px;
   bottom: 12px;
   z-index: 2;
   display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  max-width: calc(100% - 24px);
+}
+
+.canvas-wrap:has(.legend:not([hidden])) .plan-vis {
+  bottom: 46px;
+}
+
+.svc-vis {
+  display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px 8px;
-  max-width: calc(100% - 24px);
+  max-width: 100%;
   background: rgba(251, 247, 240, 0.94);
   border: 1px solid var(--line);
   padding: 5px 8px;
   font-size: 0.75rem;
-}
-
-.canvas-wrap:has(.legend:not([hidden])) .svc-vis {
-  bottom: 46px;
 }
 
 .svc-vis[hidden] {
@@ -2398,6 +2406,29 @@ body.library-home {
   touch-action: none;
 }
 
+.elev-edge-mode {
+  position: absolute;
+  z-index: 5;
+  display: inline-flex;
+  border: 1px solid var(--line-strong, rgba(26, 22, 18, 0.25));
+  border-radius: 5px;
+  overflow: hidden;
+  background: #fffdf8;
+}
+.elev-edge-mode[hidden] { display: none !important; }
+.elev-edge-mode button {
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 2px 10px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.elev-edge-mode button.active {
+  background: var(--ink, #1a1612);
+  color: #fff;
+}
+
 .elev-preview-wrap {
   display: flex;
   flex-direction: column;
@@ -2413,9 +2444,42 @@ body.library-home {
   touch-action: none;
 }
 
+.elev-preview .elev-band { cursor: pointer; }
+
+.elev-finish-callout {
+  position: relative;
+  padding: 8px;
+  border: 1px solid var(--line, rgba(26, 22, 18, 0.14));
+  border-radius: 4px;
+  background: #fffdf8;
+  box-shadow: 0 6px 16px rgba(26, 22, 18, 0.12);
+  font-size: 0.78rem;
+}
+
+.elev-finish-callout::before {
+  content: "";
+  position: absolute;
+  top: -6px;
+  left: 18px;
+  width: 10px;
+  height: 10px;
+  background: #fffdf8;
+  border-left: 1px solid var(--line, rgba(26, 22, 18, 0.14));
+  border-top: 1px solid var(--line, rgba(26, 22, 18, 0.14));
+  transform: rotate(45deg);
+}
+
+.elev-finish-callout[hidden] { display: none; }
+
+.elev-callout .fin-kind-head { margin-bottom: 2px; }
+.elev-callout .fin-name { margin: 2px 0 4px; font-size: 0.78rem; }
+.elev-callout .fin-btns { margin-top: 6px; }
+
 .elev-svg { display: block; }
 .elev-bg { fill: #fffdf8; }
 .elev-wall { fill: #e4dccd; stroke: #1a1612; stroke-width: 1.5; }
+.elev-wall-host,
+.elev-host .elev-band { cursor: pointer; }
 .elev-wall-ghost { fill: none; stroke: #8a8174; stroke-width: 1; stroke-dasharray: 4 3; pointer-events: none; }
 .elev-wall-top { fill: transparent; cursor: ns-resize; }
 .elev-guide { stroke: #1a1612; stroke-width: 1.25; }
@@ -2428,7 +2492,6 @@ body.library-home {
 .elev-door { fill: #c9a574; }
 .elev-opening.is-selected { stroke: var(--copper, #b2451e); stroke-width: 2; }
 .elev-opening.is-nonstandard { stroke-dasharray: 4 2; }
-.elev-glass { stroke: #1a1612; stroke-width: 0.8; pointer-events: none; }
 .elev-handle { fill: #fff; stroke: var(--copper, #b2451e); stroke-width: 1.5; }
 .elev-handle-l, .elev-handle-r { cursor: ew-resize; }
 .elev-handle-t, .elev-handle-b { cursor: ns-resize; }
@@ -3288,6 +3351,27 @@ body.library-home {
   border-bottom: 1px solid var(--line);
   flex-shrink: 0;
 }
+
+.inspect-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+#v2-inspect-back {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--copper);
+  cursor: pointer;
+}
+
+#v2-inspect-back:hover { color: var(--copper-dark); }
 
 .dock-context > header h2 {
   margin: 0;
@@ -5571,13 +5655,18 @@ body.library-home .library-foot {
 .sheet-set-verify.is-unverified { color: #9a6b1f; }
 .sheet-set-ceiling-note { color: #5c5348; font-size: 0.84rem; }
 .sheet-set-card { background: rgba(244, 237, 225, 0.96); border: 1px solid var(--ink); border-radius: 6px; min-width: 15rem; max-width: 22rem; overflow: hidden; }
+.sheet-set-card .sheet-set-snap { background: transparent; border: 0; border-top: 1px solid rgba(0, 0, 0, 0.15); border-radius: 0; padding: 4px 10px; min-height: 30px; width: 100%; box-sizing: border-box; }
 .sheet-set-card.is-collapsed .sheet-set-list,
-.sheet-set-card.is-collapsed .sheet-set-tabs { display: none; }
-.sheet-set-list-head { width: 100%; text-align: left; font: inherit; font-weight: 600; padding: 5px 10px; border: 0; background: transparent; cursor: pointer; }
+.sheet-set-card.is-collapsed .sheet-set-tabs,
+.sheet-set-card.is-collapsed .sheet-set-snap { display: none; }
+.sheet-set-list-bar { display: flex; align-items: stretch; min-height: 30px; }
+.sheet-set-list-head { flex: 1; min-width: 0; display: flex; align-items: center; text-align: left; font: inherit; font-weight: 600; line-height: 1.35; padding: 4px 10px; border: 0; background: transparent; cursor: pointer; }
 .sheet-set-list-head::after { content: " \25BE"; }
 .sheet-set-card.is-collapsed .sheet-set-list-head::after { content: " \25B8"; }
-.sheet-set-tabs { display: flex; border-top: 1px solid rgba(0, 0, 0, 0.15); }
-.sheet-set-tab { flex: 1; font: inherit; font-size: 0.78rem; padding: 4px 8px; border: 0; border-right: 1px solid rgba(0, 0, 0, 0.12); background: transparent; color: #5c5348; cursor: pointer; }
+.sheet-set-list-close { flex: none; width: 30px; display: flex; align-items: center; justify-content: center; padding: 0; border: 0; border-left: 1px solid rgba(0, 0, 0, 0.12); background: transparent; color: #5c5348; font: inherit; font-size: 1.15rem; line-height: 1; cursor: pointer; }
+.sheet-set-list-close:hover { background: rgba(0, 0, 0, 0.06); }
+.sheet-set-tabs { display: flex; align-items: stretch; min-height: 30px; border-top: 1px solid rgba(0, 0, 0, 0.15); }
+.sheet-set-tab { flex: 1; font: inherit; font-size: 0.78rem; line-height: 1.35; min-height: 30px; padding: 4px 10px; border: 0; border-right: 1px solid rgba(0, 0, 0, 0.12); background: transparent; color: #5c5348; cursor: pointer; }
 .sheet-set-tab:last-child { border-right: 0; }
 .sheet-set-tab.is-on { background: rgba(178, 69, 30, 0.16); color: var(--ink); font-weight: 600; }
 .sheet-set-list { display: flex; flex-direction: column; max-height: 16rem; overflow: auto; border-top: 1px solid rgba(0, 0, 0, 0.15); }
@@ -5690,12 +5779,41 @@ input.sheet-set-list-name:hover, input.sheet-set-list-name:focus { border-color:
 .elev-align { stroke: #3a5f7a; stroke-width: 1; stroke-dasharray: 4 3; pointer-events: none; }
 .elev-measure { font: 600 11px "Source Sans 3", sans-serif; fill: #1a1612; pointer-events: none; }
 .elev-measure-bg { fill: rgba(244, 237, 225, 0.92); pointer-events: none; }
-.elev-outline-edge { stroke: transparent; stroke-width: 10; cursor: pointer; }
+.elev-outline-edge { stroke: rgba(26, 22, 18, 0.01); stroke-width: 14; pointer-events: stroke; cursor: default; }
+.elev-outline-edge.is-add { cursor: copy; }
+.elev-outline-edge.is-ns { cursor: ns-resize; }
+.elev-outline-edge.is-ew { cursor: ew-resize; }
+.elev-outline-edge.is-nwse { cursor: nwse-resize; }
+.elev-outline-edge.is-nesw { cursor: nesw-resize; }
 .elev-handle.is-selected { fill: #1a1612; }
 .elev-band.is-hot { fill-opacity: 0.7 !important; }
 .elev-band.is-selected { stroke: #1a1612; stroke-width: 1.5; fill-opacity: 0.6 !important; }
 .fin-rule .fin-kind-head button { flex: 0 0 auto; }
-.fin-sizes label { display: inline-flex; align-items: center; gap: 4px; }
+.fin-sizes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 8px;
+  margin: 2px 0;
+}
+.fin-sizes .fin-note { grid-column: 1 / -1; margin: 0; }
+.fin-sizes label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  font-size: 0.72rem;
+  color: var(--ink-soft, #665d52);
+}
+.fin-sizes input[type="text"] {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+  height: 32px;
+  padding: 0 8px;
+  font: inherit;
+  font-size: 0.82rem;
+  box-sizing: border-box;
+}
 .fin-edge-note { color: var(--ink-soft, #665d52); }
 .elev-band-edge { fill: transparent; stroke: none; }
 .elev-band-edge:hover { fill: rgba(178, 69, 30, 0.45); }

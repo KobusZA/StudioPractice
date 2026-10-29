@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,560&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="./v2.css?v=20261028-add-sheet2" />
+  <link rel="stylesheet" href="./v2.css?v=20261029-sheet-close" />
 </head>
 <body class="auth-pending">
   <div class="chrome">
@@ -151,8 +151,6 @@
                aria-label="Building cut" aria-orientation="vertical"
                aria-valuemin="0" tabindex="0"></svg>
           </div>
-          <p class="hint">Drag the rail, or click the section to jump. <kbd>↑</kbd> <kbd>↓</kbd> step;
-            <kbd>PgUp</kbd> <kbd>PgDn</kbd> skip a storey.</p>
           <ul class="level-stations" id="v2-level-stations"></ul>
           <button type="button" class="panel-resize panel-resize-levels" id="v2-resize-levels"
                   aria-label="Resize levels panel" title="Drag to resize" tabindex="0"></button>
@@ -224,9 +222,15 @@
           <h3>Nothing drawn</h3>
           <p>Pick Walls, Doors or another tool on the ribbon, then a type from the list.</p>
         </div>
-        <div class="svc-vis" id="v2-service-vis" hidden>
-          <span class="svc-vis-label">Services</span>
-          <div class="svc-vis-list" id="v2-service-vis-list" role="group" aria-label="Show services on the plan"></div>
+        <div class="plan-vis" id="v2-plan-vis">
+          <div class="svc-vis" id="v2-finish-vis" hidden>
+            <span class="svc-vis-label">Finishes</span>
+            <div class="svc-vis-list" id="v2-finish-vis-list" role="group" aria-label="Show finishes on the plan"></div>
+          </div>
+          <div class="svc-vis" id="v2-service-vis" hidden>
+            <span class="svc-vis-label">Services</span>
+            <div class="svc-vis-list" id="v2-service-vis-list" role="group" aria-label="Show services on the plan"></div>
+          </div>
         </div>
         <div class="legend" id="v2-legend" hidden>
           <span class="existing"><i></i>Existing</span>
@@ -332,6 +336,10 @@
                   title="Close the route profile and the Services panel. A click on empty plan leaves them open. Escape does the same.">Exit</button>
         </div>
         <canvas id="v2-service-profile-canvas"></canvas>
+        <span class="elev-edge-mode" id="v2-elev-edge-mode" hidden role="group" aria-label="Drag an edge of the finish to">
+          <button type="button" data-elev-edge="corner" title="Add a corner on an edge">Corner</button>
+          <button type="button" data-elev-edge="line" title="Move this edge">Line</button>
+        </span>
         <div class="elev-dock-body" id="v2-elevation-body" hidden></div>
       </div>
       </div>
@@ -342,7 +350,10 @@
       <button type="button" class="panel-resize panel-resize-dock" id="v2-resize-dock"
               aria-label="Resize context panel" title="Drag to resize" tabindex="0"></button>
       <header>
-        <h2 id="v2-palette-title">Inspector</h2>
+        <div class="inspect-heading">
+          <button type="button" id="v2-inspect-back" hidden title="Return the inspector to the wall this opening is in">← Wall</button>
+          <h2 id="v2-palette-title">Inspector</h2>
+        </div>
         <span id="v2-inspect-kicker">—</span>
       </header>
       <p class="hint ctx-empty" id="v2-inspect-empty">Select a wall, room, roof or opening to edit its type and identity, or pick a tool on the ribbon to start drawing.</p>
@@ -455,6 +466,7 @@
           </label>
           <div class="elev-preview-wrap" id="v2-ctx-elev-wrap" hidden>
             <div class="elev-preview" id="v2-ctx-elev"></div>
+            <div class="elev-finish-callout" id="v2-ctx-elev-callout" hidden></div>
             <button type="button" id="v2-ctx-elev-open" title="Show this wall face in the strip under the plan. Drag the top of the wall to set its height; the line above it is the next floor or the roof.">Open elevation</button>
           </div>
           <div class="fin-panel" id="v2-ctx-finish" hidden></div>
@@ -997,6 +1009,6 @@
     </form>
   </div>
 
-  <script type="module" src="./ui.js?v=20261028-add-sheet"></script>
+  <script type="module" src="./ui.js?v=20261029-finish-callout-close"></script>
 </body>
 </html>

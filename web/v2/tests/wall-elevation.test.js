@@ -7,7 +7,8 @@ import { readFileSync } from "node:fs";
 import { normalizeDoc } from "../model.js";
 import { normalizePackUnits } from "../schema.js";
 import { deriveWalls } from "../walls.js";
-import { applyOpeningEdit, applyWallTopEdit, elevationModel, faceRefForSelection, snapElevation } from "../wall-elevation.js";
+import { createFinishRun } from "../finish-model.js";
+import { applyOpeningEdit, applyWallTopEdit, axisAlignedOutline, elevationModel, faceRefForSelection, snapElevation, translateOutlineEdge } from "../wall-elevation.js";
 
 const pack = normalizePackUnits(
   JSON.parse(readFileSync(new URL("../../samples/planner-pack-v2.json", import.meta.url))),
@@ -120,6 +121,25 @@ test("a resize cannot push the opening through the top of the wall", () => {
   assert.ok(r.sill + r.height <= m.height + 1e-9);
 });
 
+test("moving an edge keeps its length, and a nudged rectangle stays a rectangle", () => {
+  const rect = [
+    { s: 1, z: 0 },
+    { s: 4, z: 0 },
+    { s: 4, z: 2 },
+    { s: 1, z: 2 },
+  ];
+  const lifted = translateOutlineEdge(rect, 2, 0.4, 0.3, 6, 3);
+  assert.ok(Math.abs(lifted[2].s - 4.4) < 1e-9 && Math.abs(lifted[3].s - 1.4) < 1e-9);
+  assert.ok(Math.abs(lifted[2].z - 2.3) < 1e-9 && Math.abs(lifted[3].z - 2.3) < 1e-9);
+  assert.deepEqual(lifted[0], { s: 1, z: 0 });
+  assert.equal(axisAlignedOutline(lifted), null, "the sides have slanted");
+
+  const straight = translateOutlineEdge(rect, 2, 0, 0.5, 6, 2.2);
+  assert.ok(Math.abs(straight[2].z - 2.2) < 1e-9, "the line stops at the top of the wall");
+  assert.deepEqual(axisAlignedOutline(straight), { from: 1, to: 4, bottom: 0, top: 2.2 });
+  assert.deepEqual(axisAlignedOutline(rect), { from: 1, to: 4, bottom: 0, top: 2 });
+});
+
 test("snapElevation rounds to 50 mm", () => {
   assert.equal(snapElevation(0.126), 0.15);
   assert.equal(snapElevation(0.12), 0.1);
@@ -136,6 +156,104 @@ test("the SVG draws the wall and each opening, with handles only when interactiv
   const live = elevationSvg(m, { width: 600, height: 200, interactive: true, selectedId: "o1" });
   assert.match(live.svg, /elev-handle-r/);
   assert.ok(live.scale > 0);
+});
+
+function fillTag(svg, id) {
+  const at = svg.indexOf(`data-elev-fill="${id}"`);
+  assert.ok(at > 0, `fill ${id}`);
+  return svg.slice(svg.lastIndexOf("<", at), svg.indexOf(">", at) + 1);
+}
+
+function ringsOf(tag) {
+  const d = tag.match(/d="([^"]+)"/);
+  if (!d) return [];
+  return d[1].split(/[Zz]/).map((part) => {
+    const nums = part.match(/-?\d+(?:\.\d+)?/g)?.map(Number) || [];
+    const pts = [];
+    for (let i = 0; i + 1 < nums.length; i += 2) pts.push([nums[i], nums[i + 1]]);
+    return pts;
+  }).filter((ring) => ring.length >= 3);
+}
+
+function span(pts, i) {
+  const v = pts.map((p) => p[i]);
+  return Math.max(...v) - Math.min(...v);
+}
+
+test("a finish fill is cut where a window overlaps it, and a length is not", async () => {
+  const { elevationSvg } = await import("../wall-elevation-render.js");
+  const doc = drawnDoc([{ id: "o1", sku: "TSP_WN1212", wallId: "w1", t: 0.5 }]);
+  const walls = deriveWalls(doc, pack);
+  const wall = walls.find((w) => w.id === "w1");
+  const paint = createFinishRun(doc, wall, 1, { category: "paint", bottom: 0, top: 2.4 });
+  const clear = createFinishRun(doc, wall, 1, { category: "paint", bottom: 0, top: 0.4 });
+  const skirt = createFinishRun(doc, wall, 1, { category: "skirting", bottom: 0, top: 0.12 });
+  const m = elevationModel(doc, pack, { wallId: "w1", side: 1 }, walls);
+  const svg = elevationSvg(m, { width: 640, height: 280 }).svg;
+  const idOf = (run) => m.finishBands.find((b) => b.sourceId === run.id).id;
+
+  const cut = fillTag(svg, idOf(paint));
+  assert.match(cut, /fill-rule="evenodd"/);
+  const rings = ringsOf(cut);
+  assert.equal(rings.length, 2, "the window is a hole in the paint");
+  const outer = rings[0];
+  const hole = rings[1];
+  assert.ok(Math.abs(span(hole, 0) / span(outer, 0) - 1.2 / 6) < 0.02, "the hole is the window width");
+  assert.ok(Math.abs(span(hole, 1) / span(outer, 1) - 1.2 / 2.4) < 0.02, "the hole is the window height");
+
+  const below = fillTag(svg, idOf(clear));
+  assert.match(below, /^<rect /);
+  assert.doesNotMatch(below, /fill-rule/);
+
+  const skirting = fillTag(svg, idOf(skirt));
+  assert.match(skirting, /^<rect /);
+
+  const doorDoc = drawnDoc([{ id: "d1", sku: "TSP_DR900", wallId: "w1", t: 0.5 }]);
+  const doorWalls = deriveWalls(doorDoc, pack);
+  const doorSkirt = createFinishRun(doorDoc, doorWalls[0], 1, { category: "skirting", bottom: 0, top: 0.12 });
+  const doorModel = elevationModel(doorDoc, pack, { wallId: "w1", side: 1 }, doorWalls);
+  const doorSvg = elevationSvg(doorModel, { width: 640, height: 280 }).svg;
+  const doorFill = fillTag(doorSvg, doorModel.finishBands.find((b) => b.sourceId === doorSkirt.id).id);
+  assert.match(doorFill, /fill-rule="evenodd"/);
+});
+
+test("a selected rectangular finish offers corners, and a click target on each edge", async () => {
+  const { elevationSvg } = await import("../wall-elevation-render.js");
+  const doc = drawnDoc([{ id: "o1", sku: "TSP_WN1212", wallId: "w1", t: 0.5 }]);
+  const walls = deriveWalls(doc, pack);
+  const run = createFinishRun(doc, walls[0], 1, { category: "paint", from: 1, to: 5, bottom: 0, top: 2.4 });
+  const m = elevationModel(doc, pack, { wallId: "w1", side: 1 }, walls);
+  const bandId = m.finishBands.find((b) => b.sourceId === run.id).id;
+  const idle = elevationSvg(m, { width: 640, height: 280, interactive: true, selectedId: "o1" }).svg;
+  assert.doesNotMatch(idle, /data-elev-op="outline-vertex"/);
+  const svg = elevationSvg(m, { width: 640, height: 280, interactive: true, selectedId: "o1", selectedBandId: bandId }).svg;
+  assert.equal(svg.match(/data-elev-op="outline-vertex"/g).length, 4);
+  assert.equal(svg.match(/data-elev-op="outline-edge"/g).length, 4);
+  assert.match(svg, /pointer-events="stroke"/);
+  assert.match(svg, /elev-outline-edge is-add/);
+  const lineSvg = elevationSvg(m, { width: 640, height: 280, interactive: true, selectedId: "o1", selectedBandId: bandId, edgeMode: "line" }).svg;
+  assert.equal(lineSvg.match(/elev-outline-edge is-ns/g).length, 2, "a horizontal edge resizes up and down, like the wall top");
+  assert.equal(lineSvg.match(/elev-outline-edge is-ew/g).length, 2, "a vertical edge resizes sideways");
+  assert.doesNotMatch(lineSvg, /is-add/);
+  assert.doesNotMatch(svg, new RegExp(`data-elev-op="band-top"[^>]*data-elev-band="${bandId}"`));
+});
+
+test("a drawn finish is cut to the part of the window inside the shape", async () => {
+  const { elevationSvg } = await import("../wall-elevation-render.js");
+  const doc = drawnDoc([{ id: "o1", sku: "TSP_WN1212", wallId: "w1", t: 0.5 }]);
+  const walls = deriveWalls(doc, pack);
+  const outline = [[2, 0.5], [5, 0.5], [5, 2.2], [2, 2.2]];
+  const run = createFinishRun(doc, walls[0], 1, { category: "paint", outline });
+  const m = elevationModel(doc, pack, { wallId: "w1", side: 1 }, walls);
+  const svg = elevationSvg(m, { width: 640, height: 280 }).svg;
+  const tag = fillTag(svg, m.finishBands.find((b) => b.sourceId === run.id).id);
+  const rings = ringsOf(tag);
+  assert.equal(rings.length, 2);
+  const outer = rings[0];
+  const hole = rings[1];
+  // Window is x 2.4–3.6, z 0.9–2.1, inside the outline, so the hole matches it.
+  assert.ok(Math.abs(span(hole, 0) / span(outer, 0) - 1.2 / 3) < 0.02);
+  assert.ok(Math.abs(span(hole, 1) / span(outer, 1) - 1.2 / 1.7) < 0.02);
 });
 
 test("a selected window is dimensioned with the sill below and the height to the ceiling", async () => {
@@ -175,10 +293,12 @@ test("a short wall still shows the next floor, and the top storey shows the roof
   const ground = elevationModel(doc, pack, { wallId: "w1" });
   assert.equal(ground.guide.kind, "floor");
   assert.equal(ground.guide.name, "02 L1");
-  const svg = elevationSvg(ground, { width: 640, height: 280, dragTop: true });
+  const svg = elevationSvg(ground, { width: 640, height: 280 });
   assert.match(svg.svg, /02 L1 \+2\.800/);
   assert.match(svg.svg, /elev-wall-ghost/);
-  assert.match(svg.svg, /data-elev-op="wall-top"/);
+  assert.doesNotMatch(svg.svg, /data-elev-op="wall-top"/);
+  const open = elevationSvg(ground, { width: 640, height: 280, interactive: true });
+  assert.match(open.svg, /data-elev-op="wall-top"/);
 
   const full = elevationModel(drawnDoc(), pack, { wallId: "w1" });
   const fullSvg = elevationSvg(full, { width: 640, height: 280 });
@@ -191,9 +311,34 @@ test("a short wall still shows the next floor, and the top storey shows the roof
   const top = elevationModel(topDoc, pack, { wallId: "w1" });
   assert.equal(top.guide.kind, "roof");
   assert.ok(Math.abs(top.guide.elevation - 5.6) < 1e-9);
-  const roof = elevationSvg(top, { width: 640, height: 280, dragTop: true });
+  const roof = elevationSvg(top, { width: 640, height: 280 });
   assert.match(roof.svg, /Roof \+5\.600/);
   assert.match(roof.svg, /elev-wall-ghost/);
+});
+
+test("a long wall keeps the next floor above the wall", async () => {
+  const { elevationSvg } = await import("../wall-elevation-render.js");
+  const doc = drawnDoc();
+  doc.segments[0].x2 = 40;
+  doc.segments[0].height = 2.4;
+  const drawn = elevationSvg(elevationModel(doc, pack, { wallId: "w1" }), { width: 240, height: 130 });
+  assert.ok(drawn.scaleX < drawn.scaleY, "length compresses, the storey does not");
+
+  const wall = drawn.svg.match(/<rect x="([^"]+)" y="([^"]+)" width="([^"]+)" height="([^"]+)" class="elev-wall"/);
+  const label = drawn.svg.match(/<text x="([^"]+)" y="([^"]+)" text-anchor="end" class="elev-level-label">02 L1 \+2\.800</);
+  assert.ok(wall, "wall rect");
+  assert.ok(label, "next-floor label");
+  const wallTop = Number(wall[2]);
+  const wallRight = Number(wall[1]) + Number(wall[3]);
+  const labelY = Number(label[2]);
+  assert.ok(wallTop > labelY + 8, "the next floor sits above the wall");
+  assert.ok(Math.abs(Number(wall[1]) - 7) < 1 && Math.abs(wallRight - 233) < 1, "the wall spans the level lines");
+  assert.ok(wallTop >= 0 && wallTop + Number(wall[4]) <= 130, "the wall stays inside the preview");
+
+  const fitted = elevationSvg(elevationModel(drawnDoc(), pack, { wallId: "w1" }), { width: 640, height: 130 });
+  const fittedWall = fitted.svg.match(/<rect x="([^"]+)" y="([^"]+)" width="([^"]+)" height="[^"]+" class="elev-wall"/);
+  const fittedRight = Number(fittedWall[1]) + Number(fittedWall[3]);
+  assert.ok(Math.abs(Number(fittedWall[1]) - 7) < 1 && Math.abs(fittedRight - 633) < 1, "a shorter wall fills the width too");
 });
 
 test("dragging the wall top sets a fixed height and will not pass the next floor", () => {

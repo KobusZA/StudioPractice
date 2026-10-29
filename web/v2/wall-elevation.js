@@ -383,3 +383,44 @@ export function applyOutlinePoints(doc, pack, faceRef, bandId, points, walls = n
   reanchorRun(run, wall);
   return run;
 }
+
+/**
+ * Move one edge of a ring by the same amount at both ends, so the line keeps
+ * its length and direction. The delta is reduced until both ends stay on the
+ * face. `points` are `{ s, z }` in viewing coordinates.
+ */
+export function translateOutlineEdge(points, edgeIndex, ds, dz, length, height) {
+  const n = points.length;
+  if (!n) return [];
+  const i = ((edgeIndex % n) + n) % n;
+  const j = (i + 1) % n;
+  const a = points[i];
+  const b = points[j];
+  const minS = Math.min(a.s, b.s);
+  const maxS = Math.max(a.s, b.s);
+  const minZ = Math.min(a.z, b.z);
+  const maxZ = Math.max(a.z, b.z);
+  const s = Math.min(length - maxS, Math.max(-minS, ds));
+  const z = Math.min(height - maxZ, Math.max(-minZ, dz));
+  return points.map((p, k) => (k === i || k === j ? { s: p.s + s, z: p.z + z } : { s: p.s, z: p.z }));
+}
+
+/**
+ * A ring that is still an axis-aligned rectangle, as viewing `from`/`to`/`bottom`/`top`.
+ * Null when a corner has been pulled off the box.
+ */
+export function axisAlignedOutline(points) {
+  if (!Array.isArray(points) || points.length !== 4) return null;
+  const ss = points.map((p) => p.s);
+  const zs = points.map((p) => p.z);
+  const from = Math.min(...ss);
+  const to = Math.max(...ss);
+  const bottom = Math.min(...zs);
+  const top = Math.max(...zs);
+  if (to - from < 1e-4 || top - bottom < 1e-4) return null;
+  const onBox = points.every((p) => (
+    (Math.abs(p.s - from) < 1e-4 || Math.abs(p.s - to) < 1e-4)
+    && (Math.abs(p.z - bottom) < 1e-4 || Math.abs(p.z - top) < 1e-4)
+  ));
+  return onBox ? { from, to, bottom, top } : null;
+}

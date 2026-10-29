@@ -20,7 +20,7 @@
 
 import { area as polyArea, clipPolygon, distToSeg, pointInPoly } from "./geom.js";
 import { effectiveLevel, finishRegionPolygon, finishRegionSlab, roomArea, roomPolygon, shapeAsPoly } from "./model.js";
-import { openingOnWall, openingSize, skuById, wallForOpening, wallNormal } from "./openings.js";
+import { openingOnWall, openingSize, pointOnWall, skuById, wallForOpening, wallNormal } from "./openings.js";
 import { isExternalWall } from "./walls.js";
 import {
   FINISH_CATEGORIES,
@@ -706,6 +706,115 @@ export function faceFinishBands(doc, pack, walls, wall, side, { wallBases = null
       outline: b.outline ? b.outline.map(([s, z]) => [flip ? wall.length - s : s, z]) : null,
       editable: b.source === "run" || b.source === "rule",
     }));
+}
+
+/**
+ * Stripes for the plan: one per stretch of wall face that has a finish someone
+ * set (a room rule or a run). The computed plaster default is left out, since
+ * it covers every plastered face, and so is "no finish".
+ *
+ * A skirting is its own mark (`skirting`), drawn dashed. `beside` means a face
+ * finish shares that stretch, so the skirting sits just outside it.
+ * Where two face finishes cover the same stretch, the one that runs further
+ * up the wall is the one shown.
+ *
+ * Each mark carries the centreline of its stretch and a unit normal pointing
+ * to the finished side, which is the side the stripe is drawn on.
+ */
+export function planWallFinishMarks(doc, pack, walls) {
+  if (!doc || !pack || !walls?.length) return [];
+  const { bands } = resolveFinishes(doc, pack, walls);
+  const explicit = bands.filter((b) => b.source !== "default" && b.category !== "none");
+  const byWall = new Map();
+  for (const band of explicit) {
+    if (!byWall.has(band.wallId)) byWall.set(band.wallId, []);
+    byWall.get(band.wallId).push(band);
+  }
+  const marks = [];
+  for (const wall of walls) {
+    const list = byWall.get(wall.id);
+    const len = wall.length || Math.hypot(wall.x2 - wall.x1, wall.y2 - wall.y1);
+    if (!list?.length || len < 1e-4) continue;
+    for (const side of [1, -1]) {
+      const onSide = list.filter((b) => b.side === side);
+      if (!onSide.length) continue;
+      const roomIds = [...roomsBySide(doc, wall)[side]];
+      const skirt = onSide.filter((b) => FINISH_CATEGORIES[b.category]?.unit === "m");
+      const face = onSide.filter((b) => FINISH_CATEGORIES[b.category]?.unit !== "m");
+      const faceMarks = sweepFinishSpans(face);
+      const skirtMarks = sweepFinishSpans(skirt);
+      const overlaps = (a, b) => Math.min(a.to, b.to) - Math.max(a.from, b.from) > 1e-3;
+      for (const span of faceMarks) marks.push(finishMark(wall, side, len, span, roomIds, false, false));
+      for (const span of skirtMarks) {
+        marks.push(finishMark(wall, side, len, span, roomIds, true, faceMarks.some((f) => overlaps(f, span))));
+      }
+    }
+  }
+  return marks;
+}
+
+/** Merge overlapping bands on one face into spans, keeping the taller finish. */
+function sweepFinishSpans(bands) {
+  if (!bands.length) return [];
+  const cuts = [];
+  for (const band of bands) cuts.push(band.from, band.to);
+  cuts.sort((a, b) => a - b);
+  const xs = [];
+  for (const x of cuts) {
+    if (!xs.length || x - xs[xs.length - 1] > 1e-4) xs.push(x);
+  }
+  const out = [];
+  for (let i = 0; i < xs.length - 1; i += 1) {
+    const from = xs[i];
+    const to = xs[i + 1];
+    const mid = (from + to) / 2;
+    const covering = bands.filter((b) => b.from - 1e-4 <= mid && b.to + 1e-4 >= mid);
+    if (!covering.length) continue;
+    covering.sort((p, q) => {
+      const taller = (q.top - q.bottom) - (p.top - p.bottom);
+      if (Math.abs(taller) > 1e-6) return taller;
+      const product = (b) => (FINISH_CATEGORIES[b.category]?.needsProduct ? 1 : 0);
+      const ranked = product(q) - product(p);
+      if (ranked) return ranked;
+      return String(p.category).localeCompare(String(q.category));
+    });
+    const winner = covering[0];
+    const prev = out[out.length - 1];
+    if (prev && prev.category === winner.category && Math.abs(prev.to - from) < 1e-3) {
+      prev.to = to;
+    } else {
+      out.push({
+        from,
+        to,
+        category: winner.category,
+        label: FINISH_CATEGORIES[winner.category]?.label || winner.category,
+      });
+    }
+  }
+  return out;
+}
+
+function finishMark(wall, side, len, span, roomIds, skirting, beside) {
+  const n = wallNormal(wall, side);
+  const a = pointOnWall(wall, span.from / len);
+  const b = pointOnWall(wall, span.to / len);
+  return {
+    wallId: wall.id,
+    side,
+    from: span.from,
+    to: span.to,
+    category: span.category,
+    label: span.label,
+    skirting,
+    beside,
+    roomIds,
+    x1: a.x,
+    y1: a.y,
+    x2: b.x,
+    y2: b.y,
+    nx: n.x,
+    ny: n.y,
+  };
 }
 
 // --- presets ---------------------------------------------------------------

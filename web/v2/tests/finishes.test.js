@@ -6,8 +6,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import { compile } from "../compile.js";
-import { PlanStore as Store, carryFinishRegionsToLevel, finishRegionPolygon, hasJobContent, hostedFinishRegions, normalizeDoc, shapePolygon } from "../model.js";
-import { area as polygonArea } from "../geom.js";
+import { PlanStore as Store, carryFinishRegionsToLevel, finishRegionPolygon, hasJobContent, hostedFinishRegions, normalizeDoc, roomPolygon, shapePolygon } from "../model.js";
+import { area as polygonArea, pointInPoly } from "../geom.js";
 import { copySelection, mirrorSelection, rotateSelection } from "../modify.js";
 import { normalizePackUnits } from "../schema.js";
 import { deriveWalls } from "../walls.js";
@@ -21,12 +21,13 @@ import {
   createFinishRun,
   floorCoverage,
   presetFromRoom,
+  planWallFinishMarks,
   regionsOnSlab,
   resolveFinishes,
   rulesFromPreset,
   savePreset,
 } from "../finish-model.js";
-import { faceFinishHtml, productsHtml, roomFinishHtml, slabFinishHtml } from "../finish-panel.js";
+import { faceFinishHtml, finishCalloutHtml, productsHtml, roomFinishHtml, slabFinishHtml } from "../finish-panel.js";
 
 const pack = normalizePackUnits(
   JSON.parse(readFileSync(new URL("../../samples/planner-pack-v2.json", import.meta.url))),
@@ -460,6 +461,13 @@ test("a wall face panel reads like the floor panel: summary, one add form, a car
   assert.ok(!html.includes("data-fin-band=\"default:"), "the default is not a card");
   assert.ok(html.includes(">Whole face<") && html.includes('data-fin-custom hidden'), "millimetre boxes stay hidden until asked for");
   assert.ok(!html.includes("along ·"), "cards do not print coordinates");
+  assert.ok(!card.includes('data-fin="band-from"'), "a card does not edit the shape as four edges");
+  const callout = finishCalloutHtml(doc, model.finishBands.find((b) => b.id === id), model);
+  assert.ok(callout.includes(`data-fin-band="${id}"`));
+  assert.ok(callout.includes("Wall tile") && callout.includes("White · 300x600") && callout.includes("Up to 1.2 m"));
+  assert.ok(callout.includes('data-fin="band-close"') && callout.includes('data-fin="band-edit"'));
+  assert.ok(!callout.includes('data-fin="band-remove"'), "the callout does not remove the finish");
+  assert.ok(!callout.includes('data-fin="band-from"'), "the callout does not edit the shape as four edges");
 });
 
 test("taking the default off leaves a listed No finish piece that can be removed again", () => {
@@ -496,7 +504,8 @@ test("a shape drawn on a wall is measured as that shape, and a coat takes it off
   assert.equal(band.outline.length, 3);
   assert.ok(Math.abs(before - plaster(after) - 1.5) < 1e-2, "the coat comes out of the default");
   const html = faceFinishHtml(doc, after);
-  assert.ok(html.includes("Drawn area"));
+  assert.ok(html.includes("Drawn area, 3 corners"));
+  assert.ok(!html.includes('data-fin="band-from"'), "a drawn shape is not edited as a rectangle");
   assert.ok(html.includes('data-fin="band-draw"'));
   const kept = normalizeDoc({ finishRuns: [run] });
   assert.equal(kept.finishRuns[0].outline.length, 3);
@@ -513,6 +522,55 @@ test("a shape drawn on a wall is measured as that shape, and a coat takes it off
   assert.ok(edited);
   const widened = elevationModel(doc, pack, face, walls).finishBands.find((b) => b.sourceId === run.id);
   assert.ok(Math.abs(widened.quantity - 3) < 1e-3, `edited area ${widened.quantity}`);
+});
+
+test("the plan marks an explicit wall finish on the room side, and not the plaster default", () => {
+  const plain = build();
+  assert.equal(planWallFinishMarks(plain, pack, deriveWalls(plain, pack)).length, 0);
+
+  const none = build({}, { finishes: [{ id: "n", surface: "wall", category: "none", bottom: 0, top: 1.2, faces: "all" }] });
+  assert.equal(planWallFinishMarks(none, pack, deriveWalls(none, pack)).length, 0);
+
+  const doc = build({}, { finishes: [{ id: "f1", surface: "wall", category: "wallTile", bottom: 0, top: 1.2, faces: "all" }] });
+  const walls = deriveWalls(doc, pack).filter((w) => w.category === "wall");
+  const marks = planWallFinishMarks(doc, pack, walls);
+  assert.equal(marks.length, walls.length);
+  assert.ok(marks.every((m) => m.category === "wallTile" && m.label === "Wall tile" && !m.skirting));
+  const poly = roomPolygon(doc.rooms[0]);
+  for (const mark of marks) {
+    const inside = pointInPoly((mark.x1 + mark.x2) / 2 + mark.nx * 0.15, (mark.y1 + mark.y2) / 2 + mark.ny * 0.15, poly);
+    assert.equal(inside, true, "the stripe points into the room");
+    assert.ok(mark.roomIds.includes("r1"));
+  }
+});
+
+test("a taller finish wins a shared stretch, and a skirting sits beside it", () => {
+  const doc = build({}, {
+    finishes: [
+      { id: "tile", surface: "wall", category: "wallTile", bottom: 0, top: 1.2, faces: "all" },
+      { id: "paint", surface: "wall", category: "paint", bottom: 0, top: 2.4, faces: "all" },
+      { id: "skirt", surface: "wall", category: "skirting", bottom: 0, top: 0.12, faces: "all" },
+    ],
+  });
+  const marks = planWallFinishMarks(doc, pack, deriveWalls(doc, pack));
+  const faces = marks.filter((m) => !m.skirting);
+  const skirts = marks.filter((m) => m.skirting);
+  assert.ok(faces.length > 0 && faces.every((m) => m.category === "paint"));
+  assert.ok(skirts.length === faces.length && skirts.every((m) => m.beside && m.label === "Skirting"));
+});
+
+test("a finish run marks only the stretch it covers", () => {
+  const doc = normalizeDoc({
+    segments: [{ id: "w1", sku: "TSP_MAS009", level: "01 GFL", x1: 0, y1: 0, x2: 6, y2: 0 }],
+  });
+  const walls = deriveWalls(doc, pack);
+  createFinishRun(doc, walls[0], 1, { category: "wallTile", from: 1, to: 3, bottom: 0.5, top: 1.5 });
+  const marks = planWallFinishMarks(doc, pack, walls);
+  assert.equal(marks.length, 1);
+  assert.equal(marks[0].side, 1);
+  assert.ok(Math.abs(marks[0].from - 1) < 1e-6);
+  assert.ok(Math.abs(marks[0].to - 3) < 1e-6);
+  assert.ok(Math.abs(marks[0].x2 - marks[0].x1 - 2) < 1e-6);
 });
 
 test("room rules take a typed product and no longer offer floor rules", () => {
