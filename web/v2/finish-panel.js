@@ -60,20 +60,27 @@ export function ruleTarget(rule) {
   return rule.productId ? `p:${rule.productId}` : `c:${rule.category}`;
 }
 
-/** Options for a finish type on a surface; `none` only where a run may say "no finish". */
+/** Options for a finish type on a surface; `none` only where a run may say "no finish".
+ *  Wall lists split on the category's layer: a coat is what the wall is made of,
+ *  and anything else is applied on top of a coat. */
 function surfaceTypeOptions(surface, selected, { none = false } = {}) {
   const ids = categoriesForSurface(surface).filter((id) => none || !FINISH_CATEGORIES[id].virtual);
-  return ids.map((id) => (
+  const opt = (id) => (
     `<option value="${esc(id)}"${id === selected ? " selected" : ""}>${esc(FINISH_CATEGORIES[id].label)}</option>`
-  )).join("");
+  );
+  const coat = ids.filter((id) => FINISH_CATEGORIES[id].layer === "coat");
+  const applied = ids.filter((id) => FINISH_CATEGORIES[id].layer !== "coat");
+  if (!coat.length || !applied.length) return ids.map(opt).join("");
+  const group = (label, list) => `<optgroup label="${esc(label)}">${list.map(opt).join("")}</optgroup>`;
+  return group("Base coat — what the wall is made of", coat) + group("Applied finish — goes on top of a coat", applied);
 }
 
 /** Heights a wall finish usually runs to. `top: null` is the wall top. */
 export const HEIGHT_PRESETS = [
   { id: "full", label: "Full height", bottom: 0, top: null },
-  { id: "skirting", label: "Skirting (to 100)", bottom: 0, top: 0.1 },
-  { id: "dado", label: "Dado (to 1200)", bottom: 0, top: 1.2 },
-  { id: "splash", label: "Splashback (900 to 1500)", bottom: 0.9, top: 1.5 },
+  { id: "skirting", label: "Skirting (to 100 mm)", bottom: 0, top: 0.1 },
+  { id: "dado", label: "Dado (to 1200 mm)", bottom: 0, top: 1.2 },
+  { id: "splash", label: "Splashback (900 to 1500 mm)", bottom: 0.9, top: 1.5 },
   { id: "custom", label: "Custom...", bottom: null, top: null },
 ];
 
@@ -155,8 +162,8 @@ export function floorProductSuggestions(doc, category) {
 }
 
 /** A product name you can type. Existing products of this finish are suggestions, not the only choices. */
-function productNameField(doc, category, { attr, value, listId, label }) {
-  return `<input data-fin="${attr}" type="text" value="${esc(value)}" placeholder="Name" list="${esc(listId)}" aria-label="${esc(label)}" autocomplete="off" />
+function productNameField(doc, category, { attr, value, listId, label, placeholder = "Name" }) {
+  return `<input data-fin="${attr}" type="text" value="${esc(value)}" placeholder="${esc(placeholder)}" list="${esc(listId)}" aria-label="${esc(label)}" autocomplete="off" />
     <datalist id="${esc(listId)}">${floorProductSuggestions(doc, category)}</datalist>`;
 }
 
@@ -352,12 +359,24 @@ function faceCoverage(model, bands) {
   };
 }
 
-/** What is on this wall face, before the finishes themselves: the face and the plaster underneath. */
-function faceSummaryHtml(model, bands) {
+/** What is on this wall face, before the finishes themselves: the face and the plaster underneath.
+ *  Leaving it bare asks first. The commit button is only there while that question is open. */
+function faceSummaryHtml(model, bands, { confirming = false } = {}) {
   const cover = faceCoverage(model, bands);
   const plasterLabel = cover.plasterCategory ? FINISH_CATEGORIES[cover.plasterCategory]?.label : "Plaster";
+  const coat = plasterLabel.toLowerCase();
+  const ask = confirming
+    ? `<p class="fin-where">Leave this face bare? The ${esc(coat)} the wall type adds comes off this face. Paint and tile stay.</p>
+       <div class="fin-btns">
+         <button type="button" data-fin="default-remove">Leave bare</button>
+         <button type="button" data-fin="default-keep">Keep it</button>
+       </div>`
+    : "";
+  const button = confirming
+    ? ""
+    : `<button type="button" class="fin-bare" data-fin="default-ask" title="Removes the ${esc(coat)} the wall type adds on this face. Paint and tile stay.">Leave bare</button>`;
   const plaster = cover.plaster >= 0.02
-    ? `<ul class="fin-sum-list"><li class="fin-sum-row"><i class="fin-swatch" style="background:${esc(finishSwatch(cover.plasterCategory))}"></i><span class="fin-grow">${esc(plasterLabel)}, from the wall type</span><span>${formatM2(cover.plaster)}</span><button type="button" class="fin-bare" data-fin="default-remove">Take off</button></li></ul>`
+    ? `<ul class="fin-sum-list"><li class="fin-sum-row"><i class="fin-swatch" style="background:${esc(finishSwatch(cover.plasterCategory))}"></i><span class="fin-grow">${esc(plasterLabel)}, from the wall type</span><span>${formatM2(cover.plaster)}</span>${button}</li></ul>${ask}`
     : "";
   const finished = cover.hasAdded
     ? `<p class="fin-sum-line"><span>Finished ${formatM2(cover.finished)}</span></p>`
@@ -490,40 +509,60 @@ function bandPlace(band, model) {
   }
   const place = placePhrase(band, model);
   if (band.category === "none") {
-    if (!place || place === "Whole face") return "Taken off this face. Remove this to put it back.";
-    return `Taken off, ${place.charAt(0).toLowerCase()}${place.slice(1)}. Remove this to put it back.`;
+    if (!place || place === "Whole face") return "The finish from the wall type is off this face.";
+    return `The finish from the wall type is off, ${place.charAt(0).toLowerCase()}${place.slice(1)}.`;
   }
   return place || "On this face";
 }
 
-/** The face in miniature, with this finish on it, so two similar sentences still look different. */
-function bandMiniHtml(band, model) {
-  const poly = bandPolygon(band);
-  if (!poly || !(model.length > 0) || !(model.height > 0)) return "";
+/** The face in miniature. `shape` is optional: an empty draft still shows the wall and its openings. */
+function faceMiniSvg(model, shape = "") {
+  if (!(model.length > 0) || !(model.height > 0)) return "";
   const y = (z) => model.height - z;
-  const pts = poly.map(([s, z]) => `${s},${y(z)}`).join(" ");
   const openings = (model.openings || []).filter((o) => o.width > 0 && o.height > 0).map((o) => {
     const top = (o.sill || 0) + o.height;
     return `<rect x="${o.offset}" y="${y(top)}" width="${o.width}" height="${o.height}" class="fin-mini-opening"/>`;
   }).join("");
-  return `<svg class="fin-mini" viewBox="0 0 ${model.length} ${model.height}" aria-hidden="true"><rect class="fin-mini-face" x="0" y="0" width="${model.length}" height="${model.height}"/><polygon points="${pts}" class="fin-mini-shape" style="fill:${esc(finishSwatch(band.category))}"/>${openings}</svg>`;
+  return `<svg class="fin-mini" viewBox="0 0 ${model.length} ${model.height}" aria-hidden="true"><rect class="fin-mini-face" x="0" y="0" width="${model.length}" height="${model.height}"/>${shape}${openings}</svg>`;
 }
 
-/** One finish on a wall face: a card like a placed floor finish. */
+function bandShape(band, model) {
+  const poly = bandPolygon(band);
+  if (!poly) return "";
+  const y = (z) => model.height - z;
+  const pts = poly.map(([s, z]) => `${s},${y(z)}`).join(" ");
+  return `<polygon points="${pts}" class="fin-mini-shape" style="fill:${esc(finishSwatch(band.category))}"/>`;
+}
+
+/** The face in miniature, with this finish on it, so two similar sentences still look different. */
+function bandMiniHtml(band, model) {
+  const shape = bandShape(band, model);
+  if (!shape) return "";
+  return faceMiniSvg(model, shape);
+}
+
+/** Live picture of a finish that has not been added yet. Invalid numbers draw the face only. */
+export function draftBandPreviewHtml(model, draft) {
+  if (!model) return "";
+  const shape = draft && draft.to > draft.from && draft.top > draft.bottom ? bandShape(draft, model) : "";
+  return faceMiniSvg(model, shape);
+}
+
+/** One finish on a wall face. Resting rows are a line; the selected row opens the fields. */
 function bandCardHtml(doc, b, model, { selectedId, savedId, index, total }) {
   const spec = FINISH_CATEGORIES[b.category];
   const product = finishProductById(doc, b.productId);
   const picked = b.id === selectedId;
   const label = spec?.label || b.category;
-  const which = total > 1 ? `${label} ${index} of ${total} · ` : "";
-  const title = product && b.category !== "none"
-    ? `<p class="fin-kind-title">${esc(productChoiceLabel(product))}</p>`
+  const which = total > 1 ? `${label} ${index} of ${total}` : "";
+  const place = bandPlace(b, model);
+  const area = b.category === "none" ? "" : formatQty(b.quantity, b.unit);
+  const named = Boolean(product) && b.category !== "none";
+  const needs = !named && b.category !== "none" && Boolean(spec?.needsProduct);
+  const productLine = !picked && named
+    ? `<p class="fin-product-line">${esc(productChoiceLabel(product))}</p>`
     : "";
-  const badge = product || b.category === "none"
-    ? ""
-    : spec?.needsProduct
-      ? `<p class="fin-badge">Needs a product</p>`
-      : `<p class="fin-badge fin-badge-soft">No product named</p>`;
+  const badge = needs ? `<p class="fin-badge">Needs a product</p>` : "";
   const productField = b.category === "none"
     ? ""
     : `<label class="fin-pick">Product
@@ -532,30 +571,37 @@ function bandCardHtml(doc, b, model, { selectedId, savedId, index, total }) {
           ${savedId === b.id ? `<span class="fin-saved">Saved</span>` : ""}
         </span>
       </label>`;
-  const remove = b.source === "rule"
-    ? `<button type="button" data-fin="band-remove-rule" title="Removes the rule from every wall of its room">Remove</button>`
-    : `<button type="button" data-fin="band-remove">Remove</button>`;
+  const remove = b.category === "none"
+    ? `<button type="button" data-fin="band-remove" title="Puts the finish from the wall type back on this part">Put it back</button>`
+    : b.source === "rule"
+      ? `<button type="button" data-fin="band-remove-rule" title="Removes the rule from every wall of its room">Remove</button>`
+      : `<button type="button" data-fin="band-remove">Remove</button>`;
+  const head = picked
+    ? `<div class="fin-kind-head">
+        <select data-fin="band-type" aria-label="Finish type">${surfaceTypeOptions("wall", b.category, { none: true })}</select>
+        <span class="fin-area">${area}</span>
+      </div>`
+    : `<div class="fin-kind-head">
+        <span class="fin-kind-name">${esc(which || label)}</span>
+        <span class="fin-area">${area}</span>
+      </div>`;
+  const where = picked && which ? `${which} · ${place}` : place;
   return `<div class="fin-kind fin-kind-face${picked ? " fin-editing" : ""}" data-fin-band="${esc(b.id)}">
     ${bandMiniHtml(b, model)}
     <div class="fin-kind-main">
-      ${title}
-      <div class="fin-kind-head">
-        <i class="fin-swatch" style="background:${esc(finishSwatch(b.category))}"></i>
-        <select data-fin="band-type" aria-label="Finish type">${surfaceTypeOptions("wall", b.category, { none: true })}</select>
-        <span class="fin-area">${b.category === "none" ? "" : formatQty(b.quantity, b.unit)}</span>
-      </div>
-      <p class="fin-where">${esc(which)}${esc(bandPlace(b, model))}</p>
+      ${head}
+      <p class="fin-where">${esc(where)}</p>
+      ${productLine}
       ${badge}
-      ${productField}
-      <div class="fin-btns">${remove}</div>
+      ${picked || needs ? productField : ""}
+      ${picked ? `<div class="fin-btns">${remove}</div>` : ""}
     </div>
   </div>`;
 }
 
 /**
- * The box under the inspector's elevation preview. A click on a finish stays
- * on the graph: this holds the same facts as its card, and Edit opens the
- * elevation under the plan instead of scrolling the card into view.
+ * A short pointer under the inspector's elevation picture. The selected row
+ * below holds the fields. Edit opens this finish on the strip under the plan.
  */
 export function finishCalloutHtml(doc, band, model) {
   const spec = FINISH_CATEGORIES[band.category];
@@ -565,30 +611,21 @@ export function finishCalloutHtml(doc, band, model) {
     .filter((b) => b.source !== "default" && b.category === band.category)
     .sort(compareBands);
   const index = same.findIndex((b) => b.id === band.id) + 1;
-  const named = Boolean(product) && band.category !== "none" && band.source !== "default";
-  const heading = named ? productChoiceLabel(product) : label;
+  const bare = band.category === "none";
+  const named = Boolean(product) && !bare && band.source !== "default";
   const duplicate = same.length > 1 && index > 0 ? `${label} ${index} of ${same.length}` : "";
   const place = band.source === "default" ? "From the wall type" : bandPlace(band, model);
-  const which = duplicate ? `${duplicate} · ` : named ? `${label} · ` : "";
+  const heading = bare ? "Bare" : (duplicate || label);
+  const detail = [named ? productChoiceLabel(product) : "", place].filter(Boolean).join(" · ");
   const area = band.category === "none" ? "" : formatQty(band.quantity, band.unit);
-  const productLine = named || band.category === "none" || band.source === "default"
-    ? ""
-    : spec?.needsProduct
-      ? `<p class="fin-badge">Needs a product</p>`
-      : `<p class="fin-badge fin-badge-soft">No product named</p>`;
   return `<div class="elev-callout" data-fin-band="${esc(band.id)}">
     <div class="elev-callout-top">
-      <div class="fin-kind-head">
-        <i class="fin-swatch" style="background:${esc(finishSwatch(band.category))}"></i>
-        <strong class="fin-grow">${esc(heading)}</strong>
-        <span class="fin-area">${esc(area)}</span>
-      </div>
+      <p class="fin-callout-line"><strong>${esc(heading)}</strong>${detail ? ` · ${esc(detail)}` : ""}${area ? ` <span class="fin-area">${esc(area)}</span>` : ""}</p>
       <button type="button" class="elev-callout-x" data-fin="callout-close" aria-label="Close">×</button>
     </div>
-    <p class="fin-where">${esc(which)}${esc(place)}</p>
-    ${productLine}
     <div class="fin-btns">
-      <button type="button" data-fin="band-edit" title="Open this finish on the elevation under the plan">Edit</button>
+      ${bare ? `<button type="button" data-fin="bare-restore">Put it back</button>` : ""}
+      <button type="button" data-fin="band-edit" title="${bare ? "Change how much of the face is bare" : "Open this finish on the elevation under the plan"}">${bare ? "Change the area" : "Edit"}</button>
     </div>
   </div>`;
 }
@@ -768,8 +805,11 @@ function faceGroupsHtml(doc, model, opts) {
       total: list.length,
     })).join("");
     const amount = id === "none" ? "" : `<span>${formatQty(qty, unit)}</span>`;
+    const head = list.length > 1
+      ? `<div class="fin-sum-row"><i class="fin-swatch" style="background:${esc(finishSwatch(id))}"></i><span class="fin-grow">${esc(label)}</span>${amount}<span class="fin-sum-n">${countWords(list.length, unit)}</span></div>`
+      : "";
     return `<section class="fin-group">
-      <div class="fin-sum-row"><i class="fin-swatch" style="background:${esc(finishSwatch(id))}"></i><span class="fin-grow">${esc(label)}</span>${amount}<span class="fin-sum-n">${countWords(list.length, unit)}</span></div>
+      ${head}
       <div class="fin-kinds">${cards}</div>
     </section>`;
   }).join("");
@@ -789,7 +829,7 @@ export function faceFinishHtml(doc, model, opts = {}) {
     <h4>Wall finishes</h4>
     <div class="fin-surface" data-fin-surface="face">
       <div class="fin-rest"${adding ? " hidden" : ""}>
-        ${faceSummaryHtml(model, bands)}
+        ${faceSummaryHtml(model, bands, { confirming: Boolean(opts.bareAsk) })}
         ${groups || '<p class="fin-note">Nothing added on this face yet.</p>'}
         ${overlapNotesHtml(model, bands)}
         <button type="button" class="fin-add-btn" data-fin="add-open">Add a finish</button>
@@ -803,25 +843,36 @@ export function faceFinishHtml(doc, model, opts = {}) {
           <select data-fin="band-category" aria-label="Finish to add">${surfaceTypeOptions("wall", first, { none: true })}</select>
         </label>
         <label class="fin-pick">Product
-          ${productNameField(doc, first, { attr: "new-band-product", value: "", listId: "fin-new-band-product", label: "Product for the new finish" })}
+          ${productNameField(doc, first, { attr: "new-band-product", value: "", listId: "fin-new-band-product", label: "Product for the new finish", placeholder: "Product name" })}
         </label>
+        <p class="fin-note fin-hint" data-fin-hint>Wall tile needs a product name. You can add it now, or on the card after.</p>
         <label class="fin-pick">Height
           <select data-fin="band-height" aria-label="Height of the finish">${HEIGHT_PRESETS.map((p) => `<option value="${p.id}">${esc(p.label)}</option>`).join("")}</select>
         </label>
-        <div class="fin-sizes" data-fin-custom hidden>
-          <label>Up <input data-fin="run-bottom" type="text" inputmode="decimal" value="0" aria-label="Bottom, mm" /> mm</label>
-          <label>to <input data-fin="run-top" type="text" inputmode="decimal" placeholder="top" aria-label="Top, mm" /> mm</label>
+        <button type="button" class="fin-part" data-fin="band-part" aria-pressed="false">Part of this face</button>
+        <div class="fin-dim-row">
+          <div class="fin-dim fin-dim-up" data-fin-custom hidden>
+            <p class="fin-dim-head">Up the wall</p>
+            <label>bottom <input data-fin="run-bottom" type="text" inputmode="decimal" value="0" aria-label="Bottom, mm up the wall" /> mm</label>
+            <label>top <input data-fin="run-top" type="text" inputmode="decimal" placeholder="wall top" aria-label="Top, mm up the wall" /> mm</label>
+            <p class="fin-note">Blank top is the top of the wall.</p>
+          </div>
+          <div class="fin-dim fin-dim-along" data-fin-span hidden>
+            <p class="fin-dim-head">Along the wall</p>
+            <label>from <input data-fin="run-from" type="text" inputmode="decimal" aria-label="From, mm along the wall" /> mm</label>
+            <label>to <input data-fin="run-to" type="text" inputmode="decimal" aria-label="To, mm along the wall" /> mm</label>
+          </div>
         </div>
-        <div class="fin-sizes" data-fin-span hidden>
-          <p class="fin-note">Along the wall</p>
-          <label>From <input data-fin="run-from" type="text" inputmode="decimal" aria-label="From, mm along the wall" /> mm</label>
-          <label>to <input data-fin="run-to" type="text" inputmode="decimal" aria-label="To, mm along the wall" /> mm</label>
+        <div class="fin-live">
+          <p class="fin-note" data-fin-live-note>Wall tile on the whole face.</p>
+          <div data-fin-live>${draftBandPreviewHtml(model, { category: first, from: 0, to: model.length, bottom: 0, top: model.height })}</div>
         </div>
+        <p class="fin-warn" data-fin-form-error hidden></p>
         <div class="fin-btns">
-          <button type="button" data-fin="run-add">Whole face</button>
-          <button type="button" data-fin="band-draw" title="Click the corners on the elevation, then Enter.">Draw area</button>
+          <button type="button" class="fin-commit" data-fin="run-add" title="Covers this face.">Whole face</button>
+          <button type="button" data-fin="band-draw" title="Click the corners on the elevation. Double-click or Esc finishes the shape. The height and millimetres in this form are not used.">Draw area</button>
         </div>
-        <button type="button" class="fin-bare" data-fin="band-part" aria-pressed="false">Part of this face</button>
+        <p class="fin-note">Draw area is a free shape on the elevation. The height and the millimetres here are not used.</p>
       </div>
     </div>
   </section>`;

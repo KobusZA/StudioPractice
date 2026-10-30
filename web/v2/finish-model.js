@@ -21,7 +21,7 @@
 import { area as polyArea, clipPolygon, distToSeg, pointInPoly } from "./geom.js";
 import { effectiveLevel, finishRegionPolygon, finishRegionSlab, roomArea, roomPolygon, shapeAsPoly } from "./model.js";
 import { openingOnWall, openingSize, pointOnWall, skuById, wallForOpening, wallNormal } from "./openings.js";
-import { isExternalWall } from "./walls.js";
+import { deriveWalls, isExternalWall } from "./walls.js";
 import {
   FINISH_CATEGORIES,
   FINISH_CATEGORY_IDS,
@@ -378,6 +378,49 @@ export function reanchorRun(run, wall) {
   run.y2 = wall.y1 + dy * b;
   run.vx = wall.x1 + dx * mid + n.x * reach;
   run.vy = wall.y1 + dy * mid + n.y * reach;
+}
+
+/**
+ * Finishes and openings to drop when these drawn walls are deleted.
+ * A run or opening that was placed on one of them goes with it, so the next
+ * wall drawn on that line does not inherit it. A room finish rule is left
+ * alone (it belongs to the room), as is the computed plaster coat. A door
+ * or finish that still has a wall afterwards — a room wall this drawn wall
+ * was covering — stays too.
+ */
+export function dependentsOfWalls(doc, pack, segmentIds) {
+  const ids = new Set((segmentIds || []).filter(Boolean));
+  const finishRunIds = [];
+  const openingIds = [];
+  if (!ids.size) return { finishRunIds, openingIds };
+  if (!pack) {
+    for (const run of doc.finishRuns || []) if (ids.has(run.wallId)) finishRunIds.push(run.id);
+    for (const opening of doc.openings || []) if (ids.has(opening.wallId)) openingIds.push(opening.id);
+    return { finishRunIds, openingIds };
+  }
+  const before = deriveWalls(doc, pack);
+  const removed = new Set(before.filter((w) => ids.has(w.id)).map((w) => w.id));
+  const draft = { ...doc, segments: (doc.segments || []).filter((s) => !ids.has(s.id)) };
+  const after = deriveWalls(draft, pack);
+  for (const run of doc.finishRuns || []) {
+    if (ids.has(run.wallId)) {
+      finishRunIds.push(run.id);
+      continue;
+    }
+    const was = placeRun(run, before);
+    if (!was || !removed.has(was.wall.id)) continue;
+    if (!placeRun(run, after)) finishRunIds.push(run.id);
+  }
+  for (const opening of doc.openings || []) {
+    if (ids.has(opening.wallId)) {
+      openingIds.push(opening.id);
+      continue;
+    }
+    const was = wallForOpening(doc, pack, before, opening);
+    if (!was || !removed.has(was.id)) continue;
+    if (!wallForOpening(draft, pack, after, opening)) openingIds.push(opening.id);
+  }
+  return { finishRunIds, openingIds };
 }
 
 // --- resolve ---------------------------------------------------------------

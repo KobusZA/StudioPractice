@@ -9,6 +9,9 @@
 //    roof eave lining up with a wall without touching it).
 //    Moving a whole edge does not use those corner guides. The edge lines
 //    up with another edge, and only that coincidence draws an alignment line.
+//    Moving a wall also pulls each of its faces onto a parallel face, so a
+//    side can meet another wall's end and an end can meet its side. The
+//    nearer correction on each axis wins, centreline included.
 //  - Nice-length snapping: a free endpoint is attracted to round millimetre
 //    offsets (3500 mm before 3507 mm) from the wall's start, a nearby object,
 //    or the origin. The pull is a magnet, not a lock: zoom in and the same
@@ -509,6 +512,10 @@ export function snapEdgeToLine(x1, y1, x2, y2, edges, tolWorld) {
   const x = x1 + best.dist * nx;
   const y = y1 + best.dist * ny;
   const foot = closestOnSeg(best.edge, x, y);
+  // The foot is what a gap string names. Without the edge's kind it reads as
+  // a bare length, so a face alignment cannot say "face - wall".
+  if (best.edge.kind) foot.kind = best.edge.kind;
+  if (best.edge.category != null) foot.category = best.edge.category;
   const vertical = Math.abs(ux) < 1e-6;
   const horizontal = Math.abs(uy) < 1e-6;
   return {
@@ -703,4 +710,84 @@ export function bestEndpointSnap(points, targets, tolWorld) {
     if (!best || mag < best.mag) best = { dx, dy, mag, guide: s };
   }
   return best;
+}
+
+/**
+ * Snap a wall or beam that is being translated as a whole.
+ *
+ * Centreline ends still join other centreline ends and corners. Each face of
+ * the moving wall — both long faces and both end faces — also pulls onto a
+ * parallel face, so a side can sit flush on another wall's end and an end can
+ * sit flush on another wall's side. The two axes are chosen separately: the
+ * nearer correction wins, which keeps the centreline when that is the closer
+ * one and still lets the other axis land on a face.
+ *
+ * `seg` is the centreline already shifted by the raw drag. `thickness` is the
+ * drawn thickness (0 for a beam, which then has no faces). Returns the same
+ * `{ dx, dy, mag, guide }` shape as `bestEndpointSnap`, or null when nothing
+ * is within reach. `dx`/`dy` are the further correction to add to the drag.
+ */
+export function bestLinearMoveSnap(seg, thickness, targets, edges, tolWorld) {
+  let bestX = null;
+  let bestY = null;
+  let full = null;
+
+  const consider = (dx, dy, guide) => {
+    // A diagonal line cannot be split into X and Y without sliding along it.
+    if (guide.guideLine) {
+      const mag = Math.hypot(dx, dy);
+      if (!full || mag < full.mag) full = { dx, dy, mag, guide };
+      return;
+    }
+    if (guide.guideX != null) {
+      const mag = Math.abs(dx);
+      if (!bestX || mag < bestX.mag) bestX = { dx, dy: 0, mag, guide };
+    }
+    if (guide.guideY != null) {
+      const mag = Math.abs(dy);
+      if (!bestY || mag < bestY.mag) bestY = { dx: 0, dy, mag, guide };
+    }
+  };
+
+  const ends = bestEndpointSnap(
+    [{ x: seg.x1, y: seg.y1 }, { x: seg.x2, y: seg.y2 }],
+    targets,
+    tolWorld,
+  );
+  if (ends) consider(ends.dx, ends.dy, ends.guide);
+
+  for (const face of faceEdges(seg, thickness)) {
+    const hit = snapEdgeToLine(face.x1, face.y1, face.x2, face.y2, edges, tolWorld);
+    if (!hit.snapped) continue;
+    consider(hit.x - face.x1, hit.y - face.y1, hit);
+  }
+
+  if (full) {
+    const xMag = bestX ? bestX.mag : Infinity;
+    const yMag = bestY ? bestY.mag : Infinity;
+    if (full.mag <= xMag && full.mag <= yMag) return full;
+  }
+  if (!bestX && !bestY) return null;
+
+  const dx = bestX ? bestX.dx : 0;
+  const dy = bestY ? bestY.dy : 0;
+  const guideX = bestX ? bestX.guide.guideX : null;
+  const guideY = bestY ? bestY.guide.guideY : null;
+  const guideXPoint = bestX ? bestX.guide.guideXPoint : null;
+  const guideYPoint = bestY ? bestY.guide.guideYPoint : null;
+  return {
+    dx,
+    dy,
+    mag: Math.hypot(dx, dy),
+    guide: {
+      x: guideX != null ? guideX : (guideYPoint ? guideYPoint.x : seg.x1),
+      y: guideY != null ? guideY : (guideXPoint ? guideXPoint.y : seg.y1),
+      guideX,
+      guideY,
+      guideXPoint,
+      guideYPoint,
+      guideLine: null,
+      snapped: true,
+    },
+  };
 }

@@ -216,10 +216,28 @@ export function createSheetUi(ctx) {
   function ask({ title, message, choices }) {
     return new Promise((resolve) => {
       const card = h("div", { class: "sheet-set-toast", role: "alertdialog", "aria-label": title });
+      let settled = false;
+      const dismiss = () => (choices.find((c) => c.id === "cancel") || choices.find((c) => c.primary) || choices[0])?.id;
       const done = (id) => {
+        if (settled) return;
+        settled = true;
+        document.removeEventListener("keydown", onKey, true);
         card.remove();
         resolve(id);
       };
+      // Capture runs before the plan's own keys, so Escape answers this
+      // question and does not also cancel a drawing.
+      const onKey = (ev) => {
+        if (!card.isConnected) {
+          document.removeEventListener("keydown", onKey, true);
+          return;
+        }
+        if (ev.key !== "Escape") return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        done(dismiss());
+      };
+      document.addEventListener("keydown", onKey, true);
       card.append(
         h("strong", { text: title }),
         h("p", { text: message }),

@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>StudioPractice — wall elevation &amp; finishes, GUI proposal</title>
+<link rel="icon" href="../logo.png" type="image/png" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,560&family=Source+Sans+3:wght@400;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg-primary: #efe8dc;
+    --bg-secondary: #f7f3ea;
+    --bg-tertiary: #e8e0d2;
+    --bg-elevated: #fffdf8;
+    --bg-hover: rgba(26, 22, 18, 0.05);
+    --ink: #1a1612;
+    --ink-soft: #5c5348;
+    --ink-muted: #8a8074;
+    --hairline: rgba(26, 22, 18, 0.10);
+    --hairline-strong: rgba(26, 22, 18, 0.18);
+    --copper: #b2451e;
+    --copper-dark: #8d3416;
+    --copper-tint-8: rgba(178, 69, 30, 0.08);
+    --copper-tint-16: rgba(178, 69, 30, 0.16);
+    --ok: #2f6b4f;
+    --ok-tint: rgba(47, 107, 79, 0.12);
+    --warn: #9a6b1f;
+    --warn-tint: rgba(154, 107, 31, 0.12);
+    --navy: #243044;
+    --paint: #d9a441;
+    --paint-tint: rgba(217, 164, 65, 0.4);
+    --plaster: #b8b0a0;
+    --radius-sm: 3px;
+    --radius-md: 4px;
+    --radius-lg: 8px;
+    --header-h: 40px;
+    --ribbon-h: 58px;
+    --dock: 300px;
+    --font-ui: "Source Sans 3", "Segoe UI", sans-serif;
+    --font-display: Fraunces, Georgia, serif;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: var(--bg-primary);
+    color: var(--ink);
+    font-family: var(--font-ui);
+    font-size: 14px;
+  }
+  button, input, select { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+
+  .app { display: grid; grid-template-rows: auto auto auto minmax(0, 1fr); height: 100dvh; }
+
+  .note {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    padding: 7px 14px;
+    background: var(--navy);
+    color: #f3eee4;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  .note strong { font-family: var(--font-display); font-weight: 560; font-size: 13px; flex-shrink: 0; }
+  .note span { opacity: 0.88; }
+
+  .topbar {
+    height: var(--header-h);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 12px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--hairline);
+  }
+  .brand { display: flex; align-items: center; gap: 8px; }
+  .brand-mark { width: 24px; height: 24px; border-radius: 50%; background: #000; overflow: hidden; }
+  .brand-mark img { width: 100%; height: 100%; object-fit: cover; transform: scale(1.45); }
+  .brand-name { font-family: var(--font-display); font-size: 0.9rem; font-weight: 560; }
+  .job-name { font-size: 12px; color: var(--ink-muted); margin-left: 4px; }
+
+  /* ---- ribbon ---- */
+  .ribbon { background: var(--bg-tertiary); border-bottom: 1px solid var(--hairline); }
+  .ribbon-tabs { display: flex; align-items: center; gap: 2px; padding: 0 10px; border-bottom: 1px solid var(--hairline); }
+  .ribbon-tabs button {
+    border: 0; background: transparent; padding: 6px 12px 5px; font-size: 13px;
+    color: var(--ink-soft); border-bottom: 2px solid transparent;
+  }
+  .ribbon-tabs button.active { color: var(--ink); font-weight: 600; border-bottom-color: var(--copper); }
+  .ribbon-tabs button:hover:not(.active) { background: var(--bg-hover); }
+  .ribbon-fns { display: flex; align-items: stretch; height: var(--ribbon-h); padding: 4px 8px 6px; }
+  .r-group { display: flex; flex-direction: column; gap: 2px; padding: 0 8px; border-right: 1px solid var(--hairline); position: relative; }
+  .r-group:last-child { border-right: 0; }
+  .r-group.is-new { background: var(--copper-tint-8); border-radius: var(--radius-sm); }
+  .r-items { display: flex; gap: 2px; flex: 1; }
+  .r-label { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-muted); text-align: center; }
+  .r-item {
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+    min-width: 58px; padding: 2px 8px; border: 1px solid transparent; border-radius: var(--radius-sm);
+    background: transparent; font-size: 11px; line-height: 1.15; color: var(--ink);
+  }
+  .r-item:hover { background: var(--bg-hover); }
+  .r-item.active { background: var(--copper-tint-16); color: var(--copper-dark); border-color: var(--copper-tint-16); }
+  .r-item svg { width: 18px; height: 18px; }
+
+  .badge-callout {
+    position: absolute; top: -8px; right: 2px;
+    width: 18px; height: 18px; border-radius: 50%;
+    background: var(--copper); color: #fff; font-size: 10px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 0 0 2px var(--bg-tertiary);
+  }
+
+  /* ---- workspace ---- */
+  .workspace { display: grid; grid-template-columns: minmax(0, 1fr) var(--dock); min-height: 0; }
+  .stage-col { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+
+  .stage {
+    position: relative; flex: 1; min-height: 0;
+    background:
+      linear-gradient(transparent 23px, rgba(26, 22, 18, 0.045) 24px),
+      linear-gradient(90deg, transparent 23px, rgba(26, 22, 18, 0.045) 24px),
+      var(--bg-primary);
+    background-size: 24px 24px, 24px 24px, auto;
+  }
+  .plan { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .wall-highlight { filter: drop-shadow(0 0 0 var(--copper)); }
+
+  .plan-callout {
+    position: absolute; left: 58%; top: 20%;
+    background: var(--bg-elevated); border: 1px solid var(--copper); border-radius: var(--radius-md);
+    padding: 6px 10px; font-size: 12px; color: var(--copper-dark); max-width: 190px;
+    box-shadow: 0 2px 8px rgba(26,22,18,0.15);
+  }
+  .plan-callout b { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%; background: var(--copper); color: #fff; font-size: 10px; margin-right: 5px; }
+
+  /* ---- elevation dock (the per-wall-face strip) ---- */
+  .elev-dock {
+    border-top: 1px solid var(--hairline-strong);
+    background: var(--bg-secondary);
+    display: flex; flex-direction: column;
+    height: 272px;
+    flex-shrink: 0;
+  }
+  .elev-dock-head {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 12px; border-bottom: 1px solid var(--hairline);
+  }
+  .elev-dock-head h3 { margin: 0; font-family: var(--font-display); font-size: 0.95rem; font-weight: 560; }
+  .elev-dock-head .sub { font-size: 11px; color: var(--ink-muted); }
+  .elev-dock-head .spacer { flex: 1; }
+  .elev-dock-head .btn { font-size: 12px; }
+
+  .elev-info-bar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 12px; background: var(--copper-tint-8); border-bottom: 1px solid var(--hairline);
+    font-size: 12px; color: var(--copper-dark);
+  }
+  .elev-info-bar svg { width: 15px; height: 15px; flex-shrink: 0; }
+  .elev-info-bar .spacer { flex: 1; }
+  .elev-info-bar button { border: 0; background: none; font-size: 11px; color: var(--copper-dark); text-decoration: underline; }
+
+  .elev-canvas-wrap { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+  .elev-canvas { width: 100%; height: 100%; display: block; }
+
+  .coachmark {
+    position: absolute; left: 50%; top: 18px; transform: translateX(-50%);
+    background: var(--ink); color: var(--bg-secondary); border-radius: var(--radius-md);
+    padding: 8px 12px; font-size: 12px; max-width: 230px; text-align: center;
+    box-shadow: 0 4px 14px rgba(26,22,18,0.35);
+  }
+  .coachmark::after {
+    content: ""; position: absolute; left: 50%; bottom: -6px; transform: translateX(-50%);
+    width: 0; height: 0; border: 6px solid transparent; border-top-color: var(--ink); border-bottom: 0;
+  }
+  .coachmark button { display: block; margin: 6px auto 0; border: 0; background: var(--copper); color: #fff; font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 999px; }
+
+  /* ---- inspector dock ---- */
+  .dock-inspect { display: flex; flex-direction: column; min-height: 0; background: var(--bg-secondary); border-left: 1px solid var(--hairline); }
+  .dock-inspect header { display: flex; justify-content: space-between; align-items: baseline; padding: 10px 12px 8px; border-bottom: 1px solid var(--hairline); }
+  .dock-inspect header h2 { margin: 0; font-family: var(--font-display); font-size: 1rem; font-weight: 500; }
+  .dock-inspect header span { font-size: 11px; color: var(--ink-muted); }
+  .ctx-body { flex: 1; overflow: auto; padding: 10px 12px 24px; display: grid; gap: 12px; align-content: start; }
+
+  .field { display: grid; gap: 4px; }
+  .field > span:first-child { font-size: 12px; font-weight: 600; color: var(--ink-soft); }
+  .field input, .field select {
+    height: 30px; padding: 0 8px; border: 1px solid var(--hairline-strong); border-radius: var(--radius-sm); background: var(--bg-elevated);
+  }
+  .status-opts { display: flex; gap: 8px; }
+  .status-opts label {
+    flex: 1; display: flex; align-items: center; gap: 6px; padding: 6px 8px;
+    border: 1px solid var(--hairline); border-radius: var(--radius-sm); font-weight: 500;
+  }
+  .status-opts label:has(input:checked) { border-color: var(--copper); background: var(--copper-tint-8); }
+
+  details.more-settings { border: 1px solid var(--hairline); border-radius: var(--radius-sm); background: var(--bg-elevated); }
+  details.more-settings > summary { padding: 7px 10px; font-size: 12px; font-weight: 600; color: var(--ink-soft); cursor: pointer; list-style: none; display: flex; align-items: center; justify-content: space-between; }
+  details.more-settings > summary::-webkit-details-marker { display: none; }
+  details.more-settings > summary::after { content: "▾"; color: var(--ink-muted); }
+  details.more-settings[open] > summary::after { content: "▴"; }
+  details.more-settings .more-fields { padding: 4px 10px 10px; display: grid; gap: 8px; }
+
+  /* elevation-preview card: now a big obvious clickable tile */
+  .elev-card {
+    position: relative; border: 1px solid var(--hairline-strong); border-radius: var(--radius-md);
+    background: var(--bg-elevated); overflow: hidden; cursor: pointer;
+    transition: border-color .12s, box-shadow .12s;
+  }
+  .elev-card:hover, .elev-card:focus-visible {
+    border-color: var(--copper); box-shadow: 0 0 0 3px var(--copper-tint-8);
+  }
+  .elev-card .elev-card-label {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 9px; font-size: 11px; font-weight: 700; letter-spacing: .02em; text-transform: uppercase;
+    color: var(--ink-muted); background: var(--bg-tertiary);
+  }
+  .elev-card .elev-card-label em { font-style: normal; color: var(--copper-dark); text-transform: none; font-weight: 600; font-size: 11.5px; }
+  .elev-card svg { display: block; width: 100%; height: 108px; }
+  .elev-card .open-overlay {
+    position: absolute; inset: 0; top: 26px; display: flex; align-items: center; justify-content: center;
+    background: rgba(26,22,18,0); opacity: 0; transition: opacity .12s, background .12s;
+    color: #fffdf8; font-size: 12.5px; font-weight: 700; gap: 6px;
+  }
+  .elev-card:hover .open-overlay, .elev-card:focus-visible .open-overlay {
+    opacity: 1; background: rgba(26,22,18,0.38);
+  }
+  .elev-card .open-overlay svg { width: 15px; height: 15px; }
+
+  .callout-flag {
+    position: absolute; top: 4px; left: 4px; z-index: 2;
+    width: 18px; height: 18px; border-radius: 50%; background: var(--copper); color: #fff;
+    font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 0 0 2px var(--bg-elevated);
+  }
+
+  /* finishes */
+  .fin-sec { display: grid; gap: 8px; position: relative; }
+  .fin-sec h4 { margin: 0; font-family: var(--font-display); font-size: 0.95rem; font-weight: 560; }
+  .fin-summary { display: grid; gap: 3px; padding: 8px 10px; background: var(--bg-elevated); border: 1px solid var(--hairline); border-radius: var(--radius-sm); font-size: 12.5px; }
+  .fin-summary .row { display: flex; justify-content: space-between; align-items: center; }
+  .fin-summary .row.muted { color: var(--ink-muted); }
+  .fin-swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; margin-right: 6px; }
+
+  .fin-card { display: grid; gap: 6px; padding: 9px 10px; background: var(--bg-elevated); border: 1px solid var(--hairline); border-radius: var(--radius-sm); }
+  .fin-card-head { display: flex; align-items: center; gap: 7px; }
+  .fin-card-head b { flex: 1; font-size: 13px; }
+  .fin-card-head span.area { font-size: 11.5px; color: var(--ink-muted); }
+  .fin-card p { margin: 0; font-size: 12px; color: var(--ink-soft); }
+  .fin-card .btns { display: flex; gap: 6px; margin-top: 2px; }
+  .fin-card .btns button { font-size: 11px; padding: 3px 8px; border: 1px solid var(--hairline-strong); border-radius: var(--radius-sm); background: var(--bg-tertiary); }
+
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: var(--radius-md); border: 1px solid var(--hairline-strong); background: var(--bg-elevated); font-size: 12.5px; font-weight: 600; }
+  .btn:hover { border-color: var(--copper); color: var(--copper-dark); }
+  .btn-primary { background: var(--copper); color: #fffdf8; border-color: var(--copper); }
+  .btn-primary:hover { background: var(--copper-dark); color: #fff; }
+  .btn-full { width: 100%; }
+
+  /* add-a-finish sheet */
+  .add-sheet {
+    display: grid; gap: 10px; padding: 10px; border: 1px solid var(--copper-tint-16); border-radius: var(--radius-md);
+    background: color-mix(in srgb, var(--bg-elevated) 85%, var(--copper-tint-8));
+    position: relative;
+  }
+  .add-sheet-head { display: flex; align-items: center; justify-content: space-between; }
+  .add-sheet-head p { margin: 0; font-size: 12px; font-weight: 700; color: var(--copper-dark); text-transform: uppercase; letter-spacing: .03em; }
+  .add-sheet-head button { border: 0; background: none; font-size: 12px; color: var(--ink-muted); text-decoration: underline; }
+  .add-sheet .field select optgroup { font-weight: 700; color: var(--ink-soft); font-style: normal; }
+  .add-sheet .field select option { font-weight: 400; color: var(--ink); }
+
+  .dim-groups { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .dim-group { border: 1px dashed var(--hairline-strong); border-radius: var(--radius-sm); padding: 8px; display: grid; gap: 6px; background: var(--bg-elevated); }
+  .dim-group .dg-head { display: flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 700; color: var(--ink-soft); text-transform: uppercase; letter-spacing: .02em; }
+  .dim-group .dg-head svg { width: 13px; height: 13px; color: var(--copper); }
+  .dim-group .dg-row { display: flex; align-items: center; gap: 4px; font-size: 12px; }
+  .dim-group .dg-row input { width: 100%; height: 26px; padding: 0 6px; border: 1px solid var(--hairline-strong); border-radius: var(--radius-sm); background: #fff; }
+  .dim-group.v-group { border-color: rgba(47,107,79,.4); }
+  .dim-group.v-group .dg-head svg { color: var(--ok); }
+  .dim-group.h-group { border-color: rgba(154,107,31,.4); }
+  .dim-group.h-group .dg-head svg { color: var(--warn); }
+
+  .live-preview { display: grid; gap: 4px; }
+  .live-preview .lp-label { font-size: 11px; color: var(--ink-muted); display: flex; align-items: center; gap: 5px; }
+  .live-preview svg { width: 100%; height: 56px; background: var(--bg-tertiary); border-radius: var(--radius-sm); border: 1px solid var(--hairline); }
+
+  .add-sheet-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .add-sheet-actions .btn { flex: 1; }
+
+  /* legend panel */
+  .legend-panel {
+    position: fixed; right: 16px; bottom: 16px; width: 320px; max-height: 60vh; overflow: auto;
+    background: var(--bg-elevated); border: 1px solid var(--hairline-strong); border-radius: var(--radius-lg);
+    box-shadow: 0 10px 30px rgba(26,22,18,.25); font-size: 12.5px; z-index: 50;
+  }
+  .legend-panel header { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid var(--hairline); background: var(--bg-tertiary); border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
+  .legend-panel header h3 { margin: 0; font-family: var(--font-display); font-size: 0.95rem; }
+  .legend-panel header button { border: 0; background: none; font-size: 16px; line-height: 1; color: var(--ink-muted); }
+  .legend-panel ol { margin: 0; padding: 10px 12px 12px 30px; display: grid; gap: 9px; }
+  .legend-panel li::marker { font-weight: 700; color: var(--copper); }
+  .legend-panel li b { display: block; color: var(--ink); }
+  .legend-panel li span { color: var(--ink-soft); }
+  .legend-toggle {
+    position: fixed; right: 16px; bottom: 16px; z-index: 49;
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="note">
+    <strong>GUI proposal mock</strong>
+    <span>Wall inspection → wall elevation → finishes (paint, tile, plaster…), reworked for a first-time user. Numbered copper badges mark what changed from today's build; see the "What changed" panel bottom-right. Static mock — not wired to the app.</span>
+  </div>
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark"><img src="../logo.png" alt="" /></span>
+      <span class="brand-name">StudioPractice</span>
+    </div>
+    <span class="job-name">Erf 214 alterations</span>
+  </header>
+
+  <nav class="ribbon" aria-label="Toolbars">
+    <div class="ribbon-tabs">
+      <button type="button" class="active">Build</button>
+      <button type="button">Document</button>
+      <button type="button">Check</button>
+    </div>
+    <div class="ribbon-fns">
+      <div class="r-group">
+        <div class="r-items">
+          <button type="button" class="r-item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="5" width="16" height="14" rx="1"/><path d="M8 9h8M8 12h5"/></svg>
+            PDF / image
+          </button>
+        </div>
+        <div class="r-label">Sheet</div>
+      </div>
+      <div class="r-group">
+        <div class="r-items">
+          <button type="button" class="r-item active">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 20V8h6v12M10 12h10v8H10"/></svg>
+            Walls
+          </button>
+        </div>
+        <div class="r-label">Walls</div>
+      </div>
+      <div class="r-group is-new" title="Moved here from Document › Project, where it read as paperwork rather than a drawing action.">
+        <span class="badge-callout">①</span>
+        <div class="r-items">
+          <button type="button" class="r-item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 20l5-5m0 0l9-9 3 3-9 9m-3-3l3 3"/><path d="M4 20l1.5-4.5L9 19l-5 1z"/></svg>
+            Wall finishes
+          </button>
+          <button type="button" class="r-item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="15" width="16" height="5" rx="1"/><path d="M4 15l8-9 8 9"/></svg>
+            Floor finishes
+          </button>
+        </div>
+        <div class="r-label">Finishes</div>
+      </div>
+      <div class="r-group">
+        <div class="r-items">
+          <button type="button" class="r-item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 18h16V10L12 5 4 10z"/></svg>
+            Floors
+          </button>
+          <button type="button" class="r-item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 18l9-12 9 12H3z"/></svg>
+            Roofs
+          </button>
+        </div>
+        <div class="r-label">Floors &amp; roofs</div>
+      </div>
+      <div class="r-group">
+        <div class="r-items">
+          <button type="button" class="r-item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="5" y="4" width="6" height="16"/><path d="M11 8h3a3 3 0 010 6h-3"/></svg>
+            Doors
+          </button>
+          <button type="button" class="r-item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="5" width="16" height="14"/><path d="M12 5v14M4 12h16"/></svg>
+            Windows
+          </button>
+        </div>
+        <div class="r-label">Openings</div>
+      </div>
+    </div>
+  </nav>
+
+  <main class="workspace">
+    <div class="stage-col">
+      <section class="stage" aria-label="Plan">
+        <svg class="plan" viewBox="0 0 720 420" preserveAspectRatio="xMidYMid meet">
+          <polygon points="140,70 560,70 560,330 140,330" fill="rgba(26,22,18,0.04)" />
+          <polygon points="140,70 560,70 560,330 140,330" fill="none" stroke="#1a1612" stroke-width="7" stroke-linejoin="miter" />
+          <!-- selected wall, south face -->
+          <path d="M140 330h420" fill="none" stroke="#b2451e" stroke-width="9" stroke-linecap="square" />
+          <rect x="300" y="322" width="70" height="16" fill="#d9a441" opacity=".55" />
+          <g font-family="Source Sans 3, sans-serif" font-size="14" fill="#5c5348">
+            <text x="300" y="200">Lounge</text>
+            <text x="300" y="216" font-size="11">24.8 m² · existing</text>
+          </g>
+        </svg>
+        <div class="plan-callout"><b>②</b>Wall selected — the Inspector now leads with its picture, not its millimetre fields.</div>
+      </section>
+
+      <div class="elev-dock">
+        <div class="elev-dock-head">
+          <h3>Wall elevation</h3>
+          <span class="sub">W-04 · south face</span>
+          <span class="spacer"></span>
+          <button type="button" class="btn">Flip face</button>
+          <button type="button" class="btn">Fit</button>
+          <button type="button" class="btn">Exit</button>
+        </div>
+        <div class="elev-info-bar">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v5h1"/></svg>
+          <span>Drag the top of the wall to set its height. The line above is the next floor, or the roof on the top storey. Scroll to zoom.</span>
+          <span class="spacer"></span>
+          <span class="badge-callout" style="position:static;">③</span>
+          <button type="button">Don't show again</button>
+        </div>
+        <div class="elev-canvas-wrap">
+          <svg class="elev-canvas" viewBox="0 0 720 220" preserveAspectRatio="none">
+            <rect x="0" y="0" width="720" height="220" fill="#f7f3ea" />
+            <!-- level lines -->
+            <line x1="10" y1="24" x2="710" y2="24" stroke="#c9bfae" stroke-dasharray="4 3" />
+            <text x="700" y="18" text-anchor="end" font-size="11" fill="#8a8074" font-family="Source Sans 3, sans-serif">Roof +5.40</text>
+            <line x1="10" y1="196" x2="710" y2="196" stroke="#8a8074" />
+            <text x="700" y="210" text-anchor="end" font-size="11" fill="#8a8074" font-family="Source Sans 3, sans-serif">Ground +0.00</text>
+            <!-- wall -->
+            <rect x="60" y="40" width="600" height="156" fill="#efe8dc" stroke="#1a1612" stroke-width="2" />
+            <!-- plaster coat tint (base) -->
+            <rect x="60" y="40" width="600" height="156" fill="#b8b0a0" opacity="0.28" />
+            <!-- paint band, part of face -->
+            <rect x="270" y="40" width="260" height="156" fill="#d9a441" opacity="0.5" />
+            <!-- window -->
+            <rect x="420" y="96" width="110" height="80" fill="#fffdf8" stroke="#3a5f7a" stroke-width="2.5" />
+            <!-- wall top drag handle -->
+            <rect x="350" y="36" width="36" height="8" rx="2" fill="#b2451e" />
+            <rect x="364" y="36" width="8" height="8" fill="#b2451e" />
+            <text x="368" y="30" text-anchor="middle" font-size="11" fill="#5c5348" font-family="Source Sans 3, sans-serif">2700</text>
+            <text x="44" y="122" text-anchor="end" font-size="11" fill="#5c5348" font-family="Source Sans 3, sans-serif" transform="rotate(-90 44 122)">height</text>
+          </svg>
+          <div class="coachmark">
+            <span><b style="color:#d9a441">④</b> First time here? Drag this handle to change the wall's height.</span>
+            <button type="button">Got it</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <aside class="dock-inspect">
+      <header>
+        <h2>Inspector</h2>
+        <span>Wall · W-04</span>
+      </header>
+      <div class="ctx-body">
+        <label class="field"><span>Name</span><input value="W-04 lounge south" /></label>
+        <label class="field"><span>Type</span>
+          <select><option selected>Ext 220 brick plastered</option><option>Ext 220 brick fairface</option></select>
+        </label>
+        <div>
+          <div style="font-size:12px;font-weight:600;color:var(--ink-soft);margin-bottom:4px">Status</div>
+          <div class="status-opts">
+            <label><input type="radio" name="st" checked /> Existing</label>
+            <label><input type="radio" name="st" /> Proposed</label>
+          </div>
+        </div>
+
+        <!-- ② the elevation preview, promoted above the mm fields, made obviously clickable -->
+        <div class="elev-card" tabindex="0" title="Open this wall face in the strip under the plan">
+          <span class="callout-flag">②</span>
+          <div class="elev-card-label"><span>Wall elevation</span><em>south face</em></div>
+          <svg viewBox="0 0 300 108" preserveAspectRatio="none">
+            <rect x="0" y="0" width="300" height="108" fill="#fffdf8" />
+            <rect x="14" y="10" width="272" height="88" fill="#efe8dc" stroke="#1a1612" stroke-width="1.4" />
+            <rect x="14" y="10" width="272" height="88" fill="#b8b0a0" opacity="0.28" />
+            <rect x="130" y="10" width="110" height="88" fill="#d9a441" opacity="0.5" />
+            <rect x="190" y="48" width="50" height="40" fill="#fffdf8" stroke="#3a5f7a" stroke-width="1.6" />
+          </svg>
+          <div class="open-overlay">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17L17 7M9 7h8v8"/></svg>
+            Open elevation
+          </div>
+        </div>
+
+        <details class="more-settings">
+          <summary>Wall height, sill &amp; other settings</summary>
+          <div class="more-fields">
+            <label class="field"><span>Top</span><select><option>Up to level above</option><option>Fixed height</option></select></label>
+            <label class="field"><span>Wall height (mm)</span><input value="2700" /></label>
+            <div class="row" style="display:flex;justify-content:space-between;font-size:12px;color:var(--ink-muted)"><span>Base</span><strong style="color:var(--ink)">Not attached</strong></div>
+          </div>
+        </details>
+
+        <!-- ③/⑤ wall finishes, grouped by coat vs applied finish -->
+        <section class="fin-sec">
+          <h4>Wall finishes</h4>
+          <div class="fin-summary">
+            <div class="row"><span><i class="fin-swatch" style="background:#b8b0a0"></i>This face</span><strong>14.4 m²</strong></div>
+            <div class="row muted"><span>Plaster, from the wall type</span><span>14.4 m²</span></div>
+            <div class="row"><span><i class="fin-swatch" style="background:#d9a441"></i>Finished</span><strong>6.1 m²</strong></div>
+          </div>
+
+          <div class="fin-card">
+            <div class="fin-card-head">
+              <i class="fin-swatch" style="background:#d9a441"></i>
+              <b>Paint</b>
+              <span class="area">6.1 m²</span>
+            </div>
+            <p>Paint on the plaster, across the middle, full height</p>
+            <div class="btns"><button type="button">Edit</button><button type="button">Remove</button></div>
+          </div>
+
+          <div class="add-sheet">
+            <span class="callout-flag" style="position:static; display:inline-flex; margin-right:6px;">⑤</span>
+            <div class="add-sheet-head">
+              <p>Add a finish</p>
+              <button type="button">Back</button>
+            </div>
+            <label class="field"><span>Finish</span>
+              <select>
+                <optgroup label="Base coat — what the wall is made of">
+                  <option>Plaster</option>
+                  <option>Render</option>
+                  <option>Face brick</option>
+                  <option>Rhinolite</option>
+                </optgroup>
+                <optgroup label="Applied finish — goes on top of a coat" selected>
+                  <option selected>Paint</option>
+                  <option>Wall tile</option>
+                  <option>Waterproofing</option>
+                  <option>Skirting</option>
+                  <option>No finish (take off the default)</option>
+                </optgroup>
+              </select>
+            </label>
+            <label class="field"><span>Product</span><input placeholder="e.g. Plascon Double Velvet, Mist White" /></label>
+            <label class="field"><span>Height</span>
+              <select><option>Full height</option><option>Skirting (to 100)</option><option>Dado (to 1200)</option><option>Splashback (900 to 1500)</option><option selected>Custom…</option></select>
+            </label>
+
+            <div class="dim-groups">
+              <div class="dim-group v-group">
+                <div class="dg-head"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18M7 8l5-5 5 5M7 16l5 5 5-5"/></svg>Up the wall</div>
+                <div class="dg-row">from <input value="0" /> mm</div>
+                <div class="dg-row">to <input value="2700" /> mm</div>
+              </div>
+              <div class="dim-group h-group">
+                <div class="dg-head"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M8 7l-5 5 5 5M16 7l5 5-5 5"/></svg>Along the wall</div>
+                <div class="dg-row">from <input value="1300" /> mm</div>
+                <div class="dg-row">to <input value="3600" /> mm</div>
+              </div>
+            </div>
+
+            <div class="live-preview">
+              <div class="lp-label">
+                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+                Updates as you type — this is where it will land
+              </div>
+              <svg viewBox="0 0 260 52" preserveAspectRatio="none">
+                <rect x="6" y="4" width="248" height="44" fill="#efe8dc" stroke="#1a1612" stroke-width="1" />
+                <rect x="124" y="4" width="92" height="44" fill="#d9a441" opacity="0.55" />
+                <rect x="160" y="22" width="28" height="22" fill="#fffdf8" stroke="#3a5f7a" stroke-width="1" />
+              </svg>
+            </div>
+
+            <div class="add-sheet-actions">
+              <button type="button" class="btn">Whole face</button>
+              <button type="button" class="btn btn-primary">Draw area</button>
+            </div>
+          </div>
+        </section>
+      </div>
+    </aside>
+  </main>
+</div>
+
+<button type="button" class="btn legend-toggle" id="legend-toggle">What changed ▸</button>
+<div class="legend-panel" id="legend-panel" hidden>
+  <header>
+    <h3>What changed, and why</h3>
+    <button type="button" id="legend-close" aria-label="Close">×</button>
+  </header>
+  <ol>
+    <li><b>Finishes moved onto the Build ribbon, next to Walls.</b><span> They used to sit under Document → Project, next to "Project information" — a paperwork location for what is really a drawing/costing action.</span></li>
+    <li><b>The elevation preview moved up and now looks clickable.</b><span> It used to sit after eight other fields (type, status, height, sill, width, offset…), so a new user rarely scrolled far enough to find it. A hover state and an "Open elevation ↗" overlay now say "click me" without reading any help text.</span></li>
+    <li><b>The "how this works" note is visible by default.</b><span> It used to be a hidden circled "i" button nobody found. It now shows the first time the strip opens, with a one-click "Don't show again."</span></li>
+    <li><b>A first-run coach-mark points at the height handle.</b><span> Nothing today tells a new user that the top edge of the wall is draggable. This is shown once, then dismissed for good.</span></li>
+    <li><b>"Add a finish" groups Base coat vs Applied finish, and separates height from span.</b><span> Plaster/render/face brick/rhinolite are what the wall is made of; paint/tile/waterproofing/skirting sit on top of a coat — that's the data model already, now it's visible in the dropdown. The vertical ("up the wall") and horizontal ("along the wall") number pairs are now in their own labelled, colour-coded boxes instead of two identical-looking "from/to" rows, and a live mini-preview shows where the finish will land before you commit.</span></li>
+  </ol>
+</div>
+
+<script>
+  const panel = document.getElementById("legend-panel");
+  const toggle = document.getElementById("legend-toggle");
+  const close = document.getElementById("legend-close");
+  toggle.addEventListener("click", () => {
+    const open = panel.hidden;
+    panel.hidden = !open;
+    toggle.hidden = open;
+  });
+  close.addEventListener("click", () => {
+    panel.hidden = true;
+    toggle.hidden = false;
+  });
+</script>
+</body>
+</html>

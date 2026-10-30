@@ -19,6 +19,7 @@ import {
   categoriesForSurface,
   createFinishRegion,
   createFinishRun,
+  dependentsOfWalls,
   floorCoverage,
   presetFromRoom,
   planWallFinishMarks,
@@ -27,6 +28,7 @@ import {
   rulesFromPreset,
   savePreset,
 } from "../finish-model.js";
+import { RIBBON, SIMPLE_TABS } from "../ribbon.js";
 import { faceFinishHtml, finishCalloutHtml, openingCalloutHtml, productsHtml, roomFinishHtml, slabFinishHtml } from "../finish-panel.js";
 
 const pack = normalizePackUnits(
@@ -159,6 +161,63 @@ test("a finish run on a drawn wall face is measured, and survives the wall's id 
   assert.ok(c.warnings.some((w) => w.includes("finish run")));
   assert.equal(doc.finishRuns.length, 1, "an orphaned run is kept");
   assert.equal(doc.finishRuns[0].id, run.id);
+});
+
+test("deleting a wall takes its face finishes and its windows and doors", () => {
+  const doc = normalizeDoc({
+    segments: [
+      { id: "w1", sku: "TSP_MAS009", level: "01 GFL", x1: 0, y1: 0, x2: 6, y2: 0 },
+      { id: "w2", sku: "TSP_MAS009", level: "01 GFL", x1: 0, y1: 4, x2: 6, y2: 4 },
+    ],
+    openings: [
+      { id: "d1", sku: "TSP_DR900", wallId: "w1", t: 0.5 },
+      { id: "d2", sku: "TSP_DR900", wallId: "w2", t: 0.5 },
+    ],
+    rooms: [{ ...ROOM, finishes: [{ id: "paint", surface: "wall", category: "paint", faces: "all" }] }],
+  });
+  const walls = deriveWalls(doc, pack);
+  const tile = createFinishRun(doc, walls.find((w) => w.id === "w1"), 1, { category: "wallTile" });
+  const other = createFinishRun(doc, walls.find((w) => w.id === "w2"), 1, { category: "paint" });
+
+  const gone = dependentsOfWalls(doc, pack, ["w1"]);
+  assert.deepEqual(gone.finishRunIds, [tile.id]);
+  assert.equal(gone.finishRunIds.includes(other.id), false);
+  assert.deepEqual(gone.openingIds, ["d1"]);
+
+  doc.finishRuns = doc.finishRuns.filter((r) => !gone.finishRunIds.includes(r.id));
+  doc.openings = doc.openings.filter((o) => !gone.openingIds.includes(o.id));
+  doc.segments = doc.segments.filter((s) => s.id !== "w1");
+  assert.equal(doc.rooms[0].finishes.length, 1, "a room finish rule stays with the room");
+  assert.equal(finishRows(doc).some((r) => r.finishCategory === "wallTile"), false);
+  assert.equal(doc.openings.some((o) => o.id === "d2"), true);
+
+  doc.segments.push({ id: "w3", sku: "TSP_MAS009", level: "01 GFL", x1: 0, y1: 0, x2: 6, y2: 0 });
+  assert.equal(finishRows(doc).some((r) => r.finishCategory === "wallTile"), false, "a new wall on the same line does not inherit the finish");
+  assert.equal((doc.openings || []).some((o) => o.wallId === "w1"), false);
+});
+
+test("a finish on the deleted wall does not hop onto the wall beside it", () => {
+  const doc = normalizeDoc({
+    segments: [
+      { id: "w1", sku: "TSP_MAS009", level: "01 GFL", x1: 0, y1: 0, x2: 6, y2: 0 },
+      { id: "w2", sku: "TSP_MAS009", level: "01 GFL", x1: 0, y1: 0.1, x2: 6, y2: 0.1 },
+    ],
+  });
+  const walls = deriveWalls(doc, pack);
+  const run = createFinishRun(doc, walls.find((w) => w.id === "w1"), 1, { category: "wallTile", from: 1, to: 3 });
+  assert.deepEqual(dependentsOfWalls(doc, pack, ["w1"]).finishRunIds, [run.id]);
+});
+
+test("a door and a finish on the room wall stay when a drawn wall covering that line is deleted", () => {
+  const doc = build({
+    openings: [{ id: "d1", sku: "TSP_DR900", roomId: "r1", edgeIndex: 0, t: 0.5 }],
+  });
+  const roomWall = deriveWalls(doc, pack).find((w) => Math.abs(w.y1) < 1e-6 && Math.abs(w.y2) < 1e-6);
+  const run = createFinishRun(doc, roomWall, 1, { category: "wallTile" });
+  doc.segments.push({ id: "drawn", sku: "TSP_MAS009", level: "01 GFL", x1: 0, y1: 0, x2: 4, y2: 0 });
+  const gone = dependentsOfWalls(doc, pack, ["drawn"]);
+  assert.deepEqual(gone.openingIds, []);
+  assert.equal(gone.finishRunIds.includes(run.id), false);
 });
 
 test("a run on the other face carries to the mirrored side after the wall is re-keyed", () => {
@@ -435,6 +494,50 @@ test("floor coverage reports bare floor and overlap, including a concave outline
   assert.equal(side.overlapCount, 0);
 });
 
+test("finishes sit on the Build ribbon after Walls, in Full and Simple", () => {
+  const build = RIBBON.find((t) => t.id === "build");
+  const names = build.groups.map((g) => g.label);
+  assert.equal(names[names.indexOf("Walls") + 1], "Finishes");
+  const fin = build.groups.find((g) => g.label === "Finishes");
+  assert.deepEqual(fin.items.map((i) => i.id), ["wall-finishes", "finishes"]);
+  const project = RIBBON.find((t) => t.id === "document").groups.find((g) => g.label === "Project");
+  assert.deepEqual(project.items.map((i) => i.id), ["project-info"]);
+  const draw = SIMPLE_TABS.find((t) => t.id === "draw");
+  const simpleNames = draw.groups.map((g) => g.label);
+  assert.equal(simpleNames[simpleNames.indexOf("Walls") + 1], "Finishes");
+  assert.deepEqual(draw.groups.find((g) => g.label === "Finishes").items, ["wall-finishes", "finishes"]);
+  const views = RIBBON.find((t) => t.id === "document").groups.find((g) => g.label === "Views");
+  assert.equal(views.items.find((i) => i.id === "elevation")?.label, "Elevation");
+});
+
+test("a wall type list splits a base coat from an applied finish", () => {
+  const doc = normalizeDoc({
+    segments: [{ id: "w1", sku: "TSP_MAS009", level: "01 GFL", x1: 0, y1: 0, x2: 6, y2: 0 }],
+  });
+  const walls = deriveWalls(doc, pack);
+  const model = elevationModel(doc, pack, { wallId: "w1", side: 1 }, walls);
+  const html = faceFinishHtml(doc, model, { adding: true });
+  const select = html.slice(html.indexOf('data-fin="band-category"'), html.indexOf("</select>", html.indexOf('data-fin="band-category"')));
+  const coat = "Base coat — what the wall is made of";
+  const applied = "Applied finish — goes on top of a coat";
+  assert.ok(select.includes(coat) && select.includes(applied));
+  assert.ok(select.indexOf(coat) < select.indexOf(applied));
+  assert.ok(select.indexOf(">Plaster<") < select.indexOf(applied));
+  assert.ok(select.indexOf(applied) < select.indexOf(">Paint<"));
+  assert.ok(select.indexOf(applied) < select.indexOf(">Rhinolite<"));
+  assert.ok(select.includes(">Bare<"));
+  assert.ok(html.includes("Up the wall") && html.includes("Along the wall"));
+  assert.ok(html.includes('data-fin="run-bottom"') && html.includes('data-fin="run-from"'));
+  assert.ok(html.includes("data-fin-live") && html.includes("fin-mini"));
+  assert.ok(html.includes('data-fin="band-height"') && html.includes("Skirting (to 100 mm)"));
+  assert.ok(html.includes('data-fin-custom hidden') && html.includes('data-fin-span hidden'));
+  assert.ok(html.includes("Wall tile on the whole face."));
+  assert.ok(html.includes("needs a product name"));
+  assert.ok(html.includes("free shape on the elevation"));
+  assert.ok(html.indexOf('data-fin="band-part"') < html.indexOf('data-fin="run-add"'), "part of the face is chosen before the commit buttons");
+  assert.ok(!html.includes("Updates as you type"));
+});
+
 test("a wall face panel reads like the floor panel: summary, one add form, a card per finish", () => {
   const doc = normalizeDoc({
     finishProducts: [{ id: "p1", category: "wallTile", name: "White", size: "300x600" }],
@@ -457,12 +560,22 @@ test("a wall face panel reads like the floor panel: summary, one add form, a car
   assert.ok(html.includes(`fin-editing" data-fin-band="${id}"`) && card.includes("Saved"), "the picked card is marked, and a save is acknowledged");
   assert.ok(html.includes('data-fin="band-height"') && html.includes("Skirting"));
   assert.ok(html.includes("from the wall type"), "the computed plaster stays in the summary, as the wall type");
-  assert.ok(html.includes("fin-kind-title") && card.includes("White · 300x600"), "a named product is the card's title");
+  assert.ok(!html.includes("fin-kind-title") && !html.includes("1 area"), "a single finish is one row, without a group heading");
   assert.ok(card.includes("fin-mini"), "the card shows the shape on the face");
-  assert.ok(html.includes("1 area"), "each type says how many areas it is");
+  const paintId = model.finishBands.find((b) => b.category === "paint").id;
+  const paintStart = html.indexOf(`data-fin-band="${paintId}"`);
+  const paintCard = html.slice(paintStart, html.indexOf('class="fin-on"', paintStart));
+  assert.ok(paintCard.includes('class="fin-kind-name">Paint<') && paintCard.includes("1.2 m"), "a resting card names the finish and where it sits");
+  assert.ok(!paintCard.includes('data-fin="band-type"') && !paintCard.includes("No product named") && !paintCard.includes('data-fin="band-remove"'), "type, product, and Remove wait until the row is selected");
+  const resting = faceFinishHtml(doc, model);
+  const restingTile = resting.slice(resting.indexOf(`data-fin-band="${id}"`), resting.indexOf(`data-fin-band="${paintId}"`));
+  assert.ok(restingTile.includes("fin-product-line") && restingTile.includes("White · 300x600"), "a named product is a line on the resting row");
+  assert.ok(!restingTile.includes('data-fin="band-type"'));
   assert.ok(html.includes("Wall tile on the plaster") && html.includes("Paint on the plaster"), "a finish on the coat is named");
-  assert.ok(html.indexOf(">Wall tile<") < html.indexOf(`data-fin-band="${id}"`), "the type heading comes before its card");
-  assert.ok(html.includes('data-fin="default-remove"'), "the default can be taken off from the summary");
+  assert.ok(html.includes('data-fin="default-ask"') && html.includes("Leave bare"), "leaving the wall type bare asks first");
+  assert.ok(!html.includes('data-fin="default-remove"'), "the coat stays until the question is answered");
+  const asked = faceFinishHtml(doc, model, { bareAsk: true });
+  assert.ok(asked.includes('data-fin="default-remove"') && asked.includes("Paint and tile stay") && asked.includes('data-fin="default-keep"'));
   assert.ok(!html.includes("data-fin-band=\"default:"), "the default is not a card");
   assert.ok(html.includes(">Whole face<") && html.includes('data-fin-custom hidden'), "millimetre boxes stay hidden until asked for");
   assert.ok(!html.includes("along ·"), "cards do not print coordinates");
@@ -507,9 +620,20 @@ test("taking the default off leaves a listed No finish piece that can be removed
   assert.ok(after.some((b) => b.category === "none" && b.sourceId === run.id), "No finish is listed");
   const plaster = (bands) => bands.filter((b) => b.source === "default").reduce((s, b) => s + b.quantity, 0);
   assert.ok(plaster(after) < plaster(before));
-  const html = faceFinishHtml(doc, elevationModel(doc, pack, face, walls));
-  assert.ok(html.includes("Remove this to put it back"));
+  const listed = elevationModel(doc, pack, face, walls);
+  const bareId = listed.finishBands.find((b) => b.category === "none").id;
+  const html = faceFinishHtml(doc, listed, { selectedId: bareId });
+  const closed = faceFinishHtml(doc, listed);
+  assert.ok(html.includes("The finish from the wall type is off"));
+  assert.ok(closed.includes("The finish from the wall type is off"));
+  assert.ok(html.includes("Put it back"), "the open bare row can put the wall type back");
+  assert.ok(!closed.includes("Put it back"), "a resting row does not carry the button");
+  assert.ok(!html.includes("Remove this to put it back"));
   assert.ok(!html.includes("data-fin-band=\"default:"), "taking plaster off does not leave a plaster card");
+  const bare = elevationModel(doc, pack, face, walls).finishBands.find((b) => b.category === "none");
+  const callout = finishCalloutHtml(doc, bare, elevationModel(doc, pack, face, walls));
+  assert.ok(callout.includes(">Bare<") && callout.includes('data-fin="bare-restore"'));
+  assert.ok(!callout.includes("fin-swatch"), "a bare face is not drawn as an empty checkbox");
 });
 
 test("a finish under a window is described by the window", () => {

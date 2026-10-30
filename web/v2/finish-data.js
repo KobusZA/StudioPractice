@@ -29,9 +29,9 @@ export const FINISH_CATEGORIES = {
   carpet: { label: "Carpet", surfaces: ["floor"], unit: "m2", needsProduct: true, layer: null },
   vinyl: { label: "Vinyl", surfaces: ["floor"], unit: "m2", needsProduct: true, layer: null },
   timberFloor: { label: "Timber floor", surfaces: ["floor"], unit: "m2", needsProduct: true, layer: null },
-  // Not a finish: it states "no finish here", so the computed plaster default
-  // can be taken off a face or part of one.
-  none: { label: "No finish", surfaces: ["wall"], unit: "m2", needsProduct: false, layer: "coat", virtual: true },
+  // Not a finish: it states the wall type's coat is off here, on a face or
+  // part of one. Removing the run puts that coat back.
+  none: { label: "Bare", surfaces: ["wall"], unit: "m2", needsProduct: false, layer: "coat", virtual: true },
 };
 
 export const FINISH_CATEGORY_IDS = Object.keys(FINISH_CATEGORIES);

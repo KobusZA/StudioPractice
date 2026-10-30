@@ -55,6 +55,15 @@ export const RIBBON = [
         ],
       },
       {
+        // A drawing action, next to the walls it finishes. Document → Project
+        // keeps the paperwork (project information) only.
+        label: "Finishes",
+        items: [
+          { id: "wall-finishes", label: "Wall finishes", command: "wall-finishes" },
+          { id: "finishes", label: "Floor finishes", command: "finishes" },
+        ],
+      },
+      {
         label: "Floors & roofs",
         items: [
           { id: "floors", label: "Floors", tool: "slab", categories: ["floor", "pool"] },
@@ -154,8 +163,6 @@ export const RIBBON = [
         label: "Project",
         items: [
           { id: "project-info", label: "Project information", command: "project-info" },
-          { id: "finishes", label: "Floor finishes", command: "finishes" },
-          { id: "wall-finishes", label: "Wall finishes", command: "wall-finishes" },
         ],
       },
       {
@@ -366,7 +373,7 @@ const GROUP_PRIORITY = {
  * and todo all still come from RIBBON, so there is exactly one place that
  * defines what a function actually does.
  */
-const SIMPLE_TABS = [
+export const SIMPLE_TABS = [
   {
     id: "draw",
     label: "Draw",
@@ -374,6 +381,7 @@ const SIMPLE_TABS = [
       { label: "Sheet", collapseAfterLoad: true, items: ["underlay", "satellite", "calibrate", "reference", "sheet-list", "align-floors", "underlay-adjust", "underlay-toggle"] },
       { label: "Levels", items: ["level-isolate"] },
       { label: "Walls", items: ["walls"] },
+      { label: "Finishes", items: ["wall-finishes", "finishes"] },
       { label: "Floors & roofs", items: ["floors", "roofs"] },
       { label: "Ceilings", items: ["ceilings"] },
       { label: "Openings", items: ["doors", "windows"] },

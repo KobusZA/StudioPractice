@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { emptyDoc, rectShape } from "../model.js";
-import { ALIGN_ORIGIN_MAX_M, GAP_MAX_M, applyNicePoint, bestEndpointSnap, collectSnapEdges, collectSnapTargets, faceCorners, faceEdges, isExactPointSnap, nearestAlignments, probeAlongEdge, probeAlongOccupiedEdge, probeDirection, resolveProbes, snapCoord, snapEdgeToLine, snapLengthFrom, snapNiceDelta, snapPoint, snapToFace } from "../snap.js";
+import { ALIGN_ORIGIN_MAX_M, GAP_MAX_M, applyNicePoint, bestEndpointSnap, bestLinearMoveSnap, collectSnapEdges, collectSnapTargets, faceCorners, faceEdges, isExactPointSnap, nearestAlignments, probeAlongEdge, probeAlongOccupiedEdge, probeDirection, resolveProbes, snapCoord, snapEdgeToLine, snapLengthFrom, snapNiceDelta, snapPoint, snapToFace } from "../snap.js";
 
 function docWithWall(x1, y1, x2, y2, id = "s1") {
   const doc = emptyDoc();
@@ -283,6 +283,66 @@ test("bestEndpointSnap returns null when neither endpoint is close enough", () =
   const targets = [{ x: 10, y: 10 }];
   const points = [{ x: 0, y: 0 }, { x: 1, y: 1 }];
   assert.equal(bestEndpointSnap(points, targets, 0.1), null);
+});
+
+// A 220 mm wall running up the sheet, ending at y = 4. Its end face is the
+// short horizontal edge there; its side faces are the long vertical edges.
+const STANDING = { x1: 0, y1: 0, x2: 0, y2: 4 };
+function standingSnap() {
+  return {
+    edges: faceEdges(STANDING, 0.22, "wall"),
+    targets: [
+      { x: 0, y: 0, kind: "endpoint", category: "wall" },
+      { x: 0, y: 4, kind: "endpoint", category: "wall" },
+      ...faceCorners(STANDING, 0.22, "wall"),
+    ],
+  };
+}
+
+test("moving a wall lands its side on another wall's end face", () => {
+  const { edges, targets } = standingSnap();
+  // Centreline is 90 mm past the end, still inside the magnet, but the near
+  // face is only 20 mm past it. The face is the closer correction, so the
+  // side sits flush on the end instead of the centreline taking the join.
+  const hit = bestLinearMoveSnap({ x1: 1, y1: 4.09, x2: 3, y2: 4.09 }, 0.22, targets, edges, 0.1);
+  assert.ok(hit);
+  assert.ok(Math.abs(hit.dy - 0.02) < 1e-9, `dy ${hit.dy}`);
+  assert.equal(hit.dx, 0);
+  assert.equal(hit.guide.guideY, 4);
+  assert.equal(hit.guide.guideYPoint.kind, "face");
+  assert.equal(hit.guide.guideYPoint.category, "wall");
+});
+
+test("moving a wall lands its end on another wall's side face", () => {
+  const { edges, targets } = standingSnap();
+  // The end is 40 mm outside the near face and 150 mm from the centreline,
+  // so only the face is in reach.
+  const hit = bestLinearMoveSnap({ x1: -2, y1: 2, x2: 0.15, y2: 2 }, 0.22, targets, edges, 0.1);
+  assert.ok(hit);
+  assert.ok(Math.abs(0.15 + hit.dx - 0.11) < 1e-9, `end x ${0.15 + hit.dx}`);
+  assert.equal(hit.dy, 0);
+  assert.equal(hit.guide.guideX, 0.11);
+  assert.equal(hit.guide.guideXPoint.kind, "face");
+});
+
+test("a nearer centreline still beats a farther face while moving", () => {
+  const { edges, targets } = standingSnap();
+  const hit = bestLinearMoveSnap({ x1: 1, y1: 3.97, x2: 3, y2: 3.97 }, 0.22, targets, edges, 0.1);
+  assert.ok(hit);
+  assert.ok(Math.abs(hit.dy - 0.03) < 1e-9, `dy ${hit.dy}`);
+  assert.equal(hit.guide.guideYPoint.kind, "endpoint");
+});
+
+test("a wall move can meet an end and a side at the same time", () => {
+  const { edges, targets } = standingSnap();
+  // End 40 mm outside the side face, side 40 mm past the end face.
+  const hit = bestLinearMoveSnap({ x1: 0.15, y1: 4.15, x2: 3, y2: 4.15 }, 0.22, targets, edges, 0.1);
+  assert.ok(hit);
+  assert.ok(Math.abs(0.15 + hit.dx - 0.11) < 1e-9, `end x ${0.15 + hit.dx}`);
+  assert.ok(Math.abs(4.15 + hit.dy - 4.11) < 1e-9, `centreline y ${4.15 + hit.dy}`);
+  assert.equal(hit.guide.guideXPoint.kind, "face");
+  assert.equal(hit.guide.guideYPoint.kind, "face");
+  assert.equal(isExactPointSnap(hit.guide), false);
 });
 
 test("nearestAlignments measures both axes from the same nearby corner", () => {

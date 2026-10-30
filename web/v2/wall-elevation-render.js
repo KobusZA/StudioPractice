@@ -104,6 +104,203 @@ export function edgeResizeCursor(x1, y1, x2, y2) {
   return px * py >= 0 ? "nwse" : "nesw";
 }
 
+const LOCATE_GAP = 5e-4;
+
+function polygonWinding(points) {
+  let area = 0;
+  for (let i = 0; i < points.length; i += 1) {
+    const p = points[i];
+    const q = points[(i + 1) % points.length];
+    area += p.s * q.z - q.s * p.z;
+  }
+  return area >= 0 ? 1 : -1;
+}
+
+/** Drop a clearance that is flush with the wall. `null` when neither axis remains. */
+function packLocate(spec) {
+  if (!spec) return null;
+  const out = {};
+  if (spec.side && spec.side.s1 - spec.side.s0 > LOCATE_GAP) out.side = spec.side;
+  if (spec.vert && spec.vert.z1 - spec.vert.z0 > LOCATE_GAP) out.vert = spec.vert;
+  return out.side || out.vert ? out : null;
+}
+
+function mergeLocate(a, b) {
+  const spec = {};
+  if (a?.side || b?.side) spec.side = (a?.side && b?.side)
+    ? ((a.side.s1 - a.side.s0) >= (b.side.s1 - b.side.s0) ? a.side : b.side)
+    : (a?.side || b?.side);
+  if (a?.vert || b?.vert) spec.vert = (a?.vert && b?.vert)
+    ? ((a.vert.z1 - a.vert.z0) >= (b.vert.z1 - b.vert.z0) ? a.vert : b.vert)
+    : (a?.vert || b?.vert);
+  return spec;
+}
+
+/** One edge's outward clearance. A vertical edge opens a gap to the side of
+ *  the wall; a horizontal edge opens a gap to the top or the floor. A diagonal
+ *  edge opens both. */
+function edgeSpec(points, index, length, height) {
+  const n = points.length;
+  if (!n) return {};
+  const i = ((index % n) + n) % n;
+  const a = points[i];
+  const b = points[(i + 1) % n];
+  const wind = polygonWinding(points);
+  const ds = b.s - a.s;
+  const dz = b.z - a.z;
+  // Right of the direction of travel is outside a counter-clockwise ring.
+  const nx = wind * dz;
+  const nz = wind * -ds;
+  const ax = Math.abs(nx);
+  const az = Math.abs(nz);
+  const across = ax >= az * 2;
+  const along = az >= ax * 2;
+  const either = !across && !along;
+  const spec = {};
+  // The tick lands on the end that the measurement belongs to, so a sloping
+  // edge is not dimensioned from its middle.
+  if ((across || either) && ax > 1e-9) {
+    const s = nx < 0 ? Math.min(a.s, b.s) : Math.max(a.s, b.s);
+    const at = Math.abs(a.s - s) <= Math.abs(b.s - s) ? a : b;
+    spec.side = nx < 0 ? { s0: 0, s1: s, z: at.z } : { s0: s, s1: length, z: at.z };
+  }
+  if ((along || either) && az > 1e-9) {
+    const z = nz > 0 ? Math.max(a.z, b.z) : Math.min(a.z, b.z);
+    const at = Math.abs(a.z - z) <= Math.abs(b.z - z) ? a : b;
+    spec.vert = nz > 0
+      ? { z0: z, z1: height, s: at.s, toward: "top" }
+      : { z0: 0, z1: z, s: at.s, toward: "base" };
+  }
+  return spec;
+}
+
+/** Where a free point sits: the nearer end of the wall, and the nearer of the
+ *  floor and the top. A first corner has no edge yet, so both are shown. */
+function pointSpec(s, z, length, height) {
+  const spec = {};
+  const left = s;
+  const right = length - s;
+  if (left > LOCATE_GAP && left < length - LOCATE_GAP && left <= right) spec.side = { s0: 0, s1: s, z };
+  else if (right > LOCATE_GAP && right < length - LOCATE_GAP) spec.side = { s0: s, s1: length, z };
+  const down = z;
+  const up = height - z;
+  if (up > LOCATE_GAP && (up <= down || down <= LOCATE_GAP)) spec.vert = { z0: z, z1: height, s, toward: "top" };
+  else if (down > LOCATE_GAP) spec.vert = { z0: 0, z1: z, s, toward: "base" };
+  return spec;
+}
+
+/**
+ * The dimension lines for a finish that is being drawn or dragged.
+ * `mode` is `point` (the corner under the cursor), `edge` (a line, one axis),
+ * `corner` (both axes) or `move` (the whole shape). Lengths are metres.
+ * @returns {{side?:{s0:number,s1:number,z:number}, vert?:{z0:number,z1:number,s:number,toward:string}}|null}
+ */
+export function finishLocate(points, { mode, index = 0, length, height, point = null } = {}) {
+  if (!(length > 0) || !(height > 0)) return null;
+  if (mode === "point") return point ? packLocate(pointSpec(point.s, point.z, length, height)) : null;
+  if (!points?.length) return null;
+  if (mode === "move") {
+    const left = points.reduce((best, p) => (p.s < best.s ? p : best));
+    const right = points.reduce((best, p) => (p.s > best.s ? p : best));
+    const top = points.reduce((best, p) => (p.z > best.z ? p : best));
+    const bottom = points.reduce((best, p) => (p.z < best.z ? p : best));
+    return packLocate({
+      side: left.s > LOCATE_GAP ? { s0: 0, s1: left.s, z: left.z } : { s0: right.s, s1: length, z: right.z },
+      vert: height - top.z > LOCATE_GAP
+        ? { z0: top.z, z1: height, s: top.s, toward: "top" }
+        : { z0: 0, z1: bottom.z, s: bottom.s, toward: "base" },
+    });
+  }
+  if (mode === "edge") return packLocate(edgeSpec(points, index, length, height));
+  if (mode === "corner") {
+    const n = points.length;
+    const i = ((index % n) + n) % n;
+    const p = points[i];
+    const merged = mergeLocate(
+      edgeSpec(points, (i - 1 + n) % n, length, height),
+      edgeSpec(points, i, length, height),
+    );
+    if (!merged) return null;
+    // Both lines meet this corner. A sloping neighbour must not borrow the
+    // other end's height or station.
+    const spec = {};
+    if (merged.side) {
+      spec.side = merged.side.s0 === 0
+        ? { s0: 0, s1: p.s, z: p.z }
+        : { s0: p.s, s1: length, z: p.z };
+    }
+    if (merged.vert) {
+      spec.vert = merged.vert.toward === "base"
+        ? { z0: 0, z1: p.z, s: p.s, toward: "base" }
+        : { z0: p.z, z1: height, s: p.s, toward: "top" };
+    }
+    return packLocate(spec);
+  }
+  return null;
+}
+
+/** Caption on a clearance dimension. Clamped so a short gap still keeps its text inside the drawing. */
+function locateCaption(parts, x, y, anchor, text, kind, W, H) {
+  const width = text.length * 6.4 + 8;
+  const height = 14;
+  let left = anchor === "start" ? x : anchor === "end" ? x - width : x - width / 2;
+  let top = y - 11;
+  left = Math.max(2, Math.min(left, W - width - 2));
+  top = Math.max(2, Math.min(top, H - height - 2));
+  const tx = anchor === "start" ? left + 4 : anchor === "end" ? left + width - 4 : left + width / 2;
+  parts.push(`<rect x="${left}" y="${top}" width="${width}" height="${height}" rx="2" class="elev-measure-bg"/>`);
+  parts.push(`<text x="${tx}" y="${top + 11}" text-anchor="${anchor}" class="elev-dim" data-elev-dim="${kind}">${text}</text>`);
+}
+
+function locateTick(parts, x, y) {
+  parts.push(`<line x1="${x - 3.2}" y1="${y + 3.2}" x2="${x + 3.2}" y2="${y - 3.2}" class="elev-dim-tick"/>`);
+}
+
+/** Horizontal clearance, in the gap beside the finish. */
+function locateSide(parts, model, side, xOf, yOf, W, H) {
+  const metres = side.s1 - side.s0;
+  if (!(metres > LOCATE_GAP)) return;
+  const x1 = xOf(side.s0);
+  const x2 = xOf(side.s1);
+  const left = Math.min(x1, x2);
+  const right = Math.max(x1, x2);
+  const y = yOf(model.base + side.z);
+  if (right - left >= 2) {
+    parts.push(`<line x1="${left}" y1="${y - 6}" x2="${left}" y2="${y + 6}" class="elev-dim-ext"/>`);
+    parts.push(`<line x1="${right}" y1="${y - 6}" x2="${right}" y2="${y + 6}" class="elev-dim-ext"/>`);
+    parts.push(`<line x1="${left}" y1="${y}" x2="${right}" y2="${y}" class="elev-dim-line"/>`);
+    locateTick(parts, left, y);
+    locateTick(parts, right, y);
+  }
+  locateCaption(parts, (left + right) / 2, y - 2, "middle", `${mm(metres)} mm`, "side", W, H);
+}
+
+/** Vertical clearance, up to the top of the wall or down to the floor. */
+function locateVert(parts, model, vert, xOf, yOf, W, H) {
+  const metres = vert.z1 - vert.z0;
+  if (!(metres > LOCATE_GAP)) return;
+  const y1 = yOf(model.base + vert.z0);
+  const y2 = yOf(model.base + vert.z1);
+  const top = Math.min(y1, y2);
+  const bot = Math.max(y1, y2);
+  const x = xOf(vert.s);
+  if (bot - top >= 2) {
+    parts.push(`<line x1="${x - 6}" y1="${top}" x2="${x + 6}" y2="${top}" class="elev-dim-ext"/>`);
+    parts.push(`<line x1="${x - 6}" y1="${bot}" x2="${x + 6}" y2="${bot}" class="elev-dim-ext"/>`);
+    parts.push(`<line x1="${x}" y1="${top}" x2="${x}" y2="${bot}" class="elev-dim-line"/>`);
+    locateTick(parts, x, top);
+    locateTick(parts, x, bot);
+  }
+  const kind = vert.toward === "base" ? "base" : "top";
+  locateCaption(parts, x + 6, (top + bot) / 2 + 4, "start", `${mm(metres)} mm`, kind, W, H);
+}
+
+function drawFinishLocate(parts, model, locate, xOf, yOf, W, H) {
+  if (!locate || !model) return;
+  if (locate.side) locateSide(parts, model, locate.side, xOf, yOf, W, H);
+  if (locate.vert) locateVert(parts, model, locate.vert, xOf, yOf, W, H);
+}
+
 /** The same edge length the plan shows while a polygon is drawn or edited. */
 function measureLabel(parts, x1, y1, x2, y2, metres) {
   if (!(metres > 0.02)) return;
@@ -215,7 +412,7 @@ function dimensionOpening(parts, { x, y, w, h, opening, model, yOf, W, H }) {
  * @param {{width:number,height:number,interactive?:boolean,selectedId?:string|null,view?:{zoom?:number,panX?:number,panY?:number}|null}} opts
  * @returns {{svg:string, scale:number, scaleX:number, scaleY:number, originX:number, originY:number, fit:object}}
  */
-export function elevationSvg(model, { width, height, interactive = false, selectedId = null, selectedBandId = null, selectedVertex = null, draft = null, guides = null, edgeMode = "corner", view = null } = {}) {
+export function elevationSvg(model, { width, height, interactive = false, selectedId = null, selectedBandId = null, selectedVertex = null, draft = null, guides = null, edgeMode = "corner", view = null, locate = null } = {}) {
   const W = Math.max(80, Math.round(width));
   const H = Math.max(60, Math.round(height));
   if (!model) {
@@ -358,7 +555,9 @@ export function elevationSvg(model, { width, height, interactive = false, select
   // A selected run is edited as a polygon instead: corners drag, and a click
   // on an edge adds a node. A rectangle has not stored an outline yet; its
   // four corners are the ring until that click.
-  if (interactive) {
+  // A selected window or door is the one edit: its handles stay, and the
+  // finish corners and edges do not, so the two shapes are not changed together.
+  if (interactive && !selectedId) {
     const EDGE = 4;
     const editRing = (b) => {
       if (b.id !== selectedBandId || b.source !== "run") return null;
@@ -405,7 +604,10 @@ export function elevationSvg(model, { width, height, interactive = false, select
   }
 
   // Wall height is set on the open elevation, not the inspector preview.
-  if (interactive && model.canDragTop !== false) {
+  // The top handle stays off only while a finish outline is still being drawn.
+  // Once that shape is finished, or a window, door, or finish is merely selected,
+  // the handle is back so the wall height can be changed again.
+  if (interactive && model.canDragTop !== false && !draft) {
     const EDGE = 8;
     const grip = Math.min(ww, 36);
     const gx = wx + (ww - grip) / 2;
@@ -430,6 +632,13 @@ export function elevationSvg(model, { width, height, interactive = false, select
       }
     }
     parts.push(`<polyline points="${placed}${hover}" class="elev-draft"/>`);
+    // The edge back to the start is drawn while the pointer moves, so the
+    // shape reads as closed before the last click. Finishing does not require
+    // clicking that first corner.
+    if (draft.hover && draft.points.length >= 2) {
+      const first = draft.points[0];
+      parts.push(`<line x1="${xOf(draft.hover.s)}" y1="${yOf(model.base + draft.hover.z)}" x2="${xOf(first.s)}" y2="${yOf(model.base + first.z)}" class="elev-draft-close"/>`);
+    }
     for (let i = 1; i < draft.points.length; i += 1) {
       const a = draft.points[i - 1];
       const b = draft.points[i];
@@ -447,6 +656,11 @@ export function elevationSvg(model, { width, height, interactive = false, select
     for (const p of draft.points) parts.push(`<circle cx="${xOf(p.s)}" cy="${yOf(model.base + p.z)}" r="3.5" class="elev-draft-pt"/>`);
   }
 
+  // Clearance back to the wall, only while a corner is being placed or an
+  // edge is being dragged. A side move is the horizontal gap; a top or bottom
+  // move is the vertical gap; a corner draws both.
+  drawFinishLocate(parts, model, locate, xOf, yOf, W, H);
+
   if (interactive) {
     parts.push(`<text x="${wx + ww / 2}" y="${Math.min(H - 3, yOf(model.base) + 12)}" text-anchor="middle" class="elev-dim">${mm(model.length)}</text>`);
   }
@@ -455,8 +669,11 @@ export function elevationSvg(model, { width, height, interactive = false, select
   }
 
   // Level names are drawn last so a wall that reaches the label column cannot
-  // paint over the next-floor line's caption.
+  // paint over the next-floor line's caption. The drawing dot sits above them.
   parts.push(...labels);
+  if (draft?.hover) {
+    parts.push(`<circle cx="${xOf(draft.hover.s)}" cy="${yOf(model.base + draft.hover.z)}" r="6.5" class="elev-draft-cursor"/>`);
+  }
 
   const label = `Wall elevation, ${mm(model.length)} long, ${mm(model.height)} high, ${model.openings.length} opening${model.openings.length === 1 ? "" : "s"}`;
   return {

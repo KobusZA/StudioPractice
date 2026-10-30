@@ -157,6 +157,9 @@ test("the SVG draws the wall and each opening, with handles only when interactiv
   const live = elevationSvg(m, { width: 600, height: 200, interactive: true, selectedId: "o1" });
   assert.match(live.svg, /data-elev-op="move"/);
   assert.match(live.svg, /elev-handle-r/);
+  assert.match(live.svg, /data-elev-op="wall-top"/, "a selected window still leaves the wall height handle");
+  const idle = elevationSvg(m, { width: 600, height: 200, interactive: true });
+  assert.match(idle.svg, /data-elev-op="wall-top"/);
   assert.ok(live.scale > 0);
 });
 
@@ -167,6 +170,7 @@ test("a selected door can be moved, and has no handles that change its width", a
   const live = elevationSvg(m, { width: 600, height: 200, interactive: true, selectedId: "d1" });
   assert.match(live.svg, /data-elev-op="move"/);
   assert.match(live.svg, /elev-handle-t/);
+  assert.match(live.svg, /data-elev-op="wall-top"/, "a selected door still leaves the wall height handle");
   assert.doesNotMatch(live.svg, /elev-handle-l/);
   assert.doesNotMatch(live.svg, /elev-handle-r/);
   assert.doesNotMatch(live.svg, /elev-handle-b/);
@@ -240,12 +244,21 @@ test("a selected rectangular finish offers corners, and a click target on each e
   const bandId = m.finishBands.find((b) => b.sourceId === run.id).id;
   const idle = elevationSvg(m, { width: 640, height: 280, interactive: true, selectedId: "o1" }).svg;
   assert.doesNotMatch(idle, /data-elev-op="outline-vertex"/);
-  const svg = elevationSvg(m, { width: 640, height: 280, interactive: true, selectedId: "o1", selectedBandId: bandId }).svg;
+  assert.doesNotMatch(idle, /data-elev-op="band-top"/, "a selected window is the only shape being edited");
+  const open = elevationSvg(m, { width: 640, height: 280, interactive: true }).svg;
+  assert.match(open, /data-elev-op="wall-top"/);
+  const editing = elevationSvg(m, { width: 640, height: 280, interactive: true, selectedBandId: bandId }).svg;
+  assert.match(editing, /data-elev-op="wall-top"/, "a selected finish still leaves the wall height handle");
+  const svg = elevationSvg(m, { width: 640, height: 280, interactive: true, selectedBandId: bandId }).svg;
   assert.equal(svg.match(/data-elev-op="outline-vertex"/g).length, 4);
   assert.equal(svg.match(/data-elev-op="outline-edge"/g).length, 4);
   assert.match(svg, /pointer-events="stroke"/);
   assert.match(svg, /elev-outline-edge is-add/);
-  const lineSvg = elevationSvg(m, { width: 640, height: 280, interactive: true, selectedId: "o1", selectedBandId: bandId, edgeMode: "line" }).svg;
+  const both = elevationSvg(m, { width: 640, height: 280, interactive: true, selectedId: "o1", selectedBandId: bandId }).svg;
+  assert.doesNotMatch(both, /data-elev-op="outline-vertex"/, "the window edit clears the finish corners");
+  assert.doesNotMatch(both, /data-elev-op="band-top"/);
+  assert.match(both, /data-elev-op="l"/, "the window handles stay");
+  const lineSvg = elevationSvg(m, { width: 640, height: 280, interactive: true, selectedBandId: bandId, edgeMode: "line" }).svg;
   assert.equal(lineSvg.match(/elev-outline-edge is-ns/g).length, 2, "a horizontal edge resizes up and down, like the wall top");
   assert.equal(lineSvg.match(/elev-outline-edge is-ew/g).length, 2, "a vertical edge resizes sideways");
   assert.doesNotMatch(lineSvg, /is-add/);
@@ -313,6 +326,9 @@ test("a short wall still shows the next floor, and the top storey shows the roof
   assert.doesNotMatch(svg.svg, /data-elev-op="wall-top"/);
   const open = elevationSvg(ground, { width: 640, height: 280, interactive: true });
   assert.match(open.svg, /data-elev-op="wall-top"/);
+  const drawing = elevationSvg(ground, { width: 640, height: 280, interactive: true, draft: { points: [], category: "paint" } });
+  assert.doesNotMatch(drawing.svg, /data-elev-op="wall-top"/);
+  assert.doesNotMatch(drawing.svg, /elev-wall-top-handle/);
 
   const full = elevationModel(drawnDoc(), pack, { wallId: "w1" });
   const fullSvg = elevationSvg(full, { width: 640, height: 280 });
@@ -432,4 +448,83 @@ test("a wall top drag cannot cut through an opening", () => {
   const m = elevationModel(doc, pack, { wallId: "w1" });
   const head = m.openings[0].sill + m.openings[0].height;
   assert.ok(m.height + 1e-9 >= head);
+});
+
+test("drawing a finish marks the pointer and previews the edge back to the start", async () => {
+  const { elevationSvg } = await import("../wall-elevation-render.js");
+  const m = elevationModel(drawnDoc(), pack, { wallId: "w1", side: 1 });
+  const waiting = elevationSvg(m, {
+    width: 640,
+    height: 280,
+    interactive: true,
+    draft: { points: [], hover: { s: 1, z: 1 }, category: "paint" },
+  }).svg;
+  assert.match(waiting, /class="elev-draft-cursor"/);
+  const shaping = elevationSvg(m, {
+    width: 640,
+    height: 280,
+    interactive: true,
+    draft: {
+      points: [{ s: 0, z: 0 }, { s: 2, z: 0 }],
+      hover: { s: 2, z: 1.5 },
+      category: "paint",
+    },
+  }).svg;
+  assert.match(shaping, /class="elev-draft-cursor"/);
+  assert.match(shaping, /class="elev-draft-close"/);
+});
+
+test("dragging a finish corner dimensions the gap to the side and to the top", async () => {
+  const { elevationSvg, finishLocate } = await import("../wall-elevation-render.js");
+  const points = [
+    { s: 0.8, z: 0 },
+    { s: 4, z: 0 },
+    { s: 4, z: 2.2 },
+    { s: 0.8, z: 2.2 },
+  ];
+  const length = 6;
+  const height = 2.7;
+  const corner = finishLocate(points, { mode: "corner", index: 3, length, height });
+  assert.deepEqual(corner.side, { s0: 0, s1: 0.8, z: 2.2 });
+  assert.equal(corner.vert.toward, "top");
+  assert.equal(corner.vert.z0, 2.2);
+  assert.equal(corner.vert.z1, height);
+  assert.equal(corner.vert.s, 0.8, "the height to the top is taken at the corner, not along the edge");
+
+  const sloped = [
+    { s: 1.45, z: 0 },
+    { s: 7.4, z: 0 },
+    { s: 7.4, z: 2.2 },
+    { s: 1.8, z: 1.5 },
+  ];
+  const low = finishLocate(sloped, { mode: "corner", index: 3, length: 7.405, height: 3 });
+  assert.equal(low.side.s1, 1.8);
+  assert.equal(low.side.z, 1.5);
+  assert.equal(low.vert.z0, 1.5, "the low corner is not given the high end's gap");
+  assert.equal(low.vert.s, 1.8);
+  assert.ok(Math.abs((3 - low.vert.z0) - 1.5) < 1e-9);
+
+  const side = finishLocate(points, { mode: "edge", index: 3, length, height });
+  assert.ok(side.side);
+  assert.equal(side.vert, undefined, "a vertical edge is only the gap to the side");
+
+  const top = finishLocate(points, { mode: "edge", index: 2, length, height });
+  assert.equal(top.side, undefined, "a horizontal edge is only the gap to the top");
+  assert.equal(top.vert.toward, "top");
+
+  const floor = finishLocate(points, { mode: "edge", index: 0, length, height });
+  assert.equal(floor, null, "an edge already on the floor has no clearance to draw");
+
+  const placing = finishLocate(null, { mode: "point", point: { s: 0.8, z: 2.2 }, length, height });
+  assert.equal(placing.side.s1, 0.8);
+  assert.equal(placing.vert.toward, "top");
+
+  const m = elevationModel(drawnDoc(), pack, { wallId: "w1", side: 1 });
+  const svg = elevationSvg(m, { width: 640, height: 280, interactive: true, locate: corner }).svg;
+  assert.match(svg, /data-elev-dim="side">800 mm</);
+  assert.match(svg, /data-elev-dim="top">500 mm</);
+  assert.match(svg, /class="elev-dim-line"/);
+  const idle = elevationSvg(m, { width: 640, height: 280, interactive: true }).svg;
+  assert.doesNotMatch(idle, /data-elev-dim="side"/);
+  assert.doesNotMatch(idle, /data-elev-dim="top"/);
 });

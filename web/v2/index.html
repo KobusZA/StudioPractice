@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,560&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="./v2.css?v=20261029-door-hinge" />
+  <link rel="stylesheet" href="./v2.css?v=20261030-add-finish-sheet" />
 </head>
 <body class="auth-pending">
   <div class="chrome">
@@ -348,6 +348,10 @@
           <button type="button" class="svc-profile-exit" id="v2-profile-exit"
                   title="Close the route profile and the Services panel. A click on empty plan leaves them open. Escape does the same.">Exit</button>
         </div>
+        <div class="elev-info-bar" id="v2-elev-info-bar" hidden>
+          <p>Drag the top of the wall to set its height. The line above is the next floor, or the roof on the top storey. Scroll to zoom; middle-drag or Alt-drag to move around. Fit shows the whole wall.</p>
+          <button type="button" id="v2-elev-info-dismiss">Don't show again</button>
+        </div>
         <canvas id="v2-service-profile-canvas"></canvas>
         <span class="elev-edge-mode" id="v2-elev-edge-mode" hidden role="group" aria-label="Drag an edge of the finish to">
           <span class="elev-edge-subject">Editing the finish</span>
@@ -357,6 +361,10 @@
           </span>
         </span>
         <div class="elev-dock-body" id="v2-elevation-body" hidden></div>
+        <div class="elev-coach" id="v2-elev-coach" hidden>
+          <p>Drag the top of the wall to set its height.</p>
+          <button type="button" id="v2-elev-coach-ok">Got it</button>
+        </div>
       </div>
       </div>
       </div>
@@ -441,61 +449,77 @@
           </label>
           <button type="button" id="v2-ctx-shape-poly" hidden title="Turn this rectangle into a polygon so corners can be dragged and edges split, e.g. to notch out a cupboard run">Edit as polygon</button>
           <p class="hint" id="v2-ctx-shape-poly-hint" hidden>Drag a corner to reshape it. Click an edge to add a corner there. Delete removes the selected corner.</p>
-          <label id="v2-ctx-top-wrap" hidden>Top
-            <select id="v2-ctx-top">
-              <option value="level-above">Up to level above</option>
-              <option value="fixed">Fixed height</option>
-            </select>
-          </label>
-          <label id="v2-ctx-wallh-wrap" hidden>Wall height
-            <span class="plan-context-field">
-              <input id="v2-ctx-wallh" type="text" inputmode="decimal" autocomplete="off" />
-              <span>mm</span>
-            </span>
-          </label>
-          <label id="v2-ctx-sill-wrap" hidden>Sill
-            <span class="plan-context-field">
-              <input id="v2-ctx-sill" type="text" inputmode="decimal" autocomplete="off" />
-              <span>mm</span>
-            </span>
-          </label>
-          <label id="v2-ctx-owidth-wrap" hidden>Width
-            <span class="plan-context-field">
-              <input id="v2-ctx-owidth" type="text" inputmode="decimal" autocomplete="off" />
-              <span>mm</span>
-            </span>
-          </label>
-          <label id="v2-ctx-oheight-wrap" hidden>Height
-            <span class="plan-context-field">
-              <input id="v2-ctx-oheight" type="text" inputmode="decimal" autocomplete="off" />
-              <span>mm</span>
-            </span>
-          </label>
+          <div class="insp-metrics">
+            <label id="v2-ctx-sill-wrap" hidden>Sill
+              <span class="plan-context-field">
+                <input id="v2-ctx-sill" type="text" inputmode="decimal" autocomplete="off" />
+                <span>mm</span>
+              </span>
+            </label>
+            <label id="v2-ctx-owidth-wrap" hidden>Width
+              <span class="plan-context-field">
+                <input id="v2-ctx-owidth" type="text" inputmode="decimal" autocomplete="off" />
+                <span>mm</span>
+              </span>
+            </label>
+            <label id="v2-ctx-oheight-wrap" hidden>Height
+              <span class="plan-context-field">
+                <input id="v2-ctx-oheight" type="text" inputmode="decimal" autocomplete="off" />
+                <span>mm</span>
+              </span>
+            </label>
+            <label id="v2-ctx-ooffset-wrap" hidden>Offset
+              <span class="plan-context-field">
+                <input id="v2-ctx-ooffset" type="text" inputmode="decimal" autocomplete="off" aria-label="Offset from left, mm" />
+                <span>mm</span>
+              </span>
+            </label>
+          </div>
           <div class="planner-read-field" id="v2-ctx-osize-note" hidden>
             <strong></strong>
           </div>
-          <label id="v2-ctx-ooffset-wrap" hidden>Offset from left
-            <span class="plan-context-field">
-              <input id="v2-ctx-ooffset" type="text" inputmode="decimal" autocomplete="off" />
-              <span>mm</span>
-            </span>
-          </label>
           <div class="elev-preview-wrap" id="v2-ctx-elev-wrap" hidden>
-            <div class="elev-preview" id="v2-ctx-elev"></div>
+            <div class="elev-card-label">
+              <div class="elev-card-who">
+                <span>Wall elevation</span>
+                <em id="v2-ctx-elev-face">this face</em>
+              </div>
+              <div class="elev-card-actions">
+                <button type="button" class="elev-open-btn" id="v2-ctx-elev-flip" title="View the other face of this wall (mirrored left to right)">Flip face</button>
+                <button type="button" class="elev-open-btn" id="v2-ctx-elev-open" aria-expanded="false" title="Show this wall face in the strip under the plan. Drag the top of the wall to set its height; the line above it is the next floor or the roof.">Edit this face</button>
+              </div>
+            </div>
+            <div class="elev-card-stage">
+              <div class="elev-preview" id="v2-ctx-elev"></div>
+            </div>
             <div class="elev-finish-callout" id="v2-ctx-elev-callout" hidden></div>
-            <button type="button" id="v2-ctx-elev-open" title="Show this wall face in the strip under the plan. Drag the top of the wall to set its height; the line above it is the next floor or the roof.">Open elevation</button>
           </div>
           <div class="fin-panel" id="v2-ctx-finish" hidden></div>
+          <details class="wall-more" id="v2-ctx-wall-more" hidden>
+            <summary>Wall height and other settings</summary>
+            <div class="wall-more-fields" id="v2-ctx-wall-more-fields">
+              <label id="v2-ctx-top-wrap" hidden>Top
+                <select id="v2-ctx-top">
+                  <option value="level-above">Up to level above</option>
+                  <option value="fixed">Fixed height</option>
+                </select>
+              </label>
+              <label id="v2-ctx-wallh-wrap" hidden>Wall height
+                <span class="plan-context-field">
+                  <input id="v2-ctx-wallh" type="text" inputmode="decimal" autocomplete="off" />
+                  <span>mm</span>
+                </span>
+              </label>
+              <!-- Attach state on the object itself, not only in the Check panel:
+                   a wall whose base follows something else should say so the
+                   instant it is selected. -->
+              <div class="planner-read-field" id="v2-ctx-attach-wrap" hidden>
+                <span>Base</span>
+                <strong id="v2-ctx-attach">Not attached</strong>
+              </div>
+            </div>
+          </details>
           <button type="button" id="v2-ctx-convert" hidden title="Replace this room's walls with drawn walls you can select and edit one by one">Convert walls to drawn</button>
-          <!-- Attach state on the object itself, not only in the Check panel:
-               a wall whose base follows something else should say so the
-               instant it is selected. -->
-          <div class="planner-read-field" id="v2-ctx-attach-wrap" hidden>
-            <span>Base</span>
-            <strong id="v2-ctx-attach">Not attached</strong>
-          </div>
-          <button type="button" id="v2-ctx-flip" hidden>Flip swing</button>
-          <button type="button" id="v2-ctx-hinge" hidden>Flip hinge</button>
         </div>
         <!-- 2.5D services: route settings while Draw route is armed, and the
              properties of a selected route point or run. Rendered by
@@ -1026,6 +1050,6 @@
     </form>
   </div>
 
-  <script type="module" src="./ui.js?v=20261029-door-flip"></script>
+  <script type="module" src="./ui.js?v=20261030-finish-rows"></script>
 </body>
 </html>

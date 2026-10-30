@@ -138,7 +138,7 @@ import {
   setLineLength,
 } from "./click-draw.js?v=20261022-wall-loc";
 import { area as polyArea, bbox, clampToPoly, clipSegToRect, distToSeg, fitPolygonToHost, formatLengthMm, headingDeg, parseLengthMm, pointInPoly, roundGrid, translatePolyEdge } from "./geom.js?v=20261029-fit-host";
-import { SNAP_PIXEL_TOL, GAP_MAX_M, ALIGN_ORIGIN_MAX_M, NICE_MIN_STEP_M, PROBE_VECTORS, applyNicePoint, bestEndpointSnap, collectSnapEdges, collectSnapTargets, isExactPointSnap, nearestAlignments, resolveProbes, snapEdgeToLine, snapLengthFrom, snapNiceDelta, snapPoint, snapToFace } from "./snap.js?v=20261029-edge-line";
+import { SNAP_PIXEL_TOL, GAP_MAX_M, ALIGN_ORIGIN_MAX_M, NICE_MIN_STEP_M, PROBE_VECTORS, applyNicePoint, bestLinearMoveSnap, collectSnapEdges, collectSnapTargets, isExactPointSnap, nearestAlignments, resolveProbes, snapEdgeToLine, snapLengthFrom, snapNiceDelta, snapPoint, snapToFace } from "./snap.js?v=20261030-face-move";
 import { DEFAULT_ROOF_PITCH, roofGuideLines } from "./roof.js";
 import {
   ATTACHABLE_KINDS,
@@ -170,10 +170,10 @@ import {
 import { enclosedFace, syncRoomBounds } from "./room-bound.js";
 import { REGION_CONVENTIONS, regionConvention } from "./region.js";
 import { ELEVATION_SNAP, applyBandEdit, applyOpeningEdit, applyOutlinePoints, applyWallTopEdit, axisAlignedOutline, elevationModel, faceRefForSelection, snapElevation, translateOutlineEdge } from "./wall-elevation.js";
-import { createFinishRegion, createFinishRun, finishProductById, libraryLine, planWallFinishMarks, presetFromRoom, rulesFromPreset, savePreset } from "./finish-model.js?v=20261029-finish-plan";
+import { createFinishRegion, createFinishRun, dependentsOfWalls, finishProductById, libraryLine, planWallFinishMarks, presetFromRoom, rulesFromPreset, savePreset } from "./finish-model.js?v=20261030-delete-wall-hosts";
 import { FINISH_CATEGORIES, finishId, finishSwatch, normalizeFinishProducts, normalizeFinishSettings } from "./finish-data.js";
-import { HEIGHT_PRESETS, faceFinishHtml, finishCalloutHtml, openingCalloutHtml, floorProductSuggestions, parseTarget, productsHtml, roomFinishHtml, slabFinishHtml, targetOptions } from "./finish-panel.js?v=20261029-edge-square";
-import { clampElevationView, edgeResizeCursor, elevationSvg, zoomElevationView } from "./wall-elevation-render.js?v=20261029-elev-view";
+import { HEIGHT_PRESETS, draftBandPreviewHtml, faceFinishHtml, finishCalloutHtml, openingCalloutHtml, floorProductSuggestions, parseTarget, productsHtml, roomFinishHtml, slabFinishHtml, targetOptions } from "./finish-panel.js?v=20261030-finish-rows";
+import { clampElevationView, edgeResizeCursor, elevationSvg, finishLocate, zoomElevationView } from "./wall-elevation-render.js?v=20261030-finish-locate";
 import { CORNER_JOIN_TOL, deriveWalls, drawnSegmentFromWall, drawnWallThickness, isStripFooting, skuDrawnHeight, statusVisible } from "./walls.js";
 import { findJoinTarget, resolveJoin, sideTowardTarget } from "./wall-join.js?v=20261022-corner-b";
 import {
@@ -503,9 +503,13 @@ const el = {
   ctxOOffset: document.getElementById("v2-ctx-ooffset"),
   ctxOOffsetWrap: document.getElementById("v2-ctx-ooffset-wrap"),
   ctxElevWrap: document.getElementById("v2-ctx-elev-wrap"),
+  ctxElevFace: document.getElementById("v2-ctx-elev-face"),
   ctxElev: document.getElementById("v2-ctx-elev"),
   ctxElevCallout: document.getElementById("v2-ctx-elev-callout"),
   ctxElevOpen: document.getElementById("v2-ctx-elev-open"),
+  ctxElevFlip: document.getElementById("v2-ctx-elev-flip"),
+  ctxWallMore: document.getElementById("v2-ctx-wall-more"),
+  ctxWallMoreFields: document.getElementById("v2-ctx-wall-more-fields"),
   ctxFinish: document.getElementById("v2-ctx-finish"),
   ctxShapePoly: document.getElementById("v2-ctx-shape-poly"),
   ctxShapePolyHint: document.getElementById("v2-ctx-shape-poly-hint"),
@@ -513,14 +517,16 @@ const el = {
   elevFit: document.getElementById("v2-elev-fit"),
   elevInfo: document.getElementById("v2-elev-info"),
   elevInfoNote: document.getElementById("v2-elev-info-note"),
+  elevInfoBar: document.getElementById("v2-elev-info-bar"),
+  elevInfoDismiss: document.getElementById("v2-elev-info-dismiss"),
+  elevCoach: document.getElementById("v2-elev-coach"),
+  elevCoachOk: document.getElementById("v2-elev-coach-ok"),
   elevFlip: document.getElementById("v2-elev-flip"),
   elevEdgeMode: document.getElementById("v2-elev-edge-mode"),
   levelParent: document.getElementById("v2-level-parent"),
   levelReference: document.getElementById("v2-level-reference"),
   ctxAttach: document.getElementById("v2-ctx-attach"),
   ctxAttachWrap: document.getElementById("v2-ctx-attach-wrap"),
-  ctxFlip: document.getElementById("v2-ctx-flip"),
-  ctxHinge: document.getElementById("v2-ctx-hinge"),
   massOverlay: document.getElementById("v2-mass-overlay"),
   massTitle: document.getElementById("v2-mass-title"),
   massCanvas: document.getElementById("v2-mass-canvas"),
@@ -734,7 +740,7 @@ let hover = null;
 let hoverPoint = null;
 let wallsCache = [];
 // Wall elevation: the face the strip under the plan is showing, and a drag in
-// progress. `elevationOpen` is the "Open elevation" toggle; the face itself
+// progress. `elevationOpen` is the "Edit this face" toggle; the face itself
 // follows the selection (see wall-elevation.js).
 let elevationOpen = false;
 let elevationFace = null;
@@ -762,8 +768,12 @@ let hoverFinishRegionId = null;
 let bareFinishHost = null;
 let finishSavedRegionId = null;
 // The wall finish picked in the panel or the elevation, the one the pointer is
-// over in the panel, and the one just saved.
+// over in the panel, and the one just saved. A window or door being edited
+// clears this: the elevation allows one shape edit at a time.
 let selectedBandId = null;
+// The summary has asked before taking the wall type's coat off this face.
+let finishBareAsk = false;
+let notedOpeningEditId = null;
 let hoverBandId = null;
 let finishSavedBandId = null;
 // The note open on the inspector elevation: a finish, or a window or door.
@@ -772,7 +782,7 @@ let finishSavedBandId = null;
 let previewCallout = null;
 let openingCalloutClosed = null;
 // A wall finish being drawn on the elevation: corners in viewing coordinates
-// (along the face, up from the base), the same click-the-corners flow as a floor.
+// (along the face, up from the base). Double-click or Esc closes it.
 let elevFinishDraft = null;
 // The corner picked on a drawn wall finish, so Delete removes that corner.
 let selectedElevVertex = null;
@@ -792,6 +802,9 @@ let snapGuide = null;
 // Screen boxes of labels already painted this frame, so a snap string can
 // step aside from a room or floor edge length instead of drawing through it.
 let labelOccupied = [];
+// How far each wall's finish stripe and its name reach along the screen
+// normal, so the length chip can sit on the free side instead of on them.
+let wallFinishExtents = new Map();
 // Snap calibration / tracing clicks to the PDF's own endpoints and crossings.
 // Session-only; on by default once a plan-set page is showing.
 let snapToPdf = true;
@@ -3247,6 +3260,7 @@ function shouldHidePlanEmpty() {
 
 function draw() {
   labelOccupied = [];
+  wallFinishExtents = new Map();
   const rect = el.canvasWrap.getBoundingClientRect();
   ctx.clearRect(0, 0, rect.width, rect.height);
   if (!pack) return;
@@ -3609,6 +3623,7 @@ let lastRibbonHasSelection = null;
 let lastRibbonDoor = null;
 
 function render() {
+  releaseFinishEditForOpening();
   if (tool !== "select" || !propertyRing()) propertySelected = false;
   syncSheets();
   draw();
@@ -4334,6 +4349,9 @@ function drawWallFinishMarks(walls) {
     ctx.lineWidth = mark.skirting ? (emphasized ? 2.2 : 1.25) : (emphasized ? 3.4 : 1.7);
     ctx.setLineDash(mark.skirting ? [5, 4] : []);
     ctx.stroke();
+    // The stripe, and the name when there is one, occupy this side of the
+    // wall. The length chip reads that and sits on the other side.
+    noteWallFinishExtent(wall.id, dx, dy, off + ctx.lineWidth / 2 + 1);
     const label = emphasized && !(mark.skirting && mark.beside) && Math.hypot(bx - ax, by - ay) >= 36;
     if (!label) continue;
     ctx.setLineDash([]);
@@ -4341,12 +4359,17 @@ function drawWallFinishMarks(walls) {
     ctx.fillStyle = "#1a1612";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    // Dark type on the wall stroke vanishes, and a longer name (Render)
-    // reaches further back than a short one. Keep the usual offset unless
-    // the near edge would cross the wall; then step the name out.
+    // Dark type on the wall stroke vanishes, and a longer name reaches
+    // further back than a short one. The length chip takes the other side,
+    // so this offset only has to keep the name off the wall and the stripe.
     const halfText = ctx.measureText(mark.label).width / 2;
-    const textOff = Math.max(off + 11, half + halfText + 3);
-    ctx.fillText(mark.label, (ax + bx) / 2 + dx * textOff, (ay + by) / 2 + dy * textOff);
+    const ink = Math.abs(dx) * halfText + Math.abs(dy) * 8;
+    const textOff = Math.max(off + 11, half + halfText + 3, half + ink + 4);
+    const lx = (ax + bx) / 2 + dx * textOff;
+    const ly = (ay + by) / 2 + dy * textOff;
+    ctx.fillText(mark.label, lx, ly);
+    labelOccupied.push({ x: lx - halfText, y: ly - 8, w: halfText * 2, h: 16 });
+    noteWallFinishExtent(wall.id, dx, dy, textOff + ink);
   }
   ctx.restore();
 }
@@ -4824,7 +4847,7 @@ function drawSelectionHighlights(walls) {
         strokeWorldLine(f.x1, f.y1, f.x2, f.y2);
         ctx.setLineDash([]);
       }
-      drawLengthLabel(obj.x1, obj.y1, obj.x2, obj.y2);
+      drawLengthLabel(obj.x1, obj.y1, obj.x2, obj.y2, ref.kind === "segment" ? wallLengthPlace(obj) : null);
     } else if (ref.kind === "item") {
       const sku = skuById(obj.sku);
       if (sku) {
@@ -5189,7 +5212,49 @@ function segmentLength(x1, y1, x2, y2) {
   return Math.hypot(x2 - x1, y2 - y1);
 }
 
-function drawLengthLabel(x1, y1, x2, y2) {
+function noteWallFinishExtent(wallId, nx, ny, far) {
+  if (!wallId || !(far > 0)) return;
+  const list = wallFinishExtents.get(wallId);
+  if (list) list.push({ x: nx, y: ny, far });
+  else wallFinishExtents.set(wallId, [{ x: nx, y: ny, far }]);
+}
+
+function finishExtentAlong(wallId, normal) {
+  let far = 0;
+  for (const side of wallFinishExtents.get(wallId) || []) {
+    if (side.x * normal.x + side.y * normal.y > 0.5) far = Math.max(far, side.far);
+  }
+  return far;
+}
+
+/** Where a selected wall's length chip sits. Painted just above the
+ *  centreline it lands on the finish stripe and the "Wall tile" name, so a
+ *  finished side is given to the finish and the chip takes the other side. */
+function wallLengthPlace(wall) {
+  const [ax, ay] = worldToScreen(wall.x1, wall.y1);
+  const [bx, by] = worldToScreen(wall.x2, wall.y2);
+  let tx = bx - ax;
+  let ty = by - ay;
+  const span = Math.hypot(tx, ty) || 1;
+  tx /= span;
+  ty /= span;
+  const sides = [{ x: -ty, y: tx }, { x: ty, y: -tx }];
+  sides.sort((a, b) => {
+    const fa = finishExtentAlong(wall.id, a);
+    const fb = finishExtentAlong(wall.id, b);
+    if (Math.abs(fa - fb) > 0.5) return fa - fb;
+    return a.y - b.y;
+  });
+  const normal = sides[0];
+  const half = Math.max(2, (wall.thickness || 0.22) * cam.scale) / 2;
+  const along = finishExtentAlong(wall.id, normal);
+  const near = Math.max(6, half + 4, along + 4);
+  // A thin unfinished wall already clears with the chip 6px above the line.
+  if (along === 0 && near <= 6.5 && normal.y < -0.9 && Math.abs(normal.x) < 0.15) return null;
+  return { normal, near };
+}
+
+function drawLengthLabel(x1, y1, x2, y2, place = null) {
   const len = segmentLength(x1, y1, x2, y2);
   if (len < 0.05) return;
   const [ax, ay] = worldToScreen(x1, y1);
@@ -5203,9 +5268,38 @@ function drawLengthLabel(x1, y1, x2, y2) {
   ctx.save();
   ctx.font = "600 12px Source Sans 3, sans-serif";
   ctx.textAlign = "center";
-  ctx.textBaseline = "bottom";
   const width = ctx.measureText(label).width + 8;
-  const box = { x: sx - width / 2, y: sy - 22, w: width, h: 16 };
+  const height = 16;
+  if (place?.normal) {
+    const hx = width / 2;
+    const hy = height / 2;
+    const extent = Math.abs(place.normal.x) * hx + Math.abs(place.normal.y) * hy;
+    let near = place.near;
+    const boxAt = (dist) => {
+      const cx = sx + place.normal.x * (dist + extent);
+      const cy = sy + place.normal.y * (dist + extent);
+      return { x: cx - hx, y: cy - hy, w: width, h: height, cx, cy };
+    };
+    let box = boxAt(near);
+    const hits = (b) => labelOccupied.some((r) => rectsOverlap(
+      { x: b.x - 3, y: b.y - 3, w: b.w + 6, h: b.h + 6 },
+      r,
+    ));
+    for (let step = 0; step < 4 && hits(box); step += 1) {
+      near += 18;
+      box = boxAt(near);
+    }
+    labelOccupied.push(box);
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = "rgba(244, 237, 225, 0.92)";
+    ctx.fillRect(box.x, box.y, box.w, box.h);
+    ctx.fillStyle = "#1a1612";
+    ctx.fillText(label, box.cx, box.cy);
+    ctx.restore();
+    return;
+  }
+  ctx.textBaseline = "bottom";
+  const box = { x: sx - width / 2, y: sy - 22, w: width, h: height };
   labelOccupied.push(box);
   ctx.fillStyle = "rgba(244, 237, 225, 0.92)";
   ctx.fillRect(box.x, box.y, box.w, box.h);
@@ -8313,7 +8407,7 @@ function openWallFinishes() {
   drawRibbon();
   if (selectedElevationFace()) {
     elevationOpen = true;
-    setStatusMessage("Add finishes in the inspector, or drag the edges of a band in the elevation.", "ok");
+    setStatusMessage("The picture of the wall, then Add a finish. Or drag the edges of a band in the elevation.", "ok");
   } else {
     setStatusMessage("Select a wall to finish it, or a room to finish all its walls.", "ok");
   }
@@ -11303,6 +11397,10 @@ function onPointerDown(ev) {
     } else if (!(store.isSelected(hit.kind, hit.id) && store.selected.length > 1)) {
       store.selectOne(hit);
     }
+    // The wall is the selection. A finish picked earlier must not take Delete.
+    if (clearFinishPick() && hit.kind === "segment") {
+      setStatusMessage("Wall selected. Delete asks before the wall is removed.", "ok");
+    }
     store.pushUndo();
     const slideId = hit.kind === "opening" && store.selected.every((r) => r.kind === "opening") ? hit.id : null;
     if (slideId) {
@@ -12013,20 +12111,27 @@ function onPointerMove(ev) {
     if (Math.hypot(dx, dy) * cam.scale > 2) drag.moved = true;
     let grid = activeGrid();
     snapGuide = null;
-    // Endpoint-to-endpoint snapping only makes sense for a single wall or
-    // beam: with a mixed/multi selection there's no single pair of
-    // endpoints to test, so those still fall back to plain grid rounding.
+    // Snapping only makes sense for a single wall or beam: with a mixed
+    // selection there is no one centreline, or one pair of faces, to test,
+    // so those still fall back to plain grid rounding. Faces are included
+    // so a side can meet another wall's end and an end can meet its side,
+    // not only so the centrelines meet.
     if (drag.snaps.length === 1 && drag.snaps[0].x1 !== undefined) {
       const single = drag.snaps[0];
       const exclude = single.ref.kind === "segment" ? { excludeSegmentIds: new Set([single.ref.id]) }
         : { excludeBeamIds: new Set([single.ref.id]) };
-      const targets = collectSnapTargets(store.doc, snapOpts(exclude));
+      const opts = snapOpts(exclude);
+      const targets = collectSnapTargets(store.doc, opts);
+      const edges = collectSnapEdges(store.doc, opts);
       const tol = SNAP_PIXEL_TOL / cam.scale;
-      const points = [
-        { x: single.x1 + dx, y: single.y1 + dy },
-        { x: single.x2 + dx, y: single.y2 + dy },
-      ];
-      const best = bestEndpointSnap(points, targets, tol);
+      const moving = objByRef(single.ref);
+      const thickness = single.ref.kind === "segment" && moving ? segmentThickness(moving) : 0;
+      const best = bestLinearMoveSnap({
+        x1: single.x1 + dx,
+        y1: single.y1 + dy,
+        x2: single.x2 + dx,
+        y2: single.y2 + dy,
+      }, thickness, targets, edges, tol);
       if (best) {
         dx += best.dx;
         dy += best.dy;
@@ -12213,6 +12318,9 @@ function onPointerUp(ev) {
     const tap = Math.hypot(box.w, box.h) * cam.scale < 4;
     if (drag.shift) store.toggleRefs(hits);
     else if (!(tap && drag.holdRoute)) store.setSelection(hits);
+    if (clearFinishPick() && store.selected.length && store.selected.every((r) => r.kind === "segment")) {
+      setStatusMessage("Wall selected. Delete asks before the wall is removed.", "ok");
+    }
   } else if (drag.kind === "move") {
     if (!drag.moved) {
       // No-op click: drop the speculative undo entry. Put the document back
@@ -12258,6 +12366,150 @@ function onPointerUp(ev) {
   render();
 }
 
+/** Words for the finish under the pointer, including a named product. */
+function finishDisplayName(band) {
+  if (!band || band.category === "none") return "the bare patch";
+  const label = band.label || FINISH_CATEGORIES[band.category]?.label || "This finish";
+  const product = finishProductById(store.doc, band.productId);
+  const named = product?.name || product?.code;
+  return named ? `${named} (${label})` : label;
+}
+
+function joinWords(parts) {
+  if (parts.length <= 1) return parts[0] || "";
+  if (parts.length === 2) return `${parts[0]} and ${parts[1]}`;
+  return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+}
+
+/** What Delete will take off, said before it happens. */
+function finishDeletePrompt(band) {
+  const name = finishDisplayName(band);
+  if (band.category === "none") {
+    return {
+      title: "Remove the bare patch?",
+      message: "The bare patch will be removed. The finish from the wall type comes back on this part. The wall stays.",
+      action: "Remove bare patch",
+      cancel: "Keep the bare patch",
+      kept: "The bare patch stays.",
+      done: "Bare patch removed. The wall finish is back on this part.",
+    };
+  }
+  if (band.source === "rule") {
+    return {
+      title: `Remove ${name}?`,
+      message: `${name} will be removed from every wall of this room. The walls stay.`,
+      action: "Remove finish",
+      cancel: "Keep the finish",
+      kept: `${name} stays on the walls.`,
+      done: `${name} removed from the walls of this room.`,
+    };
+  }
+  if (band.source === "default") {
+    return {
+      title: `Take ${name} off this part?`,
+      message: `${name} from the wall type will be taken off this part of the face. The wall stays.`,
+      action: "Take it off",
+      cancel: "Keep it",
+      kept: `${name} stays on the wall.`,
+      done: `${name} is off this part of the face. The wall stays.`,
+    };
+  }
+  return {
+    title: `Delete ${name}?`,
+    message: `${name} will be deleted from this face. The wall stays.`,
+    action: "Delete finish",
+    cancel: "Keep the finish",
+    kept: `${name} stays on the wall.`,
+    done: `${name} deleted. The wall stays.`,
+  };
+}
+
+/** The finish Delete should remove: the one clicked, and not one of its corners. */
+function selectedFinishBand() {
+  if (!selectedBandId || selectedElevVertex != null) return null;
+  return finishFaceModel()?.finishBands.find((b) => b.id === selectedBandId) || null;
+}
+
+/** A click on the wall itself leaves any finish unselected. Returns true when one was cleared. */
+function clearFinishPick() {
+  const had = Boolean(selectedBandId) || selectedElevVertex != null || previewCallout?.kind === "finish";
+  selectedBandId = null;
+  selectedElevVertex = null;
+  if (previewCallout?.kind === "finish") previewCallout = null;
+  return had;
+}
+
+function finishSelectStatus(band) {
+  const name = finishDisplayName(band);
+  if (band.category === "none") return "Bare patch selected. Delete removes it and puts the wall finish back. The wall stays.";
+  if (band.source === "rule") return `${name} selected. Delete removes it from every wall of this room. The walls stay.`;
+  if (band.source === "default") return `${name} selected. Delete takes it off this part of the face. The wall stays.`;
+  if (elevRing(band)) return `${name} selected. Drag a corner to reshape it. Delete removes this finish. The wall stays.`;
+  return `${name} selected. Delete removes this finish from the face. The wall stays.`;
+}
+
+function announceSelectedFinish(id = selectedBandId) {
+  const band = id ? finishFaceModel()?.finishBands.find((b) => b.id === id) : null;
+  if (band) setStatusMessage(finishSelectStatus(band), "ok");
+}
+
+/**
+ * Delete with the wall itself selected, and no finish picked on it.
+ * Names the wall and whatever on it would go with it.
+ */
+function elevationWallDeletePrompt() {
+  const segments = store.selected.filter((r) => r.kind === "segment");
+  if (!segments.length || segments.length !== store.selected.length) return null;
+  const hosted = dependentsOfWalls(store.doc, pack, segments.map((r) => r.id));
+  const openings = (store.doc.openings || []).filter((o) => hosted.openingIds.includes(o.id));
+  let doors = 0;
+  let windows = 0;
+  for (const opening of openings) {
+    if (skuById(opening.sku)?.category === "door") doors += 1;
+    else windows += 1;
+  }
+  const parts = [];
+  const finishes = hosted.finishRunIds.length;
+  if (finishes) parts.push(finishes === 1 ? "1 finish" : `${finishes} finishes`);
+  if (windows) parts.push(windows === 1 ? "1 window" : `${windows} windows`);
+  if (doors) parts.push(doors === 1 ? "1 door" : `${doors} doors`);
+  const many = segments.length > 1;
+  const lead = many ? `These ${segments.length} walls will be deleted.` : "The wall will be deleted.";
+  const extra = parts.length ? ` ${joinWords(parts)} on ${many ? "them" : "it"} will be deleted too.` : "";
+  return {
+    title: many ? `Delete these ${segments.length} walls?` : "Delete this wall?",
+    message: `${lead}${extra}`,
+    action: many ? "Delete walls" : "Delete wall",
+    cancel: many ? "Keep the walls" : "Keep the wall",
+    kept: many ? "The walls stay." : "The wall stays.",
+  };
+}
+
+let deleteConfirming = false;
+
+/** Ask before a delete. `run` happens only after the destructive button. */
+function askDelete(prompt, run) {
+  if (deleteConfirming) return;
+  deleteConfirming = true;
+  sheetUi.ask({
+    title: prompt.title,
+    message: prompt.message,
+    choices: [
+      { id: "cancel", label: prompt.cancel || "Keep it", primary: true },
+      { id: "delete", label: prompt.action },
+    ],
+  }).then((choice) => {
+    if (choice !== "delete") {
+      if (prompt.kept) setStatusMessage(prompt.kept, "ok");
+      return;
+    }
+    run();
+    render();
+  }).finally(() => {
+    deleteConfirming = false;
+  });
+}
+
 function deleteElevCorner() {
   if (selectedElevVertex == null || !selectedBandId || !elevationFace) return false;
   const model = elevationModel(store.doc, pack, elevationFace, wallsCache);
@@ -12281,7 +12533,24 @@ function deleteElevCorner() {
 }
 
 function deleteSelection() {
+  if (deleteConfirming) return;
   if (deleteElevCorner()) return;
+  // A clicked finish is the thing Delete removes. The wall underneath stays
+  // selected so the elevation can keep showing it, and must not go with the key.
+  const band = selectedFinishBand();
+  if (band) {
+    const prompt = finishDeletePrompt(band);
+    askDelete(prompt, () => {
+      const current = selectedFinishBand();
+      if (!current || current.id !== band.id) {
+        setStatusMessage("That finish is no longer selected.", "warn");
+        return;
+      }
+      removeFinishBand(current);
+      setStatusMessage(prompt.done, "ok");
+    });
+    return;
+  }
   // While a region's corners are showing, Delete is about them, never the floor under them.
   const editing = editingFinishRegion();
   if (editing) {
@@ -12330,6 +12599,25 @@ function deleteSelection() {
     return;
   }
   if (!store.selected.length) return;
+  const wallPrompt = elevationWallDeletePrompt();
+  if (wallPrompt) {
+    const snapshot = store.selected.map((r) => ({ kind: r.kind, id: r.id }));
+    askDelete(wallPrompt, () => {
+      const same = snapshot.length === store.selected.length
+        && snapshot.every((r, i) => store.selected[i]?.kind === r.kind && store.selected[i]?.id === r.id);
+      if (!same) {
+        setStatusMessage("The selection changed. Nothing was deleted.", "warn");
+        return;
+      }
+      commitSelectionDelete();
+    });
+    return;
+  }
+  commitSelectionDelete();
+}
+
+function commitSelectionDelete() {
+  if (!store.selected.length) return;
   store.pushUndo();
   const isService = (ref) => ref.kind === "serviceNode" || ref.kind === "serviceEdge";
   // Services clean up after themselves (a deleted point takes its runs, an
@@ -12361,6 +12649,26 @@ function deleteSelection() {
   if (goneRegions.size) {
     store.doc.finishRegions = store.doc.finishRegions.filter((r) => !goneRegions.has(r.id));
     editingRegionId = null;
+  }
+  // A face finish, window or door placed on a deleted wall goes with it.
+  // A room's finish rule does not: the next wall of that room still gets it.
+  const deletedSegments = store.selected.filter((r) => !isService(r) && r.kind === "segment").map((r) => r.id);
+  const hosted = dependentsOfWalls(store.doc, pack, deletedSegments);
+  if (hosted.finishRunIds.length) {
+    const goneRuns = new Set(hosted.finishRunIds);
+    store.doc.finishRuns = (store.doc.finishRuns || []).filter((r) => !goneRuns.has(r.id));
+    if (selectedBandId && hosted.finishRunIds.some((id) => selectedBandId.startsWith(`run:${id}:`))) {
+      selectedBandId = null;
+      selectedElevVertex = null;
+    }
+  }
+  if (hosted.openingIds.length) {
+    const goneOpenings = new Set(hosted.openingIds);
+    store.doc.openings = (store.doc.openings || []).filter((o) => !goneOpenings.has(o.id));
+  }
+  if (elevationFace && deletedSegments.includes(elevationFace.wallId)) {
+    elevFinishDraft = null;
+    if (previewCallout) previewCallout = null;
   }
   for (const ref of store.selected.filter((r) => !isService(r))) {
     const arr = collectionFor(store.doc, ref.kind);
@@ -12427,16 +12735,25 @@ function wireKeyboard() {
         return;
       }
       if (elevFinishDraft) {
-        if (elevFinishDraft.points.length) {
-          elevFinishDraft.points.pop();
-          setStatusMessage(elevFinishDraft.points.length
-            ? "Last corner removed."
-            : "Click the first corner on the elevation.", "ok");
-        } else {
+        ev.preventDefault();
+        // A shape that can close finishes. Fewer than three corners, or a
+        // second press after a shape that would not close, leaves the drawing.
+        if (elevFinishDraft.escAgainCancels || elevFinishDraft.points.length < 3) {
           elevFinishDraft = null;
           setStatusMessage("Drawing cancelled.", "ok");
+          render();
+          return;
         }
-        render();
+        finishElevFinishDraft();
+        if (elevFinishDraft) elevFinishDraft.escAgainCancels = true;
+        return;
+      }
+      // Editing a finish on the open elevation sits on top of that wall.
+      // Escape puts the finish down and leaves the elevation open, so the
+      // next press is what closes the strip.
+      if (elevationFinishEditActive()) {
+        ev.preventDefault();
+        leaveFinishEdit();
         return;
       }
       // Editing a finish sits on top of its floor. Escape puts the finish
@@ -13240,11 +13557,59 @@ function openingHostSegment() {
 
 /** Put the inspector back on the wall that holds the selected window or door. */
 function selectOpeningHostWall() {
+  if (!focusElevationWall()) return false;
+  render();
+  return true;
+}
+
+/** Leave the opening so the wall — and a finish on it — can be edited instead. */
+function focusElevationWall() {
   const ref = openingHostSegment();
   if (!ref) return false;
   store.selectOne(ref);
-  render();
   return true;
+}
+
+/** A finish on the open elevation is selected, so Line / Corner is live. */
+function elevationFinishEditActive() {
+  return Boolean(elevationShowing() && (selectedBandId || selectedElevVertex != null));
+}
+
+/**
+ * Leave the finish being reshaped. The wall stays selected and the elevation
+ * stays open. A drag that has not been released is dropped, not saved.
+ */
+function leaveFinishEdit() {
+  elevationDrag = null;
+  selectedBandId = null;
+  selectedElevVertex = null;
+  if (previewCallout?.kind === "finish") previewCallout = null;
+  setStatusMessage("Finish left as it is. Delete asks before the wall is removed.", "ok");
+  render();
+}
+
+/**
+ * The open elevation edits one shape at a time. Choosing a window or door
+ * drops the finish that was being reshaped, so its corners are no longer live.
+ */
+function releaseFinishEditForOpening() {
+  const openingId = selectedOpeningId();
+  if (!openingId) {
+    notedOpeningEditId = null;
+    return;
+  }
+  if (openingId === notedOpeningEditId) return;
+  notedOpeningEditId = openingId;
+  if (!selectedBandId && selectedElevVertex == null && previewCallout?.kind !== "finish") return;
+  selectedBandId = null;
+  selectedElevVertex = null;
+  if (previewCallout?.kind === "finish") previewCallout = null;
+  if (!elevationOpen) return;
+  const opening = objByRef(store.primary);
+  const door = skuById(opening?.sku)?.category === "door";
+  setStatusMessage(door
+    ? "Editing the door. The finish shape is left as it is."
+    : "Editing the window. The finish shape is left as it is.", "ok");
 }
 
 /** The edit a drag in progress implies, in viewing coordinates (metres). */
@@ -13336,10 +13701,64 @@ function resetElevationView() {
   el.elevBody?.classList.remove("is-panning");
 }
 
+const ELEV_INFO_KEY = "v2-elev-info-dismissed";
+const ELEV_COACH_KEY = "v2-elev-coach-dismissed";
+// True only while the coach is actually on screen, so closing the strip
+// dismisses it and a services profile that borrows the dock does not.
+let elevCoachLive = false;
+
+function elevDismissed(key) {
+  try { return window.localStorage.getItem(key) === "1"; } catch { return false; }
+}
+
+function elevDismiss(key) {
+  try { window.localStorage.setItem(key, "1"); } catch { /* private mode */ }
+}
+
+function dismissElevCoach() {
+  elevDismiss(ELEV_COACH_KEY);
+  elevCoachLive = false;
+  setHidden(el.elevCoach, true);
+}
+
+/** First-run note and height-handle coach. The services profile never shows them. */
+function syncElevHints(show) {
+  if (!show) {
+    setHidden(el.elevInfoBar, true);
+    setHidden(el.elevCoach, true);
+    if (!elevationOpen && elevCoachLive) dismissElevCoach();
+    if (!elevationOpen) elevCoachLive = false;
+    return;
+  }
+  setHidden(el.elevInfoBar, elevDismissed(ELEV_INFO_KEY));
+  const handle = el.elevBody?.querySelector(".elev-wall-top-handle");
+  const showCoach = !elevDismissed(ELEV_COACH_KEY) && Boolean(handle);
+  setHidden(el.elevCoach, !showCoach);
+  elevCoachLive = showCoach;
+  if (showCoach) placeElevCoach();
+}
+
+function placeElevCoach() {
+  const handle = el.elevBody?.querySelector(".elev-wall-top-handle");
+  const coach = el.elevCoach;
+  const dock = el.serviceProfileDock;
+  if (!handle || !coach || coach.hidden || !dock) return;
+  const hr = handle.getBoundingClientRect();
+  const dr = dock.getBoundingClientRect();
+  const width = coach.offsetWidth || 220;
+  const height = coach.offsetHeight || 64;
+  let left = hr.left + hr.width / 2 - width / 2 - dr.left;
+  left = Math.max(8, Math.min(left, dock.clientWidth - width - 8));
+  let top = hr.top - dr.top - height - 10;
+  if (top < 8) top = 8;
+  coach.style.left = `${Math.round(left)}px`;
+  coach.style.top = `${Math.round(top)}px`;
+}
+
 /**
- * Show the elevation in the strip under the plan while "Open elevation" is on
- * and a wall face is selected. Returns true when it is showing, so the route
- * profile leaves the strip alone.
+ * Show the elevation in the strip under the plan while the inspector's
+ * "Edit this face" control is on and a wall face is selected. Returns true
+ * when it is showing, so the route profile leaves the strip alone.
  */
 function syncElevationDock() {
   const dock = el.serviceProfileDock;
@@ -13355,17 +13774,21 @@ function syncElevationDock() {
     setHidden(el.elevFit, true);
     setHidden(el.elevInfo, true);
     closeElevInfo();
+    syncElevHints(false);
     setHidden(el.elevFlip, true);
     setHidden(el.elevEdgeMode, true);
     setHidden(el.serviceProfileCanvas, false);
     setHidden(dock.querySelector(".svc-profile-mode"), false);
     setHidden(document.getElementById("v2-profile-select-all"), false);
+    el.elevBody?.classList.remove("is-drawing");
     return false;
   }
   elevationFace = face;
   const model = elevationModelNow(face);
   if (!model) {
     elevationOpen = false;
+    el.elevBody?.classList.remove("is-drawing");
+    syncElevHints(false);
     return false;
   }
   setHidden(dock, false);
@@ -13378,6 +13801,7 @@ function syncElevationDock() {
   setHidden(el.elevInfo, false);
   if (el.elevFit) el.elevFit.disabled = elevationViewFitted();
   setHidden(el.elevBody, false);
+  el.elevBody?.classList.toggle("is-drawing", Boolean(elevFinishDraft && elevFinishDraft.face.wallId === face.wallId));
   const faceKey = `${face.wallId}:${face.side}`;
   if (faceKey !== elevationViewFace) {
     elevationViewFace = faceKey;
@@ -13394,7 +13818,7 @@ function syncElevationDock() {
   });
   if (el.serviceProfileTitle) {
     el.serviceProfileTitle.textContent = elevFinishDraft
-      ? "Click each corner of the finish. Enter closes the shape. Esc removes the last corner."
+      ? "Click each corner. Double-click or Esc finishes the shape."
       : `Wall elevation · ${model.name} · ${Math.round(model.length * 1000)} mm, ${model.side === 1 ? "face A" : "face B"}`;
   }
   const w = el.elevBody.clientWidth;
@@ -13402,16 +13826,19 @@ function syncElevationDock() {
   const selectedId = selectedOpeningId();
   const draft = elevFinishDraft && elevFinishDraft.face.wallId === face.wallId ? elevFinishDraft : null;
   const guides = elevationGuides();
-  const key = `${w}x${h}|${elevationView.zoom}|${elevationView.panX}|${elevationView.panY}|${selectedId}|${selectedBandId}|${selectedElevVertex}|${lineMode ? "line" : "corner"}|${JSON.stringify(model)}|${JSON.stringify(draft)}|${JSON.stringify(guides)}`;
+  const locate = elevationLocate(model);
+  const key = `${w}x${h}|${elevationView.zoom}|${elevationView.panX}|${elevationView.panY}|${selectedId}|${selectedBandId}|${selectedElevVertex}|${lineMode ? "line" : "corner"}|${JSON.stringify(model)}|${JSON.stringify(draft)}|${JSON.stringify(guides)}|${JSON.stringify(locate)}`;
   if (key === elevationKey) {
     placeElevEdgeMode(model);
+    syncElevHints(true);
     return true;
   }
   elevationKey = key;
-  const drawn = elevationSvg(model, { width: w, height: h, interactive: true, selectedId, selectedBandId, selectedVertex: selectedElevVertex, draft, guides, edgeMode: lineMode ? "line" : "corner", view: elevationView });
+  const drawn = elevationSvg(model, { width: w, height: h, interactive: true, selectedId, selectedBandId, selectedVertex: selectedElevVertex, draft, guides, edgeMode: lineMode ? "line" : "corner", view: elevationView, locate });
   elevationLayout = { scale: drawn.scale, scaleX: drawn.scaleX, scaleY: drawn.scaleY, originX: drawn.originX, originY: drawn.originY, fit: drawn.fit };
   el.elevBody.innerHTML = drawn.svg;
   placeElevEdgeMode(model);
+  syncElevHints(true);
   return true;
 }
 
@@ -13451,6 +13878,36 @@ function elevationGuides() {
     return { s: elevationDrag.guideS, z: elevationDrag.guideZ };
   }
   return null;
+}
+
+/** Clearance dimensions for the finish under the pointer: both axes for a
+ *  corner (and for the corner being placed while drawing), one axis for a line. */
+function elevationLocate(model) {
+  if (!model) return null;
+  const draft = elevFinishDraft && elevFinishDraft.face.wallId === model.wallId ? elevFinishDraft : null;
+  if (draft?.hover) {
+    return finishLocate(null, { mode: "point", point: draft.hover, length: model.length, height: model.height });
+  }
+  const d = elevationDrag;
+  if (!d || d.face?.wallId !== model.wallId) return null;
+  if (d.part === "outline" && d.points?.length) {
+    const mode = d.moveAll ? "move" : d.moveEdge ? "edge" : "corner";
+    return finishLocate(d.points, {
+      mode,
+      index: d.moveEdge ? d.edge : d.index,
+      length: model.length,
+      height: model.height,
+    });
+  }
+  if (d.part !== "band-left" && d.part !== "band-right" && d.part !== "band-top" && d.part !== "band-bottom") return null;
+  const band = model.finishBands.find((b) => b.id === d.id);
+  if (!band || band.top == null || band.bottom == null) return null;
+  const midS = ((band.from ?? 0) + (band.to ?? model.length)) / 2;
+  const midZ = (band.bottom + band.top) / 2;
+  if (d.part === "band-left") return { side: { s0: 0, s1: band.from, z: midZ } };
+  if (d.part === "band-right") return { side: { s0: band.to, s1: model.length, z: midZ } };
+  if (d.part === "band-top") return { vert: { z0: band.top, z1: model.height, s: midS, toward: "top" } };
+  return { vert: { z0: 0, z1: band.bottom, s: midS, toward: "base" } };
 }
 
 /** Snap one elevation point to the grid, then to corners and edges on this face. */
@@ -13518,7 +13975,7 @@ function finishElevFinishDraft() {
   const ss = draft.points.map((p) => p.s);
   const zs = draft.points.map((p) => p.z);
   if (Math.max(...ss) - Math.min(...ss) < ELEVATION_SNAP || Math.max(...zs) - Math.min(...zs) < ELEVATION_SNAP) {
-    setStatusMessage("The shape is too flat. Click corners that enclose an area.", "warn");
+    setStatusMessage("The shape is too flat. Click a corner that gives it some area, or press Esc to leave.", "warn");
     return;
   }
   // Points are in viewing order. A run keeps them from the wall's first end.
@@ -13548,6 +14005,7 @@ function elevRing(band) {
 function beginOutlineDrag(ev, layout, model, band, mode, index) {
   const ring = elevRing(band);
   if (!ring) return;
+  focusElevationWall();
   const points = ring.map(([s, z]) => ({ s, z }));
   let vertex = index;
   let inserted = false;
@@ -13569,6 +14027,9 @@ function beginOutlineDrag(ev, layout, model, band, mode, index) {
   const raw = elevRawPoint(ev, ev.currentTarget, layout);
   selectedBandId = band.id;
   selectedElevVertex = mode === "move" || moveEdge ? null : vertex;
+  if (selectedElevVertex != null) {
+    setStatusMessage(`This corner of ${finishDisplayName(band)} is selected. Delete removes the corner. The finish stays.`, "warn");
+  }
   elevationDrag = {
     part: "outline",
     bandId: band.id,
@@ -13618,8 +14079,8 @@ function onElevationPointerDown(ev, layout) {
     return;
   }
   if (ev.button !== 0 || !elevationFace || !layout) return;
-  // The inspector graph is a picture. A finish click opens a callout under it
-  // instead of scrolling the inspector down to that finish's card.
+  // The inspector graph is a picture. A finish click selects its row and
+  // leaves a short pointer under the picture.
   if (ev.currentTarget === el.ctxElev && !(elevFinishDraft && elevFinishDraft.face.wallId === elevationFace.wallId)) {
     const fillHit = ev.target.closest?.("[data-elev-fill]");
     if (fillHit) {
@@ -13632,29 +14093,35 @@ function onElevationPointerDown(ev, layout) {
       return;
     }
     closePreviewCallout();
+    const hadFinish = clearFinishPick();
     // A window or door has taken the inspector. Clicking the wall puts it
     // back. The opening itself is not dragged from this graph.
     if (store.primary?.kind === "opening" && ev.target.closest?.("[data-elev-wall]")) {
       selectOpeningHostWall();
       ev.preventDefault();
+    } else if (hadFinish) {
+      render();
     }
     return;
   }
   if (elevFinishDraft && layout.originX != null && elevFinishDraft.face.wallId === elevationFace.wallId) {
-    const pt = elevDraftPoint(ev, ev.currentTarget, layout);
-    if (!pt) return;
-    const first = elevFinishDraft.points[0];
-    if (first && elevFinishDraft.points.length >= 3 && Math.hypot(pt.s - first.s, pt.z - first.z) <= ELEVATION_SNAP) {
+    // The second click of a double-click finishes. The first click already
+    // placed its corner. Replacing the drawing on each click drops the
+    // dblclick event, so the click count on this press is what closes it.
+    if (ev.detail >= 2) {
       finishElevFinishDraft();
       ev.preventDefault();
       return;
     }
+    const pt = elevDraftPoint(ev, ev.currentTarget, layout);
+    if (!pt) return;
     const last = elevFinishDraft.points[elevFinishDraft.points.length - 1];
     if (!last || last.s !== pt.s || last.z !== pt.z) elevFinishDraft.points.push(pt);
-    elevFinishDraft.hover = null;
+    elevFinishDraft.hover = pt;
+    elevFinishDraft.escAgainCancels = false;
     const n = elevFinishDraft.points.length;
     setStatusMessage(n >= 3
-      ? `Corner ${n} placed. Enter closes the shape, or click the first corner.`
+      ? `Corner ${n} placed. Double-click or Esc finishes the shape.`
       : `Corner ${n} placed. Keep clicking each corner.`, "ok");
     ev.preventDefault();
     render();
@@ -13692,7 +14159,16 @@ function onElevationPointerDown(ev, layout) {
         return;
       }
     }
-    if (fill && fill.dataset.elevFill !== selectedBandId) selectBand(fill.dataset.elevFill);
+    if (fill && fill.dataset.elevFill !== selectedBandId) {
+      selectBand(fill.dataset.elevFill);
+      return;
+    }
+    // Empty elevation — the margin, or the wall where no finish is painted —
+    // leaves the finish edit. The strip stays open.
+    if (!fill && ev.currentTarget === el.elevBody && elevationFinishEditActive()) {
+      leaveFinishEdit();
+      return;
+    }
     selectedElevVertex = null;
     return;
   }
@@ -13701,6 +14177,12 @@ function onElevationPointerDown(ev, layout) {
   const bandId = target.dataset.elevBand;
   const id = bandId || target.dataset.elevId;
   const band = bandId ? model?.finishBands.find((b) => b.id === bandId) : null;
+  if (band && part.startsWith("band-")) {
+    selectedBandId = band.id;
+    selectedElevVertex = null;
+    finishKey = "";
+    announceSelectedFinish(band.id);
+  }
   const row = !bandId && part !== "wall-top" ? model?.openings.find((o) => o.id === id) : null;
   if (part === "wall-top") {
     if (!model?.canDragTop) return;
@@ -13853,6 +14335,12 @@ function endElevationPan(ev) {
 
 function bindElevationHost(node, layoutOf) {
   if (!node) return;
+  node.addEventListener("dblclick", (ev) => {
+    if (!elevFinishDraft) return;
+    if (node === el.ctxElev && elevFinishDraft.face.wallId !== elevationFace?.wallId) return;
+    ev.preventDefault();
+    finishElevFinishDraft();
+  });
   node.addEventListener("pointerdown", (ev) => onElevationPointerDown(ev, layoutOf()));
   node.addEventListener("pointermove", onElevationPointerMove);
   node.addEventListener("pointerup", (ev) => {
@@ -13907,16 +14395,36 @@ document.addEventListener("pointerdown", (ev) => {
   closeElevInfo();
 });
 
-el.ctxElevOpen?.addEventListener("click", () => {
+function toggleWallElevation() {
   elevationOpen = !elevationOpen;
   render();
+}
+
+// The header button opens the strip. The picture stays a picture: a finish
+// or opening still opens its callout (that listener is on the graph).
+el.ctxElevOpen?.addEventListener("click", () => {
+  const face = selectedElevationFace();
+  if (elevFinishDraft && face && elevFinishDraft.face.wallId === face.wallId) return;
+  toggleWallElevation();
 });
 
-el.elevFlip?.addEventListener("click", () => {
+el.elevInfoDismiss?.addEventListener("click", () => {
+  elevDismiss(ELEV_INFO_KEY);
+  setHidden(el.elevInfoBar, true);
+});
+
+el.elevCoachOk?.addEventListener("click", () => {
+  dismissElevCoach();
+});
+
+function flipElevationFace() {
   if (!elevationFace) return;
   elevationFace = { ...elevationFace, side: elevationFace.side === -1 ? 1 : -1 };
   render();
-});
+}
+
+el.elevFlip?.addEventListener("click", flipElevationFace);
+el.ctxElevFlip?.addEventListener("click", flipElevationFace);
 
 el.elevEdgeMode?.addEventListener("click", (ev) => {
   const mode = ev.target.closest?.("[data-elev-edge]")?.dataset.elevEdge;
@@ -13936,7 +14444,7 @@ el.ctxOOffset?.addEventListener("change", (e) => {
   render();
 });
 
-/** Inspector side of the elevation: the small preview, Open elevation, and the opening's offset.
+/** Inspector side of the elevation: the small preview, Edit this face, and the opening's offset.
  *  The preview does not drag wall height; that handle is only on the open elevation. */
 function syncElevationPreview() {
   const face = selectedElevationFace();
@@ -13949,17 +14457,26 @@ function syncElevationPreview() {
     elevPreviewKey = "";
     elevPreviewLayout = null;
     previewCallout = null;
+    el.ctxElevWrap?.classList.remove("is-open");
+    el.ctxElev?.classList.remove("is-drawing");
     syncFinishPreviewCallout(null);
     return;
   }
-  if (el.ctxElevOpen) el.ctxElevOpen.textContent = elevationOpen ? "Close elevation" : "Open elevation";
+  el.ctxElevWrap?.classList.toggle("is-open", elevationOpen);
+  if (el.ctxElevOpen) {
+    el.ctxElevOpen.textContent = elevationOpen ? "Close elevation" : "Edit this face";
+    el.ctxElevOpen.setAttribute("aria-expanded", String(elevationOpen));
+  }
+  if (el.ctxElevFace) el.ctxElevFace.textContent = model.side === 1 ? "face A" : "face B";
   syncFinishPreviewCallout(model);
   const w = Math.max(120, Math.round(el.ctxElev?.clientWidth || 240));
   const draft = elevFinishDraft && elevFinishDraft.face.wallId === face.wallId ? elevFinishDraft : null;
-  const key = `${w}|${selectedOpeningId()}|${selectedBandId}|${JSON.stringify(model)}|${JSON.stringify(draft)}`;
+  el.ctxElev?.classList.toggle("is-drawing", Boolean(draft));
+  const locate = elevationLocate(model);
+  const key = `${w}|${selectedOpeningId()}|${selectedBandId}|${JSON.stringify(model)}|${JSON.stringify(draft)}|${JSON.stringify(locate)}`;
   if (key === elevPreviewKey) return;
   elevPreviewKey = key;
-  const drawn = elevationSvg(model, { width: w, height: 130, selectedId: selectedOpeningId(), selectedBandId, draft, guides: elevationGuides() });
+  const drawn = elevationSvg(model, { width: w, height: 130, selectedId: selectedOpeningId(), selectedBandId, draft, guides: elevationGuides(), locate });
   elevPreviewLayout = { scale: drawn.scale, scaleX: drawn.scaleX, scaleY: drawn.scaleY, originX: drawn.originX, originY: drawn.originY };
   el.ctxElev.innerHTML = drawn.svg;
 }
@@ -13991,6 +14508,7 @@ function syncFinishPanel(room, slab) {
   if (hostId !== finishPanelHost) {
     finishPanelHost = hostId;
     finishAddOpen = null;
+    finishBareAsk = false;
   }
   const editingId = editingFinishRegion()?.id || null;
   const floorOpts = (kind, id) => ({
@@ -13998,7 +14516,7 @@ function syncFinishPanel(room, slab) {
     bareOn: bareFinishHost?.kind === kind && bareFinishHost?.id === id,
     adding: finishAddOpen === "floor",
   });
-  const html = (room ? roomFinishHtml(store.doc, room, editingId, floorOpts("room", room.id)) : slab ? slabFinishHtml(store.doc, slab, editingId, floorOpts("slab", slab.id)) : faceFinishHtml(store.doc, model, { selectedId: selectedBandId, savedId: finishSavedBandId, adding: finishAddOpen === "face" }))
+  const html = (room ? roomFinishHtml(store.doc, room, editingId, floorOpts("room", room.id)) : slab ? slabFinishHtml(store.doc, slab, editingId, floorOpts("slab", slab.id)) : faceFinishHtml(store.doc, model, { selectedId: selectedBandId, savedId: finishSavedBandId, adding: finishAddOpen === "face", bareAsk: finishBareAsk }))
     + productsHtml(store.doc, { open: finishProductsOpen });
   if (html !== finishKey) {
     // A cleared key means the finish was just saved, so the panel has to catch up.
@@ -14118,6 +14636,100 @@ function bandSource(doc, band) {
   return null;
 }
 
+/** Millimetres, height, and span currently typed on the add-a-finish sheet. */
+function readAddFinish(form, model) {
+  const category = form.querySelector("[data-fin='band-category']")?.value || "";
+  const heightId = form.querySelector("[data-fin='band-height']")?.value || "full";
+  const spanOn = Boolean(form.querySelector("[data-fin-span]") && !form.querySelector("[data-fin-span]").hidden);
+  const read = (name) => typedMm(form.querySelector(`[data-fin='${name}']`)?.value, { allowZero: true });
+  const bottom = read("run-bottom");
+  const topRaw = read("run-top");
+  const topM = topRaw == null ? model?.height : topRaw;
+  let from = 0;
+  let to = model?.length ?? 0;
+  let spanMissing = false;
+  let ok = Boolean(model) && bottom != null && topRaw !== undefined;
+  if (spanOn) {
+    const a = read("run-from");
+    const b = read("run-to");
+    spanMissing = a == null || b == null;
+    ok = ok && !spanMissing;
+    if (ok) { from = a; to = b; }
+  }
+  const draft = ok && topM > bottom && to > from
+    ? { category, from, to, bottom, top: topM }
+    : null;
+  const wholeFace = heightId === "full" || (heightId === "custom" && bottom === 0 && topRaw == null);
+  return { category, heightId, spanOn, spanMissing, draft, wholeFace, model };
+}
+
+/** One sentence for where the finish on the sheet will land. */
+function addFinishPlaceLine(state) {
+  const label = FINISH_CATEGORIES[state.category]?.label || "This finish";
+  const { model, draft, spanOn, spanMissing } = state;
+  if (spanOn && spanMissing) return "Type both ends along the wall, in millimetres.";
+  if (!draft || !model) return "Type the height in millimetres. A blank top is the top of the wall.";
+  const mm = (m) => String(Math.round(m * 1000));
+  const fullW = draft.from <= 0.001 && model.length - draft.to <= 0.02;
+  const fullH = draft.bottom <= 0.001 && model.height - draft.top <= 0.02;
+  if (fullH && fullW) return `${label} on the whole face.`;
+  if (fullW) return `${label}, full length, ${mm(draft.bottom)}–${mm(draft.top)} mm up.`;
+  if (fullH) return `${label}, full height, ${mm(draft.from)}–${mm(draft.to)} mm along.`;
+  return `${label}, ${mm(draft.from)}–${mm(draft.to)} mm along and ${mm(draft.bottom)}–${mm(draft.top)} mm up.`;
+}
+
+/** The add-a-finish picture and its labels, patched in place so typing does not rebuild the inspector. */
+function syncAddFinishPreview() {
+  const slot = el.ctxFinish?.querySelector("[data-fin-live]");
+  if (!slot) return;
+  const model = finishFaceModel();
+  const form = slot.closest("[data-fin-newband]");
+  if (!model || !form) {
+    slot.innerHTML = "";
+    return;
+  }
+  const state = readAddFinish(form, model);
+  slot.innerHTML = draftBandPreviewHtml(model, state.draft);
+  const note = form.querySelector("[data-fin-live-note]");
+  if (note) note.textContent = addFinishPlaceLine(state);
+  const part = form.querySelector("[data-fin='band-part']");
+  if (part) part.textContent = state.spanOn ? (state.wholeFace ? "Whole face instead" : "Full length instead") : "Part of this face";
+  const add = form.querySelector("[data-fin='run-add']");
+  if (add) {
+    const commit = state.spanOn
+      ? ["Add this part", "Uses the millimetres above."]
+      : state.wholeFace
+        ? ["Whole face", "Covers this face."]
+        : ["Full length", "This height, for the whole length of the wall."];
+    add.textContent = commit[0];
+    add.title = commit[1];
+  }
+  const hint = form.querySelector("[data-fin-hint]");
+  if (hint) {
+    const spec = FINISH_CATEGORIES[state.category];
+    const name = String(form.querySelector("[data-fin='new-band-product']")?.value || "").trim();
+    const text = state.category === "none"
+      ? "Bare takes the wall type's coat off this face. Paint and tile stay."
+      : spec?.needsProduct && !name
+        ? `${spec.label} needs a product name. You can add it now, or on the card after.`
+        : "";
+    hint.hidden = !text;
+    hint.textContent = text;
+  }
+  const err = form.querySelector("[data-fin-form-error]");
+  if (err && !err.hidden && state.draft) {
+    err.hidden = true;
+    err.textContent = "";
+  }
+}
+
+function showAddFinishError(form, message) {
+  const err = form?.querySelector("[data-fin-form-error]");
+  if (!err) return;
+  err.hidden = false;
+  err.textContent = message;
+}
+
 /** Fill the add form's height fields from a preset; "custom" leaves them to be typed. */
 function applyHeightPreset(form, id) {
   const preset = HEIGHT_PRESETS.find((p) => p.id === id);
@@ -14125,9 +14737,11 @@ function applyHeightPreset(form, id) {
   const top = form?.querySelector("[data-fin='run-top']");
   const custom = form?.querySelector("[data-fin-custom]");
   if (custom) custom.hidden = id !== "custom";
-  if (!preset || preset.bottom === null || !bottom || !top) return;
-  bottom.value = String(Math.round(preset.bottom * 1000));
-  top.value = preset.top === null ? "" : String(Math.round(preset.top * 1000));
+  if (preset && preset.bottom !== null && bottom && top) {
+    bottom.value = String(Math.round(preset.bottom * 1000));
+    top.value = preset.top === null ? "" : String(Math.round(preset.top * 1000));
+  }
+  syncAddFinishPreview();
 }
 
 function noteBandSaved(id) {
@@ -14160,10 +14774,11 @@ function setHoverBand(id) {
 
 /** Pick a wall finish, in the list or on the elevation, and bring its card into view. */
 function selectBand(id) {
+  if (id) focusElevationWall();
   selectedBandId = id;
   selectedElevVertex = null;
   finishKey = "";
-  if (id) setStatusMessage("Drag a corner, or click an edge to add one.", "ok");
+  if (id) announceSelectedFinish(id);
   render();
   if (id) el.ctxFinish?.querySelectorAll("[data-fin-band]").forEach((card) => {
     if (card.dataset.finBand === id) card.scrollIntoView({ block: "nearest" });
@@ -14180,6 +14795,10 @@ function showPreviewFinish(ev, id) {
     ev.preventDefault();
     const switched = store.primary?.kind === "opening" && selectOpeningHostWall();
     if (!switched) render();
+    announceSelectedFinish(id);
+  });
+  if (id) el.ctxFinish?.querySelectorAll("[data-fin-band]").forEach((card) => {
+    if (card.dataset.finBand === id) card.scrollIntoView({ block: "nearest" });
   });
 }
 
@@ -14247,12 +14866,13 @@ function syncFinishPreviewCallout(model) {
 
 /** Open the elevation under the plan on this finish, so its corners can be edited there. */
 function openFinishProfile(id) {
+  focusElevationWall();
   selectedBandId = id;
   selectedElevVertex = null;
   elevationOpen = true;
   finishKey = "";
   const band = finishFaceModel()?.finishBands.find((b) => b.id === id);
-  if (band && elevRing(band)) setStatusMessage("Drag a corner, or click an edge to add one.", "ok");
+  if (band) announceSelectedFinish(id);
   render();
 }
 
@@ -14303,6 +14923,7 @@ el.ctxElevCallout?.addEventListener("click", (e) => {
   const band = finishFaceModel()?.finishBands.find((b) => b.id === id);
   if (!band) return;
   if (btn.dataset.fin === "band-edit") openFinishProfile(band.id);
+  if (btn.dataset.fin === "bare-restore") removeFinishBand(band);
 });
 
 el.ctxFinish?.addEventListener("pointerover", (e) => {
@@ -14398,8 +15019,14 @@ el.ctxFinish?.addEventListener("click", (e) => {
     const surface = btn.closest("[data-fin-surface]")?.dataset.finSurface;
     if (surface !== "floor" && surface !== "face") return;
     finishAddOpen = surface;
+    finishBareAsk = false;
     finishKey = "";
     render();
+    if (surface === "face") {
+      const sheet = el.ctxFinish?.querySelector("[data-fin-newband]");
+      sheet?.scrollIntoView({ block: "nearest" });
+      el.ctxFinish?.querySelector("[data-fin='band-category']")?.focus();
+    }
   } else if (action === "add-close") {
     finishAddOpen = null;
     finishKey = "";
@@ -14455,19 +15082,18 @@ el.ctxFinish?.addEventListener("click", (e) => {
   } else if (action === "band-part") {
     const form = btn.closest("[data-fin-newband]");
     const span = form?.querySelector("[data-fin-span]");
-    const add = form?.querySelector("[data-fin='run-add']");
     if (!span) return;
     const show = span.hidden;
     span.hidden = !show;
     btn.setAttribute("aria-pressed", show ? "true" : "false");
-    btn.textContent = show ? "Whole face instead" : "Part of this face";
-    if (add) add.textContent = show ? "Add to face" : "Whole face";
     if (!show) {
       const from = form.querySelector("[data-fin='run-from']");
       const to = form.querySelector("[data-fin='run-to']");
       if (from) from.value = "";
       if (to) to.value = "";
     }
+    syncAddFinishPreview();
+    if (show) form.querySelector("[data-fin='run-from']")?.focus();
   } else if (action === "band-draw") {
     const face = selectedElevationFace();
     const category = finishField("band-category")?.value;
@@ -14481,7 +15107,7 @@ el.ctxFinish?.addEventListener("click", (e) => {
       productName: String(finishField("new-band-product")?.value || "").trim(),
       face: { wallId: face.wallId, side: face.side },
     };
-    setStatusMessage("Click each corner on the elevation. Enter closes the shape. Esc removes the last corner.", "ok");
+    setStatusMessage("Click each corner on the elevation. Double-click or Esc finishes the shape.", "ok");
     render();
   } else if (action === "run-add") {
     const model = finishFaceModel();
@@ -14496,9 +15122,26 @@ el.ctxFinish?.addEventListener("click", (e) => {
     const top = read("run-top");
     const from = spanOn ? read("run-from") : null;
     const to = spanOn ? read("run-to") : null;
-    if ([from, to, bottom, top].includes(undefined)) { setStatusMessage("Type the sizes in millimetres.", "warn"); return; }
+    if (spanOn && (from == null || to == null)) {
+      const message = "Type both ends along the wall, in millimetres.";
+      setStatusMessage(message, "warn");
+      showAddFinishError(form, message);
+      form?.querySelector("[data-fin='run-from']")?.focus();
+      return;
+    }
+    if ([from, to, bottom, top].includes(undefined)) {
+      const message = "Type the sizes in millimetres.";
+      setStatusMessage(message, "warn");
+      showAddFinishError(form, message);
+      return;
+    }
     const partial = from !== null && to !== null;
-    if ((from !== null) !== (to !== null)) { setStatusMessage("Give both ends of the run, or neither for the whole face.", "warn"); return; }
+    if ((from !== null) !== (to !== null)) {
+      const message = "Give both ends of the run, or neither for the whole face.";
+      setStatusMessage(message, "warn");
+      showAddFinishError(form, message);
+      return;
+    }
     finishAddOpen = null;
     finishCommit(() => {
       const run = createFinishRun(doc, wall, model.side, {
@@ -14518,13 +15161,28 @@ el.ctxFinish?.addEventListener("click", (e) => {
     const model = finishFaceModel();
     const band = model?.finishBands.find((b) => b.id === row?.dataset.finBand);
     if (band) removeFinishBand(band);
+  } else if (action === "default-ask") {
+    finishBareAsk = true;
+    finishKey = "";
+    render();
+  } else if (action === "default-keep") {
+    finishBareAsk = false;
+    finishKey = "";
+    render();
   } else if (action === "default-remove") {
-    // Taking the default off is a "No finish" run over each remaining piece of it.
+    // Confirmed: a "Bare" run over each remaining piece of the wall type's coat.
+    if (!finishBareAsk) return;
+    finishBareAsk = false;
     const model = finishFaceModel();
     const wall = model ? wallsCache.find((w) => w.id === model.wallId) : null;
     const named = row?.dataset.finBand;
     const pieces = (model?.finishBands || []).filter((b) => b.source === "default" && (!named || b.id === named));
-    if (!model || !wall || !pieces.length) return;
+    if (!model || !wall || !pieces.length) {
+      finishKey = "";
+      render();
+      return;
+    }
+    const coat = FINISH_CATEGORIES[pieces[0].category]?.label || "Finish";
     finishCommit(() => {
       for (const band of pieces) {
         const wholeW = band.from <= 1e-6 && band.to >= model.length - 1e-6;
@@ -14538,6 +15196,7 @@ el.ctxFinish?.addEventListener("click", (e) => {
         });
       }
     });
+    setStatusMessage(`${coat} is off this face. Put it back from the card under the picture.`, "ok");
   } else if (action === "product-add") {
     const read = (name) => String(finishField(name)?.value || "").trim();
     if (!read("p-name") && !read("p-code")) { setStatusMessage("Give the product a name or a code.", "warn"); return; }
@@ -14580,6 +15239,11 @@ el.ctxFinish?.addEventListener("click", (e) => {
         : `Could not add to the rate book: ${error.message}`, "warn");
     });
   }
+});
+
+el.ctxFinish?.addEventListener("input", (e) => {
+  if (!e.target.closest?.("[data-fin-newband]")) return;
+  syncAddFinishPreview();
 });
 
 el.ctxFinish?.addEventListener("change", (e) => {
@@ -15175,6 +15839,21 @@ if (el.serviceFields) {
   el.serviceFields.addEventListener("click", onServiceControl);
 }
 
+/** Wall millimetres sit behind one collapsed details. A room keeps its wall height beside the other room fields. */
+function syncWallSettingsFold(kind) {
+  const details = el.ctxWallMore;
+  const box = el.ctxWallMoreFields;
+  if (!details || !box) return;
+  const nodes = [el.ctxTopWrap, el.ctxWallHWrap, el.ctxAttachWrap].filter(Boolean);
+  if (kind === "segment") {
+    for (const node of nodes) box.append(node);
+    setHidden(details, nodes.every((node) => node.hidden));
+  } else if (el.ctxFinish) {
+    el.ctxFinish.before(...nodes);
+    setHidden(details, true);
+  }
+}
+
 function syncPlanContext() {
   syncPlanFilterButtons();
   syncServiceProfileDock();
@@ -15324,15 +16003,13 @@ function syncPlanContext() {
   setHidden(el.ctxRidgeWrap, !pitched);
   setHidden(el.ctxTypeWrap, true);
   syncInspectStatus((showInspect || creating) && !multi ? obj : null, draft || creating);
-  const doorSelected = Boolean(opening && skuById(obj.sku)?.category === "door");
-  setHidden(el.ctxFlip, !doorSelected);
-  setHidden(el.ctxHinge, !doorSelected);
   const attachable = Boolean(obj && ATTACHABLE_KINDS.has(ref.kind));
   setHidden(el.ctxAttachWrap, !attachable);
   if (attachable && el.ctxAttach) el.ctxAttach.textContent = attachStateText(obj);
   syncObjectLevel(obj && ref.kind !== "opening" ? obj : null);
   syncWallTop(obj && ref.kind === "segment" && !draft ? obj : null);
   syncHeightFields(obj && !draft ? obj : null, ref?.kind);
+  syncWallSettingsFold(draft ? "segment" : ref?.kind);
   syncElevationPreview();
   syncFinishPanel(room && !draft ? obj : null, floorSlab && !draft ? obj : null);
 
@@ -15561,14 +16238,6 @@ el.ctxRidge?.addEventListener("change", (e) => {
 
 el.inspectBack?.addEventListener("click", () => {
   selectOpeningHostWall();
-});
-
-el.ctxFlip?.addEventListener("click", () => {
-  if (flipDoors("swing")) render();
-});
-
-el.ctxHinge?.addEventListener("click", () => {
-  if (flipDoors("hinge")) render();
 });
 
 el.ctxOLevel?.addEventListener("change", (e) => {
