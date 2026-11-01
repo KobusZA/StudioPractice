@@ -549,10 +549,11 @@ export function draftBandPreviewHtml(model, draft) {
 }
 
 /** One finish on a wall face. Resting rows are a line; the selected row opens the fields. */
-function bandCardHtml(doc, b, model, { selectedId, savedId, index, total }) {
+function bandCardHtml(doc, b, model, { selectedId, savedId, index, total, compact = false }) {
   const spec = FINISH_CATEGORIES[b.category];
   const product = finishProductById(doc, b.productId);
   const picked = b.id === selectedId;
+  const editing = picked && !compact;
   const label = spec?.label || b.category;
   const which = total > 1 ? `${label} ${index} of ${total}` : "";
   const place = bandPlace(b, model);
@@ -576,7 +577,7 @@ function bandCardHtml(doc, b, model, { selectedId, savedId, index, total }) {
     : b.source === "rule"
       ? `<button type="button" data-fin="band-remove-rule" title="Removes the rule from every wall of its room">Remove</button>`
       : `<button type="button" data-fin="band-remove">Remove</button>`;
-  const head = picked
+  const head = editing
     ? `<div class="fin-kind-head">
         <select data-fin="band-type" aria-label="Finish type">${surfaceTypeOptions("wall", b.category, { none: true })}</select>
         <span class="fin-area">${area}</span>
@@ -585,16 +586,17 @@ function bandCardHtml(doc, b, model, { selectedId, savedId, index, total }) {
         <span class="fin-kind-name">${esc(which || label)}</span>
         <span class="fin-area">${area}</span>
       </div>`;
-  const where = picked && which ? `${which} · ${place}` : place;
+  const where = editing && which ? `${which} · ${place}` : place;
+  const mini = compact ? "" : bandMiniHtml(b, model);
   return `<div class="fin-kind fin-kind-face${picked ? " fin-editing" : ""}" data-fin-band="${esc(b.id)}">
-    ${bandMiniHtml(b, model)}
+    ${mini}
     <div class="fin-kind-main">
       ${head}
       <p class="fin-where">${esc(where)}</p>
       ${productLine}
       ${badge}
-      ${picked || needs ? productField : ""}
-      ${picked ? `<div class="fin-btns">${remove}</div>` : ""}
+      ${editing || needs ? productField : ""}
+      ${editing ? `<div class="fin-btns">${remove}</div>` : ""}
     </div>
   </div>`;
 }
@@ -803,6 +805,7 @@ function faceGroupsHtml(doc, model, opts) {
       savedId: opts.savedId,
       index: i + 1,
       total: list.length,
+      compact: Boolean(opts.compact),
     })).join("");
     const amount = id === "none" ? "" : `<span>${formatQty(qty, unit)}</span>`;
     const head = list.length > 1
@@ -820,20 +823,45 @@ function faceGroupsHtml(doc, model, opts) {
  * it sits on the wall. `opts.selectedId` is the band picked in the list or the
  * elevation, `opts.savedId` the one just saved.
  */
+function openingsBillHtml(model, selectedId) {
+  const rows = (model.openings || []).map((o) => {
+    const kind = o.category === "door" ? "Door" : "Window";
+    const name = o.name || kind;
+    const on = o.id === selectedId ? " fin-editing" : "";
+    return `<button type="button" class="fin-kind fin-kind-face${on}" data-opening-id="${esc(o.id)}">
+      <span class="fin-kind-main">
+        <span class="fin-kind-head"><span class="fin-kind-name">${esc(name)}</span><span class="fin-area">${esc(`${mm(o.width)} × ${mm(o.height)}`)}</span></span>
+        <span class="fin-where">${o.category === "door" ? "Door" : `Sill ${mm(o.sill)} mm`} · ${mm(Math.max(0, o.offset))} mm from the left</span>
+      </span>
+    </button>`;
+  }).join("");
+  if (!rows) return "";
+  return `<section class="fin-sec" data-fin-block="openings"><h4>Openings</h4><div class="fin-kinds">${rows}</div></section>`;
+}
+
 export function faceFinishHtml(doc, model, opts = {}) {
   const bands = model.finishBands || [];
   const first = "wallTile";
-  const adding = Boolean(opts.adding);
+  const bill = Boolean(opts.bill);
+  const adding = Boolean(opts.adding) && !bill;
   const groups = faceGroupsHtml(doc, model, opts);
+  const notes = overlapNotesHtml(model, bands);
+  const clashes = (notes.match(/class="fin-warn"/g) || []).length;
+  const added = bands.filter((b) => b.source !== "default" && b.category !== "none").length;
+  const tally = bill
+    ? `<p class="fin-note">${added === 1 ? "1 finish" : `${added} finishes`}${clashes ? ` · ${clashes === 1 ? "1 clash" : `${clashes} clashes`}` : ""}</p>`
+    : "";
   return `<section class="fin-sec" data-fin-block="face">
     <h4>Wall finishes</h4>
     <div class="fin-surface" data-fin-surface="face">
       <div class="fin-rest"${adding ? " hidden" : ""}>
+        ${tally}
         ${faceSummaryHtml(model, bands, { confirming: Boolean(opts.bareAsk) })}
         ${groups || '<p class="fin-note">Nothing added on this face yet.</p>'}
-        ${overlapNotesHtml(model, bands)}
-        <button type="button" class="fin-add-btn" data-fin="add-open">Add a finish</button>
+        ${notes}
+        ${bill ? "" : `<button type="button" class="fin-add-btn" data-fin="add-open">Add a finish</button>`}
       </div>
+      ${bill ? openingsBillHtml(model, opts.openingId || null) : ""}
       <div class="fin-add-floor fin-add-sheet" data-fin-newband${adding ? "" : " hidden"}>
         <div class="fin-sheet-head">
           <p class="fin-kicker">Add a finish</p>

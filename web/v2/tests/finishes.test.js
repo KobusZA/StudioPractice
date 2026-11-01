@@ -26,6 +26,7 @@ import {
   regionsOnSlab,
   resolveFinishes,
   rulesFromPreset,
+  libraryLine,
   savePreset,
 } from "../finish-model.js";
 import { RIBBON, SIMPLE_TABS } from "../ribbon.js";
@@ -46,6 +47,29 @@ function finishRows(doc, p = pack) {
 }
 
 const sum = (rows, key) => rows.reduce((s, r) => s + (r[key] || 0), 0);
+
+test("a paint product keeps its colour, and the rate book line names it", () => {
+  const doc = normalizeDoc({
+    finishProducts: [{
+      id: "p",
+      category: "paint",
+      name: "Double Velvet",
+      manufacturer: "Plascon",
+      colourName: "Winter Fog",
+      colourCode: "E15-3",
+      swatch: "#E8E0D4",
+    }],
+  });
+  const product = doc.finishProducts[0];
+  assert.equal(product.manufacturer, "Plascon");
+  assert.equal(product.colourName, "Winter Fog");
+  assert.equal(product.colourCode, "E15-3");
+  assert.equal(product.swatch, "#e8e0d4");
+  assert.equal(normalizeDoc({ finishProducts: [{ id: "q", category: "paint", name: "Paint", swatch: "red" }] }).finishProducts[0].swatch, null);
+  const line = libraryLine(product);
+  assert.match(line.description, /Winter Fog/);
+  assert.match(line.description, /E15-3/);
+});
 
 test("categories say which surfaces they go on, and the unit", () => {
   assert.deepEqual(categoriesForSurface("floor").includes("wallTile"), false);

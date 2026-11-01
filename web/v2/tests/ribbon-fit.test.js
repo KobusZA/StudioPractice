@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { LADDERS, maxStep, planSteps, shrinkKey } from "../ribbon-fit.js";
+import { RIBBON, SIMPLE_TABS } from "../ribbon.js";
 
 // A toy width model: each group's width depends on its kind and step, so the
 // planner can be exercised without a browser. Wider = nicer.
@@ -18,11 +19,20 @@ const GROUPS = [
   { kind: "mixed", prio: 2 }, // Add drawing
   { kind: "stack", prio: 1 }, // Levels
   { kind: "stack", prio: -1 }, // Walls
-  { kind: "large", prio: 0 }, // Floors & roofs
-  { kind: "large", prio: 1 }, // Ceilings
-  { kind: "large", prio: 0 }, // Openings
+  { kind: "stack", prio: 3 }, // Finishes
+  { kind: "stack", prio: 3 }, // Floors & roofs
+  { kind: "stack", prio: 3 }, // Ceilings
+  { kind: "large", prio: 3 }, // Openings
   { kind: "stack", prio: 0 }, // Services
 ];
+
+test("only Openings opts into large buttons", () => {
+  const labels = [...RIBBON, ...SIMPLE_TABS]
+    .flatMap((tab) => tab.groups)
+    .filter((group) => group.large)
+    .map((group) => group.label);
+  assert.deepEqual([...new Set(labels)], ["Openings"]);
+});
 
 test("every ladder width table matches its ladder length", () => {
   for (const kind of Object.keys(LADDERS)) {
@@ -55,13 +65,21 @@ test("no dead space: no group could take one step back and still fit", () => {
   }
 });
 
-test("Add drawing's anchors stack before its other buttons shrink, and before other groups lose size", () => {
+test("Finishes, floors, ceilings and openings step before Add drawing stacks its anchors", () => {
   const first = GROUPS.map(() => 0);
   // Narrow just enough that one step is needed.
   const limit = total(GROUPS, first) - 10;
   const steps = planSteps(GROUPS, fitsIn(GROUPS, limit));
-  assert.equal(steps[0], 1, "Add drawing steps from side-by-side anchors to stacked anchors first");
-  assert.deepEqual(steps.slice(1), [0, 0, 0, 0, 0, 0]);
+  assert.equal(steps[0], 0, "Add drawing stays side by side");
+  assert.equal(steps[6], 1, "Openings, the rightmost priority-3 group, steps first");
+  assert.deepEqual(steps.slice(1, 6), [0, 0, 0, 0, 0]);
+  assert.equal(steps[7], 0);
+});
+
+test("priority 3 gives up its first step no later than Add drawing gives up side-by-side anchors", () => {
+  assert.ok(shrinkKey("stack", 3, 0) <= shrinkKey("mixed", 2, 0));
+  assert.ok(shrinkKey("large", 3, 0) <= shrinkKey("mixed", 2, 0));
+  assert.ok(shrinkKey("stack", 3, 0) < shrinkKey("stack", 1, 0));
 });
 
 test("protected groups hold their size longer than low-priority ones", () => {
@@ -72,8 +90,10 @@ test("protected groups hold their size longer than low-priority ones", () => {
 });
 
 test("dropdowns are the last resort", () => {
-  // At a width where nothing needs to collapse, nothing may collapse.
-  const steps = planSteps(GROUPS, fitsIn(GROUPS, 1000));
+  // Narrower than the best look (1990 in this model) but still wide enough
+  // that a dropdown is not required. Priority-3 stacks reach their dropdown
+  // only once the row is tighter than this.
+  const steps = planSteps(GROUPS, fitsIn(GROUPS, 1300));
   steps.forEach((s, i) => assert.ok(s < maxStep(GROUPS[i].kind) || GROUPS[i].kind === "large", `group ${i}`));
 });
 

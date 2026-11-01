@@ -341,12 +341,58 @@
             <button type="button" data-profile-mode="step" title="Dragging a node makes a vertical rise or drop (90 degrees). Hold Shift to use Slope for one drag.">Step</button>
             <button type="button" data-profile-mode="slope" title="Dragging a node changes only its height, so the runs beside it slope (use for drainage falls). Hold Shift to use Step for one drag.">Slope</button>
           </span>
+          <button type="button" class="svc-profile-all key-plan-btn" id="v2-face-plan" hidden aria-expanded="false"
+                  title="Where this face is on the plan. Click to show the plan and choose another wall.">Plan</button>
           <button type="button" class="svc-profile-all" id="v2-elev-fit" hidden
                   title="Show the whole wall again">Fit</button>
           <button type="button" class="svc-profile-all" id="v2-elev-flip" hidden
                   title="View the other face of this wall (mirrored left to right)">Flip face</button>
           <button type="button" class="svc-profile-exit" id="v2-profile-exit"
                   title="Close the route profile and the Services panel. A click on empty plan leaves them open. Escape does the same.">Exit</button>
+        </div>
+        <div class="face-editor" id="v2-face-editor" hidden>
+          <div class="face-editor-line">
+            <i id="v2-face-swatch" class="face-swatch"></i>
+            <div class="face-who">
+              <strong id="v2-face-which">This face</strong>
+              <span id="v2-face-meta"></span>
+            </div>
+            <label>Type <select id="v2-face-type" aria-label="Finish type"></select></label>
+            <label>Product <input id="v2-face-product" type="text" aria-label="Product" /></label>
+            <button type="button" id="v2-face-remove">Remove</button>
+          </div>
+          <div class="face-editor-line" id="v2-face-colour-row" hidden>
+            <label>On this job <select id="v2-face-colour-pick" aria-label="Colour already on this job"></select></label>
+            <label>Manufacturer <input id="v2-face-maker" type="text" aria-label="Paint manufacturer" /></label>
+            <label>Colour <input id="v2-face-colour-name" type="text" aria-label="Colour name" /></label>
+            <label>Code <input id="v2-face-colour-code" type="text" aria-label="Colour code" /></label>
+            <label>Swatch <input id="v2-face-swatch-input" type="color" aria-label="Colour swatch" value="#d9a441" /></label>
+          </div>
+          <div class="face-editor-line" id="v2-face-place-row" hidden>
+            <span id="v2-face-place-kicker">Place this finish</span>
+            <button type="button" data-face-place="whole">Whole face</button>
+            <button type="button" data-face-place="150">Up to 150 mm</button>
+            <button type="button" data-face-place="1200">Up to 1.2 m</button>
+            <button type="button" data-face-place="draw">Draw area</button>
+            <label class="face-mm" id="v2-face-up">Up the wall
+              <input id="v2-face-bottom" type="text" inputmode="decimal" aria-label="Bottom, mm up the wall" />
+              to
+              <input id="v2-face-top" type="text" inputmode="decimal" aria-label="Top, mm up the wall" /> mm
+            </label>
+            <label class="face-mm" id="v2-face-along">Along the wall
+              <input id="v2-face-from" type="text" inputmode="decimal" aria-label="From, mm along the wall" />
+              to
+              <input id="v2-face-to" type="text" inputmode="decimal" aria-label="To, mm along the wall" /> mm
+            </label>
+          </div>
+          <div class="face-editor-line" id="v2-face-opening-row" hidden>
+            <label class="face-mm">Width <input id="v2-face-owidth" type="text" inputmode="decimal" aria-label="Opening width, mm" /> mm</label>
+            <label class="face-mm">Height <input id="v2-face-oheight" type="text" inputmode="decimal" aria-label="Opening height, mm" /> mm</label>
+            <label class="face-mm" id="v2-face-sill-label">Sill <input id="v2-face-osill" type="text" inputmode="decimal" aria-label="Sill, mm" /> mm</label>
+            <label class="face-mm">From the left <input id="v2-face-oleft" type="text" inputmode="decimal" aria-label="From the left, mm" /> mm</label>
+          </div>
+          <p class="face-hover" id="v2-face-hover"></p>
+          <button type="button" id="v2-face-add">Add a finish</button>
         </div>
         <div class="elev-info-bar" id="v2-elev-info-bar" hidden>
           <p>Drag the top of the wall to set its height. The line above is the next floor, or the roof on the top storey. Scroll to zoom; middle-drag or Alt-drag to move around. Fit shows the whole wall.</p>
@@ -1050,6 +1096,6 @@
     </form>
   </div>
 
-  <script type="module" src="./ui.js?v=20261030-finish-rows"></script>
+  <script type="module" src="./ui.js?v=20261101-face-fixes"></script>
 </body>
 </html>

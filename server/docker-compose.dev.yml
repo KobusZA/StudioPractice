@@ -8,7 +8,8 @@
 #   # edit server/src/*.js on the host - the container restarts itself
 #   # (web/* needs no restart at all: static.js reads it from disk per request)
 #
-# `db` is untouched: only `app` needs an override, so only `app` appears here.
+# `db` is untouched. Only `app` is overridden, plus the volume that holds
+# its dependencies.
 services:
   app:
     environment:
@@ -17,12 +18,20 @@ services:
     # has to be the repo root too, or web/ goes stale while server/ reloads.
     volumes:
       - ..:/app
+      # The bind mount above hides the image's node_modules, and the image
+      # never had nodemon anyway (`npm install --omit=dev`). Keep the
+      # container's install on its own volume so a Linux npm ci does not
+      # write node_modules onto the Windows tree.
+      - app-node-modules:/app/server/node_modules
+    # The image drops to USER node, which cannot fill a fresh volume.
+    user: root
     # `nodemon --legacy-watch`, not plain `node --watch`: Docker Desktop's
     # Windows bind mount does not forward the inotify events fs.watch (and
     # so node's native --watch) depends on, and a file edited on the host is
     # never noticed. --legacy-watch polls instead, which works over any
-    # mount. `nodemon` itself is a devDependency, present here only because
-    # the Dockerfile has no .dockerignore and copies server/node_modules
-    # (installed on the host, where `npm install` was last run) into the
-    # image alongside the source - see the COPY steps there.
-    command: ["sh", "-c", "cd server && npm run dev"]
+    # mount. NODE_ENV=development above is what makes `npm ci` include
+    # nodemon; production omits it.
+    command: ["sh", "-c", "cd server && npm ci && exec npm run dev"]
+
+volumes:
+  app-node-modules:

@@ -528,3 +528,31 @@ test("dragging a finish corner dimensions the gap to the side and to the top", a
   assert.doesNotMatch(idle, /data-elev-dim="side"/);
   assert.doesNotMatch(idle, /data-elev-dim="top"/);
 });
+
+test("the face hatches the same overlaps the finish list warns about", async () => {
+  const { elevationSvg } = await import("../wall-elevation-render.js");
+  const base = elevationModel(drawnDoc(), pack, { wallId: "w1", side: 1 });
+  const band = (id, category, extra) => ({ id, source: "run", category, unit: "m2", editable: true, ...extra });
+  const draw = (finishBands) => elevationSvg({ ...base, openings: [], finishBands }, { width: 640, height: 280, interactive: true }).svg;
+  const clash = /url\(#elev-clash-a\)/;
+
+  assert.match(draw([
+    band("a", "paint", { from: 0, to: 2, bottom: 0, top: 1.2 }),
+    band("b", "wallTile", { from: 1, to: 3, bottom: 0, top: 1.5 }),
+  ]), clash, "two applied finishes on the same patch");
+
+  assert.match(draw([
+    band("a", "plaster", { from: 0, to: 2, bottom: 0, top: 2 }),
+    band("b", "render", { from: 1, to: 3, bottom: 0, top: 2 }),
+  ]), clash, "two coats on the same patch");
+
+  assert.doesNotMatch(draw([
+    band("a", "plaster", { from: 0, to: 3, bottom: 0, top: 2 }),
+    band("b", "paint", { from: 0, to: 3, bottom: 0, top: 2 }),
+  ]), clash, "paint on plaster is a finish on a coat");
+
+  assert.doesNotMatch(draw([
+    band("a", "paint", { from: 0, to: 2, bottom: 0, top: 2, outline: [[0, 0], [2, 0], [0, 2]] }),
+    band("b", "wallTile", { from: 0, to: 2, bottom: 0, top: 2, outline: [[2, 0.5], [2, 2], [1.6, 2]] }),
+  ]), clash, "drawn shapes whose boxes overlap but whose areas do not");
+});

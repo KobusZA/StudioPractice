@@ -10,7 +10,7 @@
 // The preview never passes a view, so it stays fitted.
 
 import { FINISH_CATEGORIES, finishSwatch } from "./finish-data.js";
-import { clipPolygon } from "./geom.js";
+import { area as polyArea, clipPolygon } from "./geom.js";
 
 const PAD = 14;
 const HANDLE = 5;
@@ -407,6 +407,32 @@ function dimensionOpening(parts, { x, y, w, h, opening, model, yOf, W, H }) {
   }
 }
 
+function bandPolygon(b) {
+  if (b.outline?.length >= 3) return b.outline;
+  if (!(b.to > b.from) || !(b.top > b.bottom)) return null;
+  return [[b.from, b.bottom], [b.to, b.bottom], [b.to, b.top], [b.from, b.top]];
+}
+
+/**
+ * Hatched patch where two coats, or two applied finishes, cover the same part
+ * of the face. Paint on plaster is a finish on a coat, not a clash. Same pairs
+ * as the warnings under the finish list, so the picture and the count agree.
+ */
+function drawFinishClashes(parts, model, xOf, yOf, hatch) {
+  const added = (model.finishBands || []).filter((b) => b.source !== "default" && b.category !== "none" && b.unit !== "m" && bandPolygon(b));
+  const isCoat = (b) => FINISH_CATEGORIES[b.category]?.layer === "coat";
+  for (let i = 0; i < added.length; i += 1) {
+    for (let j = i + 1; j < added.length; j += 1) {
+      if (isCoat(added[i]) !== isCoat(added[j])) continue;
+      for (const piece of clipPolygon(bandPolygon(added[i]), bandPolygon(added[j]))) {
+        if (Math.abs(polyArea(piece)) < 0.02) continue;
+        const holes = holesInBand({ category: added[i].category, outline: piece }, model.openings);
+        parts.push(`${cutFill(piece, holes, xOf, yOf, model.base)} fill="url(#elev-clash-${hatch})" pointer-events="none"><title>These finishes overlap</title></path>`);
+      }
+    }
+  }
+}
+
 /**
  * @param {object} model elevationModel() result
  * @param {{width:number,height:number,interactive?:boolean,selectedId?:string|null,view?:{zoom?:number,panX?:number,panY?:number}|null}} opts
@@ -454,6 +480,11 @@ export function elevationSvg(model, { width, height, interactive = false, select
 
   const parts = [];
   const labels = [];
+  const hatch = interactive ? "a" : "b";
+  parts.push(`<defs>
+    <pattern id="elev-rule-${hatch}" width="8" height="8" patternUnits="userSpaceOnUse"><path d="M0 8 L8 0" stroke="#5c5348" stroke-width="1"/></pattern>
+    <pattern id="elev-clash-${hatch}" width="7" height="7" patternUnits="userSpaceOnUse"><path d="M0 7 L7 0 M-1 1 L1 -1 M6 8 L8 6" stroke="#9a6b1f" stroke-width="1"/></pattern>
+  </defs>`);
   parts.push(`<rect x="0" y="0" width="${W}" height="${H}" class="elev-bg"/>`);
 
   const levelLabel = (name, elevation) => {
@@ -496,9 +527,12 @@ export function elevationSvg(model, { width, height, interactive = false, select
     // Openings are cut out of the fill: the quantity is already net of them, and
     // the wall colour showing through is how that reads. The frame is drawn after.
     const none = b.category === "none";
-    const tint = b.source === "default" || none ? "" : ` style="fill:${finishSwatch(b.category)};fill-opacity:0.55"`;
+    const colour = b.fill || (b.source === "default" || none ? "" : finishSwatch(b.category));
+    // A paint's own colour can be near white, so it keeps an outline to stay visible on the wall.
+    const edge = b.fill ? ";stroke:rgba(26,22,18,0.45);stroke-width:1" : "";
+    const tint = colour ? ` style="fill:${colour};fill-opacity:0.55${edge}"` : "";
     const picked = b.id === selectedBandId ? " is-selected" : "";
-    const cls = `elev-band elev-band-${esc(b.source || "run")}${none ? " elev-band-none" : ""}${picked}`;
+    const cls = `elev-band elev-band-${esc(b.source || "run")}${none ? " elev-band-none" : ""}${b.source === "rule" ? " elev-band-rule" : ""}${picked}`;
     const title = `<title>${esc(b.label || "Finish")}</title>`;
     const holes = holesInBand(b, model.openings);
     if (holes.length) {
@@ -512,7 +546,15 @@ export function elevationSvg(model, { width, height, interactive = false, select
     } else {
       parts.push(`<rect x="${xOf(b.from ?? 0)}" y="${yOf(model.base + b.top)}" width="${((b.to ?? model.length) - (b.from ?? 0)) * scaleX}" height="${(b.top - b.bottom) * scaleY}" class="${cls}"${tint} data-elev-fill="${esc(b.id)}">${title}</rect>`);
     }
+    if (b.source === "rule") {
+      const rx = xOf(b.from ?? 0);
+      const ry = yOf(model.base + b.top);
+      const rw = ((b.to ?? model.length) - (b.from ?? 0)) * scaleX;
+      const rh = (b.top - b.bottom) * scaleY;
+      parts.push(`<rect x="${rx}" y="${ry}" width="${rw}" height="${rh}" fill="url(#elev-rule-${hatch})" pointer-events="none"/>`);
+    }
   }
+  drawFinishClashes(parts, model, xOf, yOf, hatch);
 
   for (const o of model.openings) {
     const x = xOf(o.offset);

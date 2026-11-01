@@ -73,6 +73,13 @@ export const FINISH_SURFACES = ["wall", "floor"];
 
 const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 const str = (v) => (typeof v === "string" && v.trim() ? v.trim() : null);
+/** A screen reminder of a paint colour. The name and the code are the specification. */
+function hexColour(v) {
+  const text = str(v);
+  if (!text) return null;
+  const match = text.match(/^#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$/);
+  return match ? `#${match[1].toLowerCase()}` : null;
+}
 const known = (c) => (typeof c === "string" && c in FINISH_CATEGORIES ? c : null);
 
 let seq = 0;
@@ -100,6 +107,10 @@ export function normalizeFinishProducts(list) {
       boxCoverage: coverage !== null && coverage > 0 ? coverage : null,
       wasteFactor: waste !== null && waste >= 0 ? waste : null,
       rateRef: str(p.rateRef),
+      manufacturer: str(p.manufacturer),
+      colourName: str(p.colourName),
+      colourCode: str(p.colourCode),
+      swatch: hexColour(p.swatch),
     });
   }
   return out;

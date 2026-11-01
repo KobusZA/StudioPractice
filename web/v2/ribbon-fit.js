@@ -163,7 +163,7 @@ export function decorateRibbon(functionsEl) {
 // resort. CSS reads the attributes below, so this module owns the ladder and
 // v2.css owns what each attribute looks like.
 //
-//   data-big       "1" = large icon-over-caption buttons (kind "large")
+//   data-big       "1" = large icon-over-caption buttons (kind "large", opted in)
 //   data-comfort   "comfy" | "narrow" | "tight"   (small buttons)
 //   data-anchors   "side" | "stack"               (kind "mixed")
 //   data-anchor-comfort  "comfy" | "tight"        (kind "mixed")
@@ -171,7 +171,7 @@ export function decorateRibbon(functionsEl) {
 //   data-scale     "collapsed"                    (group folds into a dropdown)
 
 export const LADDERS = {
-  // 1-2 commands: large buttons, then stacked small ones, then icons.
+  // Opted-in groups (Openings): large buttons, then stacked small ones, then icons.
   large: [
     { big: "1", comfort: "comfy" },
     { big: "1", comfort: "tight" },

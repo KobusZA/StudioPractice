@@ -733,12 +733,15 @@ export function faceFinishBands(doc, pack, walls, wall, side, { wallBases = null
   const flip = side === -1;
   return [...bands, ...removed]
     .filter((b) => b.wallId === wall.id && b.side === (flip ? -1 : 1))
-    .map((b) => ({
+    .map((b) => {
+      const product = finishProductById(doc, b.productId);
+      return {
       id: b.id,
       source: b.source,
       sourceId: b.sourceId,
       category: b.category,
       productId: b.productId,
+      fill: b.category === "paint" && product?.swatch ? product.swatch : null,
       label: FINISH_CATEGORIES[b.category]?.label || b.category,
       from: flip ? wall.length - b.to : b.from,
       to: flip ? wall.length - b.from : b.to,
@@ -748,7 +751,8 @@ export function faceFinishBands(doc, pack, walls, wall, side, { wallBases = null
       unit: b.unit,
       outline: b.outline ? b.outline.map(([s, z]) => [flip ? wall.length - s : s, z]) : null,
       editable: b.source === "run" || b.source === "rule",
-    }));
+      };
+    });
 }
 
 /**
@@ -896,7 +900,7 @@ export function libraryLine(product) {
   return {
     model,
     category: "Finishes",
-    description: [spec.label, product.name, product.size].filter(Boolean).join(", "),
+    description: [spec.label, product.name, product.colourName, product.colourCode, product.size].filter(Boolean).join(", "),
     unit: spec.unit,
     rate: null,
   };

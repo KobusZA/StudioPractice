@@ -1,0 +1,2093 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>StudioPractice — this wall, one picture</title>
+<link rel="icon" href="../logo.png" type="image/png" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,560&family=Source+Sans+3:wght@400;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg-primary: #efe8dc;
+    --bg-secondary: #f7f3ea;
+    --bg-tertiary: #e8e0d2;
+    --bg-elevated: #fffdf8;
+    --ink: #1a1612;
+    --ink-soft: #5c5348;
+    --ink-muted: #8a8074;
+    --hairline: rgba(26, 22, 18, 0.10);
+    --hairline-strong: rgba(26, 22, 18, 0.18);
+    --copper: #b2451e;
+    --copper-dark: #8d3416;
+    --copper-tint-8: rgba(178, 69, 30, 0.08);
+    --copper-tint-16: rgba(178, 69, 30, 0.16);
+    --ok: #2f6b4f;
+    --warn: #9a6b1f;
+    --navy: #243044;
+    --radius-sm: 3px;
+    --radius-md: 4px;
+    --dock: 340px;
+    --font-ui: "Source Sans 3", "Segoe UI", sans-serif;
+    --font-display: Fraunces, Georgia, serif;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; height: 100%; background: var(--bg-primary); color: var(--ink); font-family: var(--font-ui); font-size: 14px; }
+  button, input, select { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  .app { display: grid; grid-template-rows: auto auto minmax(0, 1fr); height: 100dvh; }
+  .note { display: flex; align-items: baseline; gap: 14px; padding: 7px 14px; background: var(--navy); color: #f3eee4; font-size: 12px; line-height: 1.45; }
+  .note strong { font-family: var(--font-display); font-weight: 560; font-size: 13px; flex-shrink: 0; }
+  .note span { opacity: 0.9; }
+  .topbar { height: 40px; display: flex; align-items: center; gap: 10px; padding: 0 12px; background: var(--bg-secondary); border-bottom: 1px solid var(--hairline); }
+  .brand { display: flex; align-items: center; gap: 8px; }
+  .brand-mark { width: 24px; height: 24px; border-radius: 50%; background: #000; overflow: hidden; }
+  .brand-mark img { width: 100%; height: 100%; object-fit: cover; transform: scale(1.45); }
+  .brand-name { font-family: var(--font-display); font-size: 0.9rem; font-weight: 560; }
+  .job-name { font-size: 12px; color: var(--ink-muted); }
+  .topbar .spacer { flex: 1; }
+  .crumb { font-size: 12px; color: var(--ink-soft); }
+  .crumb b { color: var(--ink); font-weight: 600; }
+  .workspace { display: grid; grid-template-columns: minmax(0, 1fr) var(--dock); min-height: 0; }
+  .face-col { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg-primary); overflow: auto; }
+  .face-head { display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: var(--bg-secondary); border-bottom: 1px solid var(--hairline); }
+  .face-head h1 { margin: 0; font-family: var(--font-display); font-size: 1.15rem; font-weight: 560; display: flex; align-items: center; gap: 8px; }
+  .face-head .sub { font-size: 12px; color: var(--ink-muted); }
+  .face-head .spacer { flex: 1; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: var(--radius-md); border: 1px solid var(--hairline-strong); background: var(--bg-elevated); font-size: 12.5px; font-weight: 600; }
+  .btn:hover { border-color: var(--copper); color: var(--copper-dark); }
+  .btn[aria-pressed="true"] { background: var(--copper-tint-16); border-color: var(--copper); color: var(--copper-dark); }
+  .btn:disabled { opacity: 0.45; cursor: default; }
+  .mark { width: 18px; height: 18px; border-radius: 50%; flex-shrink: 0; background: var(--copper); color: #fff; font-size: 10px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
+  .editor-band { display: flex; align-items: flex-start; gap: 10px; margin: 10px 14px 0; }
+  .editor { flex: 1 1 auto; min-width: 0; display: grid; gap: 8px; padding: 8px 10px 10px; background: var(--bg-elevated); border: 1px solid var(--copper); border-radius: var(--radius-md); box-shadow: 0 1px 0 var(--copper-tint-16); }
+  .editor-top, .editor-controls { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .editor-controls { flex-wrap: wrap; padding-left: 48px; }
+  .editor-top strong { font-size: 13.5px; line-height: 1.2; flex-shrink: 0; }
+  #sel-meta { font-size: 12.5px; color: var(--ink-soft); min-width: 0; }
+  #op-fields, #places { display: flex; align-items: center; gap: 6px; }
+  #places .btn, #add, #sel-remove { flex-shrink: 0; white-space: nowrap; }
+  #sel-remove { margin-left: 4px; }
+  #add { align-self: center; }
+  .swatch { width: 14px; height: 14px; border-radius: 2px; flex-shrink: 0; box-shadow: inset 0 0 0 1px rgba(26,22,18,0.18); }
+  .swatch.rule { background-image: repeating-linear-gradient(135deg, transparent, transparent 2px, rgba(141,52,22,0.55) 2px, rgba(141,52,22,0.55) 3px); }
+  .editor label, .mm-pair { display: inline-flex; align-items: center; gap: 6px; font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-muted); white-space: nowrap; }
+  .mm-pair { text-transform: none; letter-spacing: 0; font-weight: 500; font-size: 12px; color: var(--ink-soft); }
+  .editor select, .editor input { height: 28px; width: 148px; padding: 0 8px; border: 1px solid var(--hairline-strong); border-radius: var(--radius-sm); background: #fff; font-size: 13px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--ink); }
+  .editor input.mm { width: 64px; }
+  .editor select:disabled, .editor input:disabled { background: var(--bg-tertiary); color: var(--ink-soft); }
+  .editor .remove { color: var(--copper-dark); }
+  #edge-mode { position: absolute; z-index: 3; display: inline-flex; flex-direction: column; align-items: stretch; border: 1px solid var(--hairline-strong); border-radius: 5px; overflow: hidden; background: var(--bg-elevated); box-shadow: 0 1px 0 var(--copper-tint-16); }
+  .kicker { font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-muted); padding: 2px 8px 1px; text-align: center; border-bottom: 1px solid var(--hairline); white-space: nowrap; }
+  .edge-actions { display: inline-flex; }
+  .edge-actions button { border: 0; border-radius: 0; background: transparent; height: 26px; padding: 0 10px; font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; }
+  .edge-actions button[aria-pressed="true"] { background: var(--ink); color: #fffdf8; }
+  .mm-block { display: inline-flex; align-items: center; gap: 6px; }
+  .other-wall { position: absolute; z-index: 2; top: 8px; left: 8px; right: 8px; margin: 0; padding: 6px 10px; background: var(--bg-tertiary); border-radius: var(--radius-sm); font-size: 12.5px; color: var(--ink-soft); }
+  .canvas-wrap { position: relative; flex: 1 1 auto; min-height: 240px; margin: 8px 14px 10px; }
+  .elev { width: 100%; height: 100%; display: block; background: var(--bg-elevated); border: 1px solid var(--hairline-strong); border-radius: var(--radius-md); touch-action: none; }
+  .elev.is-panning, .elev.is-panning * { cursor: grabbing !important; }
+  .elev.is-drawing:not(.is-panning), .elev.is-drawing:not(.is-panning) * { cursor: crosshair !important; }
+  .outline-edge { cursor: default; }
+  .outline-edge.is-add { cursor: copy; }
+  .outline-edge.is-ns { cursor: ns-resize; }
+  .outline-edge.is-ew { cursor: ew-resize; }
+  .outline-edge.is-nwse { cursor: nwse-resize; }
+  .outline-edge.is-nesw { cursor: nesw-resize; }
+  .closed { display: grid; place-items: center; align-content: center; gap: 12px; min-height: 100%; padding: 48px 24px; text-align: center; }
+  .closed[hidden] { display: none !important; }
+  .closed p { margin: 0; max-width: 420px; color: var(--ink-soft); }
+  .band, .opening { cursor: pointer; }
+  .handle { fill: var(--bg-elevated); stroke: var(--copper); stroke-width: 1.5; cursor: move; }
+  .handle.is-ns { cursor: ns-resize; }
+  .handle.is-ew { cursor: ew-resize; }
+  .handle.is-nwse { cursor: nwse-resize; }
+  .handle.is-nesw { cursor: nesw-resize; }
+  #top-handle { cursor: ns-resize; }
+  #top-handle.is-selected { fill: var(--copper); stroke: var(--copper-dark); stroke-width: 2.5; }
+  .dim { font-family: var(--font-ui); font-size: 12px; fill: var(--ink-soft); }
+  .dim-strong { font-family: var(--font-ui); font-size: 12px; font-weight: 700; fill: var(--copper-dark); }
+  .loc-line, .loc-ext, .loc-tick { stroke: #1a1612; stroke-width: 1.25px; vector-effect: non-scaling-stroke; pointer-events: none; }
+  .loc-bg { fill: rgba(244, 237, 225, 0.94); stroke: rgba(26, 22, 18, 0.18); stroke-width: 1px; vector-effect: non-scaling-stroke; pointer-events: none; }
+  .loc-text { font-family: var(--font-ui); font-size: 12px; font-weight: 700; fill: #1a1612; pointer-events: none; }
+  .loc-bg.is-editing { fill: var(--bg-elevated); stroke: var(--copper); stroke-width: 1.5px; }
+  .loc-text.is-editing { fill: var(--copper-dark); }
+  .align-line { stroke: #3a5f7a; stroke-width: 1; stroke-dasharray: 4 3; pointer-events: none; }
+  .level-label { font-family: var(--font-ui); font-size: 11px; fill: var(--ink-muted); }
+  .plan-wrap { position: relative; }
+  .plan-chip { display: inline-flex; align-items: center; gap: 8px; height: auto; padding: 4px 8px; border-radius: var(--radius-sm); border: 1px solid var(--hairline-strong); background: var(--bg-elevated); font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-muted); }
+  .plan-chip svg, .plan-svg { width: 128px; height: 58px; display: block; }
+  .plan-svg-large { width: 280px; height: 126px; }
+  .plan-chip-copy { display: grid; text-align: left; line-height: 1.15; }
+  .plan-chip-copy strong { color: var(--copper-dark); font-size: 11px; }
+  .plan-chip-sub { font-size: 9px; letter-spacing: 0.06em; }
+  .plan-chip[aria-expanded="true"] { border-color: var(--copper); color: var(--copper-dark); }
+  .room-fill { fill: #fffdf8; stroke: #1a1612; stroke-width: 1; }
+  .wall-line { stroke: #1a1612; stroke-width: 3.5; }
+  .side-name { font-family: var(--font-ui); font-size: 8px; fill: #8a8074; }
+  .side-name.is-on { fill: #8d3416; font-weight: 700; }
+  .flash-side { fill: #b2451e; opacity: 0; }
+  .flash-edge { stroke: #b2451e; stroke-width: 3; stroke-linecap: round; opacity: 0; }
+  .flash-side.is-on, .flash-edge.is-on { opacity: 0.75; }
+  .plan-stage {
+    position: fixed; z-index: 30; left: 0; right: 0; bottom: 0; top: 78px;
+    display: grid; place-items: center; align-content: center; gap: 12px;
+    background:
+      linear-gradient(transparent 23px, rgba(26, 22, 18, 0.045) 24px),
+      linear-gradient(90deg, transparent 23px, rgba(26, 22, 18, 0.045) 24px),
+      var(--bg-primary);
+    background-size: 24px 24px, 24px 24px, auto;
+  }
+  .plan-stage[hidden] { display: none !important; }
+  .drawing { width: min(760px, calc(100% - 48px)); height: auto; background: var(--bg-elevated); border: 1px solid var(--hairline-strong); border-radius: var(--radius-md); }
+  .plan-ink { fill: none; stroke: #1a1612; stroke-width: 2; }
+  .plan-room { font-family: var(--font-ui); font-size: 14px; fill: #5c5348; }
+  .wall-flash { fill: #b2451e; opacity: 0; }
+  .wall-flash.is-flashing { animation: side-flash 0.48s ease-in-out 3; }
+  @keyframes side-flash {
+    0%, 100% { opacity: 0.12; }
+    40%, 60% { opacity: 1; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .wall-flash.is-flashing { animation: none; opacity: 0.9; }
+  }
+  .plan-stage p { margin: 0; max-width: 460px; text-align: center; color: var(--ink-soft); }
+  .plan-stage .home-only[hidden] { display: none !important; }
+  .plan-pop { position: absolute; top: calc(100% + 4px); left: 0; z-index: 4; width: 250px; display: grid; gap: 4px; padding: 8px; background: var(--bg-elevated); border: 1px solid var(--hairline-strong); border-radius: var(--radius-md); box-shadow: 0 8px 22px rgba(26,22,18,0.16); }
+  .sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+  .plan-pop[hidden] { display: none; }
+  .plan-pop p { margin: 0 0 2px; font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--ink-muted); }
+  .plan-pop button { text-align: left; }
+  .dock { display: flex; flex-direction: column; min-height: 0; background: var(--bg-secondary); border-left: 1px solid var(--hairline); }
+  .dock header { display: flex; justify-content: space-between; align-items: baseline; padding: 10px 12px 8px; border-bottom: 1px solid var(--hairline); }
+  .dock header h2 { margin: 0; font-family: var(--font-display); font-size: 1rem; font-weight: 500; }
+  .dock header span { font-size: 11px; color: var(--ink-muted); }
+  .ctx { flex: 1; overflow: auto; padding: 10px 12px 20px; display: grid; gap: 12px; align-content: start; }
+  .identity { display: grid; gap: 8px; }
+  .identity .name { font-family: var(--font-display); font-size: 1.05rem; font-weight: 560; margin: 0; }
+  .meta { display: flex; gap: 8px; flex-wrap: wrap; }
+  .pill { font-size: 12px; padding: 3px 8px; border-radius: 999px; background: var(--bg-elevated); border: 1px solid var(--hairline); color: var(--ink-soft); }
+  .fin-sec { display: grid; gap: 6px; }
+  .fin-sec h3 { margin: 0; font-family: var(--font-display); font-size: 0.95rem; font-weight: 560; display: flex; align-items: center; gap: 8px; }
+  .fin-sec .lead, .sum { margin: 0; font-size: 12px; color: var(--ink-soft); }
+  .sum b { color: var(--ink); }
+  .fin-row { width: 100%; text-align: left; display: grid; grid-template-columns: 14px 1fr auto; grid-template-areas: "sw name area" "sw place area" "sw prod area"; column-gap: 8px; row-gap: 1px; align-items: center; padding: 8px 9px; border: 1px solid var(--hairline); border-radius: var(--radius-sm); background: var(--bg-elevated); }
+  .fin-row:hover { border-color: var(--hairline-strong); }
+  .fin-row.is-selected { border-color: var(--copper); background: var(--copper-tint-8); box-shadow: inset 3px 0 0 var(--copper); }
+  .fin-row .swatch { grid-area: sw; }
+  .fin-row .name { grid-area: name; font-weight: 700; font-size: 13px; }
+  .fin-row .place { grid-area: place; font-size: 12px; color: var(--ink-soft); }
+  .fin-row .prod { grid-area: prod; font-size: 12px; color: var(--ink-muted); }
+  .fin-row .area { grid-area: area; font-size: 12px; color: var(--ink-soft); align-self: start; padding-top: 1px; }
+  .on-note { margin: 2px 0 0; font-size: 12.5px; color: var(--ok); }
+  .warn-note { margin: 2px 0 0; font-size: 12.5px; color: var(--warn); }
+  details.more { border: 1px solid var(--hairline); border-radius: var(--radius-sm); background: var(--bg-elevated); }
+  details.more summary { padding: 7px 10px; font-size: 12px; font-weight: 600; color: var(--ink-soft); cursor: pointer; }
+  details.more .more-body { padding: 0 10px 10px; font-size: 12.5px; color: var(--ink-soft); display: grid; gap: 4px; }
+  .key { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin: 0 14px 12px; padding: 8px 10px; background: var(--bg-elevated); border: 1px solid var(--hairline); border-radius: var(--radius-md); font-size: 11.5px; line-height: 1.3; flex-shrink: 0; }
+  .key p { margin: 0; }
+  .key b { display: block; color: var(--copper-dark); font-size: 12px; }
+  .key span { color: var(--ink-soft); }
+  @media (max-width: 980px) {
+    .workspace { grid-template-columns: 1fr; grid-template-rows: minmax(420px, 1fr) auto; }
+    .dock { border-left: 0; border-top: 1px solid var(--hairline); max-height: 42vh; }
+    .key { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="note">
+    <strong>Mock — one picture of the wall</strong>
+    <span>Scroll to zoom. Middle-drag or Alt-drag to move. Fit shows the whole wall. The Wall row selects the wall. Escape leaves a finish and selects the wall, then closes it. Exit closes it now. Not wired to the app.</span>
+  </div>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark"><img src="../logo.png" alt="" /></span>
+      <span class="brand-name">StudioPractice</span>
+    </div>
+    <span class="job-name">Erf 214 alterations</span>
+    <span class="spacer"></span>
+    <span class="crumb">Plan · <b id="crumb-face">Kitchen south, kitchen side</b></span>
+  </header>
+  <div class="plan-stage" id="plan-stage" hidden>
+    <svg class="drawing" viewBox="0 0 640 460" role="img" aria-label="Plan">
+      <rect class="plan-ink" x="48" y="36" width="250" height="140"/>
+      <rect class="plan-ink" x="298" y="36" width="250" height="140"/>
+      <rect class="plan-ink" x="48" y="176" width="250" height="160"/>
+      <rect class="plan-ink" x="298" y="176" width="250" height="160"/>
+      <rect class="plan-ink" x="48" y="336" width="250" height="80"/>
+      <rect class="wall-flash" data-flash="living" x="58" y="40" width="230" height="16"/>
+      <rect class="wall-flash" data-flash="kitchen" x="58" y="318" width="230" height="16"/>
+      <rect class="wall-flash" data-flash="passage" x="58" y="338" width="230" height="16"/>
+      <line class="wall-line" x1="48" y1="336" x2="298" y2="336"/>
+      <text class="plan-room" x="173" y="114" text-anchor="middle">Living</text>
+      <text class="plan-room" x="423" y="114" text-anchor="middle">Bedroom</text>
+      <text class="plan-room" x="173" y="262" text-anchor="middle">Kitchen</text>
+      <text class="plan-room" x="423" y="262" text-anchor="middle">Bedroom</text>
+      <text class="plan-room" x="173" y="382" text-anchor="middle">Passage</text>
+    </svg>
+    <p id="plan-stage-note">Kitchen side of Kitchen south.</p>
+    <p class="home-only" id="plan-home-note" hidden>This wall is closed. You are back on the plan. Escape puts the finish down first, and the next Escape closes the wall. Exit closes it in one press.</p>
+    <button type="button" class="btn home-only" id="reopen" hidden>Open this wall</button>
+  </div>
+  <div class="workspace">
+    <section class="face-col" aria-label="This wall">
+      <div class="face-head">
+        <h1><span class="mark">1</span> This wall</h1>
+        <span class="sub" id="face-sub">Kitchen south · Kitchen side · 4 500 × 2 700 mm</span>
+        <div class="plan-wrap">
+          <button type="button" class="plan-chip" id="plan-btn" aria-expanded="false" aria-controls="plan-pop">
+            <svg class="plan-svg" viewBox="0 0 160 72" aria-hidden="true">
+              <rect class="room-fill" x="18" y="6" width="124" height="28"/>
+              <rect class="room-fill" x="18" y="38" width="124" height="28"/>
+              <rect class="flash-side" data-side="kitchen" x="22" y="22" width="116" height="10"/>
+              <rect class="flash-side" data-side="passage" x="22" y="36" width="116" height="10"/>
+              <line class="wall-line" x1="18" y1="34" x2="142" y2="34"/>
+              <line class="flash-edge" data-side="kitchen" x1="22" y1="31" x2="138" y2="31"/>
+              <line class="flash-edge" data-side="passage" x1="22" y1="37" x2="138" y2="37"/>
+              <text class="side-name" data-side="kitchen" x="80" y="18" text-anchor="middle">Kitchen</text>
+              <text class="side-name" data-side="passage" x="80" y="56" text-anchor="middle">Passage</text>
+            </svg>
+            <span class="plan-chip-copy">
+              <strong id="plan-label">Kitchen side</strong>
+              <span class="plan-chip-sub">on plan</span>
+            </span>
+          </button>
+          <span class="sr" id="flash-live" aria-live="polite"></span>
+          <div class="plan-pop" id="plan-pop" hidden>
+            <p>Choose a wall</p>
+            <button type="button" class="btn" data-face="kitchen">Kitchen south · Kitchen side</button>
+            <button type="button" class="btn" data-face="passage">Kitchen south · Passage side</button>
+            <button type="button" class="btn" data-face="living">Living north · Living side</button>
+          </div>
+        </div>
+        <span class="spacer"></span>
+        <button type="button" class="btn" id="flash-plan" title="Blink this side of the wall on the plan">Flash on plan</button>
+        <button type="button" class="btn" id="flip">Flip face</button>
+        <button type="button" class="btn" id="fit" title="Show the whole wall again">Fit</button>
+        <button type="button" class="btn" id="exit" title="Close this wall. Escape selects the wall first, then closes.">Exit</button>
+      </div>
+
+      <div class="editor-band">
+        <div class="editor" id="editor">
+          <div class="editor-top">
+            <span class="mark">2</span>
+            <i class="swatch" id="sel-swatch"></i>
+            <strong id="sel-which">Paint 2 of 2</strong>
+            <span id="sel-meta"></span>
+          </div>
+          <div class="editor-controls">
+            <label id="type-label">Type
+              <select id="sel-type" aria-label="Finish type"></select>
+            </label>
+            <label id="product-label">Product
+              <input id="sel-product" aria-label="Product" />
+            </label>
+            <div id="places" hidden>
+              <button type="button" class="btn" data-place="whole">Whole face</button>
+              <button type="button" class="btn" data-place="dado">Up to 1.2 m</button>
+              <button type="button" class="btn" data-place="low">Up to 150 mm</button>
+              <button type="button" class="btn" data-place="draw" id="draw-btn">Draw area</button>
+            </div>
+            <label id="wall-fields" hidden>Height
+              <input id="wall-mm" class="mm" inputmode="numeric" aria-label="Wall height, mm" />
+            </label>
+            <div id="op-fields" hidden>
+              <label>Width <input id="op-width" class="mm" inputmode="numeric" aria-label="Width, mm" /></label>
+              <label>Height <input id="op-height" class="mm" inputmode="numeric" aria-label="Height, mm" /></label>
+              <label>Sill <input id="op-sill" class="mm" inputmode="numeric" aria-label="Sill, mm" /></label>
+              <label>From left <input id="op-from" class="mm" inputmode="numeric" aria-label="From the left, mm" /></label>
+            </div>
+            <button type="button" class="btn remove" id="sel-remove">Remove</button>
+          </div>
+        </div>
+        <button type="button" class="btn" id="add">Add a finish</button>
+      </div>
+
+      <div class="canvas-wrap">
+        <p class="other-wall" id="other-wall" hidden>Living north would open in this same view. This mock still draws the kitchen wall.</p>
+        <svg class="elev" id="elev" viewBox="0 0 1000 620" role="img" aria-label="Wall face">
+          <defs>
+            <pattern id="rule-hatch" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(40)">
+              <rect width="8" height="8" fill="#d9a441" fill-opacity="0.45"/>
+              <line x1="0" y1="0" x2="0" y2="8" stroke="#8d3416" stroke-width="1.4" stroke-opacity="0.7"/>
+            </pattern>
+            <pattern id="clash-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(-40)">
+              <rect width="6" height="6" fill="#9a6b1f" fill-opacity="0.35"/>
+              <line x1="0" y1="0" x2="0" y2="6" stroke="#9a6b1f" stroke-width="2"/>
+            </pattern>
+          </defs>
+          <rect class="elev-bg" x="0" y="0" width="1000" height="620" fill="#fffdf8"/>
+          <line x1="40" y1="48" x2="960" y2="48" stroke="#8a8074" stroke-dasharray="5 4" stroke-width="1"/>
+          <text class="level-label" x="952" y="42" text-anchor="end">First floor +3.000</text>
+          <rect id="wall-ghost" x="80" y="48" width="840" height="34" fill="#e8e0d2" opacity="0.65"/>
+          <g id="bands"></g>
+          <g id="clashes"></g>
+          <g id="selbox"></g>
+          <g id="openings"></g>
+          <g id="outline"></g>
+          <line x1="40" y1="542" x2="960" y2="542" stroke="#5c5348" stroke-width="1.25"/>
+          <text class="level-label" x="952" y="536" text-anchor="end">Ground +0.000</text>
+          <text class="dim" x="500" y="566" text-anchor="middle">4 500</text>
+          <text class="dim" id="wall-h" x="68" y="300" text-anchor="end">2 700</text>
+          <rect id="top-handle" x="476" y="74" width="48" height="8" rx="1" fill="#fffdf8" stroke="#b2451e" stroke-width="1.5"><title>Drag to set the wall height</title></rect>
+          <g id="align"></g>
+          <g id="locate"></g>
+        </svg>
+        <div id="edge-mode" hidden>
+          <span class="kicker">Drag an edge to</span>
+          <span class="edge-actions" role="group" aria-label="Drag an edge of the finish to">
+            <button type="button" data-edge="line" aria-pressed="true" title="Move this edge">Line</button>
+            <button type="button" data-edge="corner" aria-pressed="false" title="Add a corner on an edge">Corner</button>
+          </span>
+        </div>
+      </div>
+
+      <footer class="key">
+        <p><b>1 · One picture</b><span>This face is the editor. The inspector has no second thumbnail.</span></p>
+        <p><b>2 · Named selection</b><span>Add a finish sits beside this box. The type and where it goes stay inside it.</span></p>
+        <p><b>3 · On the shape</b><span>Dragging a corner or an edge measures the gap to the wall: left or right, and up or down. Click the same spot again to edit the finish underneath.</span></p>
+        <p><b>4 · Coats on one shape</b><span>A second finish on the same area is a line just inside, and a “2 coats” mark. A clash is still the hatch.</span></p>
+        <p><b>5 · Not the sheet</b><span>Document → Views → Elevation is still the compass view of the building.</span></p>
+      </footer>
+    </section>
+
+    <aside class="dock" aria-label="Inspector">
+      <header>
+        <h2>Inspector</h2>
+        <span>Wall</span>
+      </header>
+      <div class="ctx">
+        <div class="identity">
+          <p class="name" id="wall-name">Kitchen south</p>
+          <div class="meta">
+            <span class="pill">115 mm brick</span>
+            <span class="pill">Existing</span>
+            <span class="pill" id="face-pill">Kitchen side</span>
+          </div>
+        </div>
+        <div id="wall-pick"></div>
+        <section class="fin-sec">
+          <h3>Openings</h3>
+          <p class="lead">A door uses this same box. Its width stays with the door type, and it has no sill.</p>
+          <div id="opening-list"></div>
+        </section>
+        <section class="fin-sec">
+          <h3><span class="mark">4</span> Finishes on this face</h3>
+          <p class="sum" id="fin-sum"></p>
+          <div id="fin-list"></div>
+          <div id="fin-notes"></div>
+        </section>
+        <section class="fin-sec" id="rule-sec">
+          <h3>Room rule</h3>
+          <p class="lead">Hatched on the picture. Editing it changes every wall of the Kitchen, not only this face.</p>
+          <div id="rule-list"></div>
+        </section>
+        <details class="more">
+          <summary>Wall height and other settings</summary>
+          <div class="more-body">
+            <div>Top · up to the level above</div>
+            <div id="wall-h-note">Wall height · 2 700 mm. Select the wall to edit it.</div>
+            <div>Base · Ground</div>
+          </div>
+        </details>
+      </div>
+    </aside>
+  </div>
+</div>
+<script>
+const SVG = "http://www.w3.org/2000/svg";
+const WALL = { x: 80, y: 82, w: 840, h: 460, length: 4500, height: 2700 };
+const FLOOR = WALL.y + WALL.h;
+const COLOUR = { plaster: "#b8b0a0", primer: "#c4a574", paint: "#d9a441", wallTile: "#4f86a8" };
+const TYPE_LABEL = { plaster: "Plaster", primer: "Primer", paint: "Paint", wallTile: "Wall tile", skirting: "Skirting" };
+const TYPE_OPTIONS = [["primer", "Primer"], ["paint", "Paint"], ["wallTile", "Wall tile"], ["skirting", "Skirting"]];
+const DEFAULT_PRODUCT = { primer: "Alkali resistant primer", paint: "Plascon Double Velvet", wallTile: "Union gloss white", skirting: "Skirting" };
+const COAT = new Set(["plaster", "primer"]);
+
+const byFace = {
+  kitchen: [
+    { id: "plaster", category: "plaster", product: "From the wall type", source: "default", from: 0, to: 4500, bottom: 0, top: 2700 },
+    { id: "primer", category: "primer", product: "Alkali resistant primer", source: "run", from: 0, to: 900, bottom: 0, top: 1200 },
+    { id: "paint-a", category: "paint", product: "Plascon Double Velvet", source: "run", from: 0, to: 900, bottom: 0, top: 1200 },
+    { id: "paint-b", category: "paint", product: "Dulux Trade", source: "run", points: [[900, 0], [1800, 0], [1800, 700], [1400, 1200], [900, 850]] },
+    { id: "tile", category: "wallTile", product: "Union gloss white", source: "run", from: 3000, to: 4500, bottom: 0, top: 1500 },
+    { id: "rule", category: "paint", product: "Contractor white", source: "rule", from: 0, to: 4500, bottom: 1200, top: 2700 },
+  ],
+  passage: [
+    { id: "plaster-p", category: "plaster", product: "From the wall type", source: "default", from: 0, to: 4500, bottom: 0, top: 2700 },
+    { id: "paint-p", category: "paint", product: "Dulux Trade", source: "run", from: 0, to: 4500, bottom: 0, top: 1200 },
+  ],
+};
+let openings = [{ id: "win", kind: "window", name: "Window", from: 1800, width: 1200, sill: 970, height: 1200 }];
+let faceId = "kitchen";
+let wallHeight = 2700;
+const NEXT_FLOOR = 3000;
+const MIN_WALL = 2100;
+let selected = "finish:paint-b";
+let pending = null;
+let drawing = false;
+let edgeMode = "line";
+let drawPts = [];
+let drag = null;
+let didDrag = false;
+let neighbour = false;
+// Which way a corner's clearance is pinned while it is dragged. Null keeps
+// the nearer side. The same arrow returns to the nearer side.
+let locatePin = { h: null, v: null };
+// A corner that was clicked (not dragged) stays "held": its gap captions
+// stay up so a number can be typed with the pointer not touching anything.
+let heldCorner = null;
+// The gap currently being typed into, as digits: { axis: "h" | "v", text }.
+let typing = null;
+// Which axis the next typed digit lands on, set by the last arrow press
+// or caption click.
+let typingAxis = "h";
+let faceOpen = true;
+let view = { zoom: 1, panX: 0, panY: 0 };
+let panDrag = null;
+const VIEW = { w: 1000, h: 620 };
+
+const bandsG = document.getElementById("bands");
+const clashG = document.getElementById("clashes");
+const selG = document.getElementById("selbox");
+const openG = document.getElementById("openings");
+const outG = document.getElementById("outline");
+const locateG = document.getElementById("locate");
+const alignG = document.getElementById("align");
+const typeSelect = document.getElementById("sel-type");
+for (const [value, label] of TYPE_OPTIONS) {
+  const opt = document.createElement("option");
+  opt.value = value;
+  opt.textContent = label;
+  typeSelect.appendChild(opt);
+}
+
+function finishes() { return byFace[faceId]; }
+function xOf(mm) { return WALL.x + (mm / WALL.length) * WALL.w; }
+function yOf(mm) { return FLOOR - (mm / 2700) * WALL.h; }
+function shapingFinish() {
+  return Boolean(drawing || pending);
+}
+function syncWallTop() {
+  const top = yOf(wallHeight);
+  const handle = document.getElementById("top-handle");
+  handle.setAttribute("y", top - 4);
+  handle.style.display = shapingFinish() ? "none" : "";
+  handle.classList.toggle("is-selected", selected === "wall");
+  document.getElementById("wall-h").textContent = group(wallHeight);
+  document.getElementById("wall-h-note").textContent = `Wall height · ${group(wallHeight)} mm. Select the wall to edit it.`;
+  const ghost = document.getElementById("wall-ghost");
+  const gap = top - 48;
+  ghost.style.display = gap > 1 ? "" : "none";
+  if (gap > 1) {
+    ghost.setAttribute("y", 48);
+    ghost.setAttribute("height", gap);
+  }
+}
+function group(n) { return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, " "); }
+function clamp(n, a, b) { return Math.max(a, Math.min(b, n)); }
+function snap(mm) { return Math.round(mm / 10) * 10; }
+const ALIGN = 100;
+function alignTargets(skip) {
+  const sTargets = [0, WALL.length];
+  const zTargets = [0, wallHeight];
+  const skipped = new Set(skip?.indexes || []);
+  for (const f of finishes()) {
+    if (f.source === "default") continue;
+    const ring = f.points && f.points.length >= 3 ? f.points : (Number.isFinite(f.from) ? ringOf(f) : []);
+    ring.forEach((p, i) => {
+      if (skip && skip.id === f.id && skipped.has(i)) return;
+      sTargets.push(p[0]);
+      zTargets.push(p[1]);
+    });
+  }
+  for (const o of openings) {
+    const ss = [o.from, o.from + o.width];
+    const zs = [o.sill, o.sill + o.height];
+    if (skip && skip.opening === o.id) {
+      ss.filter((v) => Math.abs(v - skip.s) > 0.5).forEach((v) => sTargets.push(v));
+      zs.filter((v) => Math.abs(v - skip.z) > 0.5).forEach((v) => zTargets.push(v));
+    } else {
+      sTargets.push(...ss);
+      zTargets.push(...zs);
+    }
+  }
+  return { sTargets, zTargets };
+}
+function pickGuide(raw, targets) {
+  let guide = null;
+  let best = ALIGN;
+  for (const t of targets) {
+    const d = Math.abs(raw - t);
+    if (d <= best) { guide = t; best = d; }
+  }
+  return guide;
+}
+/** Snap a dragged corner to another corner or edge, and remember which axes lined up. */
+function alignPoint(along, up, skip) {
+  const { sTargets, zTargets } = alignTargets(skip);
+  const guideS = pickGuide(along, sTargets);
+  const guideZ = pickGuide(up, zTargets);
+  const s = clamp(guideS == null ? along : guideS, 0, WALL.length);
+  const z = clamp(guideZ == null ? up : guideZ, 0, wallHeight);
+  return {
+    along: s,
+    up: z,
+    guideS: guideS != null && Math.abs(guideS - s) < 0.5 ? guideS : null,
+    guideZ: guideZ != null && Math.abs(guideZ - z) < 0.5 ? guideZ : null,
+  };
+}
+function rememberGuides(hit) {
+  drag.guideS = hit.guideS;
+  drag.guideZ = hit.guideZ;
+}
+function svgEl(name, attrs) {
+  const node = document.createElementNS(SVG, name);
+  for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
+  return node;
+}
+function applyView() {
+  const svg = document.getElementById("elev");
+  const w = VIEW.w / view.zoom;
+  const h = VIEW.h / view.zoom;
+  svg.setAttribute("viewBox", `${view.panX} ${view.panY} ${w} ${h}`);
+  document.getElementById("fit").disabled = view.zoom === 1 && view.panX === 0 && view.panY === 0;
+  placeEdgeMode();
+}
+function placeEdgeMode() {
+  const node = document.getElementById("edge-mode");
+  const host = document.querySelector(".canvas-wrap");
+  const svg = document.getElementById("elev");
+  const finish = currentFinish();
+  if (!node || node.hidden || !host || !svg || !canShape(finish) || !svg.getScreenCTM()) return;
+  const ring = ringOf(finish);
+  const pt = svg.createSVGPoint();
+  pt.x = Math.min(...ring.map((p) => xOf(p[0])));
+  pt.y = Math.min(...ring.map((p) => yOf(p[1])));
+  const sp = pt.matrixTransform(svg.getScreenCTM());
+  const hostRect = host.getBoundingClientRect();
+  const width = node.offsetWidth || 132;
+  const height = node.offsetHeight || 44;
+  const left = Math.max(8, Math.min(sp.x - hostRect.left, host.clientWidth - width - 8));
+  const top = Math.max(8, Math.min(sp.y - hostRect.top - height - 6, host.clientHeight - height - 8));
+  node.style.left = `${Math.round(left)}px`;
+  node.style.top = `${Math.round(top)}px`;
+}
+function pointerMm(evt, maxUp = wallHeight) {
+  const svg = document.getElementById("elev");
+  const pt = svg.createSVGPoint();
+  pt.x = evt.clientX;
+  pt.y = evt.clientY;
+  const p = pt.matrixTransform(svg.getScreenCTM().inverse());
+  return {
+    along: clamp(snap(((p.x - WALL.x) / WALL.w) * WALL.length), 0, WALL.length),
+    up: clamp(snap(((FLOOR - p.y) / WALL.h) * 2700), 0, maxUp),
+  };
+}
+function boxOf(f) {
+  if (!f.points || f.points.length < 3) return { from: f.from, to: f.to, bottom: f.bottom, top: f.top };
+  const xs = f.points.map((p) => p[0]);
+  const ys = f.points.map((p) => p[1]);
+  return { from: Math.min(...xs), to: Math.max(...xs), bottom: Math.min(...ys), top: Math.max(...ys) };
+}
+function ringOf(f) {
+  if (f.points && f.points.length >= 3) return f.points;
+  return [[f.from, f.bottom], [f.to, f.bottom], [f.to, f.top], [f.from, f.top]];
+}
+function canShape(f) {
+  return Boolean(f && f.source === "run");
+}
+function areaOf(f) {
+  if (!f.points || f.points.length < 3) return areaM2(f);
+  let twice = 0;
+  for (let i = 0; i < f.points.length; i += 1) {
+    const n = f.points[(i + 1) % f.points.length];
+    twice += f.points[i][0] * n[1] - n[0] * f.points[i][1];
+  }
+  return Math.abs(twice) / 2e6;
+}
+function sitsOnPrimer(f) {
+  if (f.category !== "paint" || f.points) return false;
+  const b = boxOf(f);
+  return finishes().some((c) => c.category === "primer" && b.from >= c.from - 30 && b.to <= c.to + 30 && b.bottom >= c.bottom - 30 && b.top <= c.top + 30);
+}
+function areaM2(box) {
+  let area = Math.max(0, box.to - box.from) * Math.max(0, box.top - box.bottom);
+  for (const o of openings) {
+    const x1 = Math.max(box.from, o.from);
+    const x2 = Math.min(box.to, o.from + o.width);
+    const y1 = Math.max(box.bottom, o.sill);
+    const y2 = Math.min(box.top, o.sill + o.height);
+    if (x2 > x1 && y2 > y1) area -= (x2 - x1) * (y2 - y1);
+  }
+  return Math.max(0, area) / 1e6;
+}
+function overlapM2(a, b) {
+  const ba = boxOf(a);
+  const bb = boxOf(b);
+  const x1 = Math.max(ba.from, bb.from);
+  const x2 = Math.min(ba.to, bb.to);
+  const y1 = Math.max(ba.bottom, bb.bottom);
+  const y2 = Math.min(ba.top, bb.top);
+  if (x2 - x1 < 20 || y2 - y1 < 20) return 0;
+  return areaM2({ from: x1, to: x2, bottom: y1, top: y2 });
+}
+function formatArea(m2) {
+  return `${m2.toFixed(1).replace(/\.0$/, "")} m²`;
+}
+function labelOf(f) { return TYPE_LABEL[f.category] || f.category; }
+function whichOf(f) {
+  if (f.source === "rule") return "Paint · room rule";
+  if (f.source === "default") return labelOf(f);
+  const same = finishes().filter((row) => row.source === "run" && row.category === f.category);
+  if (same.length < 2) return labelOf(f);
+  return `${labelOf(f)} ${same.indexOf(f) + 1} of ${same.length}`;
+}
+function bandWords(f) {
+  const b = boxOf(f);
+  const fullW = b.from <= 0 && b.to >= WALL.length;
+  const fullH = b.bottom <= 0 && b.top >= wallHeight - 10;
+  if (fullW && fullH) return "Whole face";
+  if (fullW && b.bottom === 0 && b.top === 1200) return "Up to 1.2 m";
+  if (fullW && b.bottom === 0 && b.top === 150) return "Up to 150 mm";
+  const along = fullW ? "full length" : `${group(b.from)}–${group(b.to)} mm along`;
+  const up = fullH ? "full height" : (b.bottom === 0 ? `up to ${group(b.top)} mm` : `${group(b.bottom)}–${group(b.top)} mm up`);
+  return `${along}, ${up}`;
+}
+function placeOf(f) {
+  if (f.source === "rule" && f.from === 0 && f.to === 4500 && f.bottom === 1200 && f.top === 2700) return "Every wall of the Kitchen, above 1.2 m";
+  if (f.source === "rule") return `Every wall of the Kitchen · ${bandWords(f).charAt(0).toLowerCase()}${bandWords(f).slice(1)}`;
+  if (f.source === "default") return "Whole face";
+  if (f.points) return "Left of the window";
+  if (sitsOnPrimer(f)) return "On the primer";
+  if (f.from === 0 && f.to === 900 && f.bottom === 0 && f.top === 1200) return "Left end, up to 1.2 m";
+  if (f.from === 3000 && f.to === 4500 && f.bottom === 0 && f.top === 1500) return "Right of the window, up to 1.5 m";
+  return bandWords(f);
+}
+function clashes() {
+  const applied = finishes().filter((f) => f.source !== "default");
+  const out = [];
+  for (let i = 0; i < applied.length; i += 1) {
+    for (let j = i + 1; j < applied.length; j += 1) {
+      if (COAT.has(applied[i].category) || COAT.has(applied[j].category)) continue;
+      const area = overlapM2(applied[i], applied[j]);
+      if (area >= 0.05) out.push({ a: applied[i], b: applied[j], area });
+    }
+  }
+  return out;
+}
+function quietNotes() {
+  const notes = [];
+  const onPrimer = finishes().filter(sitsOnPrimer);
+  if (onPrimer.length) {
+    const area = onPrimer.reduce((sum, row) => sum + areaOf(row), 0);
+    notes.push(`Paint on the primer, ${formatArea(area)}.`);
+  }
+  const other = finishes().filter((f) => f.category === "paint" && !sitsOnPrimer(f));
+  const tiles = finishes().filter((f) => f.category === "wallTile");
+  let area = other.reduce((sum, row) => sum + areaOf(row), 0);
+  for (const paint of other) for (const tile of tiles) area -= overlapM2(paint, tile);
+  if (area >= 0.05) notes.push(`Paint on the plaster, ${formatArea(area)}.`);
+  return notes;
+}
+function currentFinish() {
+  if (!selected.startsWith("finish:")) return null;
+  return finishes().find((f) => f.id === selected.slice(7)) || null;
+}
+function currentOpening() {
+  if (!selected.startsWith("opening:")) return null;
+  return openings.find((o) => o.id === selected.slice(8)) || null;
+}
+function rectOf(f) {
+  return { x: xOf(f.from), y: yOf(f.top), w: xOf(f.to) - xOf(f.from), h: yOf(f.bottom) - yOf(f.top) };
+}
+
+function shapeNode(f) {
+  const fill = f.source === "rule" ? "url(#rule-hatch)" : (COLOUR[f.category] || "#3c7a52");
+  const opacity = f.source === "rule" ? "1" : (f.source === "default" ? "0.45" : "0.82");
+  if (f.points && f.points.length >= 3) {
+    return svgEl("polygon", {
+      points: f.points.map((p) => `${xOf(p[0])},${yOf(p[1])}`).join(" "),
+      fill, "fill-opacity": opacity, class: "band",
+    });
+  }
+  const r = rectOf(f);
+  return svgEl("rect", {
+    x: r.x, y: r.y, width: Math.max(0, r.w), height: Math.max(0, r.h),
+    fill, "fill-opacity": opacity, class: "band",
+  });
+}
+function renderBands() {
+  bandsG.replaceChildren();
+  const rank = (f) => (f.source === "default" ? 0 : f.category === "primer" ? 1 : f.source === "rule" ? 3 : 2);
+  const rows = [...finishes()].sort((a, b) => rank(a) - rank(b));
+  for (const f of rows) {
+    const node = shapeNode(f);
+    node.dataset.kind = "finish";
+    node.dataset.id = f.id;
+    const title = svgEl("title", {});
+    title.textContent = whichOf(f);
+    node.appendChild(title);
+    node.addEventListener("click", (evt) => onFaceClick(evt, () => chooseFinishAt(evt)));
+    bandsG.appendChild(node);
+  }
+  renderCoatLines();
+}
+function sameArea(a, b) {
+  if (a.points || b.points) return false;
+  const ba = boxOf(a);
+  const bb = boxOf(b);
+  return Math.abs(ba.from - bb.from) < 15 && Math.abs(ba.to - bb.to) < 15 && Math.abs(ba.bottom - bb.bottom) < 15 && Math.abs(ba.top - bb.top) < 15;
+}
+/** A finish hidden under another of the same shape. One line per buried coat, stepped in so the edges do not land on each other. */
+function renderCoatLines() {
+  const runs = finishes().filter((f) => f.source !== "default");
+  const seen = new Set();
+  const rank = (f) => (f.category === "primer" ? 1 : f.source === "rule" ? 3 : 2);
+  for (const seed of runs) {
+    if (seen.has(seed.id)) continue;
+    const group = runs.filter((f) => sameArea(seed, f)).sort((a, b) => rank(a) - rank(b));
+    group.forEach((f) => seen.add(f.id));
+    if (group.length < 2) continue;
+    const box = rectOf(group[group.length - 1]);
+    group.slice(0, -1).forEach((coat, i) => {
+      const inset = 8 + i * 7;
+      const hole = {
+        x: box.x + inset,
+        y: box.y + inset,
+        w: box.w - inset * 2,
+        h: box.h - inset * 2,
+      };
+      if (hole.w < 12 || hole.h < 12) return;
+      bandsG.appendChild(svgEl("rect", {
+        x: hole.x, y: hole.y, width: hole.w, height: hole.h,
+        fill: "none", stroke: "#fffdf8", "stroke-width": "3.5", "pointer-events": "none",
+      }));
+      const line = svgEl("rect", {
+        x: hole.x, y: hole.y, width: hole.w, height: hole.h,
+        fill: "none", stroke: COLOUR[coat.category] || "#5c5348", "stroke-width": "1.25", "pointer-events": "none",
+      });
+      const title = svgEl("title", {});
+      title.textContent = `${labelOf(coat)} is under the finish on top`;
+      line.appendChild(title);
+      bandsG.appendChild(line);
+    });
+    const size = 11;
+    const peek = 4;
+    group.forEach((coat, i) => {
+      const k = group.length - 1 - i;
+      bandsG.appendChild(svgEl("rect", {
+        x: box.x + 10 + k * peek, y: box.y + 10 + k * peek, width: size, height: size,
+        fill: COLOUR[coat.category] || "#5c5348", stroke: "#1a1612", "stroke-width": "0.6", "pointer-events": "none",
+      }));
+    });
+    const count = svgEl("text", {
+      x: box.x + 16 + size + peek, y: box.y + 21,
+      class: "dim-strong", "pointer-events": "none",
+    });
+    count.textContent = `${group.length} coats`;
+    bandsG.appendChild(count);
+  }
+}
+function renderClashes() {
+  clashG.replaceChildren();
+  for (const pair of clashes()) {
+    const box = {
+      from: Math.max(pair.a.from, pair.b.from),
+      to: Math.min(pair.a.to, pair.b.to),
+      bottom: Math.max(pair.a.bottom, pair.b.bottom),
+      top: Math.min(pair.a.top, pair.b.top),
+    };
+    const r = rectOf(box);
+    const rect = svgEl("rect", {
+      x: r.x, y: r.y, width: Math.max(0, r.w), height: Math.max(0, r.h),
+      fill: "url(#clash-hatch)", "pointer-events": "none",
+    });
+    const title = svgEl("title", {});
+    title.textContent = `${labelOf(pair.a)} overlaps ${labelOf(pair.b).toLowerCase()}`;
+    rect.appendChild(title);
+    clashG.appendChild(rect);
+  }
+}
+function renderOpenings() {
+  openG.replaceChildren();
+  for (const o of openings) {
+    const x = xOf(o.from);
+    const y = yOf(o.sill + o.height);
+    const w = xOf(o.from + o.width) - x;
+    const h = yOf(o.sill) - y;
+    const rect = svgEl("rect", { x, y, width: w, height: h, fill: "#fffdf8", stroke: "#1a1612", "stroke-width": "1.6", class: "opening" });
+    rect.dataset.kind = "opening";
+    rect.dataset.id = o.id;
+    rect.dataset.move = "1";
+    rect.addEventListener("click", (evt) => onFaceClick(evt, () => choose(`opening:${o.id}`)));
+    openG.appendChild(rect);
+    openG.appendChild(svgEl("line", { x1: x + w / 2, y1: y, x2: x + w / 2, y2: y + h, stroke: "#1a1612", "stroke-width": "1.2", "pointer-events": "none" }));
+    openG.appendChild(svgEl("line", { x1: x, y1: y + h / 2, x2: x + w, y2: y + h / 2, stroke: "#1a1612", "stroke-width": "1.2", "pointer-events": "none" }));
+    const dim = svgEl("text", { x: x + w / 2, y: y - 6, "text-anchor": "middle", class: "dim" });
+    dim.textContent = `${group(o.width)} × ${group(o.height)}`;
+    openG.appendChild(dim);
+  }
+}
+function addHandles(box, kind, id) {
+  const corners = [["tl", box.x, box.y, "nwse"], ["tr", box.x + box.w, box.y, "nesw"], ["bl", box.x, box.y + box.h, "nesw"], ["br", box.x + box.w, box.y + box.h, "nwse"]];
+  for (const [corner, cx, cy, cursor] of corners) {
+    const h = svgEl("rect", { x: cx - 5, y: cy - 5, width: 10, height: 10, class: `handle is-${cursor}` });
+    h.dataset.kind = kind;
+    h.dataset.id = id;
+    h.dataset.corner = corner;
+    outG.appendChild(h);
+  }
+}
+function edgeResizeCursor(x1, y1, x2, y2) {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const px = -dy;
+  const py = dx;
+  if (Math.abs(py) >= Math.abs(px) * 2) return "ns";
+  if (Math.abs(px) >= Math.abs(py) * 2) return "ew";
+  return px * py >= 0 ? "nwse" : "nesw";
+}
+function addingCorner(shift) {
+  return shift ? edgeMode === "line" : edgeMode !== "line";
+}
+function edgeCursorClass(x1, y1, x2, y2, shift) {
+  const kind = addingCorner(shift) ? "add" : edgeResizeCursor(x1, y1, x2, y2);
+  return `outline-edge is-${kind}`;
+}
+function applyEdgeCursors(shift = false) {
+  const adding = addingCorner(shift);
+  document.querySelectorAll("#elev line[data-edge]").forEach((line) => {
+    line.setAttribute("class", edgeCursorClass(+line.getAttribute("x1"), +line.getAttribute("y1"), +line.getAttribute("x2"), +line.getAttribute("y2"), shift));
+    const title = line.querySelector("title");
+    if (title) title.textContent = adding ? "Add a corner" : "Resize this edge";
+  });
+}
+function edgeLength(a, b) {
+  return Math.hypot(b[0] - a[0], b[1] - a[1]);
+}
+function drawEdgeLength(a, b) {
+  const label = svgEl("text", {
+    x: (xOf(a[0]) + xOf(b[0])) / 2,
+    y: (yOf(a[1]) + yOf(b[1])) / 2 - 5,
+    "text-anchor": "middle",
+    class: "dim-strong",
+    "pointer-events": "none",
+  });
+  label.textContent = group(edgeLength(a, b));
+  outG.appendChild(label);
+}
+function renderOutline() {
+  selG.replaceChildren();
+  outG.replaceChildren();
+  if (drawing || pending) return;
+  const finish = currentFinish();
+  const opening = currentOpening();
+  if (canShape(finish)) {
+    const ring = ringOf(finish);
+    const pts = ring.map((p) => `${xOf(p[0])},${yOf(p[1])}`).join(" ");
+    selG.appendChild(svgEl("polygon", { points: pts, fill: "none", stroke: "#b2451e", "stroke-width": "2.5", "pointer-events": "none" }));
+    ring.forEach((p, i) => {
+      const n = ring[(i + 1) % ring.length];
+      const x1 = xOf(p[0]);
+      const y1 = yOf(p[1]);
+      const x2 = xOf(n[0]);
+      const y2 = yOf(n[1]);
+      const hit = svgEl("line", {
+        x1, y1, x2, y2,
+        class: edgeCursorClass(x1, y1, x2, y2, false),
+        stroke: "#b2451e", "stroke-opacity": "0.01", "stroke-width": "16", "pointer-events": "stroke",
+      });
+      hit.appendChild(svgEl("title", {})).textContent = addingCorner(false) ? "Add a corner" : "Resize this edge";
+      hit.dataset.kind = "finish";
+      hit.dataset.id = finish.id;
+      hit.dataset.edge = String(i);
+      outG.appendChild(hit);
+      if (finish.points || i === 0 || i === 3) drawEdgeLength(p, n);
+      const h = svgEl("rect", { x: xOf(p[0]) - 5, y: yOf(p[1]) - 5, width: 10, height: 10, class: "handle" });
+      h.dataset.kind = "finish";
+      h.dataset.id = finish.id;
+      h.dataset.vertex = String(i);
+      outG.appendChild(h);
+    });
+    return;
+  }
+  const box = finish ? rectOf(finish) : opening ? {
+    x: xOf(opening.from),
+    y: yOf(opening.sill + opening.height),
+    w: xOf(opening.from + opening.width) - xOf(opening.from),
+    h: yOf(opening.sill) - yOf(opening.sill + opening.height),
+  } : null;
+  if (!box) return;
+  selG.appendChild(svgEl("rect", {
+    x: box.x, y: box.y, width: Math.max(0, box.w), height: Math.max(0, box.h),
+    fill: "none", stroke: "#b2451e", "stroke-width": "2.5", "pointer-events": "none",
+  }));
+  if (finish && finish.source === "default") return;
+  addHandles(box, finish ? "finish" : "opening", finish ? finish.id : opening.id);
+  if (finish) {
+    const ring = ringOf(finish);
+    drawEdgeLength(ring[0], ring[1]);
+    drawEdgeLength(ring[0], ring[3]);
+  }
+}
+function rowButton(selectedNow, swatch, name, place, prod, area, onClick) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "fin-row" + (selectedNow ? " is-selected" : "");
+  btn.innerHTML = `<i class="swatch"></i><span class="name"></span><span class="place"></span><span class="prod"></span><span class="area"></span>`;
+  const dot = btn.querySelector(".swatch");
+  dot.style.background = swatch;
+  if (swatch === "rule") dot.classList.add("rule");
+  if (swatch === "rule") dot.style.background = COLOUR.paint;
+  btn.querySelector(".name").textContent = name;
+  btn.querySelector(".place").textContent = place;
+  btn.querySelector(".prod").textContent = prod;
+  btn.querySelector(".area").textContent = area;
+  btn.addEventListener("click", onClick);
+  return btn;
+}
+function renderList() {
+  const list = document.getElementById("fin-list");
+  const notes = document.getElementById("fin-notes");
+  const openingList = document.getElementById("opening-list");
+  const ruleList = document.getElementById("rule-list");
+  const wallPick = document.getElementById("wall-pick");
+  const wallTitle = document.getElementById("wall-name").textContent;
+  wallPick.replaceChildren(rowButton(
+    selected === "wall",
+    "#cfc6b8",
+    "Wall",
+    wallTitle,
+    "Drag the top, or type the height",
+    `${group(wallHeight)} mm`,
+    () => choose("wall"),
+  ));
+  list.replaceChildren();
+  notes.replaceChildren();
+  openingList.replaceChildren();
+  ruleList.replaceChildren();
+  const local = finishes().filter((f) => f.source !== "rule");
+  const rules = finishes().filter((f) => f.source === "rule");
+  const pairs = clashes();
+  document.getElementById("fin-sum").innerHTML = `<b>${local.length} finish${local.length === 1 ? "" : "es"}</b> · ${pairs.length} clash${pairs.length === 1 ? "" : "es"}`;
+  for (const f of local) {
+    list.appendChild(rowButton(selected === `finish:${f.id}`, COLOUR[f.category], whichOf(f), placeOf(f), f.product, formatArea(areaOf(f)), () => choose(`finish:${f.id}`)));
+  }
+  for (const text of quietNotes()) {
+    const quiet = document.createElement("p");
+    quiet.className = "on-note";
+    quiet.textContent = text;
+    notes.appendChild(quiet);
+  }
+  for (const pair of pairs) {
+    const warn = document.createElement("p");
+    warn.className = "warn-note";
+    const a = labelOf(pair.a);
+    const b = labelOf(pair.b);
+    warn.textContent = a === b ? `${a} areas overlap, ${formatArea(pair.area)}.` : `${a} overlaps ${b.toLowerCase()}, ${formatArea(pair.area)}.`;
+    notes.appendChild(warn);
+  }
+  for (const o of openings) {
+    const kind = o.kind === "door" ? "Door" : "Window";
+    openingList.appendChild(rowButton(
+      selected === `opening:${o.id}`,
+      "#fffdf8",
+      o.name || kind,
+      `Sill ${group(o.sill)} mm · ${group(o.from)} mm from the left`,
+      "",
+      `${group(o.width)} × ${group(o.height)}`,
+      () => choose(`opening:${o.id}`),
+    ));
+  }
+  document.getElementById("rule-sec").hidden = rules.length === 0;
+  for (const f of rules) {
+    ruleList.appendChild(rowButton(selected === `finish:${f.id}`, "rule", whichOf(f), placeOf(f), f.product, formatArea(areaOf(f)), () => choose(`finish:${f.id}`)));
+  }
+}
+function fillMm(id, value) {
+  const el = document.getElementById(id);
+  if (document.activeElement === el) return;
+  el.value = value === "" || value === null ? "" : group(value);
+}
+function renderBar() {
+  const finish = currentFinish();
+  const opening = currentOpening();
+  const swatch = document.getElementById("sel-swatch");
+  const openingMode = Boolean(opening);
+  const showIdentity = Boolean(pending || (finish && !opening));
+  document.getElementById("type-label").hidden = !showIdentity;
+  document.getElementById("product-label").hidden = !showIdentity;
+  document.getElementById("op-fields").hidden = !openingMode;
+  document.getElementById("wall-fields").hidden = selected !== "wall";
+  document.getElementById("edge-mode").hidden = !canShape(finish);
+  document.getElementById("add").hidden = Boolean(pending);
+  document.getElementById("places").hidden = !pending;
+  swatch.classList.toggle("rule", Boolean(finish && finish.source === "rule"));
+  document.querySelectorAll("[data-edge]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.edge === edgeMode)));
+  if (pending) {
+    swatch.style.background = COLOUR[pending.category] || "#d9a441";
+    document.getElementById("sel-which").textContent = "New finish";
+    document.getElementById("sel-meta").textContent = drawing ? "Click two corners on the wall" : "Choose where it goes. Nothing is on the wall yet.";
+    typeSelect.value = pending.category;
+    typeSelect.disabled = false;
+    const product = document.getElementById("sel-product");
+    if (document.activeElement !== product) product.value = pending.product;
+    product.disabled = false;
+    document.getElementById("product-label").hidden = true;
+    document.getElementById("sel-remove").hidden = false;
+    document.getElementById("sel-remove").textContent = "Cancel";
+    document.querySelectorAll("[data-place]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.place === "draw" && drawing)));
+  } else if (opening) {
+    swatch.style.background = "#fffdf8";
+    document.getElementById("sel-which").textContent = opening.name || "Window";
+    document.getElementById("sel-meta").textContent = `${group(opening.width)} × ${group(opening.height)}`;
+    fillMm("op-width", opening.width);
+    fillMm("op-height", opening.height);
+    fillMm("op-sill", opening.sill);
+    fillMm("op-from", opening.from);
+    document.getElementById("sel-remove").hidden = false;
+    document.getElementById("sel-remove").textContent = "Remove";
+  } else if (finish) {
+    swatch.style.background = COLOUR[finish.category] || "#3c7a52";
+    document.getElementById("sel-which").textContent = whichOf(finish);
+    document.getElementById("sel-meta").textContent = `${placeOf(finish)} · ${formatArea(areaOf(finish))}`;
+    typeSelect.value = finish.category;
+    typeSelect.disabled = finish.source === "default";
+    const product = document.getElementById("sel-product");
+    if (document.activeElement !== product) product.value = finish.product;
+    product.disabled = finish.source === "default";
+    document.getElementById("sel-remove").hidden = finish.source === "default";
+    document.getElementById("sel-remove").textContent = finish.source === "rule" ? "Remove rule" : "Remove";
+  } else if (selected === "wall") {
+    swatch.style.background = "#cfc6b8";
+    document.getElementById("sel-which").textContent = document.getElementById("wall-name").textContent;
+    document.getElementById("sel-meta").textContent = "Drag the top of the wall";
+    fillMm("wall-mm", wallHeight);
+    document.getElementById("sel-remove").hidden = true;
+  } else {
+    swatch.style.background = "transparent";
+    document.getElementById("sel-which").textContent = "Nothing selected";
+    document.getElementById("sel-meta").textContent = "Choose the wall, a finish, or an opening";
+    document.getElementById("sel-remove").hidden = true;
+  }
+  const meta = document.getElementById("sel-meta");
+  if (drawing) meta.textContent = drawPts.length ? "Click the opposite corner." : "Click one corner on the wall, then the opposite corner.";
+  document.querySelector(".editor-top").title = `${document.getElementById("sel-which").textContent}. ${meta.textContent}`;
+}
+function sideKey() {
+  return neighbour ? "living" : faceId;
+}
+function sideWords(key) {
+  if (key === "passage") return { side: "passage side", wall: "Kitchen south" };
+  if (key === "living") return { side: "living side", wall: "Living north" };
+  return { side: "kitchen side", wall: "Kitchen south" };
+}
+let flashTimer = 0;
+function syncFlash() {
+  const key = sideKey();
+  document.querySelectorAll("[data-side]").forEach((el) => el.classList.toggle("is-on", el.dataset.side === key));
+  const words = sideWords(key);
+  const label = words.side.charAt(0).toUpperCase() + words.side.slice(1);
+  document.getElementById("plan-label").textContent = label;
+  document.getElementById("plan-btn").setAttribute("aria-label", `On plan. ${label}. Flash on plan blinks this side on the drawing.`);
+}
+function flashOnPlan() {
+  const key = sideKey();
+  const words = sideWords(key);
+  const stage = document.getElementById("plan-stage");
+  const backToEditor = faceOpen;
+  stage.hidden = false;
+  document.getElementById("plan-stage-note").textContent = `Flashing the ${words.side} of ${words.wall} on the plan.`;
+  document.getElementById("flash-live").textContent = `Flashing the ${words.side} of ${words.wall} on the plan.`;
+  document.querySelectorAll("[data-flash]").forEach((el) => {
+    el.classList.remove("is-flashing");
+    void el.getBoundingClientRect();
+    if (el.dataset.flash === key) el.classList.add("is-flashing");
+  });
+  window.clearTimeout(flashTimer);
+  flashTimer = window.setTimeout(() => {
+    document.querySelectorAll("[data-flash]").forEach((el) => el.classList.remove("is-flashing"));
+    if (backToEditor && faceOpen) stage.hidden = true;
+    else document.getElementById("plan-stage-note").textContent = `${words.side.charAt(0).toUpperCase()}${words.side.slice(1)} of ${words.wall}.`;
+  }, 1600);
+}
+function renderFaceChrome() {
+  const side = faceId === "passage" ? "Passage side" : "Kitchen side";
+  document.getElementById("face-sub").textContent = `Kitchen south · ${side} · 4 500 × ${group(wallHeight)} mm`;
+  document.getElementById("face-pill").textContent = side;
+  document.getElementById("crumb-face").textContent = neighbour ? "Living north, living side" : `Kitchen south, ${side.toLowerCase()}`;
+  document.getElementById("wall-name").textContent = neighbour ? "Living north" : "Kitchen south";
+  document.getElementById("other-wall").hidden = !neighbour;
+  syncFlash();
+}
+function polygonWinding(points) {
+  let sum = 0;
+  for (let i = 0; i < points.length; i += 1) {
+    const n = points[(i + 1) % points.length];
+    sum += points[i][0] * n[1] - n[0] * points[i][1];
+  }
+  return sum >= 0 ? 1 : -1;
+}
+/** Clearance from a corner. The nearer side, unless an arrow has pinned the far one. */
+function pointClearance(s, z) {
+  const spec = {};
+  const left = s;
+  const right = WALL.length - s;
+  if (locatePin.h === "left") spec.side = { s0: 0, s1: Math.max(0, s), z, pinned: true };
+  else if (locatePin.h === "right") spec.side = { s0: Math.min(s, WALL.length), s1: WALL.length, z, pinned: true };
+  else if (left > 1 && left <= right) spec.side = { s0: 0, s1: s, z };
+  else if (right > 1) spec.side = { s0: s, s1: WALL.length, z };
+  const down = z;
+  const up = wallHeight - z;
+  if (locatePin.v === "up") spec.vert = { z0: Math.min(z, wallHeight), z1: wallHeight, s, toward: "top", pinned: true };
+  else if (locatePin.v === "down") spec.vert = { z0: 0, z1: Math.max(0, z), s, toward: "base", pinned: true };
+  else if (up > 1 && up <= down) spec.vert = { z0: z, z1: wallHeight, s, toward: "top" };
+  else if (down > 1) spec.vert = { z0: 0, z1: z, s, toward: "base" };
+  return spec;
+}
+/** Clearance from a dragged edge to the side it faces: left or right, or floor or top. */
+function edgeClearance(points, index) {
+  const n = points.length;
+  if (!n) return null;
+  const i = ((index % n) + n) % n;
+  const a = { s: points[i][0], z: points[i][1] };
+  const b = { s: points[(i + 1) % n][0], z: points[(i + 1) % n][1] };
+  const wind = polygonWinding(points);
+  const ds = b.s - a.s;
+  const dz = b.z - a.z;
+  const nx = wind * dz;
+  const nz = wind * -ds;
+  const ax = Math.abs(nx);
+  const az = Math.abs(nz);
+  const across = ax >= az * 2;
+  const along = az >= ax * 2;
+  const either = !across && !along;
+  const spec = {};
+  if ((across || either) && ax > 1e-6) {
+    const s = nx < 0 ? Math.min(a.s, b.s) : Math.max(a.s, b.s);
+    const at = Math.abs(a.s - s) <= Math.abs(b.s - s) ? a : b;
+    spec.side = nx < 0 ? { s0: 0, s1: s, z: at.z } : { s0: s, s1: WALL.length, z: at.z };
+  }
+  if ((along || either) && az > 1e-6) {
+    const z = nz > 0 ? Math.max(a.z, b.z) : Math.min(a.z, b.z);
+    const at = Math.abs(a.z - z) <= Math.abs(b.z - z) ? a : b;
+    spec.vert = nz > 0
+      ? { z0: z, z1: wallHeight, s: at.s, toward: "top" }
+      : { z0: 0, z1: z, s: at.s, toward: "base" };
+  }
+  return spec;
+}
+/** The gap outside a corner: the side its edges face, left or right and up or down. */
+function cornerClearance(points, index) {
+  const n = points.length;
+  if (!n) return null;
+  const i = ((index % n) + n) % n;
+  const p = points[i];
+  const merged = {};
+  for (const spec of [edgeClearance(points, (i - 1 + n) % n), edgeClearance(points, i)]) {
+    if (!spec) continue;
+    if (spec.side && (!merged.side || spec.side.s1 - spec.side.s0 > merged.side.s1 - merged.side.s0)) merged.side = spec.side;
+    if (spec.vert && (!merged.vert || spec.vert.z1 - spec.vert.z0 > merged.vert.z1 - merged.vert.z0)) merged.vert = spec.vert;
+  }
+  const spec = {};
+  if (merged.side) {
+    spec.side = merged.side.s0 === 0
+      ? { s0: 0, s1: p[0], z: p[1] }
+      : { s0: p[0], s1: WALL.length, z: p[1] };
+  }
+  if (merged.vert) {
+    spec.vert = merged.vert.toward === "base"
+      ? { z0: 0, z1: p[1], s: p[0], toward: "base" }
+      : { z0: p[1], z1: wallHeight, s: p[0], toward: "top" };
+  }
+  if (locatePin.h === "left") spec.side = { s0: 0, s1: p[0], z: p[1], pinned: true };
+  else if (locatePin.h === "right") spec.side = { s0: p[0], s1: WALL.length, z: p[1], pinned: true };
+  if (locatePin.v === "up") spec.vert = { z0: p[1], z1: wallHeight, s: p[0], toward: "top", pinned: true };
+  else if (locatePin.v === "down") spec.vert = { z0: 0, z1: p[1], s: p[0], toward: "base", pinned: true };
+  return spec;
+}
+function dragClearance() {
+  const d = drag || heldCorner;
+  if (!d) return null;
+  if (d.kind === "vertex") {
+    const f = finishes().find((row) => row.id === d.id);
+    const ring = f && (f.points || ringOf(f));
+    return ring ? cornerClearance(ring, d.index) : null;
+  }
+  if (d.kind === "finish") {
+    const f = finishes().find((row) => row.id === d.id);
+    if (!f) return null;
+    const corner = { bl: 0, br: 1, tr: 2, tl: 3 }[d.corner];
+    return cornerClearance(ringOf(f), corner ?? 0);
+  }
+  if (d.kind === "opening") {
+    const o = openings.find((row) => row.id === d.id);
+    if (!o) return null;
+    const corner = { bl: 0, br: 1, tr: 2, tl: 3 }[d.corner];
+    const ring = [[o.from, o.sill], [o.from + o.width, o.sill], [o.from + o.width, o.sill + o.height], [o.from, o.sill + o.height]];
+    return cornerClearance(ring, corner ?? 0);
+  }
+  if (d.kind === "rect-edge" || d.kind === "edge") {
+    const f = finishes().find((row) => row.id === d.id);
+    if (!f) return null;
+    const ring = f.points && f.points.length >= 3 ? f.points : ringOf(f);
+    return edgeClearance(ring, d.index);
+  }
+  return null;
+}
+// A corner or an edge. Both show a left/right or up/down gap that can take
+// a typed number. An opening move and the wall-height mark do not.
+function isGapKind(d) {
+  return Boolean(d) && (d.kind === "vertex" || d.kind === "finish" || d.kind === "opening" || d.kind === "edge" || d.kind === "rect-edge");
+}
+// The corner or edge whose gap captions are on screen right now: the one
+// being dragged, or the one left held after a click that didn't drag.
+function activeCorner() {
+  if (drag && isGapKind(drag)) return drag;
+  return heldCorner;
+}
+// A straight edge has only one gap. Digits should land on that one.
+function focusShownGap() {
+  const spec = dragClearance();
+  if (!spec) return;
+  if (spec.vert && !spec.side) typingAxis = "v";
+  else if (spec.side && !spec.vert) typingAxis = "h";
+}
+function dropHeldCorner() {
+  heldCorner = null;
+  typing = null;
+}
+function typingShown(text) {
+  if (!text) return "\u2502";
+  const n = Number(text);
+  return `${Number.isFinite(n) ? group(n) : text}\u2502`;
+}
+function startTyping(axis, value) {
+  if (!activeCorner()) return;
+  typingAxis = axis;
+  typing = { axis, text: Number.isFinite(value) ? String(Math.round(value)) : "" };
+  render();
+}
+function commitTyped() {
+  const corner = activeCorner();
+  const spec = dragClearance();
+  const value = Number(typing ? typing.text : NaN);
+  if (corner && spec && typing && typing.text && Number.isFinite(value)) {
+    applyTypedGap(corner, typing.axis, value, spec);
+  }
+  typing = null;
+  render();
+}
+// Largest gap this corner can take without leaving the wall or shrinking
+// the shape past its minimum. A bigger number is not accepted.
+function maxTypedGap(d, axis, spec) {
+  if (!d || !spec) return 0;
+  if (d.kind === "vertex") {
+    if (axis === "h" && spec.side) return WALL.length;
+    if (axis === "v" && spec.vert) return wallHeight;
+    return 0;
+  }
+  if (d.kind === "finish") {
+    const f = finishes().find((row) => row.id === d.id);
+    if (!f) return 0;
+    if (axis === "h" && spec.side) {
+      if (spec.side.s0 === 0) return d.corner.includes("l") ? Math.max(0, f.to - 50) : WALL.length;
+      return d.corner.includes("r") ? Math.max(0, WALL.length - f.from - 50) : WALL.length;
+    }
+    if (axis === "v" && spec.vert) {
+      if (spec.vert.toward === "base") return d.corner.includes("b") ? Math.max(0, f.top - 50) : wallHeight;
+      return d.corner.includes("t") ? Math.max(0, wallHeight - f.bottom - 50) : wallHeight;
+    }
+    return 0;
+  }
+  if (d.kind === "opening") {
+    const o = openings.find((row) => row.id === d.id);
+    if (!o) return 0;
+    const rightEdge = o.from + o.width;
+    const head = o.sill + o.height;
+    if (axis === "h" && spec.side) {
+      if (spec.side.s0 === 0) return d.corner.includes("l") ? Math.max(0, rightEdge - 200) : WALL.length;
+      return d.corner.includes("r") ? Math.max(0, WALL.length - o.from - 200) : WALL.length;
+    }
+    if (axis === "v" && spec.vert) {
+      if (spec.vert.toward === "base") return d.corner.includes("b") ? Math.max(0, head - 200) : wallHeight;
+      return d.corner.includes("t") ? Math.max(0, wallHeight - o.sill - 200) : wallHeight;
+    }
+    return 0;
+  }
+  if (d.kind === "rect-edge") {
+    const f = finishes().find((row) => row.id === d.id);
+    if (!f) return 0;
+    if (axis === "h" && spec.side) return spec.side.s0 === 0 ? Math.max(0, f.to - 50) : Math.max(0, WALL.length - f.from - 50);
+    if (axis === "v" && spec.vert) return spec.vert.toward === "base" ? Math.max(0, f.top - 50) : Math.max(0, wallHeight - f.bottom - 50);
+    return 0;
+  }
+  if (d.kind === "edge") {
+    const f = finishes().find((row) => row.id === d.id);
+    if (!f?.points) return 0;
+    const j = (d.index + 1) % f.points.length;
+    const a = f.points[d.index];
+    const b = f.points[j];
+    if (axis === "h" && spec.side) return Math.max(0, WALL.length - Math.abs(a[0] - b[0]));
+    if (axis === "v" && spec.vert) return Math.max(0, wallHeight - Math.abs(a[1] - b[1]));
+  }
+  return 0;
+}
+// Move the held or dragged corner so its left/right or up/down gap equals
+// the typed number, same geometry as a mouse drag would produce.
+function applyTypedGap(d, axis, value, spec) {
+  const v = Math.max(0, value);
+  if (d.kind === "vertex") {
+    const f = finishes().find((row) => row.id === d.id);
+    if (!f || !f.points) return;
+    const p = f.points[d.index];
+    if (axis === "h" && spec.side) p[0] = clamp(spec.side.s0 === 0 ? v : WALL.length - v, 0, WALL.length);
+    if (axis === "v" && spec.vert) p[1] = clamp(spec.vert.toward === "base" ? v : wallHeight - v, 0, wallHeight);
+    return;
+  }
+  if (d.kind === "finish") {
+    const f = finishes().find((row) => row.id === d.id);
+    if (!f) return;
+    if (axis === "h" && spec.side) {
+      const s = spec.side.s0 === 0 ? v : WALL.length - v;
+      if (d.corner.includes("l")) f.from = clamp(Math.min(s, f.to - 50), 0, WALL.length);
+      if (d.corner.includes("r")) f.to = clamp(Math.max(s, f.from + 50), 0, WALL.length);
+    }
+    if (axis === "v" && spec.vert) {
+      const z = spec.vert.toward === "base" ? v : wallHeight - v;
+      if (d.corner.includes("b")) f.bottom = clamp(Math.min(z, f.top - 50), 0, wallHeight);
+      if (d.corner.includes("t")) f.top = clamp(Math.max(z, f.bottom + 50), 0, wallHeight);
+    }
+    return;
+  }
+  if (d.kind === "opening") {
+    const o = openings.find((row) => row.id === d.id);
+    if (!o) return;
+    const head = o.sill + o.height;
+    const rightEdge = o.from + o.width;
+    if (axis === "h" && spec.side) {
+      const s = spec.side.s0 === 0 ? v : WALL.length - v;
+      if (d.corner.includes("l")) { o.from = clamp(Math.min(s, rightEdge - 200), 0, WALL.length); o.width = rightEdge - o.from; }
+      if (d.corner.includes("r")) o.width = clamp(s - o.from, 200, WALL.length - o.from);
+    }
+    if (axis === "v" && spec.vert) {
+      const z = spec.vert.toward === "base" ? v : wallHeight - v;
+      if (d.corner.includes("b")) { o.sill = clamp(Math.min(z, head - 200), 0, wallHeight); o.height = head - o.sill; }
+      if (d.corner.includes("t")) o.height = clamp(z - o.sill, 200, wallHeight - o.sill);
+    }
+    return;
+  }
+  if (d.kind === "rect-edge") {
+    const f = finishes().find((row) => row.id === d.id);
+    if (!f || f.points) return;
+    if (axis === "h" && spec.side) {
+      if (spec.side.s0 === 0) f.from = clamp(v, 0, f.to - 50);
+      else f.to = clamp(WALL.length - v, f.from + 50, WALL.length);
+    }
+    if (axis === "v" && spec.vert) {
+      if (spec.vert.toward === "base") f.bottom = clamp(v, 0, f.top - 50);
+      else f.top = clamp(wallHeight - v, f.bottom + 50, wallHeight);
+    }
+    return;
+  }
+  if (d.kind === "edge") {
+    const f = finishes().find((row) => row.id === d.id);
+    if (!f?.points) return;
+    const a = f.points[d.index];
+    const b = f.points[(d.index + 1) % f.points.length];
+    let ds = 0;
+    let dz = 0;
+    if (axis === "h" && spec.side) {
+      const target = spec.side.s0 === 0 ? v : WALL.length - v;
+      const outer = spec.side.s0 === 0 ? Math.min(a[0], b[0]) : Math.max(a[0], b[0]);
+      ds = target - outer;
+    }
+    if (axis === "v" && spec.vert) {
+      const target = spec.vert.toward === "base" ? v : wallHeight - v;
+      const outer = spec.vert.toward === "base" ? Math.min(a[1], b[1]) : Math.max(a[1], b[1]);
+      dz = target - outer;
+    }
+    if (ds) ds = clamp(ds, -Math.min(a[0], b[0]), WALL.length - Math.max(a[0], b[0]));
+    if (dz) dz = clamp(dz, -Math.min(a[1], b[1]), wallHeight - Math.max(a[1], b[1]));
+    a[0] += ds;
+    a[1] += dz;
+    b[0] += ds;
+    b[1] += dz;
+  }
+}
+function locateCaption(x, y, anchor, text, opts = {}) {
+  const { editing = false, onClick = null, unit = "" } = opts;
+  const width = Math.max(text.length * 6.2 + 8, editing ? 34 : 0);
+  const unitWidth = unit ? unit.length * 6.2 + 6 : 0;
+  const height = 14;
+  let left = anchor === "start" ? x : anchor === "end" ? x - width : x - width / 2;
+  let top = y - 11;
+  left = Math.max(2, Math.min(left, 998 - width - unitWidth));
+  top = Math.max(2, Math.min(top, 606 - height));
+  const tx = anchor === "start" ? left + 4 : anchor === "end" ? left + width - 4 : left + width / 2;
+  const bg = svgEl("rect", { x: left, y: top, width, height, rx: 2, class: `loc-bg${editing ? " is-editing" : ""}` });
+  const label = svgEl("text", { x: tx, y: top + 11, "text-anchor": anchor, class: `loc-text${editing ? " is-editing" : ""}` });
+  label.textContent = text;
+  if (onClick) {
+    for (const node of [bg, label]) {
+      node.style.pointerEvents = "auto";
+      node.style.cursor = "text";
+      node.addEventListener("pointerdown", (evt) => {
+        evt.preventDefault();
+        evt.stopPropagation();
+        onClick();
+      });
+    }
+  }
+  locateG.appendChild(bg);
+  locateG.appendChild(label);
+  if (unit) {
+    const unitLabel = svgEl("text", { x: left + width + 4, y: top + 11, "text-anchor": "start", class: "loc-text" });
+    unitLabel.textContent = unit;
+    locateG.appendChild(unitLabel);
+  }
+}
+function locateTick(x, y) {
+  locateG.appendChild(svgEl("line", { x1: x - 3.2, y1: y + 3.2, x2: x + 3.2, y2: y - 3.2, class: "loc-tick" }));
+}
+function renderLocate() {
+  locateG.replaceChildren();
+  const spec = dragClearance();
+  if (!spec) return;
+  const canType = Boolean(activeCorner());
+  if (spec.side && (spec.side.pinned || spec.side.s1 - spec.side.s0 > 1)) {
+    const side = spec.side;
+    const x1 = xOf(side.s0);
+    const x2 = xOf(side.s1);
+    const left = Math.min(x1, x2);
+    const right = Math.max(x1, x2);
+    const y = yOf(side.z);
+    if (right - left >= 2) {
+      locateG.appendChild(svgEl("line", { x1: left, y1: y - 6, x2: left, y2: y + 6, class: "loc-ext" }));
+      locateG.appendChild(svgEl("line", { x1: right, y1: y - 6, x2: right, y2: y + 6, class: "loc-ext" }));
+      locateG.appendChild(svgEl("line", { x1: left, y1: y, x2: right, y2: y, class: "loc-line" }));
+      locateTick(left, y);
+      locateTick(right, y);
+    }
+    const editingH = Boolean(typing && typing.axis === "h");
+    const gapH = side.s1 - side.s0;
+    locateCaption((left + right) / 2, y - 2, "middle",
+      editingH ? typingShown(typing.text) : `${group(gapH)} mm`,
+      { editing: editingH, unit: editingH ? "mm" : "", onClick: canType ? () => startTyping("h", gapH) : null });
+  }
+  if (spec.vert && (spec.vert.pinned || spec.vert.z1 - spec.vert.z0 > 1)) {
+    const vert = spec.vert;
+    const y1 = yOf(vert.z0);
+    const y2 = yOf(vert.z1);
+    const top = Math.min(y1, y2);
+    const bot = Math.max(y1, y2);
+    const x = xOf(vert.s);
+    if (bot - top >= 2) {
+      locateG.appendChild(svgEl("line", { x1: x - 6, y1: top, x2: x + 6, y2: top, class: "loc-ext" }));
+      locateG.appendChild(svgEl("line", { x1: x - 6, y1: bot, x2: x + 6, y2: bot, class: "loc-ext" }));
+      locateG.appendChild(svgEl("line", { x1: x, y1: top, x2: x, y2: bot, class: "loc-line" }));
+      locateTick(x, top);
+      locateTick(x, bot);
+    }
+    const editingV = Boolean(typing && typing.axis === "v");
+    const gapV = vert.z1 - vert.z0;
+    locateCaption(x + 6, (top + bot) / 2 + 4, "start",
+      editingV ? typingShown(typing.text) : `${group(gapV)} mm`,
+      { editing: editingV, unit: editingV ? "mm" : "", onClick: canType ? () => startTyping("v", gapV) : null });
+  }
+}
+function renderAlign() {
+  alignG.replaceChildren();
+  if (!drag) return;
+  const w = VIEW.w / view.zoom;
+  const h = VIEW.h / view.zoom;
+  if (drag.guideS != null) {
+    const x = xOf(drag.guideS);
+    alignG.appendChild(svgEl("line", { x1: x, y1: view.panY, x2: x, y2: view.panY + h, class: "align-line" }));
+  }
+  if (drag.guideZ != null) {
+    const y = yOf(drag.guideZ);
+    alignG.appendChild(svgEl("line", { x1: view.panX, y1: y, x2: view.panX + w, y2: y, class: "align-line" }));
+  }
+}
+function render() {
+  renderBands();
+  renderClashes();
+  renderOpenings();
+  renderOutline();
+  renderLocate();
+  renderAlign();
+  renderList();
+  renderBar();
+  renderFaceChrome();
+  syncWallTop();
+  document.getElementById("elev").classList.toggle("is-drawing", drawing);
+  requestAnimationFrame(placeEdgeMode);
+}
+function containsFinish(f, s, z) {
+  if (f.points && f.points.length >= 3) {
+    let inside = false;
+    for (let i = 0, j = f.points.length - 1; i < f.points.length; j = i, i += 1) {
+      const [xi, yi] = f.points[i];
+      const [xj, yj] = f.points[j];
+      if ((yi > z) !== (yj > z) && s < ((xj - xi) * (z - yi)) / ((yj - yi) || 1e-9) + xi) inside = !inside;
+    }
+    return inside;
+  }
+  return s >= f.from && s <= f.to && z >= f.bottom && z <= f.top;
+}
+function chooseFinishAt(evt) {
+  const m = pointerMm(evt);
+  const rank = (f) => (f.source === "default" ? 0 : f.category === "primer" ? 1 : f.source === "rule" ? 3 : 2);
+  const hits = finishes()
+    .map((f, i) => ({ f, i }))
+    .filter(({ f }) => containsFinish(f, m.along, m.up))
+    .sort((a, b) => rank(b.f) - rank(a.f) || b.i - a.i)
+    .map(({ f }) => f);
+  if (!hits.length) return;
+  const ids = hits.map((f) => `finish:${f.id}`);
+  const at = ids.indexOf(selected);
+  choose(ids[at < 0 ? 0 : (at + 1) % ids.length]);
+}
+function choose(id) {
+  if (drawing) return;
+  pending = null;
+  dropHeldCorner();
+  selected = id;
+  render();
+}
+function onFaceClick(evt, select) {
+  if (didDrag) { didDrag = false; evt.stopPropagation(); return; }
+  if (drawing) { evt.stopPropagation(); addDrawPoint(evt); return; }
+  select();
+}
+function commitPending(box) {
+  dropHeldCorner();
+  const id = `new-${Math.random().toString(36).slice(2, 6)}`;
+  finishes().push({ id, category: pending.category, product: pending.product, source: "run", ...box });
+  pending = null;
+  drawing = false;
+  drawPts = [];
+  selected = `finish:${id}`;
+  render();
+}
+function applyPreset(name) {
+  const boxes = {
+    whole: { from: 0, to: 4500, bottom: 0, top: wallHeight },
+    dado: { from: 0, to: 4500, bottom: 0, top: 1200 },
+    low: { from: 0, to: 4500, bottom: 0, top: 150 },
+  };
+  if (pending) { commitPending(boxes[name]); return; }
+  const f = currentFinish();
+  if (!f || f.source === "default") return;
+  dropHeldCorner();
+  delete f.points;
+  Object.assign(f, boxes[name]);
+  drawing = false;
+  render();
+}
+function addDrawPoint(evt) {
+  const m = pointerMm(evt);
+  drawPts.push(m);
+  if (drawPts.length < 2) {
+    document.getElementById("sel-meta").textContent = "Click the opposite corner.";
+    return;
+  }
+  const [a, b] = drawPts;
+  const box = {
+    from: Math.min(a.along, b.along),
+    to: Math.max(a.along, b.along),
+    bottom: Math.min(a.up, b.up),
+    top: Math.max(a.up, b.up),
+  };
+  if (box.to - box.from < 50 || box.top - box.bottom < 50) { drawPts = []; return; }
+  drawPts = [];
+  if (pending) commitPending(box);
+  else {
+    const f = currentFinish();
+    if (f && f.source !== "default") { delete f.points; Object.assign(f, box); }
+    drawing = false;
+    render();
+  }
+}
+function readMm(id) {
+  const n = Number(document.getElementById(id).value.replace(/\s/g, ""));
+  return Number.isFinite(n) ? n : null;
+}
+function setFace(next) {
+  dropHeldCorner();
+  neighbour = next === "living";
+  if (next === "kitchen" || next === "passage") {
+    faceId = next;
+    pending = null;
+    drawing = false;
+    if (!finishes().some((f) => selected === `finish:${f.id}`) && !selected.startsWith("opening:")) {
+      selected = `finish:${finishes().find((f) => f.source === "run")?.id || finishes()[0].id}`;
+    }
+  }
+  document.getElementById("plan-pop").hidden = true;
+  document.getElementById("plan-btn").setAttribute("aria-expanded", "false");
+  render();
+}
+
+document.getElementById("sel-product").addEventListener("input", (e) => {
+  if (pending) { pending.product = e.target.value; return; }
+  const f = currentFinish();
+  if (!f || f.source === "default") return;
+  f.product = e.target.value;
+  renderList();
+});
+typeSelect.addEventListener("change", () => {
+  if (pending) {
+    pending.category = typeSelect.value;
+    pending.product = DEFAULT_PRODUCT[typeSelect.value] || "New finish";
+    renderBar();
+    return;
+  }
+  const f = currentFinish();
+  if (!f || f.source === "default") return;
+  f.category = typeSelect.value;
+  render();
+});
+document.querySelectorAll("[data-place]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    if (btn.dataset.place === "draw") {
+      const f = currentFinish();
+      if (!pending && (!f || f.source === "default")) return;
+      drawing = !drawing;
+      drawPts = [];
+      render();
+      return;
+    }
+    drawing = false;
+    applyPreset(btn.dataset.place);
+  });
+});
+document.querySelectorAll("[data-edge]").forEach((btn) => {
+  btn.addEventListener("click", () => { edgeMode = btn.dataset.edge; applyEdgeCursors(false); renderBar(); });
+});
+for (const id of ["op-width", "op-height", "op-sill", "op-from"]) {
+  document.getElementById(id).addEventListener("change", () => {
+    const o = currentOpening();
+    if (!o) return;
+    const width = readMm("op-width");
+    const height = readMm("op-height");
+    const sill = readMm("op-sill");
+    const from = readMm("op-from");
+    if ([width, height, sill, from].some((v) => v === null)) return;
+    if (width < 200 || height < 200) return;
+    o.width = clamp(width, 200, WALL.length);
+    o.height = clamp(height, 200, wallHeight);
+    o.sill = clamp(sill, 0, wallHeight - o.height);
+    o.from = clamp(from, 0, WALL.length - o.width);
+    render();
+  });
+}
+document.getElementById("wall-mm").addEventListener("change", () => {
+  if (selected !== "wall") return;
+  const next = readMm("wall-mm");
+  if (next === null) return;
+  const prev = wallHeight;
+  wallHeight = clamp(snap(next), MIN_WALL, NEXT_FLOOR);
+  for (const list of Object.values(byFace)) {
+    for (const f of list) {
+      if (f.top != null && Math.abs(f.top - prev) < 20) f.top = wallHeight;
+      if (f.points) f.points.forEach((p) => { if (Math.abs(p[1] - prev) < 20) p[1] = wallHeight; });
+    }
+  }
+  render();
+});
+document.getElementById("add").addEventListener("click", () => {
+  dropHeldCorner();
+  pending = { category: "paint", product: DEFAULT_PRODUCT.paint };
+  drawing = false;
+  drawPts = [];
+  selected = "new";
+  render();
+  typeSelect.focus();
+});
+document.getElementById("sel-remove").addEventListener("click", () => {
+  dropHeldCorner();
+  if (pending) { pending = null; drawing = false; selected = `finish:${finishes()[0].id}`; render(); return; }
+  const f = currentFinish();
+  if (f && f.source !== "default") {
+    const list = finishes();
+    list.splice(list.indexOf(f), 1);
+    selected = `finish:${list[0].id}`;
+    render();
+    return;
+  }
+  const o = currentOpening();
+  if (o) {
+    openings = openings.filter((row) => row !== o);
+    selected = `finish:${finishes()[0].id}`;
+    render();
+  }
+});
+document.getElementById("flip").addEventListener("click", () => setFace(faceId === "kitchen" ? "passage" : "kitchen"));
+document.getElementById("fit").addEventListener("click", () => {
+  view = { zoom: 1, panX: 0, panY: 0 };
+  applyView();
+});
+document.getElementById("plan-btn").addEventListener("click", () => {
+  const pop = document.getElementById("plan-pop");
+  pop.hidden = !pop.hidden;
+  document.getElementById("plan-btn").setAttribute("aria-expanded", String(!pop.hidden));
+});
+document.querySelectorAll("[data-face]").forEach((btn) => btn.addEventListener("click", () => setFace(btn.dataset.face)));
+document.addEventListener("click", (evt) => {
+  if (!evt.target.closest(".plan-wrap")) {
+    document.getElementById("plan-pop").hidden = true;
+    document.getElementById("plan-btn").setAttribute("aria-expanded", "false");
+  }
+});
+document.getElementById("elev").addEventListener("click", (evt) => {
+  if (!drawing) return;
+  if (evt.target.dataset && (evt.target.dataset.id || evt.target.dataset.corner)) return;
+  addDrawPoint(evt);
+});
+document.getElementById("elev").addEventListener("pointerdown", (evt) => {
+  if (evt.button === 1 || evt.altKey) {
+    panDrag = { x: evt.clientX, y: evt.clientY, panX: view.panX, panY: view.panY, moved: false };
+    evt.currentTarget.classList.add("is-panning");
+    evt.preventDefault();
+    return;
+  }
+  if (evt.button !== 0) return;
+  dropHeldCorner();
+  const t = evt.target;
+  if (t.dataset.vertex != null) {
+    pending = null;
+    selected = `finish:${t.dataset.id}`;
+    drag = { kind: "vertex", id: t.dataset.id, index: Number(t.dataset.vertex) };
+    evt.preventDefault();
+  } else if (t.dataset.edge != null) {
+    pending = null;
+    selected = `finish:${t.dataset.id}`;
+    const f = finishes().find((row) => row.id === t.dataset.id);
+    const index = Number(t.dataset.edge);
+    // Line moves both ends of the edge. Corner inserts a node on that edge.
+    // Shift swaps them for this one drag.
+    const moveEdge = evt.shiftKey ? edgeMode !== "line" : edgeMode === "line";
+    if (!moveEdge && canShape(f)) {
+      if (!f.points) f.points = ringOf(f).map((p) => [p[0], p[1]]);
+      const a = f.points[index];
+      const b = f.points[(index + 1) % f.points.length];
+      const raw = pointerMm(evt);
+      const dx = b[0] - a[0];
+      const dy = b[1] - a[1];
+      const len2 = dx * dx + dy * dy || 1;
+      const tOn = Math.max(0.08, Math.min(0.92, ((raw.along - a[0]) * dx + (raw.up - a[1]) * dy) / len2));
+      f.points.splice(index + 1, 0, [a[0] + dx * tOn, a[1] + dy * tOn]);
+      drag = { kind: "vertex", id: f.id, index: index + 1 };
+      render();
+    } else if (f?.points) {
+      const j = (index + 1) % f.points.length;
+      drag = {
+        kind: "edge", id: t.dataset.id, index,
+        origin: pointerMm(evt),
+        a0: [f.points[index][0], f.points[index][1]],
+        b0: [f.points[j][0], f.points[j][1]],
+      };
+      focusShownGap();
+    } else {
+      drag = { kind: "rect-edge", id: t.dataset.id, index };
+      focusShownGap();
+    }
+    evt.preventDefault();
+  } else if (t.dataset.corner) {
+    pending = null;
+    selected = `${t.dataset.kind === "finish" ? "finish" : "opening"}:${t.dataset.id}`;
+    drag = { kind: t.dataset.kind, id: t.dataset.id, corner: t.dataset.corner };
+    evt.preventDefault();
+  } else if (t.dataset.move) {
+    const o = openings.find((row) => row.id === t.dataset.id);
+    const m = pointerMm(evt);
+    pending = null;
+    selected = `opening:${o.id}`;
+    drag = { kind: "opening-move", id: o.id, dx: m.along - o.from, dy: m.up - o.sill };
+  } else if (t.id === "top-handle" && !shapingFinish()) {
+    pending = null;
+    selected = "wall";
+    const stuck = [];
+    for (const list of Object.values(byFace)) {
+      for (const f of list) {
+        if (f.top != null && Math.abs(f.top - wallHeight) < 20) stuck.push({ f, key: "top" });
+        if (f.points) f.points.forEach((p, i) => {
+          if (Math.abs(p[1] - wallHeight) < 20) stuck.push({ f, key: "point", i });
+        });
+      }
+    }
+    drag = { kind: "wall-top", stuck };
+    evt.preventDefault();
+    render();
+  }
+});
+window.addEventListener("pointermove", (evt) => {
+  if (panDrag) {
+    const svg = document.getElementById("elev");
+    const rect = svg.getBoundingClientRect();
+    const scaleX = (VIEW.w / view.zoom) / rect.width;
+    const scaleY = (VIEW.h / view.zoom) / rect.height;
+    view.panX = panDrag.panX - (evt.clientX - panDrag.x) * scaleX;
+    view.panY = panDrag.panY - (evt.clientY - panDrag.y) * scaleY;
+    if (Math.hypot(evt.clientX - panDrag.x, evt.clientY - panDrag.y) > 3) panDrag.moved = true;
+    applyView();
+    return;
+  }
+  if (!drag) return;
+  didDrag = true;
+  const m = pointerMm(evt);
+  if (drag.kind === "vertex") {
+    const f = finishes().find((row) => row.id === drag.id);
+    if (!f) return;
+    if (!f.points) f.points = ringOf(f).map((p) => [p[0], p[1]]);
+    const hit = alignPoint(m.along, m.up, { id: f.id, indexes: [drag.index] });
+    f.points[drag.index] = [hit.along, hit.up];
+    rememberGuides(hit);
+  } else if (drag.kind === "rect-edge") {
+    const f = finishes().find((row) => row.id === drag.id);
+    if (!f || f.points) return;
+    const { sTargets, zTargets } = alignTargets({ id: f.id, indexes: [0, 1, 2, 3] });
+    drag.guideS = null;
+    drag.guideZ = null;
+    // Snap from the pointer, not from the edge's last position. Measuring
+    // from the snapped edge pins it to the next paint and it cannot cross.
+    if (drag.index === 0 || drag.index === 2) {
+      const key = drag.index === 0 ? "bottom" : "top";
+      const limit = key === "bottom" ? [0, f.top - 50] : [f.bottom + 50, wallHeight];
+      const guide = pickGuide(m.up, zTargets);
+      f[key] = clamp(guide == null ? m.up : guide, limit[0], limit[1]);
+      if (guide != null && Math.abs(guide - f[key]) < 0.5) drag.guideZ = guide;
+    } else {
+      const key = drag.index === 3 ? "from" : "to";
+      const limit = key === "from" ? [0, f.to - 50] : [f.from + 50, WALL.length];
+      const guide = pickGuide(m.along, sTargets);
+      f[key] = clamp(guide == null ? m.along : guide, limit[0], limit[1]);
+      if (guide != null && Math.abs(guide - f[key]) < 0.5) drag.guideS = guide;
+    }
+  } else if (drag.kind === "edge") {
+    const f = finishes().find((row) => row.id === drag.id);
+    if (!f?.points || !drag.a0) return;
+    const i = drag.index;
+    const j = (i + 1) % f.points.length;
+    const proposedS = clamp(drag.a0[0] + (m.along - drag.origin.along), 0, WALL.length);
+    const proposedZ = clamp(drag.a0[1] + (m.up - drag.origin.up), 0, wallHeight);
+    const hit = alignPoint(proposedS, proposedZ, { id: f.id, indexes: [i, j] });
+    const ds = hit.along - drag.a0[0];
+    const dz = hit.up - drag.a0[1];
+    const move = (p) => [clamp(p[0] + ds, 0, WALL.length), clamp(p[1] + dz, 0, wallHeight)];
+    f.points[i] = move(drag.a0);
+    f.points[j] = move(drag.b0);
+    rememberGuides(Math.abs(f.points[i][0] - hit.along) < 0.5 && Math.abs(f.points[i][1] - hit.up) < 0.5 ? hit : { guideS: null, guideZ: null });
+  } else if (drag.kind === "finish") {
+    const f = finishes().find((row) => row.id === drag.id);
+    if (!f) return;
+    const hit = alignPoint(m.along, m.up, { id: f.id, indexes: [0, 1, 2, 3] });
+    const along = hit.along;
+    const up = hit.up;
+    rememberGuides(hit);
+    const right = drag.corner.includes("r");
+    const left = drag.corner.includes("l");
+    const top = drag.corner.includes("t");
+    const bottom = drag.corner.includes("b");
+    if (left) f.from = clamp(Math.min(along, f.to - 50), 0, WALL.length);
+    if (right) f.to = clamp(Math.max(along, f.from + 50), 0, WALL.length);
+    if (bottom) f.bottom = clamp(Math.min(up, f.top - 50), 0, wallHeight);
+    if (top) f.top = clamp(Math.max(up, f.bottom + 50), 0, wallHeight);
+  } else if (drag.kind === "opening") {
+    const o = openings.find((row) => row.id === drag.id);
+    if (!o) return;
+    const head = o.sill + o.height;
+    const rightEdge = o.from + o.width;
+    const hit = alignPoint(m.along, m.up, {
+      opening: o.id,
+      s: drag.corner.includes("l") ? o.from : rightEdge,
+      z: drag.corner.includes("b") ? o.sill : head,
+    });
+    rememberGuides(hit);
+    if (drag.corner.includes("l")) { o.from = clamp(Math.min(hit.along, rightEdge - 200), 0, WALL.length); o.width = rightEdge - o.from; }
+    if (drag.corner.includes("r")) o.width = clamp(hit.along - o.from, 200, WALL.length - o.from);
+    if (drag.corner.includes("b")) { o.sill = clamp(Math.min(hit.up, head - 200), 0, wallHeight); o.height = head - o.sill; }
+    if (drag.corner.includes("t")) o.height = clamp(hit.up, o.sill + 200, wallHeight) - o.sill;
+  } else if (drag.kind === "opening-move") {
+    const o = openings.find((row) => row.id === drag.id);
+    if (!o) return;
+    o.from = clamp(m.along - drag.dx, 0, WALL.length - o.width);
+    o.sill = clamp(m.up - drag.dy, 0, wallHeight - o.height);
+  } else if (drag.kind === "wall-top") {
+    const next = clamp(snap(pointerMm(evt, NEXT_FLOOR).up), MIN_WALL, NEXT_FLOOR);
+    wallHeight = next;
+    for (const ref of drag.stuck) {
+      if (ref.key === "top") ref.f.top = next;
+      else if (ref.f.points?.[ref.i]) ref.f.points[ref.i][1] = next;
+    }
+    for (const list of Object.values(byFace)) {
+      for (const f of list) {
+        if (f.top > next) f.top = next;
+        if (f.bottom > next - 50) f.bottom = Math.max(0, next - 50);
+        if (f.points) for (const p of f.points) p[1] = Math.min(p[1], next);
+      }
+    }
+    for (const o of openings) {
+      if (o.sill + o.height > next) o.height = Math.max(200, next - o.sill);
+    }
+  }
+  render();
+});
+window.addEventListener("pointerup", () => {
+  if (panDrag?.moved) didDrag = true;
+  panDrag = null;
+  document.getElementById("elev")?.classList.remove("is-panning");
+  const wasDrag = drag;
+  const moved = didDrag;
+  drag = null;
+  if (wasDrag) {
+    // A click that never moved leaves the corner or edge "held": its gap
+    // captions stay up so a number can be typed. An actual drag drops them.
+    heldCorner = !moved && isGapKind(wasDrag) ? wasDrag : null;
+    if (moved) typing = null;
+    render();
+  }
+  setTimeout(() => { didDrag = false; }, 0);
+});
+window.addEventListener("keydown", (evt) => {
+  const side = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down" }[evt.key];
+  const corner = activeCorner();
+  if (!side || !corner) return;
+  if (evt.target instanceof Element && evt.target.closest("input, textarea, select")) return;
+  evt.preventDefault();
+  const axis = side === "left" || side === "right" ? "h" : "v";
+  locatePin[axis] = locatePin[axis] === side ? null : side;
+  typingAxis = axis;
+  typing = null;
+  render();
+});
+// While a corner or edge is held or dragged, digits turn its gap caption
+// into a small box: Enter moves it so the gap equals the number, Escape
+// leaves it where the pointer put it.
+window.addEventListener("keydown", (evt) => {
+  const corner = activeCorner();
+  if (!corner) return;
+  if (evt.target instanceof Element && evt.target.closest("input, textarea, select")) return;
+  if (/^[0-9]$/.test(evt.key)) {
+    evt.preventDefault();
+    if (!typing) typing = { axis: typingAxis, text: "" };
+    const next = typing.text + evt.key;
+    if (next.length > 6) return;
+    if (Number(next) > maxTypedGap(corner, typing.axis, dragClearance())) return;
+    typing.text = next;
+    render();
+    return;
+  }
+  if (!typing) return;
+  if (evt.key === "Backspace") {
+    evt.preventDefault();
+    typing.text = typing.text.slice(0, -1);
+    render();
+  } else if (evt.key === "Enter") {
+    evt.preventDefault();
+    commitTyped();
+  } else if (evt.key === "Escape") {
+    evt.preventDefault();
+    evt.stopImmediatePropagation();
+    typing = null;
+    render();
+  }
+});
+document.getElementById("elev").addEventListener("wheel", (evt) => {
+  evt.preventDefault();
+  if (drag || panDrag) return;
+  const svg = document.getElementById("elev");
+  const rect = svg.getBoundingClientRect();
+  const px = (evt.clientX - rect.left) / rect.width;
+  const py = (evt.clientY - rect.top) / rect.height;
+  const prev = view.zoom;
+  const zoom = Math.min(16, Math.max(1, prev * (evt.deltaY < 0 ? 1.1 : 1 / 1.1)));
+  const w0 = VIEW.w / prev;
+  const h0 = VIEW.h / prev;
+  const cx = view.panX + px * w0;
+  const cy = view.panY + py * h0;
+  view.zoom = zoom;
+  if (zoom === 1) {
+    view.panX = 0;
+    view.panY = 0;
+  } else {
+    view.panX = cx - px * (VIEW.w / zoom);
+    view.panY = cy - py * (VIEW.h / zoom);
+  }
+  applyView();
+}, { passive: false });
+document.getElementById("elev").addEventListener("click", (evt) => {
+  if (didDrag || drawing) return;
+  if (evt.target.classList?.contains("elev-bg") || evt.target.id === "top-handle") {
+    selected = "wall";
+    pending = null;
+    render();
+  }
+});
+function closeFace() {
+  faceOpen = false;
+  window.clearTimeout(flashTimer);
+  document.querySelector(".workspace").hidden = true;
+  const stage = document.getElementById("plan-stage");
+  stage.hidden = false;
+  stage.classList.add("is-home");
+  document.querySelectorAll(".home-only").forEach((el) => { el.hidden = false; });
+  const words = sideWords(sideKey());
+  document.getElementById("plan-stage-note").textContent = `${words.side.charAt(0).toUpperCase()}${words.side.slice(1)} of ${words.wall}.`;
+}
+function openFace() {
+  faceOpen = true;
+  document.querySelector(".workspace").hidden = false;
+  const stage = document.getElementById("plan-stage");
+  stage.hidden = true;
+  stage.classList.remove("is-home");
+  document.querySelectorAll(".home-only").forEach((el) => { el.hidden = true; });
+}
+document.getElementById("flash-plan").addEventListener("click", flashOnPlan);
+document.getElementById("exit").addEventListener("click", closeFace);
+document.getElementById("reopen").addEventListener("click", openFace);
+window.addEventListener("keyup", (evt) => {
+  if (evt.key === "Shift") applyEdgeCursors(false);
+});
+window.addEventListener("keydown", (evt) => {
+  if (evt.key === "Shift") applyEdgeCursors(true);
+  if (evt.key !== "Escape" || !faceOpen) return;
+  const tag = document.activeElement?.tagName;
+  if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") {
+    document.activeElement.blur();
+    return;
+  }
+  if (drawing || pending) {
+    pending = null;
+    drawing = false;
+    drawPts = [];
+    if (!selected.startsWith("finish:") && !selected.startsWith("opening:")) selected = "finish:paint-b";
+    render();
+    return;
+  }
+  if (heldCorner) {
+    dropHeldCorner();
+    render();
+    return;
+  }
+  if (selected && selected !== "wall") {
+    selected = "wall";
+    drag = null;
+    render();
+    return;
+  }
+  closeFace();
+});
+
+render();
+applyView();
+</script>
+</body>
+</html>

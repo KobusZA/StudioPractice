@@ -170,10 +170,10 @@ import {
 import { enclosedFace, syncRoomBounds } from "./room-bound.js";
 import { REGION_CONVENTIONS, regionConvention } from "./region.js";
 import { ELEVATION_SNAP, applyBandEdit, applyOpeningEdit, applyOutlinePoints, applyWallTopEdit, axisAlignedOutline, elevationModel, faceRefForSelection, snapElevation, translateOutlineEdge } from "./wall-elevation.js";
-import { createFinishRegion, createFinishRun, dependentsOfWalls, finishProductById, libraryLine, planWallFinishMarks, presetFromRoom, rulesFromPreset, savePreset } from "./finish-model.js?v=20261030-delete-wall-hosts";
+import { createFinishRegion, createFinishRun, dependentsOfWalls, finishProductById, libraryLine, planWallFinishMarks, presetFromRoom, roomsBySide, rulesFromPreset, savePreset } from "./finish-model.js?v=20261101-face-editor";
 import { FINISH_CATEGORIES, finishId, finishSwatch, normalizeFinishProducts, normalizeFinishSettings } from "./finish-data.js";
-import { HEIGHT_PRESETS, draftBandPreviewHtml, faceFinishHtml, finishCalloutHtml, openingCalloutHtml, floorProductSuggestions, parseTarget, productsHtml, roomFinishHtml, slabFinishHtml, targetOptions } from "./finish-panel.js?v=20261030-finish-rows";
-import { clampElevationView, edgeResizeCursor, elevationSvg, finishLocate, zoomElevationView } from "./wall-elevation-render.js?v=20261030-finish-locate";
+import { HEIGHT_PRESETS, draftBandPreviewHtml, faceFinishHtml, finishCalloutHtml, openingCalloutHtml, floorProductSuggestions, parseTarget, productsHtml, roomFinishHtml, slabFinishHtml, targetOptions } from "./finish-panel.js?v=20261101-face-editor";
+import { clampElevationView, edgeResizeCursor, elevationSvg, finishLocate, zoomElevationView } from "./wall-elevation-render.js?v=20261101-face-fixes";
 import { CORNER_JOIN_TOL, deriveWalls, drawnSegmentFromWall, drawnWallThickness, isStripFooting, skuDrawnHeight, statusVisible } from "./walls.js";
 import { findJoinTarget, resolveJoin, sideTowardTarget } from "./wall-join.js?v=20261022-corner-b";
 import {
@@ -514,6 +514,25 @@ const el = {
   ctxShapePoly: document.getElementById("v2-ctx-shape-poly"),
   ctxShapePolyHint: document.getElementById("v2-ctx-shape-poly-hint"),
   elevBody: document.getElementById("v2-elevation-body"),
+  faceEditor: document.getElementById("v2-face-editor"),
+  facePlan: document.getElementById("v2-face-plan"),
+  faceWhich: document.getElementById("v2-face-which"),
+  faceMeta: document.getElementById("v2-face-meta"),
+  faceSwatch: document.getElementById("v2-face-swatch"),
+  faceType: document.getElementById("v2-face-type"),
+  faceProduct: document.getElementById("v2-face-product"),
+  faceRemove: document.getElementById("v2-face-remove"),
+  faceColourRow: document.getElementById("v2-face-colour-row"),
+  faceColourPick: document.getElementById("v2-face-colour-pick"),
+  faceMaker: document.getElementById("v2-face-maker"),
+  faceColourName: document.getElementById("v2-face-colour-name"),
+  faceColourCode: document.getElementById("v2-face-colour-code"),
+  faceSwatchInput: document.getElementById("v2-face-swatch-input"),
+  facePlaceRow: document.getElementById("v2-face-place-row"),
+  faceUp: document.getElementById("v2-face-up"),
+  faceAlong: document.getElementById("v2-face-along"),
+  faceOpeningRow: document.getElementById("v2-face-opening-row"),
+  faceHover: document.getElementById("v2-face-hover"),
   elevFit: document.getElementById("v2-elev-fit"),
   elevInfo: document.getElementById("v2-elev-info"),
   elevInfoNote: document.getElementById("v2-elev-info-note"),
@@ -741,8 +760,11 @@ let hoverPoint = null;
 let wallsCache = [];
 // Wall elevation: the face the strip under the plan is showing, and a drag in
 // progress. `elevationOpen` is the "Edit this face" toggle; the face itself
-// follows the selection (see wall-elevation.js).
+// follows the selection (see wall-elevation.js). Selecting a wall does not
+// open it: the plan stays full size until the face is asked for.
 let elevationOpen = false;
+// A finish chosen on the face, not yet given a place, so nothing is stored.
+let faceAddPending = null;
 let elevationFace = null;
 let elevationDrag = null;
 let elevationKey = "";
@@ -8406,8 +8428,8 @@ function openWallFinishes() {
   syncToolButtons();
   drawRibbon();
   if (selectedElevationFace()) {
-    elevationOpen = true;
-    setStatusMessage("The picture of the wall, then Add a finish. Or drag the edges of a band in the elevation.", "ok");
+    openWallFace();
+    setStatusMessage("The picture of the wall, then Add a finish. Or drag the edges of a band on the face.", "ok");
   } else {
     setStatusMessage("Select a wall to finish it, or a room to finish all its walls.", "ok");
   }
@@ -11643,6 +11665,7 @@ function clearRouteIfLeavingServices() {
 function exitRouteProfile() {
   if (elevationShowing()) {
     elevationOpen = false;
+    faceAddPending = null;
     render();
     return;
   }
@@ -13395,9 +13418,10 @@ function syncHeightFields(obj, kind) {
 
   const size = opening ? openingSize(pack, opening) : null;
   const isWindow = Boolean(opening && skuById(opening.sku)?.category === "window");
-  setHidden(el.ctxSillWrap, !isWindow);
-  setHidden(el.ctxOWidthWrap, !opening);
-  setHidden(el.ctxOHeightWrap, !opening);
+  const faceEditing = elevationOpen && Boolean(selectedElevationFace());
+  setHidden(el.ctxSillWrap, !isWindow || faceEditing);
+  setHidden(el.ctxOWidthWrap, !opening || faceEditing);
+  setHidden(el.ctxOHeightWrap, !opening || faceEditing);
   setHidden(el.ctxOSizeNote, !size?.nonStandard);
   if (!opening) return;
   const put = (input, metres) => {
@@ -13760,6 +13784,190 @@ function placeElevCoach() {
  * "Edit this face" control is on and a wall face is selected. Returns true
  * when it is showing, so the route profile leaves the strip alone.
  */
+function faceSideTitle(model) {
+  const wall = wallsCache.find((w) => w.id === model?.wallId);
+  if (!wall) return "";
+  const ids = [...(roomsBySide(store.doc, wall)[model.side] || [])];
+  const names = ids.map((id) => (store.doc.rooms || []).find((r) => r.id === id)?.name).filter(Boolean);
+  return names.length ? `${names.join(" and ")} side` : "Outside";
+}
+
+/**
+ * A thumbnail of this storey's walls with this wall in copper and a bar on the
+ * side being viewed, so the open face always says where it is on the plan.
+ */
+function keyPlanSvg(face) {
+  const wall = wallsCache.find((w) => w.id === face?.wallId);
+  if (!wall) return "";
+  const walls = wallsCache.filter((w) => w.level === wall.level);
+  const xs = walls.flatMap((w) => [w.x1, w.x2]);
+  const ys = walls.flatMap((w) => [w.y1, w.y2]);
+  const minX = Math.min(...xs);
+  const minY = Math.min(...ys);
+  const span = Math.max(Math.max(...xs) - minX, Math.max(...ys) - minY, 1);
+  const pad = span * 0.08;
+  const n = wallNormal(wall, face.side);
+  const off = Math.max(wall.thickness || 0.22, span * 0.035);
+  const line = (w, cls) => `<line x1="${w.x1}" y1="${w.y1}" x2="${w.x2}" y2="${w.y2}" class="${cls}" vector-effect="non-scaling-stroke"/>`;
+  const others = walls.filter((w) => w.id !== wall.id).map((w) => line(w, "key-wall")).join("");
+  const sideBar = line({ x1: wall.x1 + n.x * off, y1: wall.y1 + n.y * off, x2: wall.x2 + n.x * off, y2: wall.y2 + n.y * off }, "key-side");
+  const vb = [minX - pad, minY - pad, Math.max(...xs) - minX + pad * 2, Math.max(...ys) - minY + pad * 2].map((v) => +v.toFixed(3)).join(" ");
+  return `<svg class="key-plan" viewBox="${vb}" preserveAspectRatio="xMidYMid meet" aria-hidden="true">${others}${line(wall, "key-this")}${sideBar}</svg>`;
+}
+
+function syncKeyPlan(face) {
+  const btn = el.facePlan;
+  if (!btn || !face) return;
+  const side = faceSideTitle(face) || "This face";
+  const peek = document.getElementById("v2-plan-column")?.classList.contains("is-plan-peek");
+  const html = `${keyPlanSvg(face)}<span class="key-plan-copy"><strong>${escapeHtml(side)}</strong><span>${peek ? "Hide plan" : "Show plan"}</span></span>`;
+  if (btn.innerHTML !== html) btn.innerHTML = html;
+  btn.setAttribute("aria-label", `${side}. ${peek ? "Hide the plan" : "Show the plan, to choose another wall"}.`);
+  btn.setAttribute("aria-expanded", String(Boolean(peek)));
+}
+
+function fillFaceTypeSelect() {
+  const select = el.faceType;
+  if (!select || select.options.length) return;
+  const ids = Object.keys(FINISH_CATEGORIES).filter((id) => FINISH_CATEGORIES[id].surfaces.includes("wall"));
+  const add = (label, list) => {
+    const group = document.createElement("optgroup");
+    group.label = label;
+    for (const id of list) {
+      const option = document.createElement("option");
+      option.value = id;
+      option.textContent = FINISH_CATEGORIES[id].label;
+      group.appendChild(option);
+    }
+    select.appendChild(group);
+  };
+  add("Base coat", ids.filter((id) => FINISH_CATEGORIES[id].layer === "coat"));
+  add("Applied finish", ids.filter((id) => FINISH_CATEGORIES[id].layer !== "coat"));
+}
+
+function setFaceField(node, value) {
+  if (!node || document.activeElement === node) return;
+  node.value = value ?? "";
+}
+
+function syncWallFaceChrome(show) {
+  const column = document.getElementById("v2-plan-column");
+  column?.classList.toggle("is-wall-face", show);
+  if (!show) column?.classList.remove("is-plan-peek");
+  setHidden(el.faceEditor, !show);
+  setHidden(el.facePlan, !show);
+  const exit = document.getElementById("v2-profile-exit");
+  if (exit) exit.textContent = show ? "Close" : "Exit";
+  if (show) {
+    syncKeyPlan(elevationFace);
+    syncFaceEditor();
+  } else if (el.faceHover) el.faceHover.textContent = "";
+}
+
+/** The copper box on the face: the selected finish, the opening, or a finish not yet placed. */
+function syncFaceEditor() {
+  fillFaceTypeSelect();
+  const model = finishFaceModel();
+  const openingId = selectedOpeningId();
+  const opening = openingId ? model?.openings.find((o) => o.id === openingId) : null;
+  const band = !opening && selectedBandId ? model?.finishBands.find((b) => b.id === selectedBandId) : null;
+  const pending = !opening && !band && faceAddPending && faceAddPending.wallId === model?.wallId;
+  const product = band ? finishProductById(store.doc, band.productId) : null;
+  // Colour and millimetres belong to a finish that exists. A new one gets them once it is placed.
+  const paint = band?.category === "paint" && band.editable;
+  const typedSpan = Boolean(band?.editable && !band.outline);
+  setHidden(el.facePlaceRow, Boolean(opening) || (!band && !pending));
+  setHidden(el.faceOpeningRow, !opening);
+  setHidden(el.faceColourRow, !paint || Boolean(opening));
+  setHidden(el.faceUp, !typedSpan);
+  setHidden(el.faceAlong, !typedSpan || band.source === "rule");
+  if (el.faceRemove) el.faceRemove.hidden = !band || !band.editable;
+  if (el.faceType) el.faceType.disabled = !band?.editable && !pending;
+  if (el.faceProduct) el.faceProduct.disabled = !band?.editable && !pending;
+  if (opening) {
+    const kind = opening.category === "door" ? "Door" : "Window";
+    if (el.faceWhich) el.faceWhich.textContent = opening.name || kind;
+    if (el.faceMeta) el.faceMeta.textContent = `${kind} · ${Math.round(opening.width * 1000)} × ${Math.round(opening.height * 1000)}`;
+    if (el.faceSwatch) el.faceSwatch.style.background = "#fffdf8";
+    const door = opening.category === "door";
+    const width = document.getElementById("v2-face-owidth");
+    if (width) width.disabled = door;
+    setHidden(document.getElementById("v2-face-sill-label"), door);
+    setFaceField(width, formatLengthMm(opening.width));
+    setFaceField(document.getElementById("v2-face-oheight"), formatLengthMm(opening.height));
+    setFaceField(document.getElementById("v2-face-osill"), formatLengthMm(opening.sill));
+    setFaceField(document.getElementById("v2-face-oleft"), formatLengthMm(Math.max(0, opening.offset)));
+    return;
+  }
+  const kicker = document.getElementById("v2-face-place-kicker");
+  if (kicker) kicker.textContent = pending ? "Place this finish" : "Reshape";
+  if (pending) {
+    if (el.faceWhich) el.faceWhich.textContent = "New finish";
+    if (el.faceMeta) el.faceMeta.textContent = "Choose where it goes. Nothing is added until then. Colour and exact millimetres come after.";
+    if (el.faceSwatch) el.faceSwatch.style.background = finishSwatch(el.faceType?.value || "paint");
+    document.querySelectorAll("[data-face-place]").forEach((btn) => {
+      btn.setAttribute("aria-pressed", "false");
+      btn.disabled = false;
+    });
+    return;
+  }
+  if (!band) {
+    if (el.faceWhich) el.faceWhich.textContent = faceSideTitle(model) || "This face";
+    if (el.faceMeta) el.faceMeta.textContent = "Click a finish or an opening.";
+    if (el.faceSwatch) el.faceSwatch.style.background = "transparent";
+    return;
+  }
+  const same = (model.finishBands || []).filter((b) => b.source !== "default" && b.category === band.category);
+  const index = same.findIndex((b) => b.id === band.id) + 1;
+  const label = FINISH_CATEGORIES[band.category]?.label || band.category;
+  if (el.faceWhich) el.faceWhich.textContent = same.length > 1 && index > 0 ? `${label} ${index} of ${same.length}` : label;
+  const qty = band.category === "none" ? "" : band.unit === "m" ? `${band.quantity.toFixed(2)} m` : `${band.quantity.toFixed(2)} m²`;
+  if (el.faceMeta) {
+    el.faceMeta.textContent = band.source === "rule"
+      ? `Changes every wall of this room${qty ? ` · ${qty}` : ""}`
+      : band.source === "default" ? "From the wall type" : qty;
+  }
+  if (el.faceSwatch) el.faceSwatch.style.background = band.fill || finishSwatch(band.category);
+  setFaceField(el.faceType, band.category);
+  setFaceField(el.faceProduct, product?.name || "");
+  setFaceField(document.getElementById("v2-face-bottom"), formatLengthMm(band.bottom));
+  setFaceField(document.getElementById("v2-face-top"), formatLengthMm(band.top));
+  setFaceField(document.getElementById("v2-face-from"), formatLengthMm(band.from));
+  setFaceField(document.getElementById("v2-face-to"), formatLengthMm(band.to));
+  document.querySelectorAll("[data-face-place]").forEach((btn) => {
+    const whole = band.from <= 0.02 && model.length - band.to <= 0.02 && band.bottom <= 0.02 && model.height - band.top <= 0.02;
+    const low = band.bottom <= 0.02 && Math.abs(band.top - 0.15) < 0.02;
+    const dado = band.bottom <= 0.02 && Math.abs(band.top - 1.2) < 0.02;
+    const on = (btn.dataset.facePlace === "whole" && whole) || (btn.dataset.facePlace === "150" && low) || (btn.dataset.facePlace === "1200" && dado);
+    btn.setAttribute("aria-pressed", String(on));
+    btn.disabled = !band.editable || (btn.dataset.facePlace === "draw" && band.source !== "run");
+  });
+  if (!paint) return;
+  const paints = (store.doc.finishProducts || []).filter((p) => p.category === "paint" && (p.colourName || p.swatch));
+  const pick = el.faceColourPick;
+  if (pick && document.activeElement !== pick) {
+    const current = product?.id && paints.some((p) => p.id === product.id) ? product.id : "";
+    const safe = (text) => String(text).replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" }[ch]));
+    pick.innerHTML = `<option value="">Choose a colour</option>${paints.map((p) => `<option value="${safe(p.id)}">${safe([p.manufacturer, p.colourName || p.name, p.colourCode].filter(Boolean).join(" · "))}</option>`).join("")}<option value="__other__">Other colour</option>`;
+    pick.value = current;
+  }
+  setFaceField(el.faceMaker, product?.manufacturer || "");
+  setFaceField(el.faceColourName, product?.colourName || "");
+  setFaceField(el.faceColourCode, product?.colourCode || "");
+  if (el.faceSwatchInput && document.activeElement !== el.faceSwatchInput && product?.swatch) el.faceSwatchInput.value = product.swatch;
+}
+
+function bandsUnderPoint(model, s, z) {
+  if (!model) return [];
+  const hit = (model.finishBands || []).filter((b) => {
+    if (b.outline?.length >= 3) return pointInPoly(s, z, b.outline);
+    const from = b.from ?? 0;
+    const to = b.to ?? model.length;
+    return s >= from - 1e-6 && s <= to + 1e-6 && z >= (b.bottom ?? 0) - 1e-6 && z <= (b.top ?? 0) + 1e-6;
+  });
+  return hit.reverse();
+}
+
 function syncElevationDock() {
   const dock = el.serviceProfileDock;
   const face = selectedElevationFace();
@@ -13781,6 +13989,7 @@ function syncElevationDock() {
     setHidden(dock.querySelector(".svc-profile-mode"), false);
     setHidden(document.getElementById("v2-profile-select-all"), false);
     el.elevBody?.classList.remove("is-drawing");
+    syncWallFaceChrome(false);
     return false;
   }
   elevationFace = face;
@@ -13789,6 +13998,7 @@ function syncElevationDock() {
     elevationOpen = false;
     el.elevBody?.classList.remove("is-drawing");
     syncElevHints(false);
+    syncWallFaceChrome(false);
     return false;
   }
   setHidden(dock, false);
@@ -13817,10 +14027,12 @@ function syncElevationDock() {
     b.setAttribute("aria-pressed", String(on));
   });
   if (el.serviceProfileTitle) {
+    const side = faceSideTitle(model);
     el.serviceProfileTitle.textContent = elevFinishDraft
       ? "Click each corner. Double-click or Esc finishes the shape."
-      : `Wall elevation · ${model.name} · ${Math.round(model.length * 1000)} mm, ${model.side === 1 ? "face A" : "face B"}`;
+      : `This wall${side ? ` · ${side}` : ""} · ${Math.round(model.length * 1000)} × ${Math.round(model.height * 1000)} mm`;
   }
+  syncWallFaceChrome(true);
   const w = el.elevBody.clientWidth;
   const h = el.elevBody.clientHeight;
   const selectedId = selectedOpeningId();
@@ -13982,6 +14194,15 @@ function finishElevFinishDraft() {
   const outline = draft.points.map((p) => [model.flip ? model.length - p.s : p.s, p.z]);
   const { category, productName } = draft;
   elevFinishDraft = null;
+  if (draft.replaces) {
+    finishCommit(() => {
+      applyOutlinePoints(store.doc, pack, draft.face, draft.replaces, draft.points, wallsCache);
+      selectedBandId = draft.replaces;
+      noteBandSaved(selectedBandId);
+    });
+    setStatusMessage("Finish redrawn.", "ok");
+    return;
+  }
   finishCommit(() => {
     const run = createFinishRun(store.doc, wall, model.side, {
       category,
@@ -14079,29 +14300,27 @@ function onElevationPointerDown(ev, layout) {
     return;
   }
   if (ev.button !== 0 || !elevationFace || !layout) return;
-  // The inspector graph is a picture. A finish click selects its row and
-  // leaves a short pointer under the picture.
+  // The inspector graph is the way in, shown only while the face is closed.
+  // A click opens the face with what was clicked already selected there.
   if (ev.currentTarget === el.ctxElev && !(elevFinishDraft && elevFinishDraft.face.wallId === elevationFace.wallId)) {
+    ev.preventDefault();
+    closePreviewCallout();
     const fillHit = ev.target.closest?.("[data-elev-fill]");
     if (fillHit) {
-      showPreviewFinish(ev, fillHit.dataset.elevFill);
+      selectBand(fillHit.dataset.elevFill);
       return;
     }
     const openingHit = ev.target.closest?.("[data-elev-id]");
+    faceAddPending = null;
     if (openingHit?.dataset.elevId) {
-      showPreviewOpening(ev, openingHit.dataset.elevId);
-      return;
+      selectedBandId = null;
+      if (selectedOpeningId() !== openingHit.dataset.elevId) store.selectOne({ kind: "opening", id: openingHit.dataset.elevId });
+    } else {
+      clearFinishPick();
+      if (store.primary?.kind === "opening") focusElevationWall();
     }
-    closePreviewCallout();
-    const hadFinish = clearFinishPick();
-    // A window or door has taken the inspector. Clicking the wall puts it
-    // back. The opening itself is not dragged from this graph.
-    if (store.primary?.kind === "opening" && ev.target.closest?.("[data-elev-wall]")) {
-      selectOpeningHostWall();
-      ev.preventDefault();
-    } else if (hadFinish) {
-      render();
-    }
+    openWallFace();
+    render();
     return;
   }
   if (elevFinishDraft && layout.originX != null && elevFinishDraft.face.wallId === elevationFace.wallId) {
@@ -14151,6 +14370,17 @@ function onElevationPointerDown(ev, layout) {
       return;
     }
     const fill = fillHit;
+    if (fill && layout.originX != null && ev.currentTarget === el.elevBody) {
+      const underModel = elevationModel(store.doc, pack, elevationFace, wallsCache);
+      const raw = elevRawPoint(ev, ev.currentTarget, layout);
+      const stack = bandsUnderPoint(underModel, raw.s, raw.z);
+      if (stack.length > 1 && fill.dataset.elevFill === selectedBandId) {
+        const at = stack.findIndex((b) => b.id === selectedBandId);
+        selectBand(stack[(at + 1) % stack.length].id);
+        ev.preventDefault();
+        return;
+      }
+    }
     if (fill && layout.originX != null && fill.dataset.elevFill === selectedBandId) {
       const model = elevationModel(store.doc, pack, elevationFace, wallsCache);
       const band = model?.finishBands.find((b) => b.id === fill.dataset.elevFill);
@@ -14218,6 +14448,11 @@ function onElevationPointerDown(ev, layout) {
 }
 
 function onElevationPointerMove(ev) {
+  if (!elevationDrag && !elevationPan && ev.currentTarget === el.elevBody && elevationLayout && elevationFace) {
+    const raw = elevRawPoint(ev, ev.currentTarget, elevationLayout);
+    const under = bandsUnderPoint(elevationModelNow(elevationFace), raw.s, raw.z).map((b) => finishDisplayName(b));
+    if (el.faceHover) el.faceHover.textContent = under.length > 1 ? under.join(" · ") : "";
+  }
   if (elevationPan && ev.currentTarget === el.elevBody) {
     // At the fitted zoom the wall already fills the strip; sliding it only
     // hides the next floor. Panning starts once the view is zoomed in.
@@ -14395,8 +14630,17 @@ document.addEventListener("pointerdown", (ev) => {
   closeElevInfo();
 });
 
+function openWallFace() {
+  elevationOpen = true;
+}
+
 function toggleWallElevation() {
-  elevationOpen = !elevationOpen;
+  if (elevationOpen) {
+    elevationOpen = false;
+    faceAddPending = null;
+  } else {
+    openWallFace();
+  }
   render();
 }
 
@@ -14426,6 +14670,206 @@ function flipElevationFace() {
 el.elevFlip?.addEventListener("click", flipElevationFace);
 el.ctxElevFlip?.addEventListener("click", flipElevationFace);
 
+el.facePlan?.addEventListener("click", () => {
+  document.getElementById("v2-plan-column")?.classList.toggle("is-plan-peek");
+  render();
+});
+
+function faceBandNow() {
+  const model = finishFaceModel();
+  return model?.finishBands.find((b) => b.id === selectedBandId) || null;
+}
+
+function commitFaceSpan() {
+  const face = elevationFace;
+  const model = finishFaceModel();
+  const band = faceBandNow();
+  if (!face || !model || !band?.editable || band.outline) return;
+  const read = (id) => typedMm(document.getElementById(id)?.value, { allowZero: true });
+  const top = read("v2-face-top");
+  const edit = { bottom: read("v2-face-bottom") ?? 0, top: top == null ? model.height : top };
+  if (band.source !== "rule") {
+    edit.from = read("v2-face-from") ?? 0;
+    edit.to = read("v2-face-to") ?? model.length;
+  }
+  finishCommit(() => { applyBandEdit(store.doc, pack, face, band.id, edit, wallsCache); });
+}
+
+function placeOnFace(kind) {
+  const face = selectedElevationFace();
+  const wall = wallsCache.find((w) => w.id === face?.wallId);
+  const model = face ? elevationModelNow(face) : null;
+  if (!face || !wall || !model) return;
+  const band = faceBandNow();
+  const pending = faceAddPending && faceAddPending.wallId === face.wallId;
+  if (kind === "draw") {
+    // On a placed finish, Draw area redraws that finish. It does not add a second one.
+    const redraw = !pending && band?.source === "run" && band.editable ? band.id : null;
+    if (!pending && !redraw) return;
+    const category = pending ? (el.faceType?.value || "paint") : band.category;
+    const productName = String(el.faceProduct?.value || "").trim();
+    faceAddPending = null;
+    openWallFace();
+    elevFinishDraft = {
+      points: [],
+      hover: null,
+      category,
+      productName,
+      replaces: redraw,
+      face: { wallId: face.wallId, side: face.side },
+    };
+    render();
+    return;
+  }
+  const heights = kind === "150" ? { bottom: 0, top: 0.15 } : kind === "1200" ? { bottom: 0, top: 1.2 } : { bottom: 0, top: model.height };
+  if (pending || !band) {
+    const category = el.faceType?.value || "paint";
+    const productName = String(el.faceProduct?.value || "").trim();
+    faceAddPending = null;
+    finishCommit(() => {
+      const spec = { category, ...heights };
+      if (kind === "whole") delete spec.top;
+      if (productName) spec.productId = ensureFinishProduct(store.doc, category, productName);
+      const run = createFinishRun(store.doc, wall, face.side, spec);
+      selectedBandId = `run:${run.id}:${wall.id}:${face.side}`;
+    });
+    return;
+  }
+  if (!band.editable) return;
+  // A height keeps the finish where it is along the wall. Only Whole face also spans the full length.
+  const edit = { ...heights };
+  if (band.source !== "rule") {
+    edit.from = kind === "whole" ? 0 : band.from;
+    edit.to = kind === "whole" ? model.length : band.to;
+  }
+  finishCommit(() => {
+    const source = bandSource(store.doc, band);
+    if (source?.outline) source.outline = null;
+    applyBandEdit(store.doc, pack, face, band.id, edit, wallsCache);
+  });
+}
+
+el.faceEditor?.addEventListener("click", (ev) => {
+  const place = ev.target.closest?.("[data-face-place]")?.dataset.facePlace;
+  if (place) placeOnFace(place);
+});
+
+document.getElementById("v2-face-add")?.addEventListener("click", () => {
+  const face = selectedElevationFace();
+  if (!face) return;
+  selectedBandId = null;
+  faceAddPending = { wallId: face.wallId, side: face.side };
+  openWallFace();
+  render();
+  if (el.faceType) el.faceType.value = "paint";
+  if (el.faceSwatch) el.faceSwatch.style.background = finishSwatch("paint");
+  el.faceProduct?.focus();
+});
+
+el.faceRemove?.addEventListener("click", () => {
+  const band = faceBandNow();
+  if (band) removeFinishBand(band);
+});
+
+el.faceType?.addEventListener("change", () => {
+  if (faceAddPending) { render(); return; }
+  const band = faceBandNow();
+  const source = band ? bandSource(store.doc, band) : null;
+  const next = el.faceType.value;
+  if (!band || !source || !next || next === band.category) return;
+  finishCommit(() => {
+    const product = finishProductById(store.doc, source.productId);
+    source.category = next;
+    if (next === "none" || !product || product.category !== next) source.productId = null;
+  });
+});
+
+el.faceProduct?.addEventListener("change", () => {
+  if (faceAddPending) return;
+  const band = faceBandNow();
+  const source = band ? bandSource(store.doc, band) : null;
+  if (!band?.editable || !source) return;
+  const name = String(el.faceProduct.value || "").trim();
+  finishCommit(() => {
+    source.category = band.category;
+    source.productId = name ? ensureFinishProduct(store.doc, band.category, name) : null;
+  });
+});
+
+for (const id of ["v2-face-bottom", "v2-face-top", "v2-face-from", "v2-face-to"]) {
+  document.getElementById(id)?.addEventListener("change", commitFaceSpan);
+}
+
+function patchFaceColour(patch) {
+  const band = faceBandNow();
+  const source = band ? bandSource(store.doc, band) : null;
+  if (!band?.editable || !source || band.category !== "paint") return;
+  finishCommit(() => {
+    if (!source.productId) {
+      const name = String(el.faceProduct?.value || "").trim() || el.faceColourName?.value || "Paint";
+      source.productId = ensureFinishProduct(store.doc, "paint", name);
+    }
+    const list = store.doc.finishProducts || [];
+    store.doc.finishProducts = normalizeFinishProducts(list.map((p) => (p.id === source.productId ? { ...p, ...patch } : p)));
+  });
+}
+
+el.faceColourPick?.addEventListener("change", () => {
+  const value = el.faceColourPick.value;
+  if (value === "__other__") {
+    const band = faceBandNow();
+    const source = band ? bandSource(store.doc, band) : null;
+    if (!source) return;
+    finishCommit(() => {
+      const id = finishId("fp");
+      const name = String(el.faceProduct?.value || "").trim() || "Paint";
+      store.doc.finishProducts = normalizeFinishProducts([...(store.doc.finishProducts || []), { id, category: "paint", name }]);
+      source.productId = id;
+      source.category = "paint";
+    });
+    el.faceColourName?.focus();
+    return;
+  }
+  if (!value) return;
+  const band = faceBandNow();
+  const source = band ? bandSource(store.doc, band) : null;
+  if (!source) return;
+  finishCommit(() => { source.productId = value; source.category = "paint"; });
+});
+
+el.faceMaker?.addEventListener("change", () => patchFaceColour({ manufacturer: el.faceMaker.value }));
+el.faceColourName?.addEventListener("change", () => patchFaceColour({ colourName: el.faceColourName.value }));
+el.faceColourCode?.addEventListener("change", () => patchFaceColour({ colourCode: el.faceColourCode.value }));
+el.faceSwatchInput?.addEventListener("change", () => patchFaceColour({ swatch: el.faceSwatchInput.value }));
+
+function commitFaceOpening(edit) {
+  const face = elevationFace;
+  const id = selectedOpeningId();
+  if (!face || !id) return;
+  finishCommit(() => { applyOpeningEdit(store.doc, pack, face, id, edit, wallsCache); });
+}
+
+document.getElementById("v2-face-owidth")?.addEventListener("change", (e) => {
+  const value = typedMm(e.target.value);
+  if (value == null) { render(); return; }
+  commitFaceOpening({ width: value });
+});
+document.getElementById("v2-face-oheight")?.addEventListener("change", (e) => {
+  const value = typedMm(e.target.value);
+  if (value == null) { render(); return; }
+  commitFaceOpening({ height: value });
+});
+document.getElementById("v2-face-osill")?.addEventListener("change", (e) => {
+  const value = typedMm(e.target.value, { allowZero: true });
+  if (value === undefined) { render(); return; }
+  commitFaceOpening({ sill: value ?? 0 });
+});
+document.getElementById("v2-face-oleft")?.addEventListener("change", (e) => {
+  const value = typedMm(e.target.value, { allowZero: true });
+  if (value === undefined) { render(); return; }
+  commitFaceOpening({ left: value ?? 0 });
+});
+
 el.elevEdgeMode?.addEventListener("click", (ev) => {
   const mode = ev.target.closest?.("[data-elev-edge]")?.dataset.elevEdge;
   if (mode !== "corner" && mode !== "line") return;
@@ -14449,9 +14893,10 @@ el.ctxOOffset?.addEventListener("change", (e) => {
 function syncElevationPreview() {
   const face = selectedElevationFace();
   const model = face ? elevationModelNow(face) : null;
-  setHidden(el.ctxElevWrap, !model);
+  const faceOpen = Boolean(model && elevationOpen && !serviceDockActive());
+  setHidden(el.ctxElevWrap, !model || faceOpen);
   const opening = model && selectedOpeningId() ? model.openings.find((o) => o.id === selectedOpeningId()) : null;
-  setHidden(el.ctxOOffsetWrap, !opening);
+  setHidden(el.ctxOOffsetWrap, !opening || faceOpen);
   if (opening && el.ctxOOffset && document.activeElement !== el.ctxOOffset) el.ctxOOffset.value = formatLengthMm(opening.offset);
   if (!model) {
     elevPreviewKey = "";
@@ -14464,10 +14909,10 @@ function syncElevationPreview() {
   }
   el.ctxElevWrap?.classList.toggle("is-open", elevationOpen);
   if (el.ctxElevOpen) {
-    el.ctxElevOpen.textContent = elevationOpen ? "Close elevation" : "Edit this face";
+    el.ctxElevOpen.textContent = elevationOpen ? "Close" : "Open this face";
     el.ctxElevOpen.setAttribute("aria-expanded", String(elevationOpen));
   }
-  if (el.ctxElevFace) el.ctxElevFace.textContent = model.side === 1 ? "face A" : "face B";
+  if (el.ctxElevFace) el.ctxElevFace.textContent = faceSideTitle(model);
   syncFinishPreviewCallout(model);
   const w = Math.max(120, Math.round(el.ctxElev?.clientWidth || 240));
   const draft = elevFinishDraft && elevFinishDraft.face.wallId === face.wallId ? elevFinishDraft : null;
@@ -14516,7 +14961,7 @@ function syncFinishPanel(room, slab) {
     bareOn: bareFinishHost?.kind === kind && bareFinishHost?.id === id,
     adding: finishAddOpen === "floor",
   });
-  const html = (room ? roomFinishHtml(store.doc, room, editingId, floorOpts("room", room.id)) : slab ? slabFinishHtml(store.doc, slab, editingId, floorOpts("slab", slab.id)) : faceFinishHtml(store.doc, model, { selectedId: selectedBandId, savedId: finishSavedBandId, adding: finishAddOpen === "face", bareAsk: finishBareAsk }))
+  const html = (room ? roomFinishHtml(store.doc, room, editingId, floorOpts("room", room.id)) : slab ? slabFinishHtml(store.doc, slab, editingId, floorOpts("slab", slab.id)) : faceFinishHtml(store.doc, model, { selectedId: selectedBandId, savedId: finishSavedBandId, adding: finishAddOpen === "face", bareAsk: finishBareAsk, bill: true, compact: true, openingId: selectedOpeningId() }))
     + productsHtml(store.doc, { open: finishProductsOpen });
   if (html !== finishKey) {
     // A cleared key means the finish was just saved, so the panel has to catch up.
@@ -14775,6 +15220,8 @@ function setHoverBand(id) {
 /** Pick a wall finish, in the list or on the elevation, and bring its card into view. */
 function selectBand(id) {
   if (id) focusElevationWall();
+  faceAddPending = null;
+  if (id) openWallFace();
   selectedBandId = id;
   selectedElevVertex = null;
   finishKey = "";
@@ -14782,34 +15229,6 @@ function selectBand(id) {
   render();
   if (id) el.ctxFinish?.querySelectorAll("[data-fin-band]").forEach((card) => {
     if (card.dataset.finBand === id) card.scrollIntoView({ block: "nearest" });
-  });
-}
-
-/** A finish on the inspector graph: keep the graph where it is and show its callout. */
-function showPreviewFinish(ev, id) {
-  holdInspectorGraph(() => {
-    previewCallout = { kind: "finish", id };
-    selectedBandId = id;
-    selectedElevVertex = null;
-    finishKey = "";
-    ev.preventDefault();
-    const switched = store.primary?.kind === "opening" && selectOpeningHostWall();
-    if (!switched) render();
-    announceSelectedFinish(id);
-  });
-  if (id) el.ctxFinish?.querySelectorAll("[data-fin-band]").forEach((card) => {
-    if (card.dataset.finBand === id) card.scrollIntoView({ block: "nearest" });
-  });
-}
-
-/** A window or door on the inspector graph. Selecting it does not move it. */
-function showPreviewOpening(ev, id) {
-  holdInspectorGraph(() => {
-    openingCalloutClosed = null;
-    previewCallout = { kind: "opening", id };
-    ev.preventDefault();
-    if (selectedOpeningId() !== id) store.selectOne({ kind: "opening", id });
-    render();
   });
 }
 
@@ -14869,7 +15288,7 @@ function openFinishProfile(id) {
   focusElevationWall();
   selectedBandId = id;
   selectedElevVertex = null;
-  elevationOpen = true;
+  openWallFace();
   finishKey = "";
   const band = finishFaceModel()?.finishBands.find((b) => b.id === id);
   if (band) announceSelectedFinish(id);
@@ -14914,7 +15333,7 @@ el.ctxElevCallout?.addEventListener("click", (e) => {
   }
   if (btn.dataset.fin === "opening-edit") {
     closePreviewCallout();
-    elevationOpen = true;
+    openWallFace();
     render();
     return;
   }
@@ -14962,6 +15381,15 @@ el.ctxFinish?.addEventListener("pointerout", (e) => {
 });
 
 el.ctxFinish?.addEventListener("click", (e) => {
+  const openingRow = e.target.closest?.("[data-opening-id]");
+  if (openingRow && !e.target.closest("button[data-fin]")) {
+    faceAddPending = null;
+    selectedBandId = null;
+    openWallFace();
+    store.selectOne({ kind: "opening", id: openingRow.dataset.openingId });
+    render();
+    return;
+  }
   const btn = e.target.closest?.("button[data-fin]");
   if (!btn) {
     const band = e.target.closest?.("[data-fin-band]");
@@ -15099,7 +15527,7 @@ el.ctxFinish?.addEventListener("click", (e) => {
     const category = finishField("band-category")?.value;
     if (!face || !category) { setStatusMessage("Select a wall, then draw on its elevation.", "warn"); return; }
     finishAddOpen = null;
-    elevationOpen = true;
+    openWallFace();
     elevFinishDraft = {
       points: [],
       hover: null,
@@ -15623,6 +16051,10 @@ const PROFILE_PLAN_MIN = 180;
 function fitServiceProfileHeight(px) {
   const dock = el.serviceProfileDock;
   if (!dock) return 0;
+  if (dock.parentElement?.classList.contains("is-wall-face")) {
+    if (dock.style.height) dock.style.height = "";
+    return dock.clientHeight;
+  }
   let h = px;
   if (!Number.isFinite(h) || h <= 0) h = parseFloat(dock.style.height) || 190;
   const parentH = dock.parentElement?.clientHeight || 0;

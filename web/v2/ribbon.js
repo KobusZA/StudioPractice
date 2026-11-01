@@ -81,7 +81,10 @@ export const RIBBON = [
         ],
       },
       {
+        // Opt in to the tall icon-over-caption buttons. Every other one- or
+        // two-command group stacks as small rows (see renderRibbon).
         label: "Openings",
+        large: true,
         items: [
           { id: "doors", label: "Doors", tool: "door", categories: ["door"] },
           { id: "windows", label: "Windows", tool: "window", categories: ["window"] },
@@ -361,7 +364,14 @@ const GROUP_PRIORITY = {
   Sheet: 2,
   Levels: 1,
   Walls: -1,
-  Ceilings: 1,
+  // 3 ties Add drawing's first mixed step (shrink key step - 3). These groups
+  // sit to its right, and a tie shrinks the rightmost, so they give up a step
+  // before PDF / image and Satellite leave side by side. They are already
+  // compact stacks, except Openings, which stays large until the row overflows.
+  Finishes: 3,
+  "Floors & roofs": 3,
+  Ceilings: 3,
+  Openings: 3,
   Structure: 1,
   Components: 1,
 };
@@ -384,7 +394,7 @@ export const SIMPLE_TABS = [
       { label: "Finishes", items: ["wall-finishes", "finishes"] },
       { label: "Floors & roofs", items: ["floors", "roofs"] },
       { label: "Ceilings", items: ["ceilings"] },
-      { label: "Openings", items: ["doors", "windows"] },
+      { label: "Openings", large: true, items: ["doors", "windows"] },
       { label: "Circulation", items: ["stairs"] },
       { label: "Services", items: ["electrical", "plumbing", "waterheater", "drainage"] },
     ],
@@ -497,9 +507,11 @@ export function renderRibbon(tabsEl, functionsEl, state) {
     const wrap = document.createElement("div");
     wrap.className = "ribbon-group";
     // How the group lays out (and how ribbon-fit.js shrinks it) follows from
-    // what is in it: anchors -> "mixed", 1-2 commands -> "large", else "stack".
+    // what is in it: anchors -> "mixed", an opted-in one- or two-command group
+    // -> "large", everything else (including one- and two-command groups) -> "stack".
     const hasAnchors = group.items.some((it) => it.anchor);
-    wrap.dataset.kind = hasAnchors ? "mixed" : group.items.length <= 2 ? "large" : "stack";
+    const large = group.large && group.items.length <= 2;
+    wrap.dataset.kind = hasAnchors ? "mixed" : large ? "large" : "stack";
     wrap.dataset.prio = String(GROUP_PRIORITY[group.label] ?? 0);
 
     const items = document.createElement("div");

@@ -76,7 +76,7 @@
   <label><input type="checkbox" id="simple"> Simple (hide "coming later")</label>
 </header>
 <main>
-  <p>One ribbon, no scrollbar. It starts at the best version (comfortable, large buttons for one- and two-command groups) and gives up the least important things first, one step at a time, until the row fits. Drag the width slider and watch the table below: low-priority groups step down first and lead the others by a couple of steps; Walls, Floors, Openings and Ceilings are protected and stay big the longest. Comfort (row height, padding) goes before button size, and dropdowns are the last resort.</p>
+  <p>One ribbon, no scrollbar. It starts comfortable, with small rows for one- and two-command groups and large buttons only for Openings. It gives up the least important things first, one step at a time, until the row fits. Drag the width slider and watch the table below: Floors, Ceilings and Openings step down before Add drawing stacks its anchors; Walls holds its size the longest. Comfort (row height, padding) goes before button size, and dropdowns are the last resort.</p>
   <div class="frame" id="frame">
     <div class="tabs"><span class="on">Build</span><span>Document</span><span>Site &amp; modify</span><span>Output</span><span>Check</span></div>
     <div class="rib" id="rib"></div>
@@ -129,14 +129,14 @@ const ic = k => `<svg viewBox="0 0 24 24">${I[k]}</svg>`;
 // item: [label, icon, state, toggleOn]  state: '' | 'ctx' (needs a drawing) | 'soon' (roadmap)
 // prio: how many steps AHEAD of the others this group shrinks. Negative = protected.
 const GROUPS = [
-  // PDF / image and Satellite are "anchor" items (5th field): large buttons that keep
-  // their size and margins ahead of Floors, Ceilings and Openings.
+  // PDF / image and Satellite are "anchor" items (5th field). Openings is the
+  // only group that opts into large buttons; other one- and two-command groups stack.
   { name:'Add drawing', prio:2, icon:'pdf', items:[['PDF / image','pdf','',0,1],['Satellite','sat','',0,1],['DWG','file','soon'],['CAD','file','soon'],['Adjust','adj','ctx'],['Set scale','scale','ctx'],['Hide','eye','ctx'],['Remove','x','ctx']] },
   { name:'Levels', prio:1, icon:'lvl', items:[['This level only','lvl','',1],['+ Add floor','lv'],['Insert level','lv']] },
   { name:'Walls', prio:-1, icon:'wall', items:[['Walls','wall'],['Boundary','bound'],['Foundations','found']] },
-  { name:'Floors & roofs', prio:0, icon:'floor', items:[['Floors','floor'],['Roofs','roof']] },
-  { name:'Ceilings', prio:1, icon:'ceil', items:[['Ceiling','ceil']] },
-  { name:'Openings', prio:0, icon:'door', items:[['Doors','door'],['Windows','win']] },
+  { name:'Floors & roofs', prio:3, icon:'floor', items:[['Floors','floor'],['Roofs','roof']] },
+  { name:'Ceilings', prio:3, icon:'ceil', items:[['Ceiling','ceil']] },
+  { name:'Openings', prio:3, large:true, icon:'door', items:[['Doors','door'],['Windows','win']] },
   { name:'Structure', prio:1, icon:'col', items:[['Beams','beam','soon'],['Columns','col'],['Staircase','stair'],['Ramp','ramp','soon'],['Railings','rail','soon']] },
   { name:'Services', prio:0, icon:'elec', items:[['Electrical','elec'],['Plumbing','plumb'],['Water heating','wh'],['Drainage','drain'],['Place component','place'],['Draw route','route'],['Add node','node'],['Rise / drop','rise','soon'],['Connect','conn'],['Change size / type','size','soon'],['Drainage slope','slope','soon']] },
   { name:'Components', prio:1, icon:'case', items:[['Furniture','furn','soon'],['Casework','case']] }
@@ -165,7 +165,7 @@ function btn(b, cls, sheet) {
   return `<button class="${cls} ${stateCls} ${on ? 'tog on' : ''}" ${locked ? 'disabled' : ''} title="${title}">${ic(icon)}${text}</button>`;
 }
 
-function kindOf(g) { return g.items.some(b => b[4]) ? 'mixed' : g.items.length <= 2 ? 'large' : 'stack'; }
+function kindOf(g) { return g.items.some(b => b[4]) ? 'mixed' : (g.large && g.items.length <= 2) ? 'large' : 'stack'; }
 
 function groupHtml(g, s, sheet, idx) {
   const kind = kindOf(g);
