@@ -8,7 +8,7 @@ import { normalizeDoc } from "../model.js";
 import { normalizePackUnits } from "../schema.js";
 import { deriveWalls } from "../walls.js";
 import { createFinishRun } from "../finish-model.js";
-import { applyOpeningEdit, applyWallTopEdit, axisAlignedOutline, elevationModel, faceRefForSelection, snapElevation, translateOutlineEdge } from "../wall-elevation.js";
+import { alignOutlineShift, applyOpeningEdit, applyTypedGap, applyWallTopEdit, axisAlignedOutline, elevationModel, faceRefForSelection, maxTypedGap, openingSnapEdges, resizeOpeningCorner, snapElevation, translateOutlineEdge } from "../wall-elevation.js";
 
 const pack = normalizePackUnits(
   JSON.parse(readFileSync(new URL("../../samples/planner-pack-v2.json", import.meta.url))),
@@ -49,6 +49,41 @@ test("an opening's own size and sill show in the model", () => {
   assert.equal(o.width, 1.5);
   assert.equal(o.sill, 1.1);
   assert.equal(o.nonStandard, true);
+});
+
+test("a foundation on this line is drawn below the wall, and the other side mirrors it", async () => {
+  const { elevationSvg } = await import("../wall-elevation-render.js");
+  const doc = drawnDoc();
+  doc.segments.push({
+    id: "f1", sku: "TSP_CON052", level: "01 GFL",
+    x1: 1, y1: 0, x2: 4, y2: 0, baseOffset: -0.6,
+  });
+  doc.segments.push({
+    id: "aside", sku: "TSP_CON052", level: "01 GFL",
+    x1: 0, y1: 2, x2: 6, y2: 2, baseOffset: -0.6,
+  });
+  doc.segments.push({
+    id: "past", sku: "TSP_CON052", level: "01 GFL",
+    x1: 7, y1: 0, x2: 9, y2: 0, baseOffset: -0.6,
+  });
+  const face = elevationModel(doc, pack, { wallId: "w1", side: 1 });
+  assert.equal(face.foundations.length, 1);
+  const foot = face.foundations[0];
+  assert.equal(foot.id, "f1");
+  assert.ok(Math.abs(foot.from - 1) < 1e-9);
+  assert.ok(Math.abs(foot.to - 4) < 1e-9);
+  assert.ok(Math.abs(foot.base - -0.6) < 1e-9);
+  assert.ok(Math.abs(foot.top) < 1e-9);
+  assert.ok(Math.abs(foot.depth - 0.6) < 1e-9);
+  const back = elevationModel(doc, pack, { wallId: "w1", side: -1 });
+  assert.ok(Math.abs(back.foundations[0].from - 2) < 1e-9);
+  assert.ok(Math.abs(back.foundations[0].to - 5) < 1e-9);
+  const bare = elevationModel(drawnDoc(), pack, { wallId: "w1" });
+  assert.equal(bare.foundations.length, 0);
+  const svg = elevationSvg(face, { width: 640, height: 280, interactive: true });
+  assert.match(svg.svg, /data-elev-foundation="f1"/);
+  assert.match(svg.svg, /1 foundation below/);
+  assert.doesNotMatch(elevationSvg(bare, { width: 640, height: 280 }).svg, /elev-foundation/);
 });
 
 test("a wall's own height sets the top", () => {
@@ -140,9 +175,57 @@ test("moving an edge keeps its length, and a nudged rectangle stays a rectangle"
   assert.deepEqual(axisAlignedOutline(rect), { from: 1, to: 4, bottom: 0, top: 2 });
 });
 
+test("alignOutlineShift lines a moved corner up with the nearest target", () => {
+  const origin = [{ s: 1, z: 0 }, { s: 2, z: 1 }];
+  const hit = alignOutlineShift(origin, 0.04, 0.2, [0, 3, 1.05], [0, 2.7], 0.1);
+  assert.ok(Math.abs(hit.ds - 0.05) < 1e-9);
+  assert.equal(hit.guideS, 1.05);
+  assert.equal(hit.dz, 0.2);
+  assert.equal(hit.guideZ, null);
+});
+
+test("alignOutlineShift leaves a move that misses every target", () => {
+  const hit = alignOutlineShift([{ s: 1, z: 1 }], 0.4, -0.4, [0, 5], [0, 3], 0.1);
+  assert.equal(hit.ds, 0.4);
+  assert.equal(hit.dz, -0.4);
+  assert.equal(hit.guideS, null);
+  assert.equal(hit.guideZ, null);
+});
+
 test("snapElevation rounds to 50 mm", () => {
   assert.equal(snapElevation(0.126), 0.15);
   assert.equal(snapElevation(0.12), 0.1);
+});
+
+test("a window corner keeps the opposite edge and at least 200 mm", () => {
+  const face = { length: 6, height: 2.7 };
+  const orig = { offset: 1.8, width: 1.2, sill: 0.9, height: 1.2 };
+  const bl = resizeOpeningCorner(orig, "bl", 0.4, 0.3, face);
+  assert.ok(Math.abs(bl.left - 0.4) < 1e-9);
+  assert.ok(Math.abs(bl.left + bl.width - 3) < 1e-9, "the right edge stays");
+  assert.ok(Math.abs(bl.sill - 0.3) < 1e-9);
+  assert.ok(Math.abs(bl.sill + bl.height - 2.1) < 1e-9, "the head stays");
+
+  const tight = resizeOpeningCorner(orig, "bl", 2.95, 2.05, face);
+  assert.ok(Math.abs(tight.width - 0.2) < 1e-9);
+  assert.ok(Math.abs(tight.height - 0.2) < 1e-9);
+  assert.ok(Math.abs(tight.left + tight.width - 3) < 1e-9);
+  assert.ok(Math.abs(tight.sill + tight.height - 2.1) < 1e-9);
+
+  const tr = resizeOpeningCorner(orig, "tr", 4, 2.4, face);
+  assert.equal(tr.left, orig.offset);
+  assert.equal(tr.sill, orig.sill);
+  assert.ok(Math.abs(tr.width - (4 - orig.offset)) < 1e-9);
+  assert.ok(Math.abs(tr.height - (2.4 - orig.sill)) < 1e-9);
+
+  const door = resizeOpeningCorner({ offset: 1, width: 0.9, sill: 0, height: 2.1 }, "t", 1, 2.2, face);
+  assert.equal(door.width, 0.9, "a door head does not change the width");
+  assert.equal(door.sill, 0);
+  assert.ok(Math.abs(door.height - 2.2) < 1e-9);
+
+  const edges = openingSnapEdges(orig, { s: orig.offset, z: orig.sill });
+  assert.deepEqual(edges.s, [orig.offset + orig.width], "the left corner is not a target for itself");
+  assert.deepEqual(edges.z, [orig.sill + orig.height], "the sill is not a target for itself");
 });
 
 test("the SVG draws the wall and each opening, with handles only when interactive and selected", async () => {
@@ -156,10 +239,17 @@ test("the SVG draws the wall and each opening, with handles only when interactiv
   assert.doesNotMatch(plain.svg, /elev-handle/);
   const live = elevationSvg(m, { width: 600, height: 200, interactive: true, selectedId: "o1" });
   assert.match(live.svg, /data-elev-op="move"/);
-  assert.match(live.svg, /elev-handle-r/);
-  assert.match(live.svg, /data-elev-op="wall-top"/, "a selected window still leaves the wall height handle");
+  assert.match(live.svg, /data-elev-op="tl"/);
+  assert.match(live.svg, /data-elev-op="tr"/);
+  assert.match(live.svg, /data-elev-op="bl"/);
+  assert.match(live.svg, /data-elev-op="br"/);
+  assert.doesNotMatch(live.svg, /data-elev-op="l"/, "a window is resized from its corners, not the side midpoints");
+  assert.doesNotMatch(live.svg, /data-elev-op="r"/);
+  assert.doesNotMatch(live.svg, /data-elev-op="wall-top"/, "a selected window does not change the wall height");
   const idle = elevationSvg(m, { width: 600, height: 200, interactive: true });
-  assert.match(idle.svg, /data-elev-op="wall-top"/);
+  assert.doesNotMatch(idle.svg, /data-elev-op="wall-top"/, "the height handle waits until the wall is clicked");
+  const picked = elevationSvg(m, { width: 600, height: 200, interactive: true, wallSelected: true });
+  assert.match(picked.svg, /data-elev-op="wall-top"/);
   assert.ok(live.scale > 0);
 });
 
@@ -169,11 +259,12 @@ test("a selected door can be moved, and has no handles that change its width", a
   const m = elevationModel(doc, pack, { wallId: "w1" });
   const live = elevationSvg(m, { width: 600, height: 200, interactive: true, selectedId: "d1" });
   assert.match(live.svg, /data-elev-op="move"/);
-  assert.match(live.svg, /elev-handle-t/);
-  assert.match(live.svg, /data-elev-op="wall-top"/, "a selected door still leaves the wall height handle");
-  assert.doesNotMatch(live.svg, /elev-handle-l/);
-  assert.doesNotMatch(live.svg, /elev-handle-r/);
-  assert.doesNotMatch(live.svg, /elev-handle-b/);
+  assert.match(live.svg, /data-elev-op="t"/);
+  assert.doesNotMatch(live.svg, /data-elev-op="wall-top"/, "a selected door does not change the wall height");
+  assert.doesNotMatch(live.svg, /data-elev-op="tl"/, "a door keeps its width, so it has no corner handles");
+  assert.doesNotMatch(live.svg, /data-elev-op="l"/);
+  assert.doesNotMatch(live.svg, /data-elev-op="r"/);
+  assert.doesNotMatch(live.svg, /data-elev-op="b"/);
 });
 
 function fillTag(svg, id) {
@@ -246,18 +337,20 @@ test("a selected rectangular finish offers corners, and a click target on each e
   assert.doesNotMatch(idle, /data-elev-op="outline-vertex"/);
   assert.doesNotMatch(idle, /data-elev-op="band-top"/, "a selected window is the only shape being edited");
   const open = elevationSvg(m, { width: 640, height: 280, interactive: true }).svg;
-  assert.match(open, /data-elev-op="wall-top"/);
+  assert.doesNotMatch(open, /data-elev-op="wall-top"/);
   const editing = elevationSvg(m, { width: 640, height: 280, interactive: true, selectedBandId: bandId }).svg;
-  assert.match(editing, /data-elev-op="wall-top"/, "a selected finish still leaves the wall height handle");
+  assert.doesNotMatch(editing, /data-elev-op="wall-top"/, "a selected finish does not leave the wall height handle");
   const svg = elevationSvg(m, { width: 640, height: 280, interactive: true, selectedBandId: bandId }).svg;
   assert.equal(svg.match(/data-elev-op="outline-vertex"/g).length, 4);
   assert.equal(svg.match(/data-elev-op="outline-edge"/g).length, 4);
   assert.match(svg, /pointer-events="stroke"/);
-  assert.match(svg, /elev-outline-edge is-add/);
+  assert.match(svg, /is-add/);
+  assert.equal(svg.match(/4000 mm/g).length, 1, "a rectangle labels its width once");
+  assert.equal(svg.match(/2400 mm/g).length, 1, "a rectangle labels its height once");
   const both = elevationSvg(m, { width: 640, height: 280, interactive: true, selectedId: "o1", selectedBandId: bandId }).svg;
   assert.doesNotMatch(both, /data-elev-op="outline-vertex"/, "the window edit clears the finish corners");
   assert.doesNotMatch(both, /data-elev-op="band-top"/);
-  assert.match(both, /data-elev-op="l"/, "the window handles stay");
+  assert.match(both, /data-elev-op="tl"/, "the window corner handles stay");
   const lineSvg = elevationSvg(m, { width: 640, height: 280, interactive: true, selectedBandId: bandId, edgeMode: "line" }).svg;
   assert.equal(lineSvg.match(/elev-outline-edge is-ns/g).length, 2, "a horizontal edge resizes up and down, like the wall top");
   assert.equal(lineSvg.match(/elev-outline-edge is-ew/g).length, 2, "a vertical edge resizes sideways");
@@ -281,6 +374,15 @@ test("a drawn finish is cut to the part of the window inside the shape", async (
   // Window is x 2.4–3.6, z 0.9–2.1, inside the outline, so the hole matches it.
   assert.ok(Math.abs(span(hole, 0) / span(outer, 0) - 1.2 / 3) < 0.02);
   assert.ok(Math.abs(span(hole, 1) / span(outer, 1) - 1.2 / 1.7) < 0.02);
+  const shaped = elevationSvg(m, {
+    width: 640,
+    height: 280,
+    interactive: true,
+    selectedBandId: m.finishBands.find((b) => b.sourceId === run.id).id,
+    edgeMode: "line",
+  }).svg;
+  assert.equal(shaped.match(/3000 mm/g).length, 2, "a drawn outline labels both horizontal edges");
+  assert.equal(shaped.match(/1700 mm/g).length, 2, "a drawn outline labels both vertical edges");
 });
 
 test("a selected window is dimensioned with the sill below and the height to the ceiling", async () => {
@@ -324,7 +426,7 @@ test("a short wall still shows the next floor, and the top storey shows the roof
   assert.match(svg.svg, /02 L1 \+2\.800/);
   assert.match(svg.svg, /elev-wall-ghost/);
   assert.doesNotMatch(svg.svg, /data-elev-op="wall-top"/);
-  const open = elevationSvg(ground, { width: 640, height: 280, interactive: true });
+  const open = elevationSvg(ground, { width: 640, height: 280, interactive: true, wallSelected: true });
   assert.match(open.svg, /data-elev-op="wall-top"/);
   const drawing = elevationSvg(ground, { width: 640, height: 280, interactive: true, draft: { points: [], category: "paint" } });
   assert.doesNotMatch(drawing.svg, /data-elev-op="wall-top"/);
@@ -442,6 +544,34 @@ test("a drag that shortens a room wall draws that wall only", () => {
   assert.ok(others.every((w) => Math.abs(w.height - top.height) < 1e-6));
 });
 
+test("a finish that reached the top of the wall moves when the wall does", async () => {
+  const doc = drawnDoc();
+  const wall = deriveWalls(doc, pack).find((w) => w.id === "w1");
+  const before = elevationModel(doc, pack, { wallId: "w1", side: 1 });
+  createFinishRun(doc, wall, 1, { category: "paint", bottom: 0 });
+  createFinishRun(doc, wall, 1, { category: "paint", bottom: 0, top: 1.2 });
+  createFinishRun(doc, wall, 1, {
+    category: "paint",
+    outline: [[0.2, 0], [1.2, 0], [1.2, before.height], [0.2, before.height]],
+  });
+  applyWallTopEdit(doc, pack, { wallId: "w1", side: 1 }, before.height - 0.4);
+  const m = elevationModel(doc, pack, { wallId: "w1", side: 1 });
+  assert.ok(Math.abs(m.height - (before.height - 0.4)) < 1e-6);
+  const runs = m.finishBands.filter((b) => b.source === "run");
+  const open = runs.find((b) => !b.outline && b.top > 2);
+  const dado = runs.find((b) => !b.outline && Math.abs(b.top - 1.2) < 1e-6);
+  const drawn = runs.find((b) => b.outline);
+  assert.ok(open, "the finish with no top of its own is still on the face");
+  assert.ok(Math.abs(open.top - m.height) < 1e-6, "a blank top stays at the wall top");
+  assert.ok(dado, "the lower finish is still there");
+  assert.ok(Math.abs(dado.top - 1.2) < 1e-6, "a finish that stopped lower stays there");
+  assert.ok(drawn.outline.some((p) => Math.abs(p[1] - m.height) < 1e-6), "a corner that was on the old top moves with the wall");
+  assert.ok(drawn.outline.some((p) => Math.abs(p[1]) < 1e-6), "a corner on the floor stays on the floor");
+  const { elevationSvg } = await import("../wall-elevation-render.js");
+  assert.match(elevationSvg(m, { width: 640, height: 280, interactive: true, wallSelected: true }).svg, /elev-wall-top-handle is-wall-selected/);
+  assert.doesNotMatch(elevationSvg(m, { width: 640, height: 280, interactive: true }).svg, /is-wall-selected/);
+});
+
 test("a wall top drag cannot cut through an opening", () => {
   const doc = drawnDoc([{ id: "o1", sku: "TSP_WN1212", wallId: "w1", t: 0.5 }]);
   applyWallTopEdit(doc, pack, { wallId: "w1", side: 1 }, 1.0);
@@ -527,32 +657,206 @@ test("dragging a finish corner dimensions the gap to the side and to the top", a
   const idle = elevationSvg(m, { width: 640, height: 280, interactive: true }).svg;
   assert.doesNotMatch(idle, /data-elev-dim="side"/);
   assert.doesNotMatch(idle, /data-elev-dim="top"/);
+
+  const pinned = finishLocate(points, {
+    mode: "corner",
+    index: 3,
+    length,
+    height,
+    pin: { h: "right", v: "down" },
+  });
+  assert.equal(pinned.side.s0, 0.8);
+  assert.equal(pinned.side.s1, length);
+  assert.equal(pinned.side.pinned, true);
+  assert.equal(pinned.vert.toward, "base");
+  assert.equal(pinned.vert.z0, 0);
+  assert.equal(pinned.vert.z1, 2.2);
+  assert.equal(pinned.vert.pinned, true);
+
+  const flush = [
+    { s: 0, z: 0 },
+    { s: 2, z: 0 },
+    { s: 2, z: 1 },
+    { s: 0, z: 1 },
+  ];
+  const zero = finishLocate(flush, { mode: "corner", index: 3, length, height, pin: { h: "left" } });
+  assert.equal(zero.side.s1 - zero.side.s0, 0);
+  assert.equal(zero.side.pinned, true, "a forced gap is kept even when the corner is already on that side");
+
+  const ccwLeft = finishLocate(points, { mode: "edge", index: 3, length, height });
+  assert.equal(ccwLeft.side.s0, 0, "a counter-clockwise left edge faces the left end of the wall");
+  const cw = [points[3], points[2], points[1], points[0]];
+  const cwLeft = finishLocate(cw, { mode: "edge", index: 3, length, height });
+  assert.equal(cwLeft.side.s0, 0, "reversing the ring keeps the outward side, because the winding flips with the travel");
+  const forced = finishLocate(points, { mode: "edge", index: 3, length, height, pin: { h: "right" } });
+  assert.equal(forced.side.s0, 0.8);
+  assert.equal(forced.side.s1, length);
+  assert.equal(forced.side.pinned, true);
+
+  const typing = elevationSvg(m, {
+    width: 640,
+    height: 280,
+    interactive: true,
+    locate: { ...corner, typeable: true, typing: { axis: "h", text: "600" } },
+  }).svg;
+  assert.match(typing, /data-elev-op="locate-h"/);
+  assert.match(typing, /is-editing/);
+  assert.match(typing, /600\u2502/);
+  const forcedZero = elevationSvg(m, {
+    width: 640,
+    height: 280,
+    interactive: true,
+    locate: { side: { s0: 0, s1: 0, z: 1, pinned: true }, typeable: true },
+  }).svg;
+  assert.match(forcedZero, /data-elev-dim="side"[^>]*>0 mm</);
 });
 
-test("the face hatches the same overlaps the finish list warns about", async () => {
+test("a typed gap moves the corner or edge to that clearance", () => {
+  const face = { length: 6, height: 2.7 };
+  const rect = { kind: "rect-edge", from: 1, to: 3, bottom: 0, top: 1.2 };
+  const fromLeft = applyTypedGap(rect, "h", 0.6, { side: { s0: 0, s1: 1, z: 1 } }, face);
+  assert.equal(fromLeft.from, 0.6);
+  assert.equal(fromLeft.to, 3);
+  const tooWide = applyTypedGap(rect, "h", 2.98, { side: { s0: 0, s1: 1, z: 1 } }, face);
+  assert.ok(Math.abs(tooWide.from - (3 - 0.05)) < 1e-9, "a finish keeps at least 50 mm");
+  const fromTop = applyTypedGap(
+    rect,
+    "v",
+    0.5,
+    { vert: { z0: 1.2, z1: 2.7, s: 1, toward: "top" } },
+    face,
+  );
+  assert.ok(Math.abs(fromTop.top - 2.2) < 1e-9);
+  assert.equal(maxTypedGap(rect, "h", { side: { s0: 0, s1: 1, z: 1 } }, face), 3 - 0.05);
+
+  const opening = { kind: "opening", corner: "bl", offset: 1.8, width: 1.2, sill: 0.9, height: 1.2 };
+  const left = applyTypedGap(opening, "h", 0.6, { side: { s0: 0, s1: 1.8, z: 0.9 } }, face);
+  assert.ok(Math.abs(left.offset - 0.6) < 1e-9);
+  assert.ok(Math.abs(left.offset + left.width - 3) < 1e-9, "the right edge stays put");
+  const tight = applyTypedGap(opening, "h", 2.95, { side: { s0: 0, s1: 1.8, z: 0.9 } }, face);
+  assert.ok(Math.abs(tight.offset - 2.8) < 1e-9, "a window keeps at least 200 mm");
+  assert.equal(maxTypedGap(opening, "h", { side: { s0: 0, s1: 1.8, z: 0.9 } }, face), 3 - 0.2);
+
+  const points = [
+    { s: 1, z: 0 },
+    { s: 3, z: 0 },
+    { s: 3, z: 1 },
+    { s: 1, z: 1 },
+  ];
+  const edge = applyTypedGap(
+    { kind: "edge", points, index: 3 },
+    "h",
+    0.4,
+    { side: { s0: 0, s1: 1, z: 1 } },
+    face,
+  );
+  assert.equal(edge.points[3].s, 0.4);
+  assert.equal(edge.points[0].s, 0.4);
+  assert.equal(edge.points[1].s, 3, "the opposite edge stays");
+
+  const vertex = applyTypedGap(
+    { kind: "vertex", points, index: 3 },
+    "v",
+    0.5,
+    { vert: { z0: 1, z1: 2.7, s: 1, toward: "top" } },
+    face,
+  );
+  assert.ok(Math.abs(vertex.points[3].z - (2.7 - 0.5)) < 1e-9);
+  assert.equal(vertex.points[0].z, 0);
+
+  const door = applyTypedGap(
+    { kind: "opening", corner: "t", offset: 1, width: 0.9, sill: 0, height: 2.1, door: true },
+    "v",
+    0.4,
+    { vert: { z0: 2.1, z1: 2.7, s: 1, toward: "top" } },
+    face,
+  );
+  assert.ok(Math.abs(door.height - (2.7 - 0.4)) < 1e-9);
+  assert.equal(door.width, 0.9, "a door's width stays with the door");
+  assert.equal(applyTypedGap(
+    { kind: "opening", corner: "t", offset: 1, width: 0.9, sill: 0, height: 2.1, door: true },
+    "h",
+    0.4,
+    { side: { s0: 0, s1: 1, z: 2.1 } },
+    face,
+  ), null);
+});
+
+test("shared area is marked as finishes, including a partial overlap, and nothing is hatched", async () => {
   const { elevationSvg } = await import("../wall-elevation-render.js");
   const base = elevationModel(drawnDoc(), pack, { wallId: "w1", side: 1 });
   const band = (id, category, extra) => ({ id, source: "run", category, unit: "m2", editable: true, ...extra });
   const draw = (finishBands) => elevationSvg({ ...base, openings: [], finishBands }, { width: 640, height: 280, interactive: true }).svg;
-  const clash = /url\(#elev-clash-a\)/;
 
-  assert.match(draw([
+  const partial = draw([
     band("a", "paint", { from: 0, to: 2, bottom: 0, top: 1.2 }),
     band("b", "wallTile", { from: 1, to: 3, bottom: 0, top: 1.5 }),
-  ]), clash, "two applied finishes on the same patch");
+  ]);
+  assert.match(partial, />2 finishes</, "paint and tile share part of the face");
+  assert.match(partial, /class="elev-coat-line"/);
+  assert.match(partial, /class="elev-coat-halo"/);
+  assert.doesNotMatch(partial, /elev-clash/);
 
-  assert.match(draw([
+  const coats = draw([
     band("a", "plaster", { from: 0, to: 2, bottom: 0, top: 2 }),
     band("b", "render", { from: 1, to: 3, bottom: 0, top: 2 }),
-  ]), clash, "two coats on the same patch");
+  ]);
+  assert.match(coats, />2 finishes</, "two finishes share part of the face");
+  assert.doesNotMatch(coats, /elev-clash/);
 
-  assert.doesNotMatch(draw([
-    band("a", "plaster", { from: 0, to: 3, bottom: 0, top: 2 }),
-    band("b", "paint", { from: 0, to: 3, bottom: 0, top: 2 }),
-  ]), clash, "paint on plaster is a finish on a coat");
+  const drawn = draw([
+    band("a", "paint", { outline: [[0, 0], [2, 0], [2, 1.2], [0, 1.2]] }),
+    band("b", "paint", { outline: [[1, 0], [3, 0], [3, 1.2], [1, 1.2]] }),
+  ]);
+  assert.match(drawn, />2 finishes</, "drawn shapes that share area");
 
   assert.doesNotMatch(draw([
     band("a", "paint", { from: 0, to: 2, bottom: 0, top: 2, outline: [[0, 0], [2, 0], [0, 2]] }),
     band("b", "wallTile", { from: 0, to: 2, bottom: 0, top: 2, outline: [[2, 0.5], [2, 2], [1.6, 2]] }),
-  ]), clash, "drawn shapes whose boxes overlap but whose areas do not");
+  ]), />2 finishes</, "drawn shapes whose boxes overlap but whose areas do not");
+
+  assert.doesNotMatch(draw([
+    band("a", "plaster", { source: "default", from: 0, to: 3, bottom: 0, top: 2 }),
+    band("b", "paint", { from: 0, to: 3, bottom: 0, top: 2 }),
+  ]), />2 finishes</, "paint on the wall-type plaster is not a second finish");
+
+  const triple = draw([
+    band("a", "plaster", { from: 0, to: 2, bottom: 0, top: 1.2 }),
+    band("b", "paint", { from: 0, to: 2, bottom: 0, top: 1.2 }),
+    band("c", "paint", { from: 0, to: 2, bottom: 0, top: 1.2 }),
+  ]);
+  assert.match(triple, />3 finishes</);
+  assert.doesNotMatch(triple, />2 finishes</, "the same patch is one stack, not a pile of pairs");
+  assert.equal(triple.match(/class="elev-coat-line"/g)?.length, 2, "each buried coat keeps its own line");
+});
+
+test("a coat and a paint on the same rectangle read as two finishes", async () => {
+  const { elevationSvg } = await import("../wall-elevation-render.js");
+  const base = elevationModel(drawnDoc(), pack, { wallId: "w1", side: 1 });
+  const band = (id, category, extra) => ({ id, source: "run", category, unit: "m2", editable: true, label: category === "plaster" ? "Plaster" : "Paint", ...extra });
+  const svg = elevationSvg({
+    ...base,
+    openings: [],
+    finishBands: [
+      band("coat", "plaster", { from: 0, to: 2, bottom: 0, top: 1.2 }),
+      band("paint", "paint", { from: 0, to: 2, bottom: 0.01, top: 1.2 }),
+      band("other", "paint", { from: 3, to: 4.2, bottom: 0, top: 1 }),
+    ],
+  }, { width: 640, height: 280, interactive: true }).svg;
+  assert.equal(svg.match(/class="elev-coat-line"/g)?.length, 1);
+  assert.match(svg, /Plaster is under the finish on top/);
+  assert.match(svg, />2 finishes</);
+  assert.doesNotMatch(svg, />3 finishes</);
+  const preview = elevationSvg({
+    ...base,
+    openings: [],
+    finishBands: [
+      band("coat", "plaster", { from: 0, to: 2, bottom: 0, top: 1.2 }),
+      band("paint", "paint", { from: 0, to: 2, bottom: 0, top: 1.2 }),
+    ],
+  }, { width: 280, height: 160, interactive: false }).svg;
+  assert.match(preview, /data-elev-fill="coat"/, "the preview still draws each finish");
+  assert.match(preview, /data-elev-fill="paint"/);
+  assert.doesNotMatch(preview, /elev-coat-/, "the stack mark is only on the open elevation");
+  assert.doesNotMatch(preview, />\d+ finishes</);
 });

@@ -10,7 +10,7 @@
 // The preview never passes a view, so it stays fitted.
 
 import { FINISH_CATEGORIES, finishSwatch } from "./finish-data.js";
-import { area as polyArea, clipPolygon } from "./geom.js";
+import { area as polyArea, clipPolygon, offsetPolygonInward } from "./geom.js";
 
 const PAD = 14;
 const HANDLE = 5;
@@ -116,12 +116,12 @@ function polygonWinding(points) {
   return area >= 0 ? 1 : -1;
 }
 
-/** Drop a clearance that is flush with the wall. `null` when neither axis remains. */
+/** Drop a clearance that is flush with the wall. A gap an arrow has pinned stays, even at 0. */
 function packLocate(spec) {
   if (!spec) return null;
   const out = {};
-  if (spec.side && spec.side.s1 - spec.side.s0 > LOCATE_GAP) out.side = spec.side;
-  if (spec.vert && spec.vert.z1 - spec.vert.z0 > LOCATE_GAP) out.vert = spec.vert;
+  if (spec.side && (spec.side.pinned || spec.side.s1 - spec.side.s0 > LOCATE_GAP)) out.side = spec.side;
+  if (spec.vert && (spec.vert.pinned || spec.vert.z1 - spec.vert.z0 > LOCATE_GAP)) out.vert = spec.vert;
   return out.side || out.vert ? out : null;
 }
 
@@ -189,15 +189,51 @@ function pointSpec(s, z, length, height) {
   return spec;
 }
 
+/** The point a gap is measured from: the outer end of an edge, else the first vertex. */
+function locateAnchor(spec, points, index) {
+  if (spec?.side) {
+    const s = spec.side.s0 === 0 ? spec.side.s1 : spec.side.s0;
+    return { s, z: spec.side.z };
+  }
+  if (spec?.vert) {
+    const z = spec.vert.toward === "base" ? spec.vert.z1 : spec.vert.z0;
+    return { s: spec.vert.s, z };
+  }
+  const n = points?.length || 0;
+  const p = n ? points[((index % n) + n) % n] : { s: 0, z: 0 };
+  return { s: p.s, z: p.z };
+}
+
+/**
+ * Force one axis to a wall side. `pin.h` is `left` or `right`, `pin.v` is
+ * `up` or `down`. A pinned gap is drawn even when it is 0. Anything left
+ * unpinned keeps the side the edge already faces.
+ */
+function withPin(spec, s, z, length, height, pin) {
+  if (!pin || (pin.h == null && pin.v == null)) return spec;
+  const out = { ...(spec || {}) };
+  const ss = Math.min(length, Math.max(0, s));
+  const zz = Math.min(height, Math.max(0, z));
+  if (pin.h === "left") out.side = { s0: 0, s1: ss, z: zz, pinned: true };
+  else if (pin.h === "right") out.side = { s0: ss, s1: length, z: zz, pinned: true };
+  if (pin.v === "up") out.vert = { z0: zz, z1: height, s: ss, toward: "top", pinned: true };
+  else if (pin.v === "down") out.vert = { z0: 0, z1: zz, s: ss, toward: "base", pinned: true };
+  return out;
+}
+
 /**
  * The dimension lines for a finish that is being drawn or dragged.
  * `mode` is `point` (the corner under the cursor), `edge` (a line, one axis),
- * `corner` (both axes) or `move` (the whole shape). Lengths are metres.
- * @returns {{side?:{s0:number,s1:number,z:number}, vert?:{z0:number,z1:number,s:number,toward:string}}|null}
+ * `corner` (both axes, from the corner itself) or `move` (the whole shape).
+ * `pin` forces an axis to the left, right, base or top. Lengths are metres.
+ * @returns {{side?:{s0:number,s1:number,z:number,pinned?:boolean}, vert?:{z0:number,z1:number,s:number,toward:string,pinned?:boolean}}|null}
  */
-export function finishLocate(points, { mode, index = 0, length, height, point = null } = {}) {
+export function finishLocate(points, { mode, index = 0, length, height, point = null, pin = null } = {}) {
   if (!(length > 0) || !(height > 0)) return null;
-  if (mode === "point") return point ? packLocate(pointSpec(point.s, point.z, length, height)) : null;
+  if (mode === "point") {
+    if (!point) return null;
+    return packLocate(withPin(pointSpec(point.s, point.z, length, height), point.s, point.z, length, height, pin));
+  }
   if (!points?.length) return null;
   if (mode === "move") {
     const left = points.reduce((best, p) => (p.s < best.s ? p : best));
@@ -211,7 +247,11 @@ export function finishLocate(points, { mode, index = 0, length, height, point = 
         : { z0: 0, z1: bottom.z, s: bottom.s, toward: "base" },
     });
   }
-  if (mode === "edge") return packLocate(edgeSpec(points, index, length, height));
+  if (mode === "edge") {
+    const raw = edgeSpec(points, index, length, height);
+    const anchor = locateAnchor(raw, points, index);
+    return packLocate(withPin(raw, anchor.s, anchor.z, length, height, pin));
+  }
   if (mode === "corner") {
     const n = points.length;
     const i = ((index % n) + n) % n;
@@ -220,36 +260,52 @@ export function finishLocate(points, { mode, index = 0, length, height, point = 
       edgeSpec(points, (i - 1 + n) % n, length, height),
       edgeSpec(points, i, length, height),
     );
-    if (!merged) return null;
     // Both lines meet this corner. A sloping neighbour must not borrow the
-    // other end's height or station.
+    // other end's height or station. An arrow then replaces either axis.
     const spec = {};
-    if (merged.side) {
+    if (merged?.side) {
       spec.side = merged.side.s0 === 0
         ? { s0: 0, s1: p.s, z: p.z }
         : { s0: p.s, s1: length, z: p.z };
     }
-    if (merged.vert) {
+    if (merged?.vert) {
       spec.vert = merged.vert.toward === "base"
         ? { z0: 0, z1: p.z, s: p.s, toward: "base" }
         : { z0: p.z, z1: height, s: p.s, toward: "top" };
     }
-    return packLocate(spec);
+    return packLocate(withPin(spec, p.s, p.z, length, height, pin));
   }
   return null;
 }
 
-/** Caption on a clearance dimension. Clamped so a short gap still keeps its text inside the drawing. */
-function locateCaption(parts, x, y, anchor, text, kind, W, H) {
-  const width = text.length * 6.4 + 8;
+/** Caption on a clearance dimension. Clamped so a short gap still keeps its text inside the drawing.
+ *  `editing` draws the copper type-in box; `op` is the pointer target (`locate-h` or `locate-v`). */
+function locateCaption(parts, x, y, anchor, text, kind, W, H, { editing = false, unit = "", op = "" } = {}) {
+  const unitWidth = unit ? unit.length * 6.2 + 6 : 0;
+  const width = Math.max(text.length * 6.4 + 8, editing ? 34 : 0);
   const height = 14;
   let left = anchor === "start" ? x : anchor === "end" ? x - width : x - width / 2;
   let top = y - 11;
-  left = Math.max(2, Math.min(left, W - width - 2));
+  left = Math.max(2, Math.min(left, W - width - unitWidth - 2));
   top = Math.max(2, Math.min(top, H - height - 2));
   const tx = anchor === "start" ? left + 4 : anchor === "end" ? left + width - 4 : left + width / 2;
-  parts.push(`<rect x="${left}" y="${top}" width="${width}" height="${height}" rx="2" class="elev-measure-bg"/>`);
-  parts.push(`<text x="${tx}" y="${top + 11}" text-anchor="${anchor}" class="elev-dim" data-elev-dim="${kind}">${text}</text>`);
+  const edit = editing ? " is-editing" : "";
+  const gap = op ? " elev-gap" : "";
+  const attrs = op ? ` data-elev-op="${op}"` : "";
+  parts.push(`<rect x="${left}" y="${top}" width="${width}" height="${height}" rx="2" class="elev-measure-bg${edit}${gap}"${attrs}/>`);
+  parts.push(`<text x="${tx}" y="${top + 11}" text-anchor="${anchor}" class="elev-dim${edit}${gap}" data-elev-dim="${kind}"${attrs}>${esc(text)}</text>`);
+  if (unit) {
+    parts.push(`<text x="${left + width + 4}" y="${top + 11}" text-anchor="start" class="elev-dim">${esc(unit)}</text>`);
+  }
+}
+
+/** The words in a gap caption: the measured millimetres, or the digits being typed plus a caret. */
+function gapLabel(metres, axis, typing, typeable) {
+  const op = typeable ? (axis === "h" ? "locate-h" : "locate-v") : "";
+  const editing = Boolean(typeable && typing && typing.axis === axis);
+  if (!editing) return { text: `${mm(metres)} mm`, editing: false, unit: "", op };
+  const raw = typing.text || "";
+  return { text: raw ? `${raw}\u2502` : "\u2502", editing: true, unit: "mm", op };
 }
 
 function locateTick(parts, x, y) {
@@ -257,9 +313,9 @@ function locateTick(parts, x, y) {
 }
 
 /** Horizontal clearance, in the gap beside the finish. */
-function locateSide(parts, model, side, xOf, yOf, W, H) {
+function locateSide(parts, model, side, xOf, yOf, W, H, typing, typeable) {
   const metres = side.s1 - side.s0;
-  if (!(metres > LOCATE_GAP)) return;
+  if (!(side.pinned || metres > LOCATE_GAP)) return;
   const x1 = xOf(side.s0);
   const x2 = xOf(side.s1);
   const left = Math.min(x1, x2);
@@ -272,13 +328,14 @@ function locateSide(parts, model, side, xOf, yOf, W, H) {
     locateTick(parts, left, y);
     locateTick(parts, right, y);
   }
-  locateCaption(parts, (left + right) / 2, y - 2, "middle", `${mm(metres)} mm`, "side", W, H);
+  const label = gapLabel(metres, "h", typing, typeable);
+  locateCaption(parts, (left + right) / 2, y - 2, "middle", label.text, "side", W, H, label);
 }
 
 /** Vertical clearance, up to the top of the wall or down to the floor. */
-function locateVert(parts, model, vert, xOf, yOf, W, H) {
+function locateVert(parts, model, vert, xOf, yOf, W, H, typing, typeable) {
   const metres = vert.z1 - vert.z0;
-  if (!(metres > LOCATE_GAP)) return;
+  if (!(vert.pinned || metres > LOCATE_GAP)) return;
   const y1 = yOf(model.base + vert.z0);
   const y2 = yOf(model.base + vert.z1);
   const top = Math.min(y1, y2);
@@ -292,13 +349,16 @@ function locateVert(parts, model, vert, xOf, yOf, W, H) {
     locateTick(parts, x, bot);
   }
   const kind = vert.toward === "base" ? "base" : "top";
-  locateCaption(parts, x + 6, (top + bot) / 2 + 4, "start", `${mm(metres)} mm`, kind, W, H);
+  const label = gapLabel(metres, "v", typing, typeable);
+  locateCaption(parts, x + 6, (top + bot) / 2 + 4, "start", label.text, kind, W, H, label);
 }
 
 function drawFinishLocate(parts, model, locate, xOf, yOf, W, H) {
   if (!locate || !model) return;
-  if (locate.side) locateSide(parts, model, locate.side, xOf, yOf, W, H);
-  if (locate.vert) locateVert(parts, model, locate.vert, xOf, yOf, W, H);
+  const typing = locate.typing || null;
+  const typeable = Boolean(locate.typeable);
+  if (locate.side) locateSide(parts, model, locate.side, xOf, yOf, W, H, typing, typeable);
+  if (locate.vert) locateVert(parts, model, locate.vert, xOf, yOf, W, H, typing, typeable);
 }
 
 /** The same edge length the plan shows while a polygon is drawn or edited. */
@@ -413,23 +473,111 @@ function bandPolygon(b) {
   return [[b.from, b.bottom], [b.to, b.bottom], [b.to, b.top], [b.from, b.top]];
 }
 
+/** Coats at the bottom of the pile, then applied finishes, then a room rule. */
+function coatRank(band) {
+  if (band.source === "rule") return 3;
+  if (FINISH_CATEGORIES[band.category]?.layer === "coat") return 1;
+  return 2;
+}
+
+function pieceArea(pieces) {
+  return pieces.reduce((sum, poly) => sum + Math.abs(polyArea(poly)), 0);
+}
+
+/** Placed finishes that can stack. The wall-type plaster is not one of them. */
+function coatBands(model) {
+  return (model.finishBands || []).filter((b) => (
+    b.source !== "default" && b.category !== "none" && b.unit !== "m" && bandPolygon(b)
+  ));
+}
+
 /**
- * Hatched patch where two coats, or two applied finishes, cover the same part
- * of the face. Paint on plaster is a finish on a coat, not a clash. Same pairs
- * as the warnings under the finish list, so the picture and the count agree.
+ * Patches where two or more placed finishes share area, including a partial
+ * overlap and a drawn outline. A deeper stack that covers the same patch
+ * stands in for the shallower one.
  */
-function drawFinishClashes(parts, model, xOf, yOf, hatch) {
-  const added = (model.finishBands || []).filter((b) => b.source !== "default" && b.category !== "none" && b.unit !== "m" && bandPolygon(b));
-  const isCoat = (b) => FINISH_CATEGORIES[b.category]?.layer === "coat";
-  for (let i = 0; i < added.length; i += 1) {
-    for (let j = i + 1; j < added.length; j += 1) {
-      if (isCoat(added[i]) !== isCoat(added[j])) continue;
-      for (const piece of clipPolygon(bandPolygon(added[i]), bandPolygon(added[j]))) {
-        if (Math.abs(polyArea(piece)) < 0.02) continue;
-        const holes = holesInBand({ category: added[i].category, outline: piece }, model.openings);
-        parts.push(`${cutFill(piece, holes, xOf, yOf, model.base)} fill="url(#elev-clash-${hatch})" pointer-events="none"><title>These finishes overlap</title></path>`);
-      }
+function coatStacks(model) {
+  const bands = coatBands(model).map((band) => ({ band, poly: bandPolygon(band) }));
+  const queue = [];
+  const seen = new Set();
+  const regions = [];
+  const enqueue = (idx, pieces) => {
+    const key = idx.join(",");
+    if (seen.has(key) || pieceArea(pieces) < 0.02) return;
+    seen.add(key);
+    queue.push({ idx, pieces });
+  };
+  for (let i = 0; i < bands.length; i += 1) {
+    for (let j = i + 1; j < bands.length; j += 1) {
+      const pieces = clipPolygon(bands[i].poly, bands[j].poly).filter((piece) => Math.abs(polyArea(piece)) > 1e-6);
+      enqueue([i, j], pieces);
     }
+  }
+  while (queue.length) {
+    const region = queue.shift();
+    regions.push(region);
+    for (let k = 0; k < bands.length; k += 1) {
+      if (region.idx.includes(k)) continue;
+      const pieces = [];
+      for (const piece of region.pieces) {
+        for (const cut of clipPolygon(piece, bands[k].poly)) {
+          if (Math.abs(polyArea(cut)) > 1e-6) pieces.push(cut);
+        }
+      }
+      enqueue([...region.idx, k].sort((a, b) => a - b), pieces);
+    }
+  }
+  return regions.filter((region) => {
+    const area = pieceArea(region.pieces);
+    return !regions.some((other) => (
+      other.idx.length > region.idx.length
+      && region.idx.every((i) => other.idx.includes(i))
+      && area - pieceArea(other.pieces) < 0.02
+    ));
+  }).map((region) => ({
+    bands: region.idx.map((i) => bands[i].band).sort((a, b) => coatRank(a) - coatRank(b)),
+    pieces: region.pieces,
+  }));
+}
+
+/**
+ * Each shared patch carries a buried finish drawn just inside, in its own
+ * colour, and a pile labelled "n finishes". The finishes are not coats:
+ * tile over paint is two different finishes, not two coats of one material.
+ * The wall-type plaster is left out, so paint on plaster is not a second finish.
+ * The inspector preview leaves this mark off. The swatches and the count
+ * crowd that small picture; the finish colours still show.
+ */
+function drawCoatMarks(parts, model, xOf, yOf) {
+  const anchors = [];
+  for (const stack of coatStacks(model)) {
+    const buried = stack.bands.slice(0, -1);
+    for (const piece of stack.pieces) {
+      const screen = piece.map(([s, z]) => [xOf(s), yOf(model.base + z)]);
+      buried.forEach((band, i) => {
+        const inset = offsetPolygonInward(screen, 8 + i * 7);
+        if (!inset) return;
+        const pts = inset.map(([x, y]) => `${x},${y}`).join(" ");
+        const colour = esc(band.fill || finishSwatch(band.category));
+        const name = esc(band.label || FINISH_CATEGORIES[band.category]?.label || "Finish");
+        parts.push(`<polygon points="${pts}" fill="none" stroke="#fffdf8" stroke-width="3.5" class="elev-coat-halo" pointer-events="none"/>`);
+        parts.push(`<polygon points="${pts}" fill="none" stroke="${colour}" stroke-width="1.25" class="elev-coat-line" pointer-events="none"><title>${name} is under the finish on top</title></polygon>`);
+      });
+    }
+    const host = stack.pieces.reduce((best, poly) => (Math.abs(polyArea(poly)) > Math.abs(polyArea(best)) ? poly : best));
+    const screen = host.map(([s, z]) => [xOf(s), yOf(model.base + z)]);
+    let x = Math.min(...screen.map((p) => p[0])) + 10;
+    let y = Math.min(...screen.map((p) => p[1])) + 10;
+    while (anchors.some((p) => Math.hypot(p.x - x, p.y - y) < 18)) y += 16;
+    anchors.push({ x, y });
+    const size = 11;
+    const peek = 4;
+    stack.bands.forEach((band, i) => {
+      const k = stack.bands.length - 1 - i;
+      const colour = esc(band.fill || finishSwatch(band.category));
+      parts.push(`<rect x="${x + k * peek}" y="${y + k * peek}" width="${size}" height="${size}" fill="${colour}" stroke="#1a1612" stroke-width="0.6" class="elev-coat-swatch" pointer-events="none"/>`);
+    });
+    parts.push(`<text x="${x + 6 + size + peek}" y="${y + 11}" class="elev-dim-strong">${stack.bands.length} finishes</text>`);
   }
 }
 
@@ -438,7 +586,7 @@ function drawFinishClashes(parts, model, xOf, yOf, hatch) {
  * @param {{width:number,height:number,interactive?:boolean,selectedId?:string|null,view?:{zoom?:number,panX?:number,panY?:number}|null}} opts
  * @returns {{svg:string, scale:number, scaleX:number, scaleY:number, originX:number, originY:number, fit:object}}
  */
-export function elevationSvg(model, { width, height, interactive = false, selectedId = null, selectedBandId = null, selectedVertex = null, draft = null, guides = null, edgeMode = "corner", view = null, locate = null } = {}) {
+export function elevationSvg(model, { width, height, interactive = false, selectedId = null, selectedBandId = null, selectedVertex = null, draft = null, guides = null, edgeMode = "corner", view = null, locate = null, wallSelected = false } = {}) {
   const W = Math.max(80, Math.round(width));
   const H = Math.max(60, Math.round(height));
   if (!model) {
@@ -451,7 +599,8 @@ export function elevationSvg(model, { width, height, interactive = false, select
   const guide = model.guide && Number.isFinite(model.guide.elevation) ? model.guide : null;
   const spanTop = Math.max(model.top, guide?.elevation ?? model.top);
   const near = model.levels.filter((l) => l.elevation >= model.base - 0.6 && l.elevation <= spanTop + 0.6);
-  const zLo = Math.min(model.base, ...near.map((l) => l.elevation)) - 0.1;
+  const footBases = (model.foundations || []).map((f) => f.base);
+  const zLo = Math.min(model.base, ...footBases, ...near.map((l) => l.elevation)) - 0.1;
   const zHi = Math.max(spanTop, ...near.map((l) => l.elevation)) + 0.2;
   // Span the same width as the level lines. The open elevation keeps a strip
   // on the left for the height figure; the preview uses the whole graph.
@@ -483,7 +632,6 @@ export function elevationSvg(model, { width, height, interactive = false, select
   const hatch = interactive ? "a" : "b";
   parts.push(`<defs>
     <pattern id="elev-rule-${hatch}" width="8" height="8" patternUnits="userSpaceOnUse"><path d="M0 8 L8 0" stroke="#5c5348" stroke-width="1"/></pattern>
-    <pattern id="elev-clash-${hatch}" width="7" height="7" patternUnits="userSpaceOnUse"><path d="M0 7 L7 0 M-1 1 L1 -1 M6 8 L8 6" stroke="#9a6b1f" stroke-width="1"/></pattern>
   </defs>`);
   parts.push(`<rect x="0" y="0" width="${W}" height="${H}" class="elev-bg"/>`);
 
@@ -520,6 +668,17 @@ export function elevationSvg(model, { width, height, interactive = false, select
   }
   const host = selectedId ? " elev-wall-host" : "";
   parts.push(`<rect x="${wx}" y="${wy}" width="${ww}" height="${wh}" class="elev-wall${host}" data-elev-wall="1"/>`);
+  for (const f of model.foundations || []) {
+    const fx = xOf(f.from);
+    const fy = yOf(f.top);
+    const fw = (f.to - f.from) * scaleX;
+    const fh = (f.top - f.base) * scaleY;
+    if (fw < 1 || fh < 1) continue;
+    parts.push(`<rect x="${fx}" y="${fy}" width="${fw}" height="${fh}" class="elev-foundation" data-elev-foundation="${esc(f.id)}"><title>${esc(f.name)}</title></rect>`);
+    if (fh >= 14 && fw >= 36) {
+      parts.push(`<text x="${fx + fw / 2}" y="${fy + fh / 2 + 4}" text-anchor="middle" class="elev-dim" pointer-events="none">${mm(f.depth)}</text>`);
+    }
+  }
 
   for (const b of model.finishBands) {
     // A finish is the colour it has in the panel. The computed default stays grey,
@@ -554,7 +713,7 @@ export function elevationSvg(model, { width, height, interactive = false, select
       parts.push(`<rect x="${rx}" y="${ry}" width="${rw}" height="${rh}" fill="url(#elev-rule-${hatch})" pointer-events="none"/>`);
     }
   }
-  drawFinishClashes(parts, model, xOf, yOf, hatch);
+  if (interactive) drawCoatMarks(parts, model, xOf, yOf);
 
   for (const o of model.openings) {
     const x = xOf(o.offset);
@@ -578,13 +737,13 @@ export function elevationSvg(model, { width, height, interactive = false, select
       dimensionOpening(parts, { x, y, w, h, opening: o, model, yOf, W, H });
     }
     if (interactive && sel) {
-      // A door keeps its type width. The body is the move target; the side
-      // handles that stretch a window are not drawn. The head still sets height,
-      // and a door has no sill, so there is no bottom handle either.
-      const hs = [["t", x + w / 2, y]];
-      if (o.category !== "door") {
-        hs.push(["l", x, y + h / 2], ["r", x + w, y + h / 2], ["b", x + w / 2, y + h]);
-      }
+      // A window is resized from its four corners. The left ones move the
+      // offset and keep the right edge; the bottom ones move the sill and
+      // keep the head. A door keeps its type width and has no sill, so only
+      // the head handle is drawn, and it changes the height.
+      const hs = o.category === "door"
+        ? [["t", x + w / 2, y]]
+        : [["tl", x, y], ["tr", x + w, y], ["br", x + w, y + h], ["bl", x, y + h]];
       for (const [part, hx, hy] of hs) {
         parts.push(`<rect x="${hx - HANDLE}" y="${hy - HANDLE}" width="${HANDLE * 2}" height="${HANDLE * 2}" class="elev-handle elev-handle-${part}" data-elev-op="${part}" data-elev-id="${esc(o.id)}"/>`);
       }
@@ -630,11 +789,16 @@ export function elevationSvg(model, { width, height, interactive = false, select
         const [s2, z2] = ring[(i + 1) % ring.length];
         const [x1, y1] = pts[i];
         const [x2, y2] = pts[(i + 1) % pts.length];
+        // The resize cursor stays on the line. Shift swaps every edge to the
+        // other job by a class on the drawing, without rebuilding this SVG.
         const adding = edgeMode !== "line";
-        const edgeClass = adding ? "elev-outline-edge is-add" : `elev-outline-edge is-${edgeResizeCursor(x1, y1, x2, y2)}`;
+        const edgeClass = `elev-outline-edge is-${edgeResizeCursor(x1, y1, x2, y2)}${adding ? " is-add" : ""}`;
         const edgeTitle = adding ? "Add a corner" : "Resize this edge";
         parts.push(`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" class="${edgeClass}" pointer-events="stroke" data-elev-op="outline-edge" data-elev-band="${esc(b.id)}" data-elev-index="${i}"><title>${edgeTitle}</title></line>`);
-        measureLabel(parts, x1, y1, x2, y2, Math.hypot(s2 - s1, z2 - z1));
+        // A rectangle that is still a box labels its width and its height.
+        // A drawn outline keeps a length on every edge.
+        const labelEdge = b.outline?.length >= 3 || i === 0 || i === 3;
+        if (labelEdge) measureLabel(parts, x1, y1, x2, y2, Math.hypot(s2 - s1, z2 - z1));
       }
       ring.forEach(([s, z], i) => {
         const x = xOf(s);
@@ -646,15 +810,16 @@ export function elevationSvg(model, { width, height, interactive = false, select
   }
 
   // Wall height is set on the open elevation, not the inspector preview.
-  // The top handle stays off only while a finish outline is still being drawn.
-  // Once that shape is finished, or a window, door, or finish is merely selected,
-  // the handle is back so the wall height can be changed again.
-  if (interactive && model.canDragTop !== false && !draft) {
+  // The handle is only there after the wall itself is clicked. A finish, a
+  // window, or a door keeps the click, so dragging that shape cannot change
+  // the wall.
+  if (interactive && wallSelected && model.canDragTop !== false && !draft) {
     const EDGE = 8;
     const grip = Math.min(ww, 36);
     const gx = wx + (ww - grip) / 2;
     parts.push(`<rect x="${gx}" y="${wy - EDGE / 2}" width="${grip}" height="${EDGE}" class="elev-wall-top" data-elev-op="wall-top"/>`);
-    parts.push(`<rect x="${wx + ww / 2 - HANDLE}" y="${wy - HANDLE}" width="${HANDLE * 2}" height="${HANDLE * 2}" class="elev-handle elev-handle-t elev-wall-top-handle" data-elev-op="wall-top"/>`);
+    const picked = wallSelected ? " is-wall-selected" : "";
+    parts.push(`<rect x="${wx + ww / 2 - HANDLE}" y="${wy - HANDLE}" width="${HANDLE * 2}" height="${HANDLE * 2}" class="elev-handle elev-handle-t elev-wall-top-handle${picked}" data-elev-op="wall-top"/>`);
   }
 
   alignLines(parts, model, guides, xOf, yOf, W, H);
@@ -698,13 +863,14 @@ export function elevationSvg(model, { width, height, interactive = false, select
     for (const p of draft.points) parts.push(`<circle cx="${xOf(p.s)}" cy="${yOf(model.base + p.z)}" r="3.5" class="elev-draft-pt"/>`);
   }
 
-  // Clearance back to the wall, only while a corner is being placed or an
-  // edge is being dragged. A side move is the horizontal gap; a top or bottom
-  // move is the vertical gap; a corner draws both.
+  // Clearance back to the wall: while a corner is placed, and while a corner
+  // or edge is dragged or left held. A pinned gap is drawn even at 0. A
+  // label with a caret is the one being typed into.
   drawFinishLocate(parts, model, locate, xOf, yOf, W, H);
 
   if (interactive) {
-    parts.push(`<text x="${wx + ww / 2}" y="${Math.min(H - 3, yOf(model.base) + 12)}" text-anchor="middle" class="elev-dim">${mm(model.length)}</text>`);
+    const below = (model.foundations || []).reduce((y, f) => Math.max(y, yOf(f.base)), yOf(model.base));
+    parts.push(`<text x="${wx + ww / 2}" y="${Math.min(H - 3, below + 12)}" text-anchor="middle" class="elev-dim">${mm(model.length)}</text>`);
   }
   if (interactive) {
     parts.push(`<text x="${wx - 4}" y="${wy + wh / 2}" text-anchor="end" class="elev-dim">${mm(model.height)}</text>`);
@@ -717,7 +883,10 @@ export function elevationSvg(model, { width, height, interactive = false, select
     parts.push(`<circle cx="${xOf(draft.hover.s)}" cy="${yOf(model.base + draft.hover.z)}" r="6.5" class="elev-draft-cursor"/>`);
   }
 
-  const label = `Wall elevation, ${mm(model.length)} long, ${mm(model.height)} high, ${model.openings.length} opening${model.openings.length === 1 ? "" : "s"}`;
+  const footing = model.foundations?.length
+    ? `, ${model.foundations.length} foundation${model.foundations.length === 1 ? "" : "s"} below`
+    : "";
+  const label = `Wall elevation, ${mm(model.length)} long, ${mm(model.height)} high, ${model.openings.length} opening${model.openings.length === 1 ? "" : "s"}${footing}`;
   return {
     svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}" class="elev-svg${selectedId ? " elev-host" : ""}">${parts.join("")}</svg>`,
     scale,

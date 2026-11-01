@@ -169,11 +169,11 @@ import {
 } from "./model.js";
 import { enclosedFace, syncRoomBounds } from "./room-bound.js";
 import { REGION_CONVENTIONS, regionConvention } from "./region.js";
-import { ELEVATION_SNAP, applyBandEdit, applyOpeningEdit, applyOutlinePoints, applyWallTopEdit, axisAlignedOutline, elevationModel, faceRefForSelection, snapElevation, translateOutlineEdge } from "./wall-elevation.js";
+import { ELEVATION_SNAP, FINISH_MIN_M, OPENING_MIN_M, alignOutlineShift, applyBandEdit, applyOpeningEdit, applyOutlinePoints, applyTypedGap, applyWallTopEdit, axisAlignedOutline, elevationModel, faceRefForSelection, maxTypedGap, openingSnapEdges, resizeOpeningCorner, snapElevation, translateOutlineEdge } from "./wall-elevation.js?v=20261101-face-align";
 import { createFinishRegion, createFinishRun, dependentsOfWalls, finishProductById, libraryLine, planWallFinishMarks, presetFromRoom, roomsBySide, rulesFromPreset, savePreset } from "./finish-model.js?v=20261101-face-editor";
 import { FINISH_CATEGORIES, finishId, finishSwatch, normalizeFinishProducts, normalizeFinishSettings } from "./finish-data.js";
-import { HEIGHT_PRESETS, draftBandPreviewHtml, faceFinishHtml, finishCalloutHtml, openingCalloutHtml, floorProductSuggestions, parseTarget, productsHtml, roomFinishHtml, slabFinishHtml, targetOptions } from "./finish-panel.js?v=20261101-face-editor";
-import { clampElevationView, edgeResizeCursor, elevationSvg, finishLocate, zoomElevationView } from "./wall-elevation-render.js?v=20261101-face-fixes";
+import { HEIGHT_PRESETS, bandFaceLine, compareBands, draftBandPreviewHtml, faceFinishHtml, finishCalloutHtml, openingCalloutHtml, floorProductSuggestions, parseTarget, productsHtml, roomFinishHtml, slabFinishHtml, targetOptions } from "./finish-panel.js?v=20261101-coat-stack";
+import { clampElevationView, edgeResizeCursor, elevationSvg, finishLocate, zoomElevationView } from "./wall-elevation-render.js?v=20261101-finish-stack";
 import { CORNER_JOIN_TOL, deriveWalls, drawnSegmentFromWall, drawnWallThickness, isStripFooting, skuDrawnHeight, statusVisible } from "./walls.js";
 import { findJoinTarget, resolveJoin, sideTowardTarget } from "./wall-join.js?v=20261022-corner-b";
 import {
@@ -516,6 +516,7 @@ const el = {
   elevBody: document.getElementById("v2-elevation-body"),
   faceEditor: document.getElementById("v2-face-editor"),
   facePlan: document.getElementById("v2-face-plan"),
+  elevFlash: document.getElementById("v2-elev-flash"),
   faceWhich: document.getElementById("v2-face-which"),
   faceMeta: document.getElementById("v2-face-meta"),
   faceSwatch: document.getElementById("v2-face-swatch"),
@@ -532,6 +533,10 @@ const el = {
   faceUp: document.getElementById("v2-face-up"),
   faceAlong: document.getElementById("v2-face-along"),
   faceOpeningRow: document.getElementById("v2-face-opening-row"),
+  faceWallRow: document.getElementById("v2-face-wall-row"),
+  faceWallH: document.getElementById("v2-face-wall-h"),
+  faceTypeLabel: document.getElementById("v2-face-type-label"),
+  faceProductLabel: document.getElementById("v2-face-product-label"),
   faceHover: document.getElementById("v2-face-hover"),
   elevFit: document.getElementById("v2-elev-fit"),
   elevInfo: document.getElementById("v2-elev-info"),
@@ -540,7 +545,6 @@ const el = {
   elevInfoDismiss: document.getElementById("v2-elev-info-dismiss"),
   elevCoach: document.getElementById("v2-elev-coach"),
   elevCoachOk: document.getElementById("v2-elev-coach-ok"),
-  elevFlip: document.getElementById("v2-elev-flip"),
   elevEdgeMode: document.getElementById("v2-elev-edge-mode"),
   levelParent: document.getElementById("v2-level-parent"),
   levelReference: document.getElementById("v2-level-reference"),
@@ -765,9 +769,23 @@ let wallsCache = [];
 let elevationOpen = false;
 // A finish chosen on the face, not yet given a place, so nothing is stored.
 let faceAddPending = null;
+// The open face can select the wall itself. This is not the plan selection:
+// the plan already has the wall, or the opening that stands for it.
+let faceWallSelected = false;
 let elevationFace = null;
 let elevationDrag = null;
 let elevationKey = "";
+// A corner or edge that was pressed and not dragged. Its gap labels stay up
+// so a number can be typed. A real drag clears it, and so does a new press,
+// a different selection, or Escape.
+let elevHeld = null;
+// Digits for the gap being typed: { axis: "h" | "v", text }. Millimetres.
+let elevTyping = null;
+// Which gap the next digit lands on. An arrow or a click on a label sets it.
+let elevTypingAxis = "h";
+// Which wall side a gap is forced to. Null keeps the side the edge faces.
+// The same arrow returns it to that side. h is "left" | "right", v is "up" | "down".
+let elevLocatePin = { h: null, v: null };
 let elevPreviewKey = "";
 // Finishes: the inspector section's last markup and whether Products is open,
 // and, while a floor finish region is being drawn, its { category, productId }
@@ -812,6 +830,9 @@ let selectedElevVertex = null;
 // edit, so it starts selected. Corner adds a node. Shift uses the other one
 // for a single drag, as Step and Slope do.
 let elevEdgeMode = "line";
+// Shift is held. It swaps Line and Corner on the edges already drawn, without
+// rebuilding the elevation. The drag itself still reads Shift when it starts.
+let elevShiftHeld = false;
 let floorEdgeMode = "line";
 let finishSavedTimer = 0;
 let finishScrolledId = null;
@@ -10644,18 +10665,34 @@ el.attachConfirm?.addEventListener("click", () => {
 
 let statusTimer = null;
 
-function setStatusMessage(text, tone) {
-  el.healthLabel.textContent = text;
+function setStatusMessage(text, tone, action = null) {
+  clearTimeout(statusTimer);
+  el.healthLabel.replaceChildren(document.createTextNode(text));
+  if (action?.label && action.run) {
+    el.healthLabel.append(document.createTextNode(" "));
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "status-action";
+    btn.textContent = action.label;
+    btn.addEventListener("click", () => {
+      clearTimeout(statusTimer);
+      el.healthLabel.textContent = "";
+      el.healthDot.classList.add("ok");
+      el.healthDot.hidden = true;
+      drawPackHealth();
+      action.run();
+    });
+    el.healthLabel.append(btn);
+  }
   el.healthDot.classList.toggle("ok", tone !== "warn");
   el.healthDot.title = text;
   el.healthDot.hidden = false;
-  clearTimeout(statusTimer);
   statusTimer = setTimeout(() => {
     el.healthLabel.textContent = "";
     el.healthDot.classList.add("ok");
     el.healthDot.hidden = true;
     drawPackHealth();
-  }, 4000);
+  }, action ? 8000 : 4000);
 }
 
 /** How many products the loaded template offers. Phrased for the person
@@ -11636,6 +11673,7 @@ function leaveInspectorForPlacement() {
   store.clearSelection();
   elevationOpen = false;
   elevationDrag = null;
+  dropElevGapHold();
   elevFinishDraft = null;
   selectedBandId = null;
   selectedElevVertex = null;
@@ -11663,10 +11701,8 @@ function clearRouteIfLeavingServices() {
  * the run just drawn brings the profile straight back.
  */
 function exitRouteProfile() {
-  if (elevationShowing()) {
-    elevationOpen = false;
-    faceAddPending = null;
-    render();
+  if (elevationShowing() || (elevationOpen && selectedElevationFace())) {
+    closeOpenFace();
     return;
   }
   if (serviceRoute?.fromNodeId) finishServiceRoute({ select: false });
@@ -12456,6 +12492,7 @@ function selectedFinishBand() {
 /** A click on the wall itself leaves any finish unselected. Returns true when one was cleared. */
 function clearFinishPick() {
   const had = Boolean(selectedBandId) || selectedElevVertex != null || previewCallout?.kind === "finish";
+  dropElevGapHold();
   selectedBandId = null;
   selectedElevVertex = null;
   if (previewCallout?.kind === "finish") previewCallout = null;
@@ -12712,16 +12749,31 @@ function commitSelectionDelete() {
 }
 
 function wireKeyboard() {
+  window.addEventListener("keyup", (ev) => {
+    if (ev.key === "Shift") syncElevEdgeCursors(false);
+  });
+  window.addEventListener("blur", () => {
+    if (elevShiftHeld) syncElevEdgeCursors(false);
+  });
   window.addEventListener("keydown", (ev) => {
+    if (ev.key === "Shift") syncElevEdgeCursors(true);
     const tag = document.activeElement?.tagName;
     const typing = tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA";
 
+    if (ev.key === "Shift") return;
     if (handleSizeTyping(ev)) return;
     if (handleDraftNumericShortcut(ev)) return;
     // Escape still has to get through from a field: the size HUD is part of
-    // drawing, so typing a width there must not trap the draft.
-    if (typing && ev.key === "Escape") document.activeElement.blur();
-    else if (typing) return;
+    // drawing, so typing a width there must not trap the draft. On the open
+    // face, blurring the field is the whole press.
+    if (typing && ev.key === "Escape") {
+      document.activeElement.blur();
+      if (elevationOpen && selectedElevationFace()) return;
+    } else if (typing) return;
+
+    // Digits, Backspace, Enter and the arrows. Escape is ordered with the
+    // rest of the face, after a drawing and a finish that is waiting.
+    if (ev.key !== "Escape" && elevationGapKey(ev)) return;
 
     if (ev.key === "Escape") {
       if (accountIsOpen()) {
@@ -12757,28 +12809,10 @@ function wireKeyboard() {
         setPanMode(false);
         return;
       }
-      if (elevFinishDraft) {
-        ev.preventDefault();
-        // A shape that can close finishes. Fewer than three corners, or a
-        // second press after a shape that would not close, leaves the drawing.
-        if (elevFinishDraft.escAgainCancels || elevFinishDraft.points.length < 3) {
-          elevFinishDraft = null;
-          setStatusMessage("Drawing cancelled.", "ok");
-          render();
-          return;
-        }
-        finishElevFinishDraft();
-        if (elevFinishDraft) elevFinishDraft.escAgainCancels = true;
-        return;
-      }
-      // Editing a finish on the open elevation sits on top of that wall.
-      // Escape puts the finish down and leaves the elevation open, so the
-      // next press is what closes the strip.
-      if (elevationFinishEditActive()) {
-        ev.preventDefault();
-        leaveFinishEdit();
-        return;
-      }
+      // The open face takes one step: drawing, a finish waiting to be placed,
+      // a typed gap, a held corner, then the wall, then the face closes.
+      // It does not fall through into cancelling a plan drawing.
+      if (escapeOpenFace()) return;
       // Editing a finish sits on top of its floor. Escape puts the finish
       // down and leaves the floor selected, so the next press is what
       // deselects the floor.
@@ -13605,10 +13639,85 @@ function elevationFinishEditActive() {
  */
 function leaveFinishEdit() {
   elevationDrag = null;
+  dropElevGapHold();
   selectedBandId = null;
   selectedElevVertex = null;
   if (previewCallout?.kind === "finish") previewCallout = null;
-  setStatusMessage("Finish left as it is. Delete asks before the wall is removed.", "ok");
+  selectFaceWall();
+}
+
+/**
+ * One Escape on the open face. A field has already been blurred by the caller.
+ * Returns true when this press was about the face, so it does not also cancel
+ * a drawing on the plan.
+ */
+function escapeOpenFace() {
+  const faceOpen = Boolean(elevationOpen && selectedElevationFace());
+  if (!faceOpen && !elevFinishDraft) return false;
+  if (elevFinishDraft) {
+    // A shape that can close finishes. Fewer than three corners, or a
+    // second press after a shape that would not close, leaves the drawing.
+    if (elevFinishDraft.escAgainCancels || elevFinishDraft.points.length < 3) {
+      elevFinishDraft = null;
+      setStatusMessage("Drawing cancelled.", "ok");
+      render();
+      return true;
+    }
+    finishElevFinishDraft();
+    if (elevFinishDraft) elevFinishDraft.escAgainCancels = true;
+    return true;
+  }
+  if (faceAddPending && faceAddPending.wallId === elevationFace?.wallId) {
+    selectFaceWall();
+    return true;
+  }
+  if (elevTyping) {
+    elevTyping = null;
+    render();
+    return true;
+  }
+  if (elevHeld) {
+    dropElevGapHold();
+    render();
+    return true;
+  }
+  // A finish or a window or door. The wall's own selection is the next press.
+  if (!faceWallSelected && (selectedBandId || selectedElevVertex != null || selectedOpeningId())) {
+    elevationDrag = null;
+    if (previewCallout?.kind === "finish") previewCallout = null;
+    selectFaceWall();
+    return true;
+  }
+  closeOpenFace();
+  return true;
+}
+
+/** Close the open face in one press. The plan keeps whatever it had selected. */
+function closeOpenFace() {
+  elevationOpen = false;
+  faceAddPending = null;
+  elevationDrag = null;
+  elevFinishDraft = null;
+  dropElevGapHold();
+  faceWallSelected = false;
+  setStatusMessage("This wall is closed.", "ok", {
+    label: "Open this wall",
+    run: () => {
+      openWallFace();
+      render();
+    },
+  });
+  render();
+}
+
+/** The open face is editing the wall, not a finish or an opening. The plan selection stays. */
+function selectFaceWall() {
+  faceAddPending = null;
+  selectedBandId = null;
+  selectedElevVertex = null;
+  dropElevGapHold();
+  faceWallSelected = true;
+  setStatusMessage("The wall is selected. Drag the top, or type the height.", "ok");
   render();
 }
 
@@ -13624,7 +13733,9 @@ function releaseFinishEditForOpening() {
   }
   if (openingId === notedOpeningEditId) return;
   notedOpeningEditId = openingId;
+  faceWallSelected = false;
   if (!selectedBandId && selectedElevVertex == null && previewCallout?.kind !== "finish") return;
+  dropElevGapHold();
   selectedBandId = null;
   selectedElevVertex = null;
   if (previewCallout?.kind === "finish") previewCallout = null;
@@ -13643,24 +13754,41 @@ function elevationDragEdit(d) {
   const dx = (d.x - d.x0) / scaleX;
   const dy = -(d.y - d.y0) / scaleY; // up is positive
   const o = d.orig;
-  const MIN = 0.15;
+  const face = { length: d.wallLength, height: d.wallHeight };
   switch (d.part) {
     // A finish band's edges: a run's ends, and the top and bottom of a run or a room rule.
-    case "band-top": return { top: o.top + dy };
-    case "band-bottom": return { bottom: o.bottom + dy };
-    case "band-left": return { from: o.from + dx };
-    case "band-right": return { to: o.to + dx };
-    case "move": return { left: o.left + dx, sill: o.category === "door" ? undefined : o.sill + dy };
-    case "l": {
-      if (o.category === "door") return { left: o.left + dx };
-      const width = Math.max(MIN, o.width - dx);
-      return { left: o.left + o.width - width, width };
+    // `edgeAt` is the snapped position. Without it, the edge follows the pointer.
+    case "band-top": return { top: d.edgeAt != null ? d.edgeAt : (o.top ?? d.wallHeight) + dy };
+    case "band-bottom": return { bottom: d.edgeAt != null ? d.edgeAt : o.bottom + dy };
+    case "band-left": return { from: d.edgeAt != null ? d.edgeAt : o.from + dx };
+    case "band-right": return { to: d.edgeAt != null ? d.edgeAt : o.to + dx };
+    case "move": return {
+      left: d.moveLeft != null ? d.moveLeft : o.left + dx,
+      sill: o.category === "door" ? undefined : (d.moveSill != null ? d.moveSill : o.sill + dy),
+    };
+    case "tl":
+    case "tr":
+    case "bl":
+    case "br": {
+      const edit = resizeOpeningCorner(
+        { offset: o.left, width: o.width, sill: o.sill, height: o.height },
+        d.part,
+        d.cornerS ?? (d.part.includes("l") ? o.left : o.left + o.width),
+        d.cornerZ ?? (d.part.includes("b") ? o.sill : o.sill + o.height),
+        face,
+      );
+      return edit;
     }
-    case "r": return o.category === "door" ? { left: o.left + dx } : { width: Math.max(MIN, o.width + dx) };
-    case "t": return { height: Math.max(MIN, o.height + dy) };
-    case "b": {
-      const height = Math.max(MIN, o.height - dy);
-      return { sill: Math.max(0, o.sill + o.height - height), height };
+    case "t": {
+      // A door's head. The width stays with the door type, and there is no sill.
+      if (d.cornerZ == null) return { height: Math.max(OPENING_MIN_M, o.height + dy) };
+      return { height: resizeOpeningCorner(
+        { offset: o.left, width: o.width, sill: o.sill, height: o.height },
+        "t",
+        o.left,
+        d.cornerZ,
+        face,
+      ).height };
     }
     case "wall-top": return { height: o.height + dy };
     default: return {};
@@ -13792,38 +13920,60 @@ function faceSideTitle(model) {
   return names.length ? `${names.join(" and ")} side` : "Outside";
 }
 
+/** Room names on one side of a wall, or "Outside" when that side has no room. */
+function faceSideName(wall, side) {
+  const ids = [...(roomsBySide(store.doc, wall)[side] || [])];
+  const names = ids.map((id) => (store.doc.rooms || []).find((r) => r.id === id)?.name).filter(Boolean);
+  return names.length ? names.join(" and ") : "Outside";
+}
+
+function wallProductName(wall) {
+  return skuById(wall?.sku)?.name || "Wall";
+}
+
 /**
- * A thumbnail of this storey's walls with this wall in copper and a bar on the
- * side being viewed, so the open face always says where it is on the plan.
+ * A thumbnail centred on this wall. The copper edge and the copper room name
+ * are the side being viewed. The other side's name stays quiet.
  */
 function keyPlanSvg(face) {
   const wall = wallsCache.find((w) => w.id === face?.wallId);
   if (!wall) return "";
   const walls = wallsCache.filter((w) => w.level === wall.level);
-  const xs = walls.flatMap((w) => [w.x1, w.x2]);
-  const ys = walls.flatMap((w) => [w.y1, w.y2]);
-  const minX = Math.min(...xs);
-  const minY = Math.min(...ys);
-  const span = Math.max(Math.max(...xs) - minX, Math.max(...ys) - minY, 1);
-  const pad = span * 0.08;
-  const n = wallNormal(wall, face.side);
-  const off = Math.max(wall.thickness || 0.22, span * 0.035);
+  const mx = (wall.x1 + wall.x2) / 2;
+  const my = (wall.y1 + wall.y2) / 2;
+  const half = Math.max(wall.length * 0.85, 1.4);
+  const size = half * 2;
+  const viewed = face.side === -1 ? -1 : 1;
+  const n = wallNormal(wall, viewed);
+  const off = Math.max(wall.thickness || 0.22, size * 0.03);
+  const font = (size * 0.16).toFixed(3);
   const line = (w, cls) => `<line x1="${w.x1}" y1="${w.y1}" x2="${w.x2}" y2="${w.y2}" class="${cls}" vector-effect="non-scaling-stroke"/>`;
   const others = walls.filter((w) => w.id !== wall.id).map((w) => line(w, "key-wall")).join("");
-  const sideBar = line({ x1: wall.x1 + n.x * off, y1: wall.y1 + n.y * off, x2: wall.x2 + n.x * off, y2: wall.y2 + n.y * off }, "key-side");
-  const vb = [minX - pad, minY - pad, Math.max(...xs) - minX + pad * 2, Math.max(...ys) - minY + pad * 2].map((v) => +v.toFixed(3)).join(" ");
-  return `<svg class="key-plan" viewBox="${vb}" preserveAspectRatio="xMidYMid meet" aria-hidden="true">${others}${line(wall, "key-this")}${sideBar}</svg>`;
+  const sideBar = line({
+    x1: wall.x1 + n.x * off,
+    y1: wall.y1 + n.y * off,
+    x2: wall.x2 + n.x * off,
+    y2: wall.y2 + n.y * off,
+  }, "key-side");
+  const names = [1, -1].map((side) => {
+    let label = faceSideName(wall, side);
+    if (label.length > 16) label = `${label.slice(0, 15)}…`;
+    const nn = wallNormal(wall, side);
+    const dist = half * 0.42;
+    const on = side === viewed ? " is-on" : "";
+    return `<text x="${(mx + nn.x * dist).toFixed(3)}" y="${(my + nn.y * dist).toFixed(3)}" text-anchor="middle" dominant-baseline="middle" font-size="${font}" class="key-room${on}">${escapeHtml(label)}</text>`;
+  }).join("");
+  const vb = [mx - half, my - half, size, size].map((v) => +v.toFixed(3)).join(" ");
+  return `<svg class="key-plan" viewBox="${vb}" preserveAspectRatio="xMidYMid meet" aria-hidden="true">${others}${line(wall, "key-this")}${sideBar}${names}</svg>`;
 }
 
 function syncKeyPlan(face) {
   const btn = el.facePlan;
   if (!btn || !face) return;
   const side = faceSideTitle(face) || "This face";
-  const peek = document.getElementById("v2-plan-column")?.classList.contains("is-plan-peek");
-  const html = `${keyPlanSvg(face)}<span class="key-plan-copy"><strong>${escapeHtml(side)}</strong><span>${peek ? "Hide plan" : "Show plan"}</span></span>`;
+  const html = `${keyPlanSvg(face)}<span class="key-plan-copy"><strong>${escapeHtml(side)}</strong><span>Flip face</span></span>`;
   if (btn.innerHTML !== html) btn.innerHTML = html;
-  btn.setAttribute("aria-label", `${side}. ${peek ? "Hide the plan" : "Show the plan, to choose another wall"}.`);
-  btn.setAttribute("aria-expanded", String(Boolean(peek)));
+  btn.setAttribute("aria-label", `${side}. Flip face.`);
 }
 
 function fillFaceTypeSelect() {
@@ -13857,7 +14007,12 @@ function syncWallFaceChrome(show) {
   setHidden(el.faceEditor, !show);
   setHidden(el.facePlan, !show);
   const exit = document.getElementById("v2-profile-exit");
-  if (exit) exit.textContent = show ? "Close" : "Exit";
+  if (exit) {
+    exit.textContent = "Exit";
+    exit.title = show
+      ? "Close this wall. Escape selects the wall first, then closes."
+      : "Close the route profile and the Services panel. A click on empty plan leaves them open. Escape does the same.";
+  }
   if (show) {
     syncKeyPlan(elevationFace);
     syncFaceEditor();
@@ -13868,20 +14023,34 @@ function syncWallFaceChrome(show) {
 function syncFaceEditor() {
   fillFaceTypeSelect();
   const model = finishFaceModel();
-  const openingId = selectedOpeningId();
+  const pending = Boolean(faceAddPending && faceAddPending.wallId === model?.wallId);
+  const wallOn = faceWallSelected && !pending && !elevFinishDraft;
+  const openingId = wallOn ? null : selectedOpeningId();
   const opening = openingId ? model?.openings.find((o) => o.id === openingId) : null;
-  const band = !opening && selectedBandId ? model?.finishBands.find((b) => b.id === selectedBandId) : null;
-  const pending = !opening && !band && faceAddPending && faceAddPending.wallId === model?.wallId;
+  const band = !opening && !wallOn && selectedBandId ? model?.finishBands.find((b) => b.id === selectedBandId) : null;
   const product = band ? finishProductById(store.doc, band.productId) : null;
   // Colour and millimetres belong to a finish that exists. A new one gets them once it is placed.
   const paint = band?.category === "paint" && band.editable;
-  const typedSpan = Boolean(band?.editable && !band.outline);
-  setHidden(el.facePlaceRow, Boolean(opening) || (!band && !pending));
+  // Presets only while a new finish is waiting. A placed finish is moved by
+  // the gap labels, so the up and along fields stay off.
+  setHidden(el.facePlaceRow, !pending);
   setHidden(el.faceOpeningRow, !opening);
-  setHidden(el.faceColourRow, !paint || Boolean(opening));
-  setHidden(el.faceUp, !typedSpan);
-  setHidden(el.faceAlong, !typedSpan || band.source === "rule");
-  if (el.faceRemove) el.faceRemove.hidden = !band || !band.editable;
+  setHidden(el.faceWallRow, !wallOn);
+  setHidden(el.faceTypeLabel, wallOn);
+  setHidden(el.faceProductLabel, wallOn);
+  setHidden(el.faceColourRow, !paint || Boolean(opening) || wallOn);
+  setHidden(el.faceUp, true);
+  setHidden(el.faceAlong, true);
+  if (el.faceRemove) {
+    const rule = band?.source === "rule";
+    el.faceRemove.hidden = wallOn || (!pending && !(band?.editable));
+    el.faceRemove.textContent = pending ? "Cancel" : rule ? "Remove rule" : "Remove";
+    el.faceRemove.title = pending
+      ? "Leave this finish unplaced."
+      : rule
+        ? "Removes the rule from every wall of this room."
+        : "";
+  }
   if (el.faceType) el.faceType.disabled = !band?.editable && !pending;
   if (el.faceProduct) el.faceProduct.disabled = !band?.editable && !pending;
   if (opening) {
@@ -13911,21 +14080,26 @@ function syncFaceEditor() {
     });
     return;
   }
+  if (wallOn) {
+    if (el.faceWhich) el.faceWhich.textContent = model?.name || "This wall";
+    if (el.faceMeta) el.faceMeta.textContent = "Drag the top of the wall";
+    if (el.faceSwatch) el.faceSwatch.style.background = "#cfc6b8";
+    setFaceField(el.faceWallH, formatLengthMm(model?.height));
+    return;
+  }
   if (!band) {
     if (el.faceWhich) el.faceWhich.textContent = faceSideTitle(model) || "This face";
-    if (el.faceMeta) el.faceMeta.textContent = "Click a finish or an opening.";
+    if (el.faceMeta) el.faceMeta.textContent = "Click a finish, an opening, or the wall.";
     if (el.faceSwatch) el.faceSwatch.style.background = "transparent";
     return;
   }
-  const same = (model.finishBands || []).filter((b) => b.source !== "default" && b.category === band.category);
+  // A room rule is not counted: the inspector lists it in its own section.
+  const same = (model.finishBands || []).filter((b) => b.source !== "default" && b.source !== "rule" && b.category === band.category).sort(compareBands);
   const index = same.findIndex((b) => b.id === band.id) + 1;
   const label = FINISH_CATEGORIES[band.category]?.label || band.category;
   if (el.faceWhich) el.faceWhich.textContent = same.length > 1 && index > 0 ? `${label} ${index} of ${same.length}` : label;
-  const qty = band.category === "none" ? "" : band.unit === "m" ? `${band.quantity.toFixed(2)} m` : `${band.quantity.toFixed(2)} m²`;
   if (el.faceMeta) {
-    el.faceMeta.textContent = band.source === "rule"
-      ? `Changes every wall of this room${qty ? ` · ${qty}` : ""}`
-      : band.source === "default" ? "From the wall type" : qty;
+    el.faceMeta.textContent = band.source === "default" ? "From the wall type" : bandFaceLine(band, model);
   }
   if (el.faceSwatch) el.faceSwatch.style.background = band.fill || finishSwatch(band.category);
   setFaceField(el.faceType, band.category);
@@ -13977,18 +14151,20 @@ function syncElevationDock() {
     if (face) elevationFace = face;
     elevationLayout = null;
     elevationKey = "";
+    if (elevHeld || elevTyping) dropElevGapHold();
+    faceWallSelected = false;
     resetElevationView();
     setHidden(el.elevBody, true);
     setHidden(el.elevFit, true);
     setHidden(el.elevInfo, true);
     closeElevInfo();
     syncElevHints(false);
-    setHidden(el.elevFlip, true);
+    setHidden(el.elevFlash, true);
     setHidden(el.elevEdgeMode, true);
     setHidden(el.serviceProfileCanvas, false);
     setHidden(dock.querySelector(".svc-profile-mode"), false);
     setHidden(document.getElementById("v2-profile-select-all"), false);
-    el.elevBody?.classList.remove("is-drawing");
+    el.elevBody?.classList.remove("is-drawing", "is-edge-add", "is-edge-resize");
     syncWallFaceChrome(false);
     return false;
   }
@@ -13996,7 +14172,7 @@ function syncElevationDock() {
   const model = elevationModelNow(face);
   if (!model) {
     elevationOpen = false;
-    el.elevBody?.classList.remove("is-drawing");
+    el.elevBody?.classList.remove("is-drawing", "is-edge-add", "is-edge-resize");
     syncElevHints(false);
     syncWallFaceChrome(false);
     return false;
@@ -14006,7 +14182,7 @@ function syncElevationDock() {
   setHidden(el.serviceProfileCanvas, true);
   setHidden(dock.querySelector(".svc-profile-mode"), true);
   setHidden(document.getElementById("v2-profile-select-all"), true);
-  setHidden(el.elevFlip, false);
+  setHidden(el.elevFlash, false);
   setHidden(el.elevFit, false);
   setHidden(el.elevInfo, false);
   if (el.elevFit) el.elevFit.disabled = elevationViewFitted();
@@ -14039,19 +14215,53 @@ function syncElevationDock() {
   const draft = elevFinishDraft && elevFinishDraft.face.wallId === face.wallId ? elevFinishDraft : null;
   const guides = elevationGuides();
   const locate = elevationLocate(model);
-  const key = `${w}x${h}|${elevationView.zoom}|${elevationView.panX}|${elevationView.panY}|${selectedId}|${selectedBandId}|${selectedElevVertex}|${lineMode ? "line" : "corner"}|${JSON.stringify(model)}|${JSON.stringify(draft)}|${JSON.stringify(guides)}|${JSON.stringify(locate)}`;
+  const key = `${w}x${h}|${elevationView.zoom}|${elevationView.panX}|${elevationView.panY}|${selectedId}|${selectedBandId}|${selectedElevVertex}|${faceWallSelected ? "wall" : ""}|${lineMode ? "line" : "corner"}|${JSON.stringify(model)}|${JSON.stringify(draft)}|${JSON.stringify(guides)}|${JSON.stringify(locate)}`;
   if (key === elevationKey) {
     placeElevEdgeMode(model);
     syncElevHints(true);
     return true;
   }
   elevationKey = key;
-  const drawn = elevationSvg(model, { width: w, height: h, interactive: true, selectedId, selectedBandId, selectedVertex: selectedElevVertex, draft, guides, edgeMode: lineMode ? "line" : "corner", view: elevationView, locate });
+  const drawn = elevationSvg(model, {
+    width: w,
+    height: h,
+    interactive: true,
+    selectedId: faceWallSelected ? null : selectedId,
+    selectedBandId: faceWallSelected ? null : selectedBandId,
+    selectedVertex: faceWallSelected ? null : selectedElevVertex,
+    draft,
+    guides,
+    edgeMode: lineMode ? "line" : "corner",
+    view: elevationView,
+    locate,
+    wallSelected: faceWallSelected,
+  });
   elevationLayout = { scale: drawn.scale, scaleX: drawn.scaleX, scaleY: drawn.scaleY, originX: drawn.originX, originY: drawn.originY, fit: drawn.fit };
   el.elevBody.innerHTML = drawn.svg;
+  syncElevEdgeCursors();
   placeElevEdgeMode(model);
   syncElevHints(true);
   return true;
+}
+
+/** Line adds a corner while Shift is held. Corner resizes while Shift is held. */
+function elevEdgesAdding() {
+  return elevShiftHeld ? elevEdgeMode === "line" : elevEdgeMode !== "line";
+}
+
+/** Swap the edge cursors and their tooltips. The drawing stays as it is. */
+function syncElevEdgeCursors(shift = elevShiftHeld) {
+  elevShiftHeld = Boolean(shift);
+  const host = el.elevBody;
+  if (!host) return;
+  const shaping = Boolean(host.querySelector?.(".elev-outline-edge"));
+  const adding = elevEdgesAdding();
+  host.classList.toggle("is-edge-add", shaping && adding);
+  host.classList.toggle("is-edge-resize", shaping && !adding);
+  const label = adding ? "Add a corner" : "Resize this edge";
+  host.querySelectorAll(".elev-outline-edge > title").forEach((node) => {
+    if (node.textContent !== label) node.textContent = label;
+  });
 }
 
 /** Corner / Line sits just above the finish being edited, not in the dock header. */
@@ -14086,44 +14296,323 @@ function elevationGuides() {
   if (elevFinishDraft && (elevFinishDraft.guideS != null || elevFinishDraft.guideZ != null)) {
     return { s: elevFinishDraft.guideS, z: elevFinishDraft.guideZ };
   }
-  if (elevationDrag?.part === "outline" && (elevationDrag.guideS != null || elevationDrag.guideZ != null)) {
+  if (elevationDrag && (elevationDrag.guideS != null || elevationDrag.guideZ != null)) {
     return { s: elevationDrag.guideS, z: elevationDrag.guideZ };
   }
   return null;
 }
 
-/** Clearance dimensions for the finish under the pointer: both axes for a
- *  corner (and for the corner being placed while drawing), one axis for a line. */
+/** A corner or an edge. A whole-shape move and the wall-height mark are not:
+ *  those gaps cannot take a typed number. */
+function isGapDrag(d) {
+  if (!d) return false;
+  if (d.part === "outline") return !d.moveAll;
+  if (typeof d.part === "string" && d.part.startsWith("band-")) return true;
+  return d.part === "l" || d.part === "r" || d.part === "t" || d.part === "b"
+    || d.part === "tl" || d.part === "tr" || d.part === "bl" || d.part === "br";
+}
+
+/** The corner or edge whose gap is on screen: the one under the pointer, else the one left held. */
+function activeGapTarget() {
+  if (elevationDrag && isGapDrag(elevationDrag)) return elevationDrag;
+  if (elevHeld && isGapDrag(elevHeld)) return elevHeld;
+  return null;
+}
+
+function dropElevGapHold() {
+  elevHeld = null;
+  elevTyping = null;
+  elevLocatePin = { h: null, v: null };
+}
+
+/** A new press drops the previous hold. The pin stays, so the next corner keeps the side an arrow chose. */
+function clearGapGesture() {
+  elevHeld = null;
+  elevTyping = null;
+}
+
+function holdFromDrag(d) {
+  if (!isGapDrag(d)) return null;
+  return {
+    part: d.part,
+    id: d.id || d.bandId,
+    bandId: d.bandId || d.id,
+    face: d.face ? { ...d.face } : null,
+    band: d.band,
+    points: d.points ? d.points.map((p) => ({ s: p.s, z: p.z })) : null,
+    index: d.index,
+    edge: d.edge,
+    moveEdge: Boolean(d.moveEdge),
+    moveAll: false,
+    originOutline: Boolean(d.originOutline),
+    inserted: Boolean(d.inserted),
+  };
+}
+
+/** Rectangle of a band in viewing coordinates. A missing top means the top of the wall. */
+function bandRectPoints(band, model) {
+  const from = band.from ?? 0;
+  const to = band.to ?? model.length;
+  const bottom = band.bottom ?? 0;
+  const top = band.top == null ? model.height : band.top;
+  if (!(to > from) || !(top > bottom)) return null;
+  return [
+    { s: from, z: bottom },
+    { s: to, z: bottom },
+    { s: to, z: top },
+    { s: from, z: top },
+  ];
+}
+
+/** Clearance for one held or dragged corner or edge. Pins are applied inside finishLocate. */
+function gapLocate(d, model) {
+  if (!d || !model) return null;
+  const pin = elevLocatePin;
+  if (d.part === "outline" && d.points?.length) {
+    if (d.moveAll) {
+      return finishLocate(d.points, { mode: "move", length: model.length, height: model.height });
+    }
+    const mode = d.moveEdge ? "edge" : "corner";
+    const index = d.moveEdge ? (d.edge ?? d.index) : d.index;
+    return finishLocate(d.points, { mode, index, length: model.length, height: model.height, pin });
+  }
+  if (typeof d.part === "string" && d.part.startsWith("band-")) {
+    const band = model.finishBands.find((b) => b.id === (d.id || d.bandId));
+    const ring = band ? bandRectPoints(band, model) : null;
+    if (!ring) return null;
+    const index = { "band-bottom": 0, "band-right": 1, "band-top": 2, "band-left": 3 }[d.part];
+    if (index == null) return null;
+    // A room rule only has a top and a bottom, so it keeps a single vertical gap.
+    if (band.source === "rule") {
+      if (d.part !== "band-top" && d.part !== "band-bottom") return null;
+      const spec = finishLocate(ring, {
+        mode: "edge",
+        index,
+        length: model.length,
+        height: model.height,
+        pin: { h: null, v: pin?.v || null },
+      });
+      if (spec?.side) delete spec.side;
+      return spec && spec.vert ? spec : null;
+    }
+    return finishLocate(ring, { mode: "edge", index, length: model.length, height: model.height, pin });
+  }
+  const openingIndex = { l: 3, r: 1, t: 2, b: 0, bl: 0, br: 1, tr: 2, tl: 3 };
+  if (Object.prototype.hasOwnProperty.call(openingIndex, d.part)) {
+    const row = model.openings.find((o) => o.id === d.id);
+    if (!row) return null;
+    const ring = [
+      { s: row.offset, z: row.sill },
+      { s: row.offset + row.width, z: row.sill },
+      { s: row.offset + row.width, z: row.sill + row.height },
+      { s: row.offset, z: row.sill + row.height },
+    ];
+    const corner = d.part.length === 2;
+    return finishLocate(ring, {
+      mode: corner ? "corner" : "edge",
+      index: openingIndex[d.part],
+      length: model.length,
+      height: model.height,
+      pin,
+    });
+  }
+  return null;
+}
+
+/** The shape a typed gap moves, in the coordinates applyTypedGap expects. */
+function gapTargetGeometry(d, model) {
+  if (!d || !model) return null;
+  if (d.part === "outline" && d.points?.length) {
+    const points = d.points.map((p) => ({ s: p.s, z: p.z }));
+    if (d.moveEdge) return { kind: "edge", points, index: d.edge ?? d.index };
+    return { kind: "vertex", points, index: d.index };
+  }
+  if (typeof d.part === "string" && d.part.startsWith("band-")) {
+    const band = model.finishBands.find((b) => b.id === (d.id || d.bandId));
+    if (!band) return null;
+    return {
+      kind: "rect-edge",
+      edge: d.part.slice(5),
+      from: band.from ?? 0,
+      to: band.to ?? model.length,
+      bottom: band.bottom ?? 0,
+      top: band.top == null ? model.height : band.top,
+      rule: band.source === "rule",
+    };
+  }
+  const row = model.openings.find((o) => o.id === d.id);
+  if (!row || !isGapDrag(d)) return null;
+  return {
+    kind: "opening",
+    corner: d.part,
+    offset: row.offset,
+    width: row.width,
+    sill: row.sill,
+    height: row.height,
+    door: row.category === "door",
+  };
+}
+
+/** A straight edge has one gap. Digits land on that one. */
+function noteGapAxis(d, model) {
+  const spec = gapLocate(d, model);
+  if (!spec) return;
+  if (spec.vert && !spec.side) elevTypingAxis = "v";
+  else if (spec.side && !spec.vert) elevTypingAxis = "h";
+}
+
+function attachGapTyping(spec) {
+  if (!spec && !elevTyping) return null;
+  const out = spec ? { ...spec } : {};
+  out.typeable = true;
+  if (elevTyping) out.typing = { axis: elevTyping.axis, text: elevTyping.text };
+  return out.side || out.vert ? out : null;
+}
+
+/** Clearance for the corner being placed, or for the corner or edge that is dragged or held. */
 function elevationLocate(model) {
   if (!model) return null;
   const draft = elevFinishDraft && elevFinishDraft.face.wallId === model.wallId ? elevFinishDraft : null;
   if (draft?.hover) {
     return finishLocate(null, { mode: "point", point: draft.hover, length: model.length, height: model.height });
   }
-  const d = elevationDrag;
-  if (!d || d.face?.wallId !== model.wallId) return null;
-  if (d.part === "outline" && d.points?.length) {
-    const mode = d.moveAll ? "move" : d.moveEdge ? "edge" : "corner";
-    return finishLocate(d.points, {
-      mode,
-      index: d.moveEdge ? d.edge : d.index,
-      length: model.length,
-      height: model.height,
-    });
+  if (elevationDrag?.part === "outline" && elevationDrag.moveAll && elevationDrag.points?.length && elevationDrag.face?.wallId === model.wallId) {
+    return finishLocate(elevationDrag.points, { mode: "move", length: model.length, height: model.height });
   }
-  if (d.part !== "band-left" && d.part !== "band-right" && d.part !== "band-top" && d.part !== "band-bottom") return null;
-  const band = model.finishBands.find((b) => b.id === d.id);
-  if (!band || band.top == null || band.bottom == null) return null;
-  const midS = ((band.from ?? 0) + (band.to ?? model.length)) / 2;
-  const midZ = (band.bottom + band.top) / 2;
-  if (d.part === "band-left") return { side: { s0: 0, s1: band.from, z: midZ } };
-  if (d.part === "band-right") return { side: { s0: band.to, s1: model.length, z: midZ } };
-  if (d.part === "band-top") return { vert: { z0: band.top, z1: model.height, s: midS, toward: "top" } };
-  return { vert: { z0: 0, z1: band.bottom, s: midS, toward: "base" } };
+  const d = activeGapTarget();
+  if (!d || d.face?.wallId !== model.wallId) return null;
+  return attachGapTyping(gapLocate(d, model));
 }
 
-/** Snap one elevation point to the grid, then to corners and edges on this face. */
-function elevAlign(rawS, rawZ, model, points, skipIndex = -1) {
+function typedGapUnchanged(target, next) {
+  if (next.points && target.points) {
+    return next.points.length === target.points.length && next.points.every((p, i) => (
+      Math.abs(p.s - target.points[i].s) < 1e-9 && Math.abs(p.z - target.points[i].z) < 1e-9
+    ));
+  }
+  if (target.kind === "rect-edge") {
+    return Math.abs(next.from - target.from) < 1e-9 && Math.abs(next.to - target.to) < 1e-9
+      && Math.abs(next.bottom - target.bottom) < 1e-9 && Math.abs(next.top - target.top) < 1e-9;
+  }
+  if (target.kind === "opening") {
+    return Math.abs(next.offset - target.offset) < 1e-9 && Math.abs(next.width - target.width) < 1e-9
+      && Math.abs(next.sill - target.sill) < 1e-9 && Math.abs(next.height - target.height) < 1e-9;
+  }
+  return false;
+}
+
+/** Enter: move the held or dragged corner so the gap equals the typed millimetres. One undo step. */
+function commitTypedGap() {
+  const d = activeGapTarget();
+  const typing = elevTyping;
+  elevTyping = null;
+  if (!d || !typing?.text) { render(); return; }
+  const mm = Number(typing.text);
+  if (!Number.isFinite(mm)) { render(); return; }
+  const face = d.face;
+  const live = elevationModelNow(face);
+  if (!live) { render(); return; }
+  const spec = gapLocate(d, live);
+  const target = gapTargetGeometry(d, live);
+  if (!spec || !target) { render(); return; }
+  const next = applyTypedGap(target, typing.axis, mm / 1000, spec, { length: live.length, height: live.height });
+  if (!next || typedGapUnchanged(target, next)) { render(); return; }
+  elevationDrag = null;
+  elevHeld = holdFromDrag(d);
+  if (elevHeld && next.points) elevHeld.points = next.points.map((p) => ({ s: p.s, z: p.z }));
+  finishCommit(() => {
+    if (next.points) {
+      const rect = !d.originOutline && !d.inserted && axisAlignedOutline(next.points);
+      const bandId = d.bandId || d.id;
+      if (rect) applyBandEdit(store.doc, pack, face, bandId, rect, wallsCache);
+      else applyOutlinePoints(store.doc, pack, face, bandId, next.points, wallsCache);
+      return;
+    }
+    if (target.kind === "rect-edge") {
+      applyBandEdit(store.doc, pack, face, d.id || d.bandId, {
+        from: next.from,
+        to: next.to,
+        bottom: next.bottom,
+        top: next.top,
+      }, wallsCache);
+      return;
+    }
+    const edit = {};
+    if (Math.abs(next.offset - target.offset) > 1e-9 || Math.abs(next.width - target.width) > 1e-9) {
+      edit.left = next.offset;
+      edit.width = next.width;
+    }
+    if (Math.abs(next.sill - target.sill) > 1e-9) edit.sill = next.sill;
+    if (Math.abs(next.height - target.height) > 1e-9) edit.height = next.height;
+    if (edit.left != null || edit.width != null || edit.sill != null || edit.height != null) {
+      applyOpeningEdit(store.doc, pack, face, d.id, edit, wallsCache);
+    }
+  });
+  const model = elevationModel(store.doc, pack, face, wallsCache);
+  if (model && elevHeld) noteGapAxis(elevHeld, model);
+  setStatusMessage(`Gap set to ${Math.round(mm)} mm.`, "ok");
+}
+
+/** Digits, Backspace, Enter, Escape and the arrows, while a corner or edge is held or dragged. */
+function elevationGapKey(ev) {
+  if (!elevationOpen || ev.ctrlKey || ev.metaKey || ev.altKey) return false;
+  const tag = document.activeElement?.tagName;
+  if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return false;
+  const live = activeGapTarget();
+  if (!live) return false;
+  const arrow = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down" }[ev.key];
+  if (arrow) {
+    ev.preventDefault();
+    const axis = arrow === "left" || arrow === "right" ? "h" : "v";
+    elevLocatePin[axis] = elevLocatePin[axis] === arrow ? null : arrow;
+    elevTypingAxis = axis;
+    elevTyping = null;
+    const model = elevationModelNow(live.face);
+    if (model) noteGapAxis(live, model);
+    render();
+    return true;
+  }
+  if (/^[0-9]$/.test(ev.key)) {
+    ev.preventDefault();
+    if (!elevTyping || elevTyping.axis !== elevTypingAxis) elevTyping = { axis: elevTypingAxis, text: "" };
+    const next = elevTyping.text + ev.key;
+    if (next.length > 6) return true;
+    const model = elevationModelNow(live.face);
+    const spec = model ? gapLocate(live, model) : null;
+    const target = model ? gapTargetGeometry(live, model) : null;
+    const maxMm = Math.round(maxTypedGap(target, elevTyping.axis, spec, model) * 1000);
+    if (Number(next) > maxMm) return true;
+    elevTyping = { axis: elevTyping.axis, text: next };
+    render();
+    return true;
+  }
+  if (!elevTyping) return false;
+  if (ev.key === "Backspace") {
+    ev.preventDefault();
+    elevTyping = { axis: elevTyping.axis, text: elevTyping.text.slice(0, -1) };
+    render();
+    return true;
+  }
+  if (ev.key === "Enter") {
+    ev.preventDefault();
+    commitTypedGap();
+    return true;
+  }
+  if (ev.key === "Escape") {
+    ev.preventDefault();
+    ev.stopPropagation();
+    elevTyping = null;
+    render();
+    return true;
+  }
+  return false;
+}
+
+/** Snap one elevation point to the grid, then to corners and edges on this face.
+ *  `skipOpening` is `{ id, s, z }` for the corner being dragged: its own
+ *  station and height are not targets, so it cannot snap to the adjacent
+ *  corner on that axis. */
+function elevAlign(rawS, rawZ, model, points, skipIndex = -1, skipOpening = null) {
   const sTargets = [0, model.length];
   const zTargets = [0, model.height];
   const skip = new Set(Array.isArray(skipIndex) ? skipIndex : [skipIndex]);
@@ -14133,8 +14622,14 @@ function elevAlign(rawS, rawZ, model, points, skipIndex = -1) {
     zTargets.push(p.z);
   });
   for (const opening of model.openings || []) {
-    sTargets.push(opening.offset, opening.offset + opening.width);
-    zTargets.push(opening.sill, opening.sill + opening.height);
+    if (skipOpening && opening.id === skipOpening.id) {
+      const edges = openingSnapEdges(opening, skipOpening);
+      sTargets.push(...edges.s);
+      zTargets.push(...edges.z);
+    } else {
+      sTargets.push(opening.offset, opening.offset + opening.width);
+      zTargets.push(opening.sill, opening.sill + opening.height);
+    }
   }
   const axis = (raw, hi, targets) => {
     let value = snapElevation(raw);
@@ -14168,7 +14663,7 @@ function elevDraftPoint(ev, host, layout) {
   const model = elevationModelNow(elevFinishDraft.face);
   if (!model) return null;
   const raw = elevRawPoint(ev, host, layout);
-  const aligned = elevAlign(raw.s, raw.z, model, elevFinishDraft.points);
+  const aligned = elevAlign(raw.s, raw.z, model, elevFinishDraft.points.concat(elevOtherCorners(model, null)));
   elevFinishDraft.guideS = aligned.guideS;
   elevFinishDraft.guideZ = aligned.guideZ;
   return { s: aligned.s, z: aligned.z };
@@ -14240,12 +14735,14 @@ function beginOutlineDrag(ev, layout, model, band, mode, index) {
     const dx = b.s - a.s;
     const dz = b.z - a.z;
     const len2 = dx * dx + dz * dz || 1;
-    const t = Math.max(0, Math.min(1, ((raw.s - a.s) * dx + (raw.z - a.z) * dz) / len2));
+    // Keep the new corner off the two it sits between, so it can still be grabbed.
+    const t = Math.max(0.08, Math.min(0.92, ((raw.s - a.s) * dx + (raw.z - a.z) * dz) / len2));
     points.splice(index + 1, 0, { s: a.s + dx * t, z: a.z + dz * t });
     vertex = index + 1;
     inserted = true;
   }
   const raw = elevRawPoint(ev, ev.currentTarget, layout);
+  faceWallSelected = false;
   selectedBandId = band.id;
   selectedElevVertex = mode === "move" || moveEdge ? null : vertex;
   if (selectedElevVertex != null) {
@@ -14280,6 +14777,7 @@ function beginOutlineDrag(ev, layout, model, band, mode, index) {
   };
   ev.currentTarget.setPointerCapture(ev.pointerId);
   ev.preventDefault();
+  noteGapAxis(elevationDrag, model);
   render();
 }
 
@@ -14287,6 +14785,7 @@ function onElevationPointerDown(ev, layout) {
   // Middle button and Alt-drag pan the open strip, as they do on the plan.
   // Pan mode's left-drag does the same. The gesture never starts an edit.
   if (ev.currentTarget === el.elevBody && (ev.button === 1 || ev.altKey || (panMode && ev.button === 0))) {
+    clearGapGesture();
     elevationPan = {
       pointerId: ev.pointerId,
       startX: ev.clientX,
@@ -14300,11 +14799,36 @@ function onElevationPointerDown(ev, layout) {
     return;
   }
   if (ev.button !== 0 || !elevationFace || !layout) return;
+  // A gap label is a type-in, not a drag. The corner that is already held stays held.
+  const gapLabel = ev.target.closest?.("[data-elev-op='locate-h'],[data-elev-op='locate-v']");
+  if (gapLabel && ev.currentTarget === el.elevBody) {
+    ev.preventDefault();
+    const axis = gapLabel.dataset.elevOp === "locate-v" ? "v" : "h";
+    const d = activeGapTarget();
+    const faceModel = d ? elevationModelNow(d.face) : null;
+    const spec = d && faceModel ? gapLocate(d, faceModel) : null;
+    const metres = axis === "h"
+      ? (spec?.side ? spec.side.s1 - spec.side.s0 : NaN)
+      : (spec?.vert ? spec.vert.z1 - spec.vert.z0 : NaN);
+    if (d && Number.isFinite(metres)) {
+      elevTypingAxis = axis;
+      elevTyping = { axis, text: String(Math.round(metres * 1000)) };
+      render();
+    }
+    return;
+  }
   // The inspector graph is the way in, shown only while the face is closed.
   // A click opens the face with what was clicked already selected there.
   if (ev.currentTarget === el.ctxElev && !(elevFinishDraft && elevFinishDraft.face.wallId === elevationFace.wallId)) {
     ev.preventDefault();
     closePreviewCallout();
+    const foundHit = ev.target.closest?.("[data-elev-foundation]");
+    if (foundHit?.dataset.elevFoundation) {
+      store.selectOne({ kind: "segment", id: foundHit.dataset.elevFoundation });
+      openWallFace();
+      render();
+      return;
+    }
     const fillHit = ev.target.closest?.("[data-elev-fill]");
     if (fillHit) {
       selectBand(fillHit.dataset.elevFill);
@@ -14346,6 +14870,16 @@ function onElevationPointerDown(ev, layout) {
     render();
     return;
   }
+  clearGapGesture();
+  const foundHit = ev.target.closest?.("[data-elev-foundation]");
+  if (foundHit?.dataset.elevFoundation && ev.currentTarget === el.elevBody) {
+    faceAddPending = null;
+    leaveFinishEdit();
+    store.selectOne({ kind: "segment", id: foundHit.dataset.elevFoundation });
+    ev.preventDefault();
+    render();
+    return;
+  }
   const outlineHit = ev.target.closest?.("[data-elev-op='outline-vertex'],[data-elev-op='outline-edge']");
   if (outlineHit && layout.originX != null) {
     const model = elevationModel(store.doc, pack, elevationFace, wallsCache);
@@ -14364,10 +14898,18 @@ function onElevationPointerDown(ev, layout) {
     // A window or door has taken the inspector. Clicking the wall — or a
     // finish painted on it — puts the wall back, without a trip to the plan.
     const fillHit = ev.target.closest?.("[data-elev-fill]");
-    if (store.primary?.kind === "opening" && (fillHit || ev.target.closest?.("[data-elev-wall]"))) {
-      if (selectOpeningHostWall() && fillHit) selectBand(fillHit.dataset.elevFill);
-      ev.preventDefault();
-      return;
+    if (store.primary?.kind === "opening" && (fillHit || ev.target.closest?.("[data-elev-wall], .elev-bg"))) {
+      const host = selectOpeningHostWall();
+      if (fillHit && host) {
+        selectBand(fillHit.dataset.elevFill);
+        ev.preventDefault();
+        return;
+      }
+      if (!fillHit) {
+        leaveFinishEdit();
+        ev.preventDefault();
+        return;
+      }
     }
     const fill = fillHit;
     if (fill && layout.originX != null && ev.currentTarget === el.elevBody) {
@@ -14393,9 +14935,9 @@ function onElevationPointerDown(ev, layout) {
       selectBand(fill.dataset.elevFill);
       return;
     }
-    // Empty elevation — the margin, or the wall where no finish is painted —
-    // leaves the finish edit. The strip stays open.
-    if (!fill && ev.currentTarget === el.elevBody && elevationFinishEditActive()) {
+    // The margin, or the wall where no finish is painted, selects the wall.
+    // The strip stays open.
+    if (!fill && ev.currentTarget === el.elevBody) {
       leaveFinishEdit();
       return;
     }
@@ -14408,6 +14950,7 @@ function onElevationPointerDown(ev, layout) {
   const id = bandId || target.dataset.elevId;
   const band = bandId ? model?.finishBands.find((b) => b.id === bandId) : null;
   if (band && part.startsWith("band-")) {
+    faceWallSelected = false;
     selectedBandId = band.id;
     selectedElevVertex = null;
     finishKey = "";
@@ -14415,13 +14958,20 @@ function onElevationPointerDown(ev, layout) {
   }
   const row = !bandId && part !== "wall-top" ? model?.openings.find((o) => o.id === id) : null;
   if (part === "wall-top") {
-    if (!model?.canDragTop) return;
+    if (!model?.canDragTop || !faceWallSelected) return;
+    faceAddPending = null;
+    selectedBandId = null;
+    selectedElevVertex = null;
+    faceWallSelected = true;
   } else if (!band && !row) {
     return;
   }
-  if (row && selectedOpeningId() !== id) {
-    store.selectOne({ kind: "opening", id });
-    render();
+  if (row) {
+    faceWallSelected = false;
+    if (selectedOpeningId() !== id) {
+      store.selectOne({ kind: "opening", id });
+      render();
+    }
   }
   const p = elevationPointer(ev, ev.currentTarget);
   elevationDrag = {
@@ -14437,6 +14987,11 @@ function onElevationPointerDown(ev, layout) {
     x: p.x,
     y: p.y,
     moved: false,
+    wallLength: model.length,
+    wallHeight: model.height,
+    grab: layout?.originX != null ? elevRawPoint(ev, ev.currentTarget, layout) : null,
+    guideS: null,
+    guideZ: null,
     orig: part === "wall-top"
       ? { height: model.height }
       : band
@@ -14445,13 +15000,170 @@ function onElevationPointerDown(ev, layout) {
   };
   ev.currentTarget.setPointerCapture(ev.pointerId);
   ev.preventDefault();
+  if (isGapDrag(elevationDrag)) noteGapAxis(elevationDrag, model);
+  if (part === "wall-top") {
+    setStatusMessage("The wall is selected. Drag the top, or type the height.", "ok");
+    render();
+  }
+}
+
+/** Corners of one finish, so another drag can line up with them. A missing top is the top of the wall. */
+function bandCornerPoints(band, model) {
+  if (band.outline?.length >= 3) return band.outline.map(([s, z]) => ({ s, z }));
+  const from = band.from ?? 0;
+  const to = band.to ?? model.length;
+  const bottom = band.bottom ?? 0;
+  const top = band.top == null ? model.height : band.top;
+  if (!(to > from) || !(top > bottom)) return [];
+  return [
+    { s: from, z: bottom },
+    { s: to, z: bottom },
+    { s: to, z: top },
+    { s: from, z: top },
+  ];
+}
+
+/** Finish corners on this face, the dragged band's own four first so an edge can skip them. */
+function elevSnapPoints(model, band) {
+  const own = band ? bandCornerPoints(band, model) : [];
+  const rest = [];
+  for (const other of model.finishBands || []) {
+    if (band && other.id === band.id) continue;
+    if (other.source === "default" || other.category === "none") continue;
+    rest.push(...bandCornerPoints(other, model));
+  }
+  return own.concat(rest);
+}
+
+/** Corners of every other finish. The shape being dragged is left out, so it cannot snap to itself. */
+function elevOtherCorners(model, band) {
+  const own = band ? bandCornerPoints(band, model).length : 0;
+  return elevSnapPoints(model, band).slice(own);
+}
+
+/** Stations a move can line up with: the wall, other finish corners, and openings.
+ *  `skipOpeningId` is the opening being dragged, whose own edges are not targets. */
+function elevAlignTargets(model, corners, skipOpeningId = null) {
+  const sTargets = [0, model.length];
+  const zTargets = [0, model.height];
+  for (const p of corners) {
+    sTargets.push(p.s);
+    zTargets.push(p.z);
+  }
+  for (const opening of model.openings || []) {
+    if (skipOpeningId && opening.id === skipOpeningId) continue;
+    sTargets.push(opening.offset, opening.offset + opening.width);
+    zTargets.push(opening.sill, opening.sill + opening.height);
+  }
+  return { sTargets, zTargets };
+}
+
+/** Keep a guide only when a corner of the moved shape still sits on it. */
+function guideIfLanded(corners, guide, axis, delta) {
+  if (guide == null) return null;
+  const key = axis === "s" ? "s" : "z";
+  return corners.some((p) => Math.abs(p[key] + delta - guide) < 1e-6) ? guide : null;
+}
+
+const BAND_EDGE_CORNERS = {
+  "band-bottom": [0, 1],
+  "band-right": [1, 2],
+  "band-top": [2, 3],
+  "band-left": [3, 0],
+};
+
+/** Snap a window corner, a door head, a rectangle edge, or a whole opening, and remember the guides. */
+function alignElevationDrag(ev, d) {
+  const corner = d.part === "tl" || d.part === "tr" || d.part === "bl" || d.part === "br" || d.part === "t";
+  const bandEdge = typeof d.part === "string" && Object.prototype.hasOwnProperty.call(BAND_EDGE_CORNERS, d.part);
+  const moving = d.part === "move";
+  if (!corner && !bandEdge && !moving) return false;
+  const layout = ev.currentTarget === el.elevBody ? elevationLayout : elevPreviewLayout;
+  const model = elevationModel(store.doc, pack, d.face, wallsCache);
+  if (!layout || layout.originX == null || !model) return false;
+  const raw = elevRawPoint(ev, ev.currentTarget, layout);
+  const o = d.orig;
+  if (moving) {
+    const scaleX = d.scaleX || d.scale;
+    const scaleY = d.scaleY || d.scale;
+    const ds = (d.x - d.x0) / scaleX;
+    const dz = -((d.y - d.y0) / scaleY);
+    const corners = [
+      { s: o.left, z: o.sill },
+      { s: o.left + o.width, z: o.sill },
+      { s: o.left + o.width, z: o.sill + o.height },
+      { s: o.left, z: o.sill + o.height },
+    ];
+    const { sTargets, zTargets } = elevAlignTargets(model, elevSnapPoints(model, null), d.id);
+    const hit = alignOutlineShift(corners, ds, dz, sTargets, zTargets, ELEVATION_SNAP * 2);
+    const left = Math.min(model.length - o.width, Math.max(0, o.left + hit.ds));
+    const sill = o.category === "door" ? o.sill : Math.min(Math.max(0, model.height - o.height), Math.max(0, o.sill + hit.dz));
+    d.moveLeft = left;
+    d.moveSill = sill;
+    d.guideS = guideIfLanded(corners, hit.guideS, "s", left - o.left);
+    d.guideZ = o.category === "door" ? null : guideIfLanded(corners, hit.guideZ, "z", sill - o.sill);
+    return true;
+  }
+  if (corner) {
+    const atS = d.part.includes("l") ? o.left : d.part.includes("r") ? o.left + o.width : NaN;
+    const atZ = d.part === "t" || d.part.includes("t") ? o.sill + o.height : d.part.includes("b") ? o.sill : NaN;
+    const aligned = elevAlign(raw.s, raw.z, model, elevSnapPoints(model, null), -1, { id: d.id, s: atS, z: atZ });
+    const edit = resizeOpeningCorner(
+      { offset: o.left, width: o.width, sill: o.sill, height: o.height },
+      d.part,
+      aligned.s,
+      aligned.z,
+      { length: model.length, height: model.height },
+    );
+    const landedS = d.part.includes("l") ? edit.left : d.part.includes("r") ? edit.left + edit.width : aligned.s;
+    const landedZ = d.part.includes("b") ? edit.sill : (d.part.includes("t") ? edit.sill + edit.height : aligned.z);
+    d.cornerS = landedS;
+    d.cornerZ = landedZ;
+    d.guideS = d.part === "t" || Math.abs(landedS - aligned.s) < 1e-6 ? aligned.guideS : null;
+    d.guideZ = Math.abs(landedZ - aligned.z) < 1e-6 ? aligned.guideZ : null;
+    if (d.part === "t") d.guideS = aligned.guideS;
+    return true;
+  }
+  const top = o.top == null ? model.height : o.top;
+  const vertical = d.part === "band-left" || d.part === "band-right";
+  if (!d.grab) d.grab = raw;
+  const grab = d.grab;
+  const proposeS = vertical ? (d.part === "band-left" ? o.from : o.to) + (raw.s - grab.s) : raw.s;
+  const proposeZ = vertical ? raw.z : (d.part === "band-top" ? top : o.bottom) + (raw.z - grab.z);
+  const band = model.finishBands.find((b) => b.id === d.id) || null;
+  const aligned = elevAlign(
+    proposeS,
+    proposeZ,
+    model,
+    elevSnapPoints(model, band),
+    band ? BAND_EDGE_CORNERS[d.part] : -1,
+  );
+  let at = vertical ? aligned.s : aligned.z;
+  if (d.part === "band-left") at = Math.min(o.to - FINISH_MIN_M, Math.max(0, at));
+  else if (d.part === "band-right") at = Math.min(model.length, Math.max(o.from + FINISH_MIN_M, at));
+  else if (d.part === "band-bottom") at = Math.min(top - FINISH_MIN_M, Math.max(0, at));
+  else at = Math.min(model.height, Math.max(o.bottom + FINISH_MIN_M, at));
+  d.edgeAt = at;
+  d.guideS = aligned.guideS;
+  d.guideZ = aligned.guideZ;
+  if (vertical && Math.abs(at - aligned.s) > 1e-6) d.guideS = null;
+  if (!vertical && Math.abs(at - aligned.z) > 1e-6) d.guideZ = null;
+  return true;
 }
 
 function onElevationPointerMove(ev) {
   if (!elevationDrag && !elevationPan && ev.currentTarget === el.elevBody && elevationLayout && elevationFace) {
     const raw = elevRawPoint(ev, ev.currentTarget, elevationLayout);
     const under = bandsUnderPoint(elevationModelNow(elevationFace), raw.s, raw.z).map((b) => finishDisplayName(b));
-    if (el.faceHover) el.faceHover.textContent = under.length > 1 ? under.join(" · ") : "";
+    if (el.faceHover) {
+      const label = under.length > 1 ? under.join(" · ") : "";
+      el.faceHover.textContent = label;
+      // Out of flow, pinned to the elevation, so the line cannot shift the wall under the cursor.
+      if (label && el.elevBody) {
+        el.faceHover.style.left = `${el.elevBody.offsetLeft + 8}px`;
+        el.faceHover.style.top = `${el.elevBody.offsetTop + 8}px`;
+      }
+    }
   }
   if (elevationPan && ev.currentTarget === el.elevBody) {
     // At the fitted zoom the wall already fills the strip; sliding it only
@@ -14472,6 +15184,8 @@ function onElevationPointerMove(ev) {
     if (!layout || layout.originX == null || !model) return;
     const raw = elevRawPoint(ev, ev.currentTarget, layout);
     const d = elevationDrag;
+    const band = model.finishBands.find((b) => b.id === d.bandId) || null;
+    const alignPts = d.origin.concat(elevOtherCorners(model, band));
     if (d.moveAll) {
       let ds = raw.s - d.grab.s;
       let dz = raw.z - d.grab.z;
@@ -14485,17 +15199,19 @@ function onElevationPointerMove(ev) {
         minZ = Math.min(minZ, p.z);
         maxZ = Math.max(maxZ, p.z);
       }
-      ds = Math.min(model.length - maxS, Math.max(-minS, ds));
-      dz = Math.min(model.height - maxZ, Math.max(-minZ, dz));
+      const { sTargets, zTargets } = elevAlignTargets(model, elevOtherCorners(model, band));
+      const hit = alignOutlineShift(d.origin, ds, dz, sTargets, zTargets, ELEVATION_SNAP * 2);
+      ds = Math.min(model.length - maxS, Math.max(-minS, hit.ds));
+      dz = Math.min(model.height - maxZ, Math.max(-minZ, hit.dz));
       d.points = d.origin.map((p) => ({ s: p.s + ds, z: p.z + dz }));
-      d.guideS = null;
-      d.guideZ = null;
+      d.guideS = guideIfLanded(d.origin, hit.guideS, "s", ds);
+      d.guideZ = guideIfLanded(d.origin, hit.guideZ, "z", dz);
       if (Math.hypot(ds, dz) > 0.01) d.moved = true;
     } else if (d.moveEdge) {
       const i = d.edge;
       const j = (i + 1) % d.origin.length;
       const a0 = d.origin[i];
-      const aligned = elevAlign(a0.s + (raw.s - d.grab.s), a0.z + (raw.z - d.grab.z), model, d.origin, [i, j]);
+      const aligned = elevAlign(a0.s + (raw.s - d.grab.s), a0.z + (raw.z - d.grab.z), model, alignPts, [i, j]);
       const next = translateOutlineEdge(d.origin, i, aligned.s - a0.s, aligned.z - a0.z, model.length, model.height);
       const moved = next[i];
       d.points = next;
@@ -14503,7 +15219,7 @@ function onElevationPointerMove(ev) {
       d.guideZ = Math.abs(moved.z - aligned.z) < 1e-6 ? aligned.guideZ : null;
       if (Math.hypot(moved.s - a0.s, moved.z - a0.z) > 0.01) d.moved = true;
     } else {
-      const aligned = elevAlign(raw.s, raw.z, model, d.origin, d.index);
+      const aligned = elevAlign(raw.s, raw.z, model, alignPts, d.index);
       d.points[d.index] = { s: aligned.s, z: aligned.z };
       d.guideS = aligned.guideS;
       d.guideZ = aligned.guideZ;
@@ -14527,6 +15243,10 @@ function onElevationPointerMove(ev) {
   d.x = p.x;
   d.y = p.y;
   if (Math.hypot(p.x - d.x0, p.y - d.y0) > 3) d.moved = true;
+  if (d.moved && alignElevationDrag(ev, d)) {
+    render();
+    return;
+  }
   if (d.moved) render();
 }
 
@@ -14534,6 +15254,19 @@ function endElevationDrag(commit) {
   const d = elevationDrag;
   elevationDrag = null;
   if (!d) return;
+  // A press that never moved leaves the corner or edge held, so its gap stays
+  // up. An actual drag drops the hold. Inserting a corner still saves it.
+  if (!d.moved && !d.inserted && isGapDrag(d)) {
+    elevHeld = holdFromDrag(d);
+    const model = elevationModel(store.doc, pack, d.face, wallsCache);
+    if (model) noteGapAxis(elevHeld, model);
+    render();
+    return;
+  }
+  if (d.moved) {
+    elevHeld = null;
+    elevTyping = null;
+  }
   if (d.part === "outline") {
     if (commit && (d.moved || d.inserted)) {
       store.pushUndo();
@@ -14544,6 +15277,11 @@ function endElevationDrag(commit) {
       finishKey = "";
       if (d.inserted) setStatusMessage("Corner added. Drag it, or click another edge. Delete removes the selected corner.", "ok");
       else if (d.moveEdge) setStatusMessage("Line moved.", "ok");
+    }
+    if (!d.moved && d.inserted) {
+      elevHeld = holdFromDrag(d);
+      const model = elevationModel(store.doc, pack, d.face, wallsCache);
+      if (model && elevHeld) noteGapAxis(elevHeld, model);
     }
     render();
     return;
@@ -14635,13 +15373,11 @@ function openWallFace() {
 }
 
 function toggleWallElevation() {
-  if (elevationOpen) {
-    elevationOpen = false;
-    faceAddPending = null;
-  } else {
+  if (elevationOpen) closeOpenFace();
+  else {
     openWallFace();
+    render();
   }
-  render();
 }
 
 // The header button opens the strip. The picture stays a picture: a finish
@@ -14663,17 +15399,62 @@ el.elevCoachOk?.addEventListener("click", () => {
 
 function flipElevationFace() {
   if (!elevationFace) return;
+  dropElevGapHold();
   elevationFace = { ...elevationFace, side: elevationFace.side === -1 ? 1 : -1 };
   render();
 }
 
-el.elevFlip?.addEventListener("click", flipElevationFace);
 el.ctxElevFlip?.addEventListener("click", flipElevationFace);
-
-el.facePlan?.addEventListener("click", () => {
-  document.getElementById("v2-plan-column")?.classList.toggle("is-plan-peek");
-  render();
+el.facePlan?.addEventListener("click", (ev) => {
+  ev.stopPropagation();
+  flipElevationFace();
 });
+
+// True only when Flash on plan opened the peek, so the end of the blink can
+// put the plan away again.
+let faceFlashPeek = false;
+
+function flashFaceOnPlan() {
+  const face = elevationFace;
+  const wall = wallsCache.find((w) => w.id === face?.wallId);
+  if (!face || !wall || !elevationOpen) return;
+  const n = wallNormal(wall, face.side === -1 ? -1 : 1);
+  const off = (wall.thickness || 0.22) / 2 + 0.12;
+  const a = { x: wall.x1 + n.x * off, y: wall.y1 + n.y * off };
+  const b = { x: wall.x2 + n.x * off, y: wall.y2 + n.y * off };
+  const column = document.getElementById("v2-plan-column");
+  if (column && !column.classList.contains("is-plan-peek")) {
+    column.classList.add("is-plan-peek");
+    faceFlashPeek = true;
+  } else {
+    faceFlashPeek = false;
+  }
+  if (wall.level && wall.level !== activeLevel) {
+    activeLevel = wall.level;
+    drawLevelSwitcher();
+  }
+  framePlanPoints([a, b, { x: wall.x1, y: wall.y1 }, { x: wall.x2, y: wall.y2 }]);
+  const sideName = faceSideTitle(face) || "This side";
+  const phrase = sideName.charAt(0).toLowerCase() + sideName.slice(1);
+  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const live = document.getElementById("v2-face-flash-live");
+  if (live) live.textContent = `${reduced ? "Showing" : "Flashing"} the ${phrase} of ${wallProductName(wall)} on the plan.`;
+  const backToFace = elevationOpen;
+  startLocateFlash([a, b], wall.level || activeLevel, {
+    pulses: 3,
+    ms: 1560,
+    segment: true,
+    steady: reduced,
+    onDone: () => {
+      if (faceFlashPeek && backToFace && elevationOpen) {
+        column?.classList.remove("is-plan-peek");
+      }
+      faceFlashPeek = false;
+    },
+  });
+}
+
+el.elevFlash?.addEventListener("click", flashFaceOnPlan);
 
 function faceBandNow() {
   const model = finishFaceModel();
@@ -14758,6 +15539,7 @@ document.getElementById("v2-face-add")?.addEventListener("click", () => {
   const face = selectedElevationFace();
   if (!face) return;
   selectedBandId = null;
+  faceWallSelected = false;
   faceAddPending = { wallId: face.wallId, side: face.side };
   openWallFace();
   render();
@@ -14767,6 +15549,12 @@ document.getElementById("v2-face-add")?.addEventListener("click", () => {
 });
 
 el.faceRemove?.addEventListener("click", () => {
+  if (faceAddPending) {
+    faceAddPending = null;
+    selectedBandId = null;
+    selectFaceWall();
+    return;
+  }
   const band = faceBandNow();
   if (band) removeFinishBand(band);
 });
@@ -14799,6 +15587,21 @@ el.faceProduct?.addEventListener("change", () => {
 for (const id of ["v2-face-bottom", "v2-face-top", "v2-face-from", "v2-face-to"]) {
   document.getElementById(id)?.addEventListener("change", commitFaceSpan);
 }
+
+el.faceWallH?.addEventListener("change", () => {
+  if (!faceWallSelected || !elevationFace) { render(); return; }
+  const value = typedMm(el.faceWallH.value);
+  if (value == null) { render(); return; }
+  const face = elevationFace;
+  finishCommit(() => {
+    const applied = applyWallTopEdit(store.doc, pack, face, value, wallsCache);
+    if (applied?.wallId && applied.wallId !== face.wallId) {
+      elevationFace = { ...face, wallId: applied.wallId };
+      if (store.primary?.kind === "segment") store.selectOne({ kind: "segment", id: applied.wallId });
+    }
+  });
+  setStatusMessage("Wall height updated.", "ok");
+});
 
 function patchFaceColour(patch) {
   const band = faceBandNow();
@@ -14937,6 +15740,15 @@ function finishFaceModel() {
   return face ? elevationModel(store.doc, pack, face, wallsCache) : null;
 }
 
+/** What the open face's inspector says about the wall beside its name: status, and which side is being viewed. */
+function faceIdentity(model) {
+  const wall = wallsCache.find((w) => w.id === model?.wallId);
+  return {
+    status: wall ? ({ existing: "Existing", mixed: "Existing and proposed" }[wall.status] || "Proposed") : "",
+    side: faceSideTitle(model),
+  };
+}
+
 function syncFinishPanel(room, slab) {
   const host = el.ctxFinish;
   if (!host) return;
@@ -14961,7 +15773,7 @@ function syncFinishPanel(room, slab) {
     bareOn: bareFinishHost?.kind === kind && bareFinishHost?.id === id,
     adding: finishAddOpen === "floor",
   });
-  const html = (room ? roomFinishHtml(store.doc, room, editingId, floorOpts("room", room.id)) : slab ? slabFinishHtml(store.doc, slab, editingId, floorOpts("slab", slab.id)) : faceFinishHtml(store.doc, model, { selectedId: selectedBandId, savedId: finishSavedBandId, adding: finishAddOpen === "face", bareAsk: finishBareAsk, bill: true, compact: true, openingId: selectedOpeningId() }))
+  const html = (room ? roomFinishHtml(store.doc, room, editingId, floorOpts("room", room.id)) : slab ? slabFinishHtml(store.doc, slab, editingId, floorOpts("slab", slab.id)) : faceFinishHtml(store.doc, model, { selectedId: faceWallSelected ? null : selectedBandId, savedId: finishSavedBandId, adding: finishAddOpen === "face", bareAsk: finishBareAsk, bill: true, compact: true, openingId: faceWallSelected ? null : selectedOpeningId(), faceOpen: elevationOpen, wallSelected: faceWallSelected, identity: faceIdentity(model) }))
     + productsHtml(store.doc, { open: finishProductsOpen });
   if (html !== finishKey) {
     // A cleared key means the finish was just saved, so the panel has to catch up.
@@ -15219,7 +16031,9 @@ function setHoverBand(id) {
 
 /** Pick a wall finish, in the list or on the elevation, and bring its card into view. */
 function selectBand(id) {
+  if (id !== selectedBandId) dropElevGapHold();
   if (id) focusElevationWall();
+  if (id) faceWallSelected = false;
   faceAddPending = null;
   if (id) openWallFace();
   selectedBandId = id;
@@ -15381,8 +16195,13 @@ el.ctxFinish?.addEventListener("pointerout", (e) => {
 });
 
 el.ctxFinish?.addEventListener("click", (e) => {
+  if (e.target.closest?.("[data-fin='face-wall']")) {
+    selectFaceWall();
+    return;
+  }
   const openingRow = e.target.closest?.("[data-opening-id]");
   if (openingRow && !e.target.closest("button[data-fin]")) {
+    faceWallSelected = false;
     faceAddPending = null;
     selectedBandId = null;
     openWallFace();
@@ -15585,6 +16404,9 @@ el.ctxFinish?.addEventListener("click", (e) => {
       selectedBandId = `run:${run.id}:${wall.id}:${model.side}`;
       noteBandSaved(selectedBandId);
     });
+  } else if (action === "band-edit") {
+    const id = row?.dataset.finBand;
+    if (id) openFinishProfile(id);
   } else if (action === "band-remove" || action === "band-remove-rule") {
     const model = finishFaceModel();
     const band = model?.finishBands.find((b) => b.id === row?.dataset.finBand);
@@ -15624,7 +16446,7 @@ el.ctxFinish?.addEventListener("click", (e) => {
         });
       }
     });
-    setStatusMessage(`${coat} is off this face. Put it back from the card under the picture.`, "ok");
+    setStatusMessage(`${coat} is off this face. Put it back from the Bare row.`, "ok");
   } else if (action === "product-add") {
     const read = (name) => String(finishField(name)?.value || "").trim();
     if (!read("p-name") && !read("p-code")) { setStatusMessage("Give the product a name or a code.", "warn"); return; }
@@ -16290,7 +17112,10 @@ function syncPlanContext() {
   syncPlanFilterButtons();
   syncServiceProfileDock();
   if (serviceDockActive()) {
-    if (el.dockContext) el.dockContext.dataset.state = "edit";
+    if (el.dockContext) {
+      el.dockContext.dataset.state = "edit";
+      el.dockContext.classList.remove("is-face-open");
+    }
     setHidden(el.ctxTypePicker, true);
     setHidden(el.inspectFields, true);
     setHidden(el.planOptions, true);
@@ -16337,9 +17162,16 @@ function syncPlanContext() {
   const editingProperty = propertySelected && !draft && refs.length === 0;
   const creating = !showInspect && !multi && !editingProperty && placingToolArmed();
   const dockState = editingProperty || showInspect ? "edit" : multiTypeable ? "edit" : creating ? "create" : "empty";
+  // The open face is the editor, so the inspector is only who the wall is and
+  // its list. The type picker, status and cut level stay with the closed wall.
+  const faceEditing = Boolean(elevationOpen && !draft && !multi && (linear || opening) && selectedElevationFace());
 
-  if (el.dockContext) el.dockContext.dataset.state = dockState;
-  setHidden(el.ctxTypePicker, !(showType || creating || room || multiTypeable));
+  if (el.dockContext) {
+    el.dockContext.dataset.state = dockState;
+    el.dockContext.classList.toggle("is-face-open", faceEditing);
+  }
+  setHidden(el.ctxTypePicker, faceEditing || !(showType || creating || room || multiTypeable));
+  if (faceEditing) setTypeFlyoutOpen(false);
   syncTypeCurrent();
   // Arming a draw tool makes picking a type the whole job, so open the chooser
   // straight away (it fills the inspector). Leaving create - either an empty
@@ -16434,11 +17266,11 @@ function syncPlanContext() {
   setHidden(el.ctxPitchWrap, !pitched);
   setHidden(el.ctxRidgeWrap, !pitched);
   setHidden(el.ctxTypeWrap, true);
-  syncInspectStatus((showInspect || creating) && !multi ? obj : null, draft || creating);
+  syncInspectStatus((showInspect || creating) && !multi && !faceEditing ? obj : null, draft || creating);
   const attachable = Boolean(obj && ATTACHABLE_KINDS.has(ref.kind));
   setHidden(el.ctxAttachWrap, !attachable);
   if (attachable && el.ctxAttach) el.ctxAttach.textContent = attachStateText(obj);
-  syncObjectLevel(obj && ref.kind !== "opening" ? obj : null);
+  syncObjectLevel(obj && ref.kind !== "opening" && !faceEditing ? obj : null);
   syncWallTop(obj && ref.kind === "segment" && !draft ? obj : null);
   syncHeightFields(obj && !draft ? obj : null, ref?.kind);
   syncWallSettingsFold(draft ? "segment" : ref?.kind);
@@ -17297,22 +18129,51 @@ const LOCATE_FLASH_MS = 1100;
 let locateFlash = null;
 let locateFlashFrame = 0;
 
+let locateFlashTimer = 0;
+
 function clearLocateFlash() {
   if (locateFlashFrame) cancelAnimationFrame(locateFlashFrame);
+  if (locateFlashTimer) clearTimeout(locateFlashTimer);
   locateFlashFrame = 0;
+  locateFlashTimer = 0;
   locateFlash = null;
 }
 
-function startLocateFlash(points, levelId) {
+function finishLocateFlash() {
+  const done = locateFlash?.onDone;
   clearLocateFlash();
-  if (!points.length) return;
-  locateFlash = { points, levelId, start: performance.now() };
+  if (done) done();
+  render();
+}
+
+/**
+ * Pulse a ring over each point. `opts.pulses` is how many blinks (the schedule
+ * uses two). `opts.segment` draws the points as one line, for a wall side.
+ * `opts.steady` is one still highlight, for reduced motion. `opts.onDone`
+ * runs when the flash ends.
+ */
+function startLocateFlash(points, levelId, opts = null) {
+  clearLocateFlash();
+  if (!points?.length) return;
+  locateFlash = {
+    points,
+    levelId,
+    start: performance.now(),
+    pulses: Number(opts?.pulses) || 2,
+    ms: Number(opts?.ms) || LOCATE_FLASH_MS,
+    steady: Boolean(opts?.steady),
+    segment: Boolean(opts?.segment),
+    onDone: typeof opts?.onDone === "function" ? opts.onDone : null,
+  };
+  if (locateFlash.steady) {
+    render();
+    locateFlashTimer = window.setTimeout(finishLocateFlash, locateFlash.ms);
+    return;
+  }
   const step = () => {
     if (!locateFlash) return;
-    if (performance.now() - locateFlash.start >= LOCATE_FLASH_MS) {
-      locateFlash = null;
-      locateFlashFrame = 0;
-      render();
+    if (performance.now() - locateFlash.start >= locateFlash.ms) {
+      finishLocateFlash();
       return;
     }
     locateFlashFrame = requestAnimationFrame(step);
@@ -17323,20 +18184,34 @@ function startLocateFlash(points, levelId) {
 
 function drawLocateFlash() {
   if (!locateFlash || locateFlash.levelId !== activeLevel) return;
-  const t = (performance.now() - locateFlash.start) / LOCATE_FLASH_MS;
-  if (t >= 1) return;
-  // Two pulses over the life of the flash, fading out as it goes.
-  const pulse = Math.abs(Math.sin(t * Math.PI * 2));
+  const ms = locateFlash.ms || LOCATE_FLASH_MS;
+  const t = locateFlash.steady ? 0 : (performance.now() - locateFlash.start) / ms;
+  if (!locateFlash.steady && t >= 1) return;
+  const pulses = locateFlash.pulses || 2;
+  const pulse = locateFlash.steady ? 1 : Math.abs(Math.sin(t * Math.PI * pulses));
+  const fade = locateFlash.steady ? 0.9 : (1 - t) * (0.35 + 0.65 * pulse);
   ctx.save();
   ctx.strokeStyle = COLOUR.hover;
-  ctx.globalAlpha = (1 - t) * (0.35 + 0.65 * pulse);
-  ctx.lineWidth = 2.4;
+  ctx.globalAlpha = fade;
   ctx.setLineDash([]);
-  for (const p of locateFlash.points) {
-    const [sx, sy] = worldToScreen(p.x, p.y);
+  if (locateFlash.segment && locateFlash.points.length >= 2) {
+    ctx.lineWidth = 5;
+    ctx.lineCap = "round";
     ctx.beginPath();
-    ctx.arc(sx, sy, 10 + 16 * pulse, 0, Math.PI * 2);
+    locateFlash.points.forEach((p, i) => {
+      const [sx, sy] = worldToScreen(p.x, p.y);
+      if (i) ctx.lineTo(sx, sy);
+      else ctx.moveTo(sx, sy);
+    });
     ctx.stroke();
+  } else {
+    ctx.lineWidth = 2.4;
+    for (const p of locateFlash.points) {
+      const [sx, sy] = worldToScreen(p.x, p.y);
+      ctx.beginPath();
+      ctx.arc(sx, sy, 10 + 16 * pulse, 0, Math.PI * 2);
+      ctx.stroke();
+    }
   }
   ctx.restore();
 }

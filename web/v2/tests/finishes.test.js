@@ -652,6 +652,9 @@ test("taking the default off leaves a listed No finish piece that can be removed
   assert.ok(closed.includes("The finish from the wall type is off"));
   assert.ok(html.includes("Put it back"), "the open bare row can put the wall type back");
   assert.ok(!closed.includes("Put it back"), "a resting row does not carry the button");
+  const bill = faceFinishHtml(doc, listed, { bill: true, compact: true });
+  assert.ok(bill.includes("Put it back") && bill.includes("Change the area"), "the closed inspector can restore a partial bare patch, or change how much is bare");
+  assert.ok(!bill.includes(">Finished "), "the closed list does not repeat the finish area above the rows");
   assert.ok(!html.includes("Remove this to put it back"));
   assert.ok(!html.includes("data-fin-band=\"default:"), "taking plaster off does not leave a plaster card");
   const bare = elevationModel(doc, pack, face, walls).finishBands.find((b) => b.category === "none");
@@ -690,7 +693,7 @@ test("a finish under a window is described by the window", () => {
   assert.ok(html.includes("Under the window, up to 900 mm"), "the patch is named from the opening above it");
 });
 
-test("finishes of one type stay in wall order, and an overlap is named", () => {
+test("finishes of one type stay in wall order, and an overlap is not a warning", () => {
   const doc = normalizeDoc({
     segments: [{ id: "w1", sku: "TSP_MAS009", level: "01 GFL", x1: 0, y1: 0, x2: 6, y2: 0 }],
   });
@@ -710,7 +713,8 @@ test("finishes of one type stay in wall order, and an overlap is named", () => {
   assert.ok(!html.includes("Paint areas overlap"), "patches that miss each other are not an overlap");
   createFinishRun(doc, walls[0], 1, { category: "paint", outline: [[1, 0], [3, 0], [3, 1], [1, 1]] });
   const overlap = faceFinishHtml(doc, elevationModel(doc, pack, face, walls));
-  assert.ok(overlap.includes("Paint areas overlap"), "two paints on the same patch are named");
+  assert.ok(!overlap.includes("Paint areas overlap"), "two paints on the same patch are drawn on the elevation, not warned");
+  assert.ok(!overlap.includes("clash"));
 });
 
 test("a shape drawn on a wall is measured as that shape, and a coat takes it off the default", () => {
@@ -808,4 +812,70 @@ test("room rules take a typed product and no longer offer floor rules", () => {
   const html = roomFinishHtml(doc, doc.rooms[0]);
   assert.ok(html.includes('data-fin="rule-type"') && html.includes('data-fin="rule-product-name"'));
   assert.ok(html.includes('data-fin="new-rule-category"') && !html.includes('data-fin="new-surface"'));
+});
+
+test("an open face lists the wall, then openings, finishes, and the room rule apart", () => {
+  const doc = build(
+    { openings: [{ id: "o1", sku: "TSP_WN1212", roomId: "r1", edgeIndex: 0, t: 0.5 }] },
+    { name: "Kitchen", finishes: [{ id: "rule1", surface: "wall", category: "paint", bottom: 1.2, faces: "all" }] },
+  );
+  const walls = deriveWalls(doc, pack).filter((w) => w.category === "wall");
+  let host = null;
+  let side = 1;
+  let model = null;
+  for (const wall of walls) {
+    for (const s of [1, -1]) {
+      const candidate = elevationModel(doc, pack, { wallId: wall.id, side: s }, walls);
+      if (candidate.openings.length && candidate.finishBands.some((b) => b.source === "rule")) {
+        host = wall;
+        side = s;
+        model = candidate;
+        break;
+      }
+    }
+    if (host) break;
+  }
+  assert.ok(host && model, "the window's room side carries the rule");
+  createFinishRun(doc, host, side, { category: "wallTile", bottom: 0, top: 1.2 });
+  model = elevationModel(doc, pack, { wallId: host.id, side }, walls);
+  const html = faceFinishHtml(doc, model, {
+    faceOpen: true, bill: true, wallSelected: true, identity: { status: "Existing", side: "Kitchen side" },
+  });
+  assert.ok(html.indexOf('data-fin-block="identity"') < html.indexOf('data-fin="face-wall"'), "who the wall is comes first");
+  assert.ok(html.includes('class="fin-pill">Existing<') && html.includes('class="fin-pill">Kitchen side<'), "status and side are pills");
+  assert.ok(html.includes("<h3>Finishes on this face</h3>") && !html.includes("fin-mark"), "the finishes heading has no number");
+  assert.ok(html.includes('class="fin-line is-selected" data-fin="face-wall"'), "the wall row is the selected row");
+  assert.ok(!html.includes("data-fin-summary") && !html.includes('data-fin="default-ask"'), "no coverage box beside the face editor");
+  assert.ok(!html.includes("data-fin-newband") && !html.includes("fin-mini") && !html.includes('data-fin="add-open"'), "no add form and no second thumbnail");
+  assert.ok(!html.includes("fin-kind") && !html.includes("fin-group"), "rows are single lines, not cards or type groups");
+  const wallAt = html.indexOf('data-fin="face-wall"');
+  const openAt = html.indexOf('data-fin-block="openings"');
+  const finAt = html.indexOf("Finishes on this face");
+  const ruleAt = html.indexOf(">Room rule<");
+  assert.ok(wallAt >= 0 && wallAt < openAt && openAt < finAt && finAt < ruleAt);
+  assert.ok(html.includes("Drag the top, or type the height"));
+  assert.ok(!html.includes("A door uses this same box"));
+  assert.ok(html.includes("Hatched on the picture. Editing it changes every wall of the Kitchen, not only this face."));
+  assert.match(html, /<b>1 finish<\/b>/);
+  assert.ok(!html.includes("clash"));
+  const tileId = model.finishBands.find((b) => b.source === "run").id;
+  const ruleId = model.finishBands.find((b) => b.source === "rule").id;
+  assert.ok(html.indexOf(`data-fin-band="${tileId}"`) < ruleAt, "the finish stays in the face list");
+  assert.ok(html.indexOf(`data-fin-band="${ruleId}"`) > ruleAt, "the rule leaves the face list");
+  assert.ok(html.includes('class="fin-on"') || html.includes('class="fin-warn"'));
+  assert.ok(!html.includes("elev-preview") && !html.includes("v2-ctx-elev"));
+  const closed = faceFinishHtml(doc, model, { bill: true });
+  assert.ok(closed.includes(">Wall finishes<"));
+  const closedRule = closed.indexOf(">Room rule<");
+  assert.ok(closedRule > closed.indexOf(">Wall finishes<"), "the closed inspector gives the room rule its own section");
+  assert.ok(closed.includes("Hatched on the picture. Editing it changes every wall of the Kitchen"));
+  assert.ok(closed.includes("is-rule"), "a room rule keeps the hatch");
+  assert.ok(closed.indexOf(`data-fin-band="${tileId}"`) < closedRule, "this face's finish stays out of the room rule");
+  assert.ok(closed.indexOf(`data-fin-band="${ruleId}"`) > closedRule, "the rule leaves this face's list");
+  assert.match(closed, /<b>1 finish<\/b>/);
+  assert.ok(!closed.includes("clash"));
+  assert.ok(!closed.includes(">Finished "), "the area is on the row, not repeated as Finished");
+  const bare = faceFinishHtml(doc, { ...model, openings: [], finishBands: model.finishBands.filter((b) => b.source !== "rule") }, { faceOpen: true, bill: true });
+  assert.ok(!bare.includes(">Room rule<"), "the room rule section waits until a rule applies");
+  assert.ok(!bare.includes("A door uses this same box"));
 });

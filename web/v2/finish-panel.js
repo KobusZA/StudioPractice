@@ -352,10 +352,10 @@ function faceCoverage(model, bands) {
   const addedQty = added.reduce((sum, b) => sum + b.quantity, 0);
   return {
     face: model.length * model.height,
+    // Area with a finish on it. Overlap is counted once, so this is not the sum of the cards.
     finished: addedCover.excess >= 0.02 ? addedCover.finished : addedQty,
     plaster: defaults.reduce((sum, b) => sum + b.quantity, 0),
     plasterCategory: defaults[0]?.category || null,
-    hasAdded: added.length > 0,
   };
 }
 
@@ -378,16 +378,14 @@ function faceSummaryHtml(model, bands, { confirming = false } = {}) {
   const plaster = cover.plaster >= 0.02
     ? `<ul class="fin-sum-list"><li class="fin-sum-row"><i class="fin-swatch" style="background:${esc(finishSwatch(cover.plasterCategory))}"></i><span class="fin-grow">${esc(plasterLabel)}, from the wall type</span><span>${formatM2(cover.plaster)}</span>${button}</li></ul>${ask}`
     : "";
-  const finished = cover.hasAdded
-    ? `<p class="fin-sum-line"><span>Finished ${formatM2(cover.finished)}</span></p>`
-    : "";
-  const bare = !plaster && cover.face - cover.finished >= 0.02
-    ? `<p class="fin-sum-line"><span>Bare ${formatM2(Math.max(0, cover.face - cover.finished))}</span></p>`
+  // "Unfinished" is the face with no finish on it. A Bare row means the wall
+  // type's coat is off, which is a different thing, so this line does not say Bare.
+  const unfinished = !plaster && cover.face - cover.finished >= 0.02
+    ? `<p class="fin-sum-line"><span>Unfinished ${formatM2(Math.max(0, cover.face - cover.finished))}</span></p>`
     : "";
   return `<div class="fin-summary" data-fin-summary>
     <p class="fin-sum-head"><span>This face</span><span>${formatM2(cover.face)}</span></p>
-    ${finished}
-    ${bare}
+    ${unfinished}
     ${plaster}
   </div>`;
 }
@@ -410,8 +408,16 @@ function bandBox(band) {
   return { from, to, bottom, top };
 }
 
+/** The patch covers this whole face, within a small tolerance. */
+function coversFace(band, model) {
+  const box = bandBox(band);
+  if (!box || !(model.length > 0) || !(model.height > 0)) return false;
+  return box.from <= 0.02 && model.length - box.to <= 0.02
+    && box.bottom <= 0.02 && model.height - box.top <= 0.02;
+}
+
 /** Left to right, then low to high: the order the cards read, matching the elevation. */
-function compareBands(a, b) {
+export function compareBands(a, b) {
   const ba = bandBox(a);
   const bb = bandBox(b);
   if (!ba && !bb) return 0;
@@ -515,6 +521,17 @@ function bandPlace(band, model) {
   return place || "On this face";
 }
 
+/**
+ * The face editor's info line. The place sentence is the same one the finish
+ * card shows (`fin-where`). A run adds its area. A room rule stays the place
+ * sentence alone, because that area is not the whole room.
+ */
+export function bandFaceLine(band, model) {
+  const place = bandPlace(band, model);
+  if (!place || band.source === "rule" || band.category === "none" || !Number.isFinite(band.quantity)) return place;
+  return `${place} · ${formatQty(band.quantity, band.unit)}`;
+}
+
 /** The face in miniature. `shape` is optional: an empty draft still shows the wall and its openings. */
 function faceMiniSvg(model, shape = "") {
   if (!(model.length > 0) || !(model.height > 0)) return "";
@@ -549,10 +566,11 @@ export function draftBandPreviewHtml(model, draft) {
 }
 
 /** One finish on a wall face. Resting rows are a line; the selected row opens the fields. */
-function bandCardHtml(doc, b, model, { selectedId, savedId, index, total, compact = false }) {
+function bandCardHtml(doc, b, model, { selectedId, savedId, index, total, compact = false, ruleMark = false }) {
   const spec = FINISH_CATEGORIES[b.category];
   const product = finishProductById(doc, b.productId);
   const picked = b.id === selectedId;
+  const bare = b.category === "none";
   const editing = picked && !compact;
   const label = spec?.label || b.category;
   const which = total > 1 ? `${label} ${index} of ${total}` : "";
@@ -577,12 +595,22 @@ function bandCardHtml(doc, b, model, { selectedId, savedId, index, total, compac
     : b.source === "rule"
       ? `<button type="button" data-fin="band-remove-rule" title="Removes the rule from every wall of its room">Remove</button>`
       : `<button type="button" data-fin="band-remove">Remove</button>`;
+  // The closed inspector's rows do not open. A bare patch still needs a way
+  // back, and a partial one a way to change how much of the face it covers.
+  const bareActions = bare && compact;
+  const changeArea = bareActions && !coversFace(b, model)
+    ? `<button type="button" data-fin="band-edit" title="Open this face and change how much of it is bare">Change the area</button>`
+    : "";
+  const ruleSwatch = ruleMark
+    ? `<i class="fin-swatch is-rule" style="background-color:${esc(finishSwatch(b.category))}"></i>`
+    : "";
   const head = editing
     ? `<div class="fin-kind-head">
         <select data-fin="band-type" aria-label="Finish type">${surfaceTypeOptions("wall", b.category, { none: true })}</select>
         <span class="fin-area">${area}</span>
       </div>`
     : `<div class="fin-kind-head">
+        ${ruleSwatch}
         <span class="fin-kind-name">${esc(which || label)}</span>
         <span class="fin-area">${area}</span>
       </div>`;
@@ -596,7 +624,7 @@ function bandCardHtml(doc, b, model, { selectedId, savedId, index, total, compac
       ${productLine}
       ${badge}
       ${editing || needs ? productField : ""}
-      ${editing ? `<div class="fin-btns">${remove}</div>` : ""}
+      ${editing || bareActions ? `<div class="fin-btns">${remove}${changeArea}</div>` : ""}
     </div>
   </div>`;
 }
@@ -610,7 +638,7 @@ export function finishCalloutHtml(doc, band, model) {
   const product = finishProductById(doc, band.productId);
   const label = spec?.label || band.category;
   const same = (model.finishBands || [])
-    .filter((b) => b.source !== "default" && b.category === band.category)
+    .filter((b) => b.source !== "default" && b.source !== "rule" && b.category === band.category)
     .sort(compareBands);
   const index = same.findIndex((b) => b.id === band.id) + 1;
   const bare = band.category === "none";
@@ -696,8 +724,9 @@ function openingPolys(model) {
 }
 
 /**
- * Which finishes sit on which. A finish on a coat is said quietly ("Paint on
- * the plaster"). Two coats, or two finishes of the same kind, are a warning.
+ * Which finishes sit on the wall-type coat. Said quietly ("Paint on the
+ * plaster"). A second finish on the same patch is drawn on the elevation,
+ * and is not a warning: which pairs are a problem is still undecided.
  * The plaster drawn under a coat is the coat's own area, so that pair is not
  * reported again.
  */
@@ -710,7 +739,6 @@ function overlapNotesHtml(model, bands) {
   const coatPolys = coats.map(bandPolygon);
   const labelOf = (b) => FINISH_CATEGORIES[b.category]?.label || b.category;
   const quiet = new Map();
-  const warns = new Map();
 
   const finishCats = [...new Set(finishes.map((b) => b.category))];
   for (const category of finishCats) {
@@ -741,41 +769,10 @@ function overlapNotesHtml(model, bands) {
     }
   }
 
-  const stack = [...coats, ...finishes];
-  const order = categoriesForSurface("wall");
-  const seen = new Set();
-  for (let i = 0; i < stack.length; i += 1) {
-    for (let j = i + 1; j < stack.length; j += 1) {
-      const a = stack[i];
-      const b = stack[j];
-      const coatA = FINISH_CATEGORIES[a.category]?.layer === "coat";
-      const coatB = FINISH_CATEGORIES[b.category]?.layer === "coat";
-      if (coatA !== coatB) continue;
-      const [first, second] = order.indexOf(a.category) <= order.indexOf(b.category) ? [a, b] : [b, a];
-      const key = `${first.category}|${second.category}`;
-      if (!seen.has(key)) {
-        seen.add(key);
-        warns.set(key, { pieces: [], first, second });
-      }
-      warns.get(key).pieces.push(...clipPolygon(bandPolygon(a), bandPolygon(b)));
-    }
-  }
-
-  const quietHtml = [...quiet.values()]
+  return [...quiet.values()]
     .filter((row) => row.area >= 0.02)
     .map((row) => `<p class="fin-on">${esc(row.text)}, ${formatM2(row.area)}.</p>`)
     .join("");
-  const warnHtml = [...warns.values()].map((row) => {
-    const area = netArea(model, row.pieces, openings);
-    if (area < 0.02) return "";
-    const a = labelOf(row.first);
-    const b = labelOf(row.second);
-    const text = row.first.category === row.second.category
-      ? `${a} areas overlap`
-      : `${a} overlaps ${b.toLowerCase()}`;
-    return `<p class="fin-warn">${esc(text)}, ${formatM2(area)}.</p>`;
-  }).join("");
-  return quietHtml + warnHtml;
 }
 
 function countWords(n, unit) {
@@ -785,7 +782,9 @@ function countWords(n, unit) {
 
 /** Cards under their type, in the order they sit along the wall. */
 function faceGroupsHtml(doc, model, opts) {
-  const added = (model.finishBands || []).filter((b) => b.source !== "default").sort(compareBands);
+  const added = (model.finishBands || [])
+    .filter((b) => b.source !== "default" && !(opts.splitRules && b.source === "rule"))
+    .sort(compareBands);
   const byCat = new Map();
   for (const b of added) {
     const list = byCat.get(b.category) || [];
@@ -806,6 +805,7 @@ function faceGroupsHtml(doc, model, opts) {
       index: i + 1,
       total: list.length,
       compact: Boolean(opts.compact),
+      ruleMark: Boolean(opts.ruleMark),
     })).join("");
     const amount = id === "none" ? "" : `<span>${formatQty(qty, unit)}</span>`;
     const head = list.length > 1
@@ -839,30 +839,190 @@ function openingsBillHtml(model, selectedId) {
   return `<section class="fin-sec" data-fin-block="openings"><h4>Openings</h4><div class="fin-kinds">${rows}</div></section>`;
 }
 
+/** The room a wall rule belongs to, from the rule id stored on the band. */
+function ruleRoomLabel(doc, rules) {
+  const names = [];
+  for (const band of rules) {
+    const room = (doc.rooms || []).find((r) => (r.finishes || []).some((rule) => rule.id === band.sourceId));
+    const name = String(room?.name || "").trim();
+    if (name && !names.includes(name)) names.push(name);
+  }
+  if (names.length === 1) return names[0];
+  if (names.length > 1) return names.join(" and ");
+  return "this room";
+}
+
+function ruleLead(doc, rules) {
+  const room = ruleRoomLabel(doc, rules);
+  const ofRoom = room === "this room" ? "this room" : `the ${room}`;
+  return `Hatched on the picture. Editing it changes every wall of ${ofRoom}, not only this face.`;
+}
+
+/** Room rules sit apart from this face's own finishes, in both inspectors. */
+function ruleBillHtml(doc, model, bands, opts) {
+  const rules = bands.filter((b) => b.source === "rule").sort(compareBands);
+  if (!rules.length) return "";
+  const cards = rules.map((b) => {
+    const same = rules.filter((r) => r.category === b.category);
+    return bandCardHtml(doc, b, model, {
+      selectedId: opts.selectedId,
+      savedId: opts.savedId,
+      index: same.indexOf(b) + 1,
+      total: same.length,
+      compact: true,
+      ruleMark: true,
+    });
+  }).join("");
+  return `<section class="fin-sec" data-fin-block="rule">
+    <h4>Room rule</h4>
+    <p class="fin-note">${esc(ruleLead(doc, rules))}</p>
+    <div class="fin-kinds">${cards}</div>
+  </section>`;
+}
+
+function finishCountWords(n) {
+  return n === 1 ? "1 finish" : `${n} finishes`;
+}
+
+function lineSwatchHtml(swatch) {
+  if (swatch.kind === "rule") return `<i class="fin-line-sw is-rule" style="background-color:${esc(swatch.fill)}"></i>`;
+  if (swatch.kind) return `<i class="fin-line-sw is-${swatch.kind}"></i>`;
+  return `<i class="fin-line-sw" style="background:${esc(swatch.fill)}"></i>`;
+}
+
+/** One row of the open face's inspector: swatch, name, where, product, and area on the right. */
+function lineHtml({ attrs = "", selected = false, swatch, name, place = "", prod = "", warn = false, area = "" }) {
+  return `<button type="button" class="fin-line${selected ? " is-selected" : ""}" ${attrs} aria-pressed="${selected ? "true" : "false"}">
+    ${lineSwatchHtml(swatch)}
+    <span class="fin-line-name">${esc(name)}</span>
+    <span class="fin-line-place">${esc(place)}</span>
+    ${prod ? `<span class="fin-line-prod${warn ? " is-warn" : ""}">${esc(prod)}</span>` : ""}
+    <span class="fin-line-area">${esc(area)}</span>
+  </button>`;
+}
+
+/** "Paint 2 of 3" where a type repeats, the plain type otherwise. A room rule is not counted: it has its own section. */
+function bandHeading(band, bands) {
+  if (band.category === "none") return "Bare";
+  const label = FINISH_CATEGORIES[band.category]?.label || band.category;
+  const same = bands.filter((b) => b.source !== "default" && b.source !== "rule" && b.category === band.category).sort(compareBands);
+  const index = same.findIndex((b) => b.id === band.id) + 1;
+  return same.length > 1 && index > 0 ? `${label} ${index} of ${same.length}` : label;
+}
+
+function bandLineHtml(doc, band, model, bands, selectedId) {
+  const spec = FINISH_CATEGORIES[band.category];
+  const bare = band.category === "none";
+  const product = finishProductById(doc, band.productId);
+  const named = Boolean(product) && !bare;
+  const needs = !named && !bare && Boolean(spec?.needsProduct);
+  const fill = band.fill || finishSwatch(band.category);
+  return lineHtml({
+    attrs: `data-fin-band="${esc(band.id)}"`,
+    selected: band.id === selectedId,
+    swatch: bare ? { kind: "none" } : band.source === "rule" ? { kind: "rule", fill } : { fill },
+    name: bandHeading(band, bands),
+    place: bandPlace(band, model),
+    prod: named ? productChoiceLabel(product) : needs ? "Needs a product" : "",
+    warn: needs,
+    area: bare ? "" : formatQty(band.quantity, band.unit),
+  });
+}
+
+/** Who this wall is: its type, then thickness, status and the side being viewed as pills. */
+function identityHtml(model, identity = {}) {
+  const pills = [];
+  if (Number.isFinite(model.thickness) && model.thickness > 0) pills.push(`${mm(model.thickness)} mm`);
+  if (identity.status) pills.push(identity.status);
+  if (identity.side) pills.push(identity.side);
+  return `<div class="fin-identity" data-fin-block="identity">
+    <p class="fin-id-name">${esc(model.name || "This wall")}</p>
+    <div class="fin-pills">${pills.map((p) => `<span class="fin-pill">${esc(p)}</span>`).join("")}</div>
+  </div>`;
+}
+
+/**
+ * The inspector while the face is open. The face is the editor, so this is
+ * only a list: who the wall is, the wall row, its openings, the finishes on
+ * this face, and the room rule apart. It has no thumbnail, no add form and
+ * no coverage box. `opts.selectedId` is the picked band, `opts.openingId`
+ * the picked opening, `opts.identity` the status and side shown as pills.
+ */
+function faceOpenHtml(doc, model, opts) {
+  const bands = model.finishBands || [];
+  const notes = overlapNotesHtml(model, bands);
+  const runs = bands.filter((b) => b.source !== "default" && b.source !== "rule").sort(compareBands);
+  const rules = bands.filter((b) => b.source === "rule").sort(compareBands);
+  const added = runs.filter((b) => b.category !== "none").length;
+  const wall = lineHtml({
+    attrs: 'data-fin="face-wall"',
+    selected: Boolean(opts.wallSelected),
+    swatch: { fill: "#cfc6b8" },
+    name: "Wall",
+    place: model.name || "This wall",
+    prod: "Drag the top, or type the height",
+    area: `${mm(model.height)} mm`,
+  });
+  const openings = (model.openings || []).map((o) => {
+    const door = o.category === "door";
+    return lineHtml({
+      attrs: `data-opening-id="${esc(o.id)}"`,
+      selected: o.id === opts.openingId,
+      swatch: { kind: "opening" },
+      name: o.name || (door ? "Door" : "Window"),
+      place: `${door ? "Door" : `Sill ${mm(o.sill)} mm`} · ${mm(Math.max(0, o.offset))} mm from the left`,
+      area: `${mm(o.width)} × ${mm(o.height)}`,
+    });
+  }).join("");
+  const finishes = runs.map((b) => bandLineHtml(doc, b, model, bands, opts.selectedId)).join("")
+    || '<p class="fin-note">Nothing added on this face yet.</p>';
+  const ruleSection = rules.length
+    ? `<section class="fin-block" data-fin-block="rule">
+      <h3>Room rule</h3>
+      <p class="fin-lead">${esc(ruleLead(doc, rules))}</p>
+      <div class="fin-lines">${rules.map((b) => bandLineHtml(doc, b, model, bands, opts.selectedId)).join("")}</div>
+    </section>`
+    : "";
+  return `<section class="fin-sec fin-open" data-fin-block="face">
+    ${identityHtml(model, opts.identity)}
+    <div class="fin-block" data-fin-block="wall">${wall}</div>
+    <section class="fin-block" data-fin-block="openings">
+      <h3>Openings</h3>
+      <div class="fin-lines">${openings}</div>
+    </section>
+    <section class="fin-block" data-fin-block="finishes">
+      <h3>Finishes on this face</h3>
+      <p class="fin-note fin-tally"><b>${finishCountWords(added)}</b></p>
+      <div class="fin-lines">${finishes}</div>
+      ${notes}
+    </section>
+    ${ruleSection}
+  </section>`;
+}
+
 export function faceFinishHtml(doc, model, opts = {}) {
+  if (opts.faceOpen) return faceOpenHtml(doc, model, opts);
   const bands = model.finishBands || [];
   const first = "wallTile";
   const bill = Boolean(opts.bill);
   const adding = Boolean(opts.adding) && !bill;
-  const groups = faceGroupsHtml(doc, model, opts);
   const notes = overlapNotesHtml(model, bands);
-  const clashes = (notes.match(/class="fin-warn"/g) || []).length;
-  const added = bands.filter((b) => b.source !== "default" && b.category !== "none").length;
+  const groups = faceGroupsHtml(doc, model, { ...opts, splitRules: bill });
+  const added = bands.filter((b) => b.source !== "default" && b.source !== "rule" && b.category !== "none").length;
   const tally = bill
-    ? `<p class="fin-note">${added === 1 ? "1 finish" : `${added} finishes`}${clashes ? ` · ${clashes === 1 ? "1 clash" : `${clashes} clashes`}` : ""}</p>`
+    ? `<p class="fin-note fin-tally"><b>${finishCountWords(added)}</b></p>`
     : "";
-  return `<section class="fin-sec" data-fin-block="face">
-    <h4>Wall finishes</h4>
-    <div class="fin-surface" data-fin-surface="face">
-      <div class="fin-rest"${adding ? " hidden" : ""}>
+  const rules = bill ? ruleBillHtml(doc, model, bands, opts) : "";
+  const list = `<div class="fin-rest"${adding ? " hidden" : ""}>
         ${tally}
         ${faceSummaryHtml(model, bands, { confirming: Boolean(opts.bareAsk) })}
         ${groups || '<p class="fin-note">Nothing added on this face yet.</p>'}
         ${notes}
+        ${rules}
         ${bill ? "" : `<button type="button" class="fin-add-btn" data-fin="add-open">Add a finish</button>`}
-      </div>
-      ${bill ? openingsBillHtml(model, opts.openingId || null) : ""}
-      <div class="fin-add-floor fin-add-sheet" data-fin-newband${adding ? "" : " hidden"}>
+      </div>`;
+  // The inspector's bill has no add form: the finish is added from the face editor.
+  const sheet = bill ? "" : `<div class="fin-add-floor fin-add-sheet" data-fin-newband${adding ? "" : " hidden"}>
         <div class="fin-sheet-head">
           <p class="fin-kicker">Add a finish</p>
           <button type="button" class="fin-bare" data-fin="add-close">Back</button>
@@ -901,7 +1061,13 @@ export function faceFinishHtml(doc, model, opts = {}) {
           <button type="button" data-fin="band-draw" title="Click the corners on the elevation. Double-click or Esc finishes the shape. The height and millimetres in this form are not used.">Draw area</button>
         </div>
         <p class="fin-note">Draw area is a free shape on the elevation. The height and the millimetres here are not used.</p>
-      </div>
+      </div>`;
+  return `<section class="fin-sec" data-fin-block="face">
+    <h4>Wall finishes</h4>
+    <div class="fin-surface" data-fin-surface="face">
+      ${list}
+      ${bill ? openingsBillHtml(model, opts.openingId || null) : ""}
+      ${sheet}
     </div>
   </section>`;
 }

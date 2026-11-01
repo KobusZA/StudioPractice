@@ -2337,37 +2337,114 @@ body.library-home {
   display: none;
 }
 
+.face-editor-band {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.face-editor-band[hidden] { display: none; }
+
 .face-editor {
+  flex: 1 1 auto;
+  min-width: 0;
   display: grid;
   gap: 6px;
-  margin: 0 0 6px;
   padding: 8px;
   border: 1px solid var(--copper, #b2451e);
   border-radius: 4px;
   background: #fffdf8;
 }
 
-.face-editor[hidden] { display: none; }
+#v2-face-add {
+  flex: 0 0 auto;
+  align-self: center;
+  height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--copper-dark, #8d3416);
+  border-radius: 4px;
+  background: var(--copper, #b2451e);
+  color: #fffdf8;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+#v2-face-add:hover { background: var(--copper-dark, #8d3416); }
 
 .face-editor-line {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 
 .face-editor-line[hidden] { display: none; }
 
+/* Name stays on the left and truncates. Type, Product, and Remove stay a fixed group on the right, so Remove does not slide when the name or the place line changes length. */
+.face-editor-main {
+  flex-wrap: nowrap;
+  align-items: center;
+}
+
 .face-swatch {
   width: 14px;
   height: 14px;
+  flex: 0 0 auto;
   border-radius: 2px;
   box-shadow: inset 0 0 0 1px rgba(26, 22, 18, 0.2);
 }
 
-.face-who { min-width: 140px; }
-.face-who strong { display: block; font-size: 0.92rem; }
-.face-who span { display: block; font-size: 0.78rem; color: var(--ink-soft, #5c5348); }
+.face-who {
+  flex: 1 1 0;
+  min-width: 7.5rem;
+  overflow: hidden;
+}
+.face-who strong,
+.face-who span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.face-who strong { font-size: 0.92rem; }
+.face-who span { font-size: 0.78rem; color: var(--ink-soft, #5c5348); }
+
+.face-editor-controls {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: 8px;
+  flex: 0 1 auto;
+  min-width: 0;
+  margin-left: auto;
+}
+
+.face-editor-controls label {
+  flex: 1 1 148px;
+  width: 148px;
+  max-width: 148px;
+  min-width: 5.5rem;
+}
+
+.face-editor-controls select,
+.face-editor-controls input {
+  width: 100%;
+  min-width: 0;
+}
+
+#v2-face-remove {
+  width: 7.5rem;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  color: var(--copper-dark, #8d3416);
+}
 
 .face-editor label {
   display: grid;
@@ -2378,6 +2455,9 @@ body.library-home {
   text-transform: uppercase;
   color: var(--ink-muted, #8a8074);
 }
+
+/* display:grid above beats the hidden attribute, so Up the wall / Along the wall stay painted. */
+.face-editor label[hidden] { display: none; }
 
 .face-editor input,
 .face-editor select {
@@ -2414,8 +2494,6 @@ body.library-home {
   color: var(--copper-dark, #8d3416);
 }
 
-#v2-face-remove { color: var(--copper-dark, #8d3416); }
-
 .key-plan-btn {
   display: inline-flex;
   align-items: center;
@@ -2424,13 +2502,9 @@ body.library-home {
   padding: 3px 8px 3px 4px;
 }
 
-.key-plan-btn[aria-expanded="true"] {
-  border-color: var(--copper, #b2451e);
-}
-
 .key-plan {
-  width: 72px;
-  height: 36px;
+  width: 96px;
+  height: 48px;
   display: block;
   background: #fffdf8;
   border-radius: 2px;
@@ -2438,7 +2512,20 @@ body.library-home {
 
 .key-plan .key-wall { stroke: #8a8074; stroke-width: 1.25; }
 .key-plan .key-this { stroke: #1a1612; stroke-width: 2.5; }
-.key-plan .key-side { stroke: var(--copper, #b2451e); stroke-width: 3; stroke-linecap: round; }
+.key-plan .key-side { stroke: var(--copper, #b2451e); stroke-width: 3.5; stroke-linecap: round; }
+.key-plan .key-room { fill: #8a8074; font-family: "Source Sans 3", sans-serif; }
+.key-plan .key-room.is-on { fill: var(--copper-dark, #8d3416); font-weight: 700; }
+
+.status-action {
+  font: inherit;
+  font-weight: 700;
+  color: var(--copper-dark, #8d3416);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+}
 
 .key-plan-copy {
   display: grid;
@@ -2450,9 +2537,17 @@ body.library-home {
 .key-plan-copy span { font-size: 0.68rem; color: var(--ink-muted, #8a8074); }
 
 .face-hover {
+  position: absolute;
+  z-index: 4;
   margin: 0;
+  padding: 2px 8px;
+  border-radius: 3px;
+  border: 1px solid rgba(26, 22, 18, 0.12);
+  background: rgba(255, 253, 248, 0.94);
   font-size: 0.78rem;
   color: var(--ink-soft, #5c5348);
+  pointer-events: none;
+  white-space: nowrap;
 }
 
 .face-hover:empty { display: none; }
@@ -2528,14 +2623,10 @@ button.fin-kind {
   background: transparent;
 }
 
-/* Fit sits with Flip, and the pair stays on the right of the title. */
+/* Fit stays on the right of the title. */
 #v2-elev-fit {
   margin-left: auto;
   margin-right: 0;
-}
-
-#v2-elev-flip {
-  margin-left: 8px;
 }
 
 .svc-profile-title-row {
@@ -2900,10 +2991,12 @@ button.fin-kind {
 .elev-svg { display: block; }
 .elev-bg { fill: #fffdf8; }
 .elev-wall { fill: #e4dccd; stroke: #1a1612; stroke-width: 1.5; }
+.elev-foundation { fill: #d4cbbd; stroke: #5c5348; stroke-width: 1.25; stroke-dasharray: 5 3; cursor: pointer; }
 .elev-wall-host,
 .elev-host .elev-band { cursor: pointer; }
 .elev-wall-ghost { fill: none; stroke: #8a8174; stroke-width: 1; stroke-dasharray: 4 3; pointer-events: none; }
 .elev-wall-top { fill: transparent; cursor: ns-resize; }
+.elev-wall-top-handle.is-wall-selected { fill: var(--copper, #b2451e); }
 .elev-guide { stroke: #1a1612; stroke-width: 1.25; }
 .elev-band { fill: rgba(178, 69, 30, 0.22); }
 .elev-level { stroke: #8a8174; stroke-width: 1; stroke-dasharray: 6 4; }
@@ -2918,7 +3011,14 @@ button.fin-kind {
 .elev-handle { fill: #fff; stroke: var(--copper, #b2451e); stroke-width: 1.5; }
 .elev-handle-l, .elev-handle-r { cursor: ew-resize; }
 .elev-handle-t, .elev-handle-b { cursor: ns-resize; }
+.elev-handle-tl, .elev-handle-br { cursor: nwse-resize; }
+.elev-handle-tr, .elev-handle-bl { cursor: nesw-resize; }
 .elev-dim { font-size: 11px; fill: #1a1612; pointer-events: none; }
+.elev-dim-strong { font: 700 12px "Source Sans 3", sans-serif; fill: var(--copper-dark, #8d3416); pointer-events: none; }
+.elev-dim.elev-gap,
+.elev-measure-bg.elev-gap { pointer-events: auto; cursor: text; }
+.elev-measure-bg.is-editing { stroke: var(--copper, #b2451e); stroke-width: 1.5px; }
+.elev-dim.is-editing { fill: var(--copper-dark, #8d3416); }
 .elev-dim-line,
 .elev-dim-ext,
 .elev-dim-tick { stroke: #1a1612; stroke-width: 0.7; pointer-events: none; }
@@ -6234,6 +6334,12 @@ input.sheet-set-list-name:hover, input.sheet-set-list-name:focus { border-color:
 .elev-outline-edge.is-ew { cursor: ew-resize; }
 .elev-outline-edge.is-nwse { cursor: nwse-resize; }
 .elev-outline-edge.is-nesw { cursor: nesw-resize; }
+/* Shift, or Corner, flips every edge at once. The other class puts the resize cursor back. */
+#v2-elevation-body.is-edge-add .elev-outline-edge { cursor: copy; }
+#v2-elevation-body.is-edge-resize .elev-outline-edge.is-ns { cursor: ns-resize; }
+#v2-elevation-body.is-edge-resize .elev-outline-edge.is-ew { cursor: ew-resize; }
+#v2-elevation-body.is-edge-resize .elev-outline-edge.is-nwse { cursor: nwse-resize; }
+#v2-elevation-body.is-edge-resize .elev-outline-edge.is-nesw { cursor: nesw-resize; }
 .elev-handle.is-selected { fill: #1a1612; }
 .elev-band.is-hot { fill-opacity: 0.7 !important; }
 .elev-band.is-selected { stroke: #1a1612; stroke-width: 1.5; fill-opacity: 0.6 !important; }
@@ -6340,6 +6446,8 @@ input.sheet-set-list-name:hover, input.sheet-set-list-name:focus { border-color:
 .fin-grow { flex: 1 1 8em; min-width: 0; }
 .fin-tag { font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-soft, #665d52); min-width: 4.4em; }
 .fin-note { margin: 2px 0; color: var(--ink-soft, #665d52); }
+.fin-lead { margin: 0 0 6px; color: var(--ink-soft, #665d52); }
+.fin-tally b { color: var(--ink, #1a1612); font-weight: 650; }
 .fin-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin: 4px 0; }
 .fin-grid button { grid-column: 1 / -1; }
 .fin-add-floor { display: flex; flex-direction: column; gap: 6px; margin: 6px 0 2px; }
@@ -6457,6 +6565,9 @@ input.sheet-set-list-name:hover, input.sheet-set-list-name:focus { border-color:
 .fin-sum-row { justify-content: flex-start; }
 .fin-sum-n { margin-left: auto; color: var(--ink-soft, #665d52); font-size: 0.68rem; white-space: nowrap; }
 .fin-swatch { width: 10px; height: 10px; border-radius: 2px; flex: 0 0 auto; display: inline-block; box-shadow: inset 0 0 0 1px rgba(26, 22, 18, 0.25); }
+.fin-swatch.is-rule {
+  background-image: repeating-linear-gradient(135deg, transparent, transparent 2px, rgba(141, 52, 22, 0.55) 2px, rgba(141, 52, 22, 0.55) 3px);
+}
 .fin-warn { margin: 4px 0 0; color: #8a4b12; }
 button.fin-bare {
   margin: 0;
@@ -6505,3 +6616,85 @@ button.fin-bare[aria-pressed="true"] { color: #8a4b12; font-weight: 650; }
 .fin-drawn { margin-top: 8px; padding-top: 2px; border-top: 1px solid var(--line, #cfc4b3); }
 .fin-kind .fin-row { margin-top: 4px; padding-top: 4px; }
 .fin-drawn .fin-row + .fin-row { border-top: 1px dashed var(--line, rgba(26, 22, 18, 0.22)); }
+
+/* The inspector while a wall face is open. The face is the editor, so this is
+   a quiet list: who the wall is, then one line per wall, opening and finish.
+   Scoped to .is-face-open so the closed inspector keeps its own look. */
+.dock-context.is-face-open .planner-fields { padding: 10px 12px 20px; gap: 12px; }
+.dock-context.is-face-open .fin-panel { margin: 0; gap: 12px; font-size: 12px; }
+.fin-open { display: grid; gap: 12px; border-top: 0; padding-top: 0; }
+.fin-open .fin-block { display: grid; gap: 6px; align-content: start; }
+.fin-open .fin-lines { display: grid; gap: 6px; }
+.fin-identity { display: grid; gap: 8px; }
+.fin-id-name { margin: 0; font-family: Fraunces, Georgia, serif; font-size: 1.05rem; font-weight: 560; color: var(--ink, #1a1612); }
+.fin-pills { display: flex; flex-wrap: wrap; gap: 8px; }
+.fin-pill {
+  padding: 3px 8px;
+  border: 1px solid rgba(26, 22, 18, 0.1);
+  border-radius: 999px;
+  background: #fffdf8;
+  color: var(--ink-soft, #5c5348);
+  font-size: 12px;
+}
+.fin-open h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-family: Fraunces, Georgia, serif;
+  font-size: 0.95rem;
+  font-weight: 560;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink, #1a1612);
+}
+.fin-open .fin-lead, .fin-open .fin-tally, .fin-open .fin-note { margin: 0; font-size: 12px; color: var(--ink-soft, #5c5348); }
+.fin-open .fin-tally b { color: var(--ink, #1a1612); font-weight: 600; }
+.fin-open .fin-on, .fin-open .fin-warn { margin: 2px 0 0; font-size: 12.5px; }
+.fin-open .fin-on { color: var(--ok, #2f6b4f); }
+.fin-open .fin-warn { color: var(--warn, #9a6b1f); }
+
+.fin-open .fin-line {
+  width: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 14px 1fr auto;
+  grid-template-areas: "sw name area" "sw place area" "sw prod area";
+  column-gap: 8px;
+  row-gap: 1px;
+  align-items: center;
+  align-self: auto;
+  padding: 8px 9px;
+  border: 1px solid rgba(26, 22, 18, 0.1);
+  border-radius: 3px;
+  background: #fffdf8;
+  color: var(--ink, #1a1612);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.3;
+  text-align: left;
+  cursor: pointer;
+}
+.fin-open .fin-line:hover, .fin-open .fin-line.fin-hot { border-color: rgba(26, 22, 18, 0.18); }
+.fin-open .fin-line.is-selected {
+  border-color: var(--copper, #b2451e);
+  background: rgba(178, 69, 30, 0.08);
+  box-shadow: inset 3px 0 0 var(--copper, #b2451e);
+}
+.fin-line-sw {
+  grid-area: sw;
+  width: 14px;
+  height: 14px;
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px rgba(26, 22, 18, 0.18);
+}
+.fin-line-sw.is-opening { background: #fffdf8; }
+.fin-line-sw.is-none { background: transparent; box-shadow: inset 0 0 0 1px rgba(26, 22, 18, 0.35); }
+.fin-line-sw.is-rule {
+  background-image: repeating-linear-gradient(135deg, transparent, transparent 2px, rgba(141, 52, 22, 0.55) 2px, rgba(141, 52, 22, 0.55) 3px);
+}
+.fin-line-name { grid-area: name; font-size: 13px; font-weight: 700; }
+.fin-line-place { grid-area: place; color: var(--ink-soft, #5c5348); }
+.fin-line-prod { grid-area: prod; color: var(--ink-muted, #8a8074); }
+.fin-line-prod.is-warn { color: var(--warn, #9a6b1f); }
+.fin-line-area { grid-area: area; align-self: start; padding-top: 1px; color: var(--ink-soft, #5c5348); white-space: nowrap; }

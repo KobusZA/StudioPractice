@@ -140,6 +140,8 @@ export function elevationModel(doc, pack, faceRef, walls = null) {
   }
   openings.sort((a, b) => a.offset - b.offset);
 
+  const foundations = foundationsUnder(doc, pack, wall, all, base, flip);
+
   const levels = (pack.levels || [])
     .filter((l) => Number.isFinite(l.elevation))
     .map((l) => ({
@@ -166,6 +168,9 @@ export function elevationModel(doc, pack, faceRef, walls = null) {
     attachedTo: resolved.attachedTo?.label || null,
     heightConflict: wall.heightConflict || null,
     openings,
+    // Foundations on this line, in viewing order. `from`/`to` run along the
+    // face; `base` and `top` are absolute, and `top` never rises above this wall.
+    foundations,
     // Finish bands in viewing order, heights above `base`. Room rules and
     // runs are editable; the computed plaster default is not.
     finishBands: faceFinishBands(doc, pack, all, wall, side, {
@@ -175,6 +180,61 @@ export function elevationModel(doc, pack, faceRef, walls = null) {
     guide: heightGuide(pack, wall),
     canDragTop: wall.category !== "foundation",
   };
+}
+
+/**
+ * Foundations that belong under this wall: parallel, close enough in plan to
+ * be the footing of this line, and overlapping it. Only the part below the
+ * wall's base is returned, so a foundation that rises into the storey is not
+ * painted over the wall. Offsets are in viewing order.
+ */
+function foundationsUnder(doc, pack, wall, all, wallBase, flip) {
+  const dx = wall.x2 - wall.x1;
+  const dy = wall.y2 - wall.y1;
+  const len = Math.hypot(dx, dy) || 1;
+  const ux = dx / len;
+  const uy = dy / len;
+  const along = (x, y) => (x - wall.x1) * ux + (y - wall.y1) * uy;
+  const perp = (x, y) => (x - wall.x1) * uy - (y - wall.y1) * ux;
+  const out = [];
+  for (const found of all) {
+    if (found.id === wall.id || found.category !== "foundation") continue;
+    const fdx = found.x2 - found.x1;
+    const fdy = found.y2 - found.y1;
+    const fl = Math.hypot(fdx, fdy) || 1;
+    if (Math.abs((fdx / fl) * ux + (fdy / fl) * uy) < 0.996) continue;
+    const reach = (wall.thickness + found.thickness) / 2 + 0.05;
+    if (Math.abs(perp((found.x1 + found.x2) / 2, (found.y1 + found.y2) / 2)) > reach) continue;
+    let a = along(found.x1, found.y1);
+    let b = along(found.x2, found.y2);
+    if (a > b) [a, b] = [b, a];
+    let from = Math.max(0, a);
+    let to = Math.min(wall.length, b);
+    if (to - from < 0.02) continue;
+    const sku = skuById(pack, found.sku);
+    const height = found.height || skuDrawnHeight(sku) || 0;
+    if (!(height > 0)) continue;
+    const resolved = resolvedBase(doc, pack, found, height);
+    const footBase = resolved.elevation;
+    const footTop = Math.min(footBase + resolved.height, wallBase);
+    if (footTop - footBase < 0.02) continue;
+    if (flip) {
+      const mirroredFrom = wall.length - to;
+      to = wall.length - from;
+      from = mirroredFrom;
+    }
+    out.push({
+      id: found.id,
+      name: sku?.name || found.sku,
+      from,
+      to,
+      base: footBase,
+      top: footTop,
+      depth: footTop - footBase,
+    });
+  }
+  out.sort((a, b) => a.from - b.from || a.base - b.base);
+  return out;
 }
 
 /**
@@ -230,6 +290,7 @@ export function applyWallTopEdit(doc, pack, faceRef, height, walls = null) {
     const seg = (doc.segments || []).find((s) => s.id === wall.id);
     if (!seg) return null;
     write(seg);
+    followWallTop(doc, wall.id, model.height, h);
     return { height: h, wallId: wall.id };
   }
 
@@ -240,7 +301,35 @@ export function applyWallTopEdit(doc, pack, faceRef, height, walls = null) {
     if (run.wallId === wall.id) run.wallId = seg.id;
   }
   (doc.segments || (doc.segments = [])).push(seg);
+  followWallTop(doc, seg.id, model.height, h);
   return { height: h, wallId: seg.id };
+}
+
+/**
+ * A finish whose top was the top of the wall stays there. A blank top already
+ * means "the top of the wall". A drawn corner that sat on the old top moves
+ * with it, and so does a stored top that was that same height.
+ */
+function followWallTop(doc, wallId, oldH, newH) {
+  if (!(oldH > 0) || !(newH > 0) || Math.abs(oldH - newH) < 1e-6) return;
+  const onTop = (z) => Number.isFinite(z) && Math.abs(z - oldH) <= ELEVATION_SNAP / 2 + 1e-9;
+  for (const run of doc.finishRuns || []) {
+    if (run.wallId !== wallId) continue;
+    if (Array.isArray(run.outline) && run.outline.length >= 3) {
+      run.outline = run.outline.map(([s, z]) => {
+        if (onTop(z)) return [s, newH];
+        return [s, z > newH ? newH : z];
+      });
+      const zs = run.outline.map((p) => p[1]);
+      run.bottom = Math.max(0, Math.min(...zs));
+      run.top = Math.max(...zs);
+      continue;
+    }
+    // A blank top is already "the top of the wall". A number that was that
+    // height becomes blank, so the next change follows too.
+    if (run.top == null) continue;
+    if (onTop(run.top)) run.top = null;
+  }
 }
 
 /** The opening's anchor `t` that puts its centre `fromA` metres from the wall's first end. */
@@ -385,6 +474,39 @@ export function applyOutlinePoints(doc, pack, faceRef, bandId, points, walls = n
 }
 
 /**
+ * Nudge a rigid move so a corner of `origin` lands on a target. `ds` and `dz`
+ * are the pointer's move, in metres. A guide is the target that won that axis,
+ * and is null when nothing was within `reach`. The caller drops a guide again
+ * if clamping the move onto the wall pulls the corner off it.
+ */
+export function alignOutlineShift(origin, ds, dz, sTargets, zTargets, reach) {
+  let dsHit = 0;
+  let dzHit = 0;
+  let bestS = reach + 1;
+  let bestZ = reach + 1;
+  let guideS = null;
+  let guideZ = null;
+  for (const p of origin) {
+    const s = p.s + ds;
+    const z = p.z + dz;
+    for (const t of sTargets) {
+      const ad = Math.abs(t - s);
+      if (ad <= reach && ad < bestS) { bestS = ad; dsHit = t - s; guideS = t; }
+    }
+    for (const t of zTargets) {
+      const ad = Math.abs(t - z);
+      if (ad <= reach && ad < bestZ) { bestZ = ad; dzHit = t - z; guideZ = t; }
+    }
+  }
+  return {
+    ds: ds + (guideS == null ? 0 : dsHit),
+    dz: dz + (guideZ == null ? 0 : dzHit),
+    guideS,
+    guideZ,
+  };
+}
+
+/**
  * Move one edge of a ring by the same amount at both ends, so the line keeps
  * its length and direction. The delta is reduced until both ends stay on the
  * face. `points` are `{ s, z }` in viewing coordinates.
@@ -423,4 +545,219 @@ export function axisAlignedOutline(points) {
     && (Math.abs(p.z - bottom) < 1e-4 || Math.abs(p.z - top) < 1e-4)
   ));
   return onBox ? { from, to, bottom, top } : null;
+}
+
+/** Smallest finish a typed gap may leave, metres. The same step a drag snaps to. */
+export const FINISH_MIN_M = ELEVATION_SNAP;
+/** Smallest window or door a typed gap may leave, metres. */
+export const OPENING_MIN_M = 0.2;
+
+function clampGap(value, lo, hi) {
+  return Math.min(hi, Math.max(lo, value));
+}
+
+/**
+ * Largest gap, in metres, that still leaves the shape on the wall and at
+ * least its minimum size. A bigger typed number is refused. `target` is the
+ * same shape `applyTypedGap` takes. `spec` is a `finishLocate` result.
+ */
+export function maxTypedGap(target, axis, spec, face) {
+  const length = face?.length || 0;
+  const height = face?.height || 0;
+  if (!target || !spec) return 0;
+  if (target.kind === "vertex") {
+    if (axis === "h" && spec.side) return length;
+    if (axis === "v" && spec.vert) return height;
+    return 0;
+  }
+  if (target.kind === "rect-edge") {
+    if (target.rule && axis === "h") return 0;
+    if (axis === "h" && spec.side) {
+      return spec.side.s0 === 0
+        ? Math.max(0, target.to - FINISH_MIN_M)
+        : Math.max(0, length - target.from - FINISH_MIN_M);
+    }
+    if (axis === "v" && spec.vert) {
+      return spec.vert.toward === "base"
+        ? Math.max(0, target.top - FINISH_MIN_M)
+        : Math.max(0, height - target.bottom - FINISH_MIN_M);
+    }
+    return 0;
+  }
+  if (target.kind === "opening") {
+    const corner = String(target.corner || "");
+    if (target.door && (axis === "h" || !corner.includes("t"))) return 0;
+    const right = target.offset + target.width;
+    const head = target.sill + target.height;
+    if (axis === "h" && spec.side) {
+      if (spec.side.s0 === 0) return corner.includes("l") ? Math.max(0, right - OPENING_MIN_M) : length;
+      return corner.includes("r") ? Math.max(0, length - target.offset - OPENING_MIN_M) : length;
+    }
+    if (axis === "v" && spec.vert) {
+      if (spec.vert.toward === "base") return corner.includes("b") ? Math.max(0, head - OPENING_MIN_M) : height;
+      return corner.includes("t") ? Math.max(0, height - target.sill - OPENING_MIN_M) : height;
+    }
+    return 0;
+  }
+  if (target.kind === "edge") {
+    const pts = target.points;
+    if (!pts?.length) return 0;
+    const j = (target.index + 1) % pts.length;
+    const a = pts[target.index];
+    const b = pts[j];
+    if (!a || !b) return 0;
+    if (axis === "h" && spec.side) return Math.max(0, length - Math.abs(a.s - b.s));
+    if (axis === "v" && spec.vert) return Math.max(0, height - Math.abs(a.z - b.z));
+  }
+  return 0;
+}
+
+/**
+ * Move a corner or an edge so one gap equals `gapM` metres. The same
+ * geometry a drag uses: a corner keeps the opposite edge, an outline edge
+ * keeps its length, a rectangle edge stays a rectangle.
+ *
+ * `target.kind` is `vertex`, `edge` (a drawn outline), `rect-edge`, or
+ * `opening`. `corner` on an opening is `l`/`r`/`t`/`b` or `tl`/`tr`/`bl`/`br`.
+ * `spec` is the clearance being typed (`side` across, `vert` up or down).
+ * `face` is `{ length, height }` in metres. Returns the new coordinates, or
+ * null when that axis has no gap to set.
+ */
+export function applyTypedGap(target, axis, gapM, spec, face) {
+  if (!target || !spec || !face) return null;
+  if (axis === "h" && !spec.side) return null;
+  if (axis === "v" && !spec.vert) return null;
+  const value = Math.max(0, gapM);
+  const length = face.length;
+  const height = face.height;
+
+  if (target.kind === "vertex") {
+    if (!target.points || target.points[target.index] == null) return null;
+    const points = target.points.map((p) => ({ s: p.s, z: p.z }));
+    const p = points[target.index];
+    if (axis === "h") p.s = clampGap(spec.side.s0 === 0 ? value : length - value, 0, length);
+    if (axis === "v") p.z = clampGap(spec.vert.toward === "base" ? value : height - value, 0, height);
+    return { points };
+  }
+
+  if (target.kind === "edge") {
+    if (!target.points?.length) return null;
+    const points = target.points.map((p) => ({ s: p.s, z: p.z }));
+    const i = ((target.index % points.length) + points.length) % points.length;
+    const j = (i + 1) % points.length;
+    const a = points[i];
+    const b = points[j];
+    let ds = 0;
+    let dz = 0;
+    if (axis === "h") {
+      const at = spec.side.s0 === 0 ? value : length - value;
+      const outer = spec.side.s0 === 0 ? Math.min(a.s, b.s) : Math.max(a.s, b.s);
+      ds = at - outer;
+    }
+    if (axis === "v") {
+      const at = spec.vert.toward === "base" ? value : height - value;
+      const outer = spec.vert.toward === "base" ? Math.min(a.z, b.z) : Math.max(a.z, b.z);
+      dz = at - outer;
+    }
+    return { points: translateOutlineEdge(points, i, ds, dz, length, height) };
+  }
+
+  if (target.kind === "rect-edge") {
+    if (target.rule && axis === "h") return null;
+    let { from, to, bottom, top } = target;
+    if (axis === "h") {
+      if (spec.side.s0 === 0) from = clampGap(value, 0, to - FINISH_MIN_M);
+      else to = clampGap(length - value, from + FINISH_MIN_M, length);
+    }
+    if (axis === "v") {
+      if (spec.vert.toward === "base") bottom = clampGap(value, 0, top - FINISH_MIN_M);
+      else top = clampGap(height - value, bottom + FINISH_MIN_M, height);
+    }
+    return { from, to, bottom, top };
+  }
+
+  if (target.kind === "opening") {
+    const corner = String(target.corner || "");
+    let { offset, width, sill } = target;
+    let openingH = target.height;
+    if (target.door) {
+      if (axis !== "v" || !corner.includes("t")) return null;
+      const z = spec.vert.toward === "base" ? value : height - value;
+      openingH = clampGap(z - sill, OPENING_MIN_M, Math.max(OPENING_MIN_M, height - sill));
+      return { offset, width, sill, height: openingH };
+    }
+    const head = sill + openingH;
+    const right = offset + width;
+    if (axis === "h") {
+      const s = spec.side.s0 === 0 ? value : length - value;
+      if (corner.includes("l")) {
+        offset = clampGap(Math.min(s, right - OPENING_MIN_M), 0, length);
+        width = right - offset;
+      }
+      if (corner.includes("r")) width = clampGap(s - offset, OPENING_MIN_M, Math.max(OPENING_MIN_M, length - offset));
+    }
+    if (axis === "v") {
+      const z = spec.vert.toward === "base" ? value : height - value;
+      if (corner.includes("b")) {
+        sill = clampGap(Math.min(z, head - OPENING_MIN_M), 0, height);
+        openingH = head - sill;
+      }
+      if (corner.includes("t")) openingH = clampGap(z - sill, OPENING_MIN_M, Math.max(OPENING_MIN_M, height - sill));
+    }
+    return { offset, width, sill, height: openingH };
+  }
+
+  return null;
+}
+
+/**
+ * Resize an opening from one corner, in viewing metres. `corner` is
+ * `tl`, `tr`, `bl`, `br`, or `t` (a door head). Left corners move the
+ * offset and keep the right edge. Bottom corners move the sill and keep
+ * the head. The opening stays at least `OPENING_MIN_M` on each side.
+ * Returns the edit `applyOpeningEdit` expects (`left`, `width`, `sill`, `height`).
+ */
+export function resizeOpeningCorner(orig, corner, s, z, face) {
+  const min = OPENING_MIN_M;
+  const length = face?.length ?? 0;
+  const wallH = face?.height ?? 0;
+  const right = orig.offset + orig.width;
+  const head = orig.sill + orig.height;
+  let offset = orig.offset;
+  let width = orig.width;
+  let sill = orig.sill;
+  let height = orig.height;
+  const name = String(corner || "");
+  if (name.includes("l")) {
+    offset = clampGap(Math.min(s, right - min), 0, Math.max(0, length));
+    width = right - offset;
+  }
+  if (name.includes("r")) {
+    const at = clampGap(s, offset + min, Math.max(offset + min, length));
+    width = at - offset;
+  }
+  if (name.includes("b")) {
+    sill = clampGap(Math.min(z, head - min), 0, Math.max(0, wallH));
+    height = head - sill;
+  }
+  if (name.includes("t")) {
+    const at = clampGap(z, sill + min, Math.max(sill + min, wallH));
+    height = at - sill;
+  }
+  return { left: offset, width, sill, height };
+}
+
+/**
+ * Edges of an opening a dragged corner may snap to. The corner's own
+ * station and its own height are left out, so it cannot snap to the
+ * adjacent corner that shares that axis. The opposite edge is still a target.
+ */
+export function openingSnapEdges(opening, at) {
+  const ss = [opening.offset, opening.offset + opening.width];
+  const zs = [opening.sill, opening.sill + opening.height];
+  const keep = (v, atV) => !(Number.isFinite(atV) && Math.abs(v - atV) <= 1e-6);
+  return {
+    s: ss.filter((v) => keep(v, at?.s)),
+    z: zs.filter((v) => keep(v, at?.z)),
+  };
 }

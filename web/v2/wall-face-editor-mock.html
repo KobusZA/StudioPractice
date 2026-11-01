@@ -38,9 +38,9 @@
   button, input, select { font: inherit; color: inherit; }
   button { cursor: pointer; }
   .app { display: grid; grid-template-rows: auto auto minmax(0, 1fr); height: 100dvh; }
-  .note { display: flex; align-items: baseline; gap: 14px; padding: 7px 14px; background: var(--navy); color: #f3eee4; font-size: 12px; line-height: 1.45; }
+  .note { display: flex; align-items: center; gap: 14px; height: 30px; padding: 0 14px; background: var(--navy); color: #f3eee4; font-size: 12px; white-space: nowrap; overflow: hidden; }
   .note strong { font-family: var(--font-display); font-weight: 560; font-size: 13px; flex-shrink: 0; }
-  .note span { opacity: 0.9; }
+  .note span { opacity: 0.9; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .topbar { height: 40px; display: flex; align-items: center; gap: 10px; padding: 0 12px; background: var(--bg-secondary); border-bottom: 1px solid var(--hairline); }
   .brand { display: flex; align-items: center; gap: 8px; }
   .brand-mark { width: 24px; height: 24px; border-radius: 50%; background: #000; overflow: hidden; }
@@ -51,22 +51,30 @@
   .crumb { font-size: 12px; color: var(--ink-soft); }
   .crumb b { color: var(--ink); font-weight: 600; }
   .workspace { display: grid; grid-template-columns: minmax(0, 1fr) var(--dock); min-height: 0; }
+  /* Fixed bands: head, editor and key never change height, so the canvas
+     (the only flexible band) never moves when the selection changes. */
   .face-col { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg-primary); overflow: auto; }
-  .face-head { display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: var(--bg-secondary); border-bottom: 1px solid var(--hairline); }
-  .face-head h1 { margin: 0; font-family: var(--font-display); font-size: 1.15rem; font-weight: 560; display: flex; align-items: center; gap: 8px; }
-  .face-head .sub { font-size: 12px; color: var(--ink-muted); }
+  .face-head { flex: 0 0 48px; height: 48px; display: flex; align-items: center; gap: 10px; padding: 0 14px; background: var(--bg-secondary); border-bottom: 1px solid var(--hairline); }
+  .face-head h1 { margin: 0; font-family: var(--font-display); font-size: 1.15rem; font-weight: 560; display: flex; align-items: center; gap: 8px; white-space: nowrap; flex-shrink: 0; }
+  .face-head .sub { font-size: 12px; color: var(--ink-muted); min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .face-head .btn { flex-shrink: 0; white-space: nowrap; }
+  @media (max-width: 1240px) { .face-head .sub { display: none; } }
   .face-head .spacer { flex: 1; }
   .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: var(--radius-md); border: 1px solid var(--hairline-strong); background: var(--bg-elevated); font-size: 12.5px; font-weight: 600; }
   .btn:hover { border-color: var(--copper); color: var(--copper-dark); }
   .btn[aria-pressed="true"] { background: var(--copper-tint-16); border-color: var(--copper); color: var(--copper-dark); }
   .btn:disabled { opacity: 0.45; cursor: default; }
-  .mark { width: 18px; height: 18px; border-radius: 50%; flex-shrink: 0; background: var(--copper); color: #fff; font-size: 10px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
-  .editor-band { display: flex; align-items: flex-start; gap: 10px; margin: 10px 14px 0; }
-  .editor { flex: 1 1 auto; min-width: 0; display: grid; gap: 8px; padding: 8px 10px 10px; background: var(--bg-elevated); border: 1px solid var(--copper); border-radius: var(--radius-md); box-shadow: 0 1px 0 var(--copper-tint-16); }
-  .editor-top, .editor-controls { display: flex; align-items: center; gap: 8px; min-width: 0; }
-  .editor-controls { flex-wrap: wrap; padding-left: 48px; }
-  .editor-top strong { font-size: 13.5px; line-height: 1.2; flex-shrink: 0; }
-  #sel-meta { font-size: 12.5px; color: var(--ink-soft); min-width: 0; }
+  .editor-band { flex: 0 0 46px; height: 46px; display: flex; align-items: center; gap: 10px; margin: 8px 14px 0; }
+  /* One row, one height. Who is selected sits on the left; what you can set sits on the right. */
+  .editor { flex: 1 1 auto; min-width: 0; height: 46px; display: flex; align-items: center; gap: 12px; padding: 0 10px; background: var(--bg-elevated); border: 1px solid var(--copper); border-radius: var(--radius-md); box-shadow: 0 1px 0 var(--copper-tint-16); }
+  .editor-top { flex: 1 1 0; display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .editor-controls { flex: 0 1 auto; display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; margin-left: auto; overflow-x: auto; scrollbar-width: none; }
+  .editor-controls::-webkit-scrollbar { display: none; }
+  .editor-top strong { font-size: 13.5px; line-height: 1.2; flex-shrink: 0; white-space: nowrap; }
+  #sel-meta { font-size: 12.5px; color: var(--ink-soft); min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #add { min-width: 108px; }
+  #add[hidden] { display: inline-flex !important; visibility: hidden; }
+  @media (max-width: 1240px) { #sel-meta { display: none; } }
   #op-fields, #places { display: flex; align-items: center; gap: 6px; }
   #places .btn, #add, #sel-remove { flex-shrink: 0; white-space: nowrap; }
   #sel-remove { margin-left: 4px; }
@@ -86,7 +94,7 @@
   .edge-actions button[aria-pressed="true"] { background: var(--ink); color: #fffdf8; }
   .mm-block { display: inline-flex; align-items: center; gap: 6px; }
   .other-wall { position: absolute; z-index: 2; top: 8px; left: 8px; right: 8px; margin: 0; padding: 6px 10px; background: var(--bg-tertiary); border-radius: var(--radius-sm); font-size: 12.5px; color: var(--ink-soft); }
-  .canvas-wrap { position: relative; flex: 1 1 auto; min-height: 240px; margin: 8px 14px 10px; }
+  .canvas-wrap { position: relative; flex: 1 1 auto; min-height: 240px; margin: 8px 14px 8px; }
   .elev { width: 100%; height: 100%; display: block; background: var(--bg-elevated); border: 1px solid var(--hairline-strong); border-radius: var(--radius-md); touch-action: none; }
   .elev.is-panning, .elev.is-panning * { cursor: grabbing !important; }
   .elev.is-drawing:not(.is-panning), .elev.is-drawing:not(.is-panning) * { cursor: crosshair !important; }
@@ -105,8 +113,8 @@
   .handle.is-ew { cursor: ew-resize; }
   .handle.is-nwse { cursor: nwse-resize; }
   .handle.is-nesw { cursor: nesw-resize; }
-  #top-handle { cursor: ns-resize; }
-  #top-handle.is-selected { fill: var(--copper); stroke: var(--copper-dark); stroke-width: 2.5; }
+  #top-handle, #base-handle { cursor: ns-resize; }
+  #top-handle.is-selected, #base-handle.is-selected { fill: var(--copper); stroke: var(--copper-dark); stroke-width: 2.5; }
   .dim { font-family: var(--font-ui); font-size: 12px; fill: var(--ink-soft); }
   .dim-strong { font-family: var(--font-ui); font-size: 12px; font-weight: 700; fill: var(--copper-dark); }
   .loc-line, .loc-ext, .loc-tick { stroke: #1a1612; stroke-width: 1.25px; vector-effect: non-scaling-stroke; pointer-events: none; }
@@ -116,14 +124,13 @@
   .loc-text.is-editing { fill: var(--copper-dark); }
   .align-line { stroke: #3a5f7a; stroke-width: 1; stroke-dasharray: 4 3; pointer-events: none; }
   .level-label { font-family: var(--font-ui); font-size: 11px; fill: var(--ink-muted); }
-  .plan-wrap { position: relative; }
-  .plan-chip { display: inline-flex; align-items: center; gap: 8px; height: auto; padding: 4px 8px; border-radius: var(--radius-sm); border: 1px solid var(--hairline-strong); background: var(--bg-elevated); font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-muted); }
-  .plan-chip svg, .plan-svg { width: 128px; height: 58px; display: block; }
+  .plan-chip { flex-shrink: 0; display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 8px; border-radius: var(--radius-sm); border: 1px solid var(--hairline-strong); background: var(--bg-elevated); font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-muted); }
+  .plan-chip svg, .plan-svg { width: 62px; height: 28px; display: block; }
+  .plan-chip .side-name { display: none; }
   .plan-svg-large { width: 280px; height: 126px; }
   .plan-chip-copy { display: grid; text-align: left; line-height: 1.15; }
   .plan-chip-copy strong { color: var(--copper-dark); font-size: 11px; }
   .plan-chip-sub { font-size: 9px; letter-spacing: 0.06em; }
-  .plan-chip[aria-expanded="true"] { border-color: var(--copper); color: var(--copper-dark); }
   .room-fill { fill: #fffdf8; stroke: #1a1612; stroke-width: 1; }
   .wall-line { stroke: #1a1612; stroke-width: 3.5; }
   .side-name { font-family: var(--font-ui); font-size: 8px; fill: #8a8074; }
@@ -132,7 +139,7 @@
   .flash-edge { stroke: #b2451e; stroke-width: 3; stroke-linecap: round; opacity: 0; }
   .flash-side.is-on, .flash-edge.is-on { opacity: 0.75; }
   .plan-stage {
-    position: fixed; z-index: 30; left: 0; right: 0; bottom: 0; top: 78px;
+    position: fixed; z-index: 30; left: 0; right: 0; bottom: 0; top: 70px;
     display: grid; place-items: center; align-content: center; gap: 12px;
     background:
       linear-gradient(transparent 23px, rgba(26, 22, 18, 0.045) 24px),
@@ -155,11 +162,7 @@
   }
   .plan-stage p { margin: 0; max-width: 460px; text-align: center; color: var(--ink-soft); }
   .plan-stage .home-only[hidden] { display: none !important; }
-  .plan-pop { position: absolute; top: calc(100% + 4px); left: 0; z-index: 4; width: 250px; display: grid; gap: 4px; padding: 8px; background: var(--bg-elevated); border: 1px solid var(--hairline-strong); border-radius: var(--radius-md); box-shadow: 0 8px 22px rgba(26,22,18,0.16); }
   .sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
-  .plan-pop[hidden] { display: none; }
-  .plan-pop p { margin: 0 0 2px; font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--ink-muted); }
-  .plan-pop button { text-align: left; }
   .dock { display: flex; flex-direction: column; min-height: 0; background: var(--bg-secondary); border-left: 1px solid var(--hairline); }
   .dock header { display: flex; justify-content: space-between; align-items: baseline; padding: 10px 12px 8px; border-bottom: 1px solid var(--hairline); }
   .dock header h2 { margin: 0; font-family: var(--font-display); font-size: 1rem; font-weight: 500; }
@@ -186,7 +189,10 @@
   details.more { border: 1px solid var(--hairline); border-radius: var(--radius-sm); background: var(--bg-elevated); }
   details.more summary { padding: 7px 10px; font-size: 12px; font-weight: 600; color: var(--ink-soft); cursor: pointer; }
   details.more .more-body { padding: 0 10px 10px; font-size: 12.5px; color: var(--ink-soft); display: grid; gap: 4px; }
-  .key { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin: 0 14px 12px; padding: 8px 10px; background: var(--bg-elevated); border: 1px solid var(--hairline); border-radius: var(--radius-md); font-size: 11.5px; line-height: 1.3; flex-shrink: 0; }
+  /* The key is one fixed line. Its text opens upward over the canvas, so opening it moves nothing. */
+  .key { position: relative; flex: 0 0 30px; height: 30px; margin: 0 14px 8px; font-size: 11.5px; line-height: 1.3; }
+  .key summary { height: 30px; display: flex; align-items: center; padding: 0 10px; background: var(--bg-elevated); border: 1px solid var(--hairline); border-radius: var(--radius-md); font-size: 12px; font-weight: 600; color: var(--ink-soft); cursor: pointer; }
+  .key-body { position: absolute; z-index: 5; left: 0; right: 0; bottom: calc(100% + 4px); display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; padding: 8px 10px; background: var(--bg-elevated); border: 1px solid var(--hairline-strong); border-radius: var(--radius-md); box-shadow: 0 8px 22px rgba(26,22,18,0.16); }
   .key p { margin: 0; }
   .key b { display: block; color: var(--copper-dark); font-size: 12px; }
   .key span { color: var(--ink-soft); }
@@ -201,7 +207,7 @@
 <div class="app">
   <div class="note">
     <strong>Mock — one picture of the wall</strong>
-    <span>Scroll to zoom. Middle-drag or Alt-drag to move. Fit shows the whole wall. The Wall row selects the wall. Escape leaves a finish and selects the wall, then closes it. Exit closes it now. Not wired to the app.</span>
+    <span>Scroll to zoom. Middle-drag or Alt-drag to move. Fit shows the whole wall. The plan chip flips the face. Escape leaves a finish and selects the wall, then closes it. Exit closes it now. Not wired to the app.</span>
   </div>
   <header class="topbar">
     <div class="brand">
@@ -236,10 +242,9 @@
   <div class="workspace">
     <section class="face-col" aria-label="This wall">
       <div class="face-head">
-        <h1><span class="mark">1</span> This wall</h1>
+        <h1>This wall</h1>
         <span class="sub" id="face-sub">Kitchen south · Kitchen side · 4 500 × 2 700 mm</span>
-        <div class="plan-wrap">
-          <button type="button" class="plan-chip" id="plan-btn" aria-expanded="false" aria-controls="plan-pop">
+        <button type="button" class="plan-chip" id="plan-btn" title="Flip to the other face of this wall.">
             <svg class="plan-svg" viewBox="0 0 160 72" aria-hidden="true">
               <rect class="room-fill" x="18" y="6" width="124" height="28"/>
               <rect class="room-fill" x="18" y="38" width="124" height="28"/>
@@ -253,20 +258,12 @@
             </svg>
             <span class="plan-chip-copy">
               <strong id="plan-label">Kitchen side</strong>
-              <span class="plan-chip-sub">on plan</span>
+              <span class="plan-chip-sub">Flip face</span>
             </span>
           </button>
           <span class="sr" id="flash-live" aria-live="polite"></span>
-          <div class="plan-pop" id="plan-pop" hidden>
-            <p>Choose a wall</p>
-            <button type="button" class="btn" data-face="kitchen">Kitchen south · Kitchen side</button>
-            <button type="button" class="btn" data-face="passage">Kitchen south · Passage side</button>
-            <button type="button" class="btn" data-face="living">Living north · Living side</button>
-          </div>
-        </div>
         <span class="spacer"></span>
         <button type="button" class="btn" id="flash-plan" title="Blink this side of the wall on the plan">Flash on plan</button>
-        <button type="button" class="btn" id="flip">Flip face</button>
         <button type="button" class="btn" id="fit" title="Show the whole wall again">Fit</button>
         <button type="button" class="btn" id="exit" title="Close this wall. Escape selects the wall first, then closes.">Exit</button>
       </div>
@@ -274,7 +271,6 @@
       <div class="editor-band">
         <div class="editor" id="editor">
           <div class="editor-top">
-            <span class="mark">2</span>
             <i class="swatch" id="sel-swatch"></i>
             <strong id="sel-which">Paint 2 of 2</strong>
             <span id="sel-meta"></span>
@@ -294,6 +290,9 @@
             </div>
             <label id="wall-fields" hidden>Height
               <input id="wall-mm" class="mm" inputmode="numeric" aria-label="Wall height, mm" />
+            </label>
+            <label id="base-fields" hidden>Above ground
+              <input id="base-mm" class="mm" inputmode="numeric" aria-label="Wall base above ground, mm" />
             </label>
             <div id="op-fields" hidden>
               <label>Width <input id="op-width" class="mm" inputmode="numeric" aria-label="Width, mm" /></label>
@@ -321,9 +320,11 @@
             </pattern>
           </defs>
           <rect class="elev-bg" x="0" y="0" width="1000" height="620" fill="#fffdf8"/>
-          <line x1="40" y1="48" x2="960" y2="48" stroke="#8a8074" stroke-dasharray="5 4" stroke-width="1"/>
-          <text class="level-label" x="952" y="42" text-anchor="end">First floor +3.000</text>
-          <rect id="wall-ghost" x="80" y="48" width="840" height="34" fill="#e8e0d2" opacity="0.65"/>
+          <!-- The frame holds the wall's whole range, from 400 mm below Ground to the first floor, so it never has to move. -->
+          <rect x="0" y="542" width="1000" height="78" fill="#e8e0d2" opacity="0.55" pointer-events="none"/>
+          <line x1="40" y1="31" x2="960" y2="31" stroke="#8a8074" stroke-dasharray="5 4" stroke-width="1"/>
+          <text class="level-label" x="952" y="25" text-anchor="end">First floor +3.000</text>
+          <rect id="wall-ghost" x="80" y="31" width="840" height="51" fill="#e8e0d2" opacity="0.65"/>
           <g id="bands"></g>
           <g id="clashes"></g>
           <g id="selbox"></g>
@@ -331,9 +332,17 @@
           <g id="outline"></g>
           <line x1="40" y1="542" x2="960" y2="542" stroke="#5c5348" stroke-width="1.25"/>
           <text class="level-label" x="952" y="536" text-anchor="end">Ground +0.000</text>
-          <text class="dim" x="500" y="566" text-anchor="middle">4 500</text>
+          <g pointer-events="none" stroke="#5c5348" stroke-width="1">
+            <line x1="80" y1="14" x2="466" y2="14"/>
+            <line x1="534" y1="14" x2="920" y2="14"/>
+            <line x1="80" y1="9" x2="80" y2="19"/>
+            <line x1="920" y1="9" x2="920" y2="19"/>
+          </g>
+          <text class="dim" x="500" y="18" text-anchor="middle">4 500</text>
           <text class="dim" id="wall-h" x="68" y="300" text-anchor="end">2 700</text>
+          <text class="dim" id="wall-base" x="68" y="542" text-anchor="end"></text>
           <rect id="top-handle" x="476" y="74" width="48" height="8" rx="1" fill="#fffdf8" stroke="#b2451e" stroke-width="1.5"><title>Drag to set the wall height</title></rect>
+          <rect id="base-handle" x="476" y="538" width="48" height="8" rx="1" fill="#fffdf8" stroke="#b2451e" stroke-width="1.5"><title>Drag to move the wall up or down</title></rect>
           <g id="align"></g>
           <g id="locate"></g>
         </svg>
@@ -347,11 +356,16 @@
       </div>
 
       <footer class="key">
-        <p><b>1 · One picture</b><span>This face is the editor. The inspector has no second thumbnail.</span></p>
-        <p><b>2 · Named selection</b><span>Add a finish sits beside this box. The type and where it goes stay inside it.</span></p>
-        <p><b>3 · On the shape</b><span>Dragging a corner or an edge measures the gap to the wall: left or right, and up or down. Click the same spot again to edit the finish underneath.</span></p>
-        <p><b>4 · Coats on one shape</b><span>A second finish on the same area is a line just inside, and a “2 coats” mark. A clash is still the hatch.</span></p>
-        <p><b>5 · Not the sheet</b><span>Document → Views → Elevation is still the compass view of the building.</span></p>
+        <details>
+          <summary>How this works</summary>
+          <div class="key-body">
+            <p><b>1 · One picture</b><span>This face is the editor. The inspector has no second thumbnail.</span></p>
+            <p><b>2 · Named selection</b><span>Add a finish sits beside this box. The type and where it goes stay inside it.</span></p>
+            <p><b>3 · On the shape</b><span>Dragging a corner or an edge measures the gap to the wall: left or right, and up or down. Click the same spot again to edit the finish underneath.</span></p>
+            <p><b>4 · Finishes on one shape</b><span>A second finish on the same area is a line just inside, and a “2 finishes” mark. A clash is still the hatch.</span></p>
+            <p><b>5 · Not the sheet</b><span>Document → Views → Elevation is still the compass view of the building.</span></p>
+          </div>
+        </details>
       </footer>
     </section>
 
@@ -372,11 +386,10 @@
         <div id="wall-pick"></div>
         <section class="fin-sec">
           <h3>Openings</h3>
-          <p class="lead">A door uses this same box. Its width stays with the door type, and it has no sill.</p>
           <div id="opening-list"></div>
         </section>
         <section class="fin-sec">
-          <h3><span class="mark">4</span> Finishes on this face</h3>
+          <h3>Finishes on this face</h3>
           <p class="sum" id="fin-sum"></p>
           <div id="fin-list"></div>
           <div id="fin-notes"></div>
@@ -391,7 +404,7 @@
           <div class="more-body">
             <div>Top · up to the level above</div>
             <div id="wall-h-note">Wall height · 2 700 mm. Select the wall to edit it.</div>
-            <div>Base · Ground</div>
+            <div id="wall-base-note">Base · Ground</div>
           </div>
         </details>
       </div>
@@ -425,9 +438,12 @@ const byFace = {
 let openings = [{ id: "win", kind: "window", name: "Window", from: 1800, width: 1200, sill: 970, height: 1200 }];
 let faceId = "kitchen";
 let wallHeight = 2700;
+let wallBase = 0;
 const NEXT_FLOOR = 3000;
+const TOP_Y = FLOOR - (NEXT_FLOOR / 2700) * WALL.h;
 const MIN_WALL = 2100;
-let selected = "finish:paint-b";
+const MIN_BASE = -400;
+let selected = "wall";
 let pending = null;
 let drawing = false;
 let edgeMode = "line";
@@ -468,23 +484,56 @@ for (const [value, label] of TYPE_OPTIONS) {
 
 function finishes() { return byFace[faceId]; }
 function xOf(mm) { return WALL.x + (mm / WALL.length) * WALL.w; }
-function yOf(mm) { return FLOOR - (mm / 2700) * WALL.h; }
+function yOf(mm) { return FLOOR - ((mm + wallBase) / 2700) * WALL.h; }
+function maxWallHeight() { return Math.max(MIN_WALL, NEXT_FLOOR - wallBase); }
+function maxWallBase() { return NEXT_FLOOR - wallHeight; }
+function setWallBase(mm) {
+  const cap = maxWallBase();
+  let next = Math.abs(mm) <= 10 ? 0 : snap(mm);
+  if (Math.abs(mm + wallHeight - NEXT_FLOOR) <= 10) next = cap;
+  wallBase = clamp(next, MIN_BASE, cap);
+}
+function baseWords() {
+  if (Math.abs(wallBase) < 1) return "Base · Ground";
+  const n = group(Math.abs(wallBase));
+  return wallBase > 0 ? `Base · ${n} mm above Ground` : `Base · ${n} mm below Ground`;
+}
 function shapingFinish() {
   return Boolean(drawing || pending);
 }
+function wallChosen() {
+  return selected === "wall" && !shapingFinish();
+}
 function syncWallTop() {
   const top = yOf(wallHeight);
+  const base = yOf(0);
+  const show = wallChosen();
   const handle = document.getElementById("top-handle");
   handle.setAttribute("y", top - 4);
-  handle.style.display = shapingFinish() ? "none" : "";
-  handle.classList.toggle("is-selected", selected === "wall");
-  document.getElementById("wall-h").textContent = group(wallHeight);
-  document.getElementById("wall-h-note").textContent = `Wall height · ${group(wallHeight)} mm. Select the wall to edit it.`;
+  handle.style.display = show ? "" : "none";
+  handle.setAttribute("pointer-events", show ? "all" : "none");
+  handle.classList.toggle("is-selected", show);
+  const baseHandle = document.getElementById("base-handle");
+  baseHandle.setAttribute("y", base - 4);
+  baseHandle.style.display = show ? "" : "none";
+  baseHandle.setAttribute("pointer-events", show ? "all" : "none");
+  baseHandle.classList.toggle("is-selected", show);
+  const hLabel = document.getElementById("wall-h");
+  hLabel.textContent = group(wallHeight);
+  hLabel.setAttribute("y", (top + base) / 2);
+  const bLabel = document.getElementById("wall-base");
+  if (Math.abs(wallBase) < 1) bLabel.textContent = "";
+  else {
+    bLabel.textContent = wallBase > 0 ? `+ ${group(wallBase)}` : `− ${group(Math.abs(wallBase))}`;
+    bLabel.setAttribute("y", (Math.min(base, FLOOR) + Math.max(base, FLOOR)) / 2 + 4);
+  }
+  document.getElementById("wall-h-note").textContent = `Wall height · ${group(wallHeight)} mm. Drag the bottom to move the wall.`;
+  document.getElementById("wall-base-note").textContent = baseWords();
   const ghost = document.getElementById("wall-ghost");
-  const gap = top - 48;
+  const gap = top - TOP_Y;
   ghost.style.display = gap > 1 ? "" : "none";
   if (gap > 1) {
-    ghost.setAttribute("y", 48);
+    ghost.setAttribute("y", TOP_Y);
     ghost.setAttribute("height", gap);
   }
 }
@@ -577,15 +626,22 @@ function placeEdgeMode() {
   node.style.left = `${Math.round(left)}px`;
   node.style.top = `${Math.round(top)}px`;
 }
-function pointerMm(evt, maxUp = wallHeight) {
+function pointerRaw(evt) {
   const svg = document.getElementById("elev");
   const pt = svg.createSVGPoint();
   pt.x = evt.clientX;
   pt.y = evt.clientY;
   const p = pt.matrixTransform(svg.getScreenCTM().inverse());
   return {
-    along: clamp(snap(((p.x - WALL.x) / WALL.w) * WALL.length), 0, WALL.length),
-    up: clamp(snap(((FLOOR - p.y) / WALL.h) * 2700), 0, maxUp),
+    along: ((p.x - WALL.x) / WALL.w) * WALL.length,
+    abs: ((FLOOR - p.y) / WALL.h) * 2700,
+  };
+}
+function pointerMm(evt, maxUp = wallHeight) {
+  const raw = pointerRaw(evt);
+  return {
+    along: clamp(snap(raw.along), 0, WALL.length),
+    up: clamp(snap(raw.abs - wallBase), 0, maxUp),
   };
 }
 function boxOf(f) {
@@ -789,7 +845,7 @@ function renderCoatLines() {
       x: box.x + 16 + size + peek, y: box.y + 21,
       class: "dim-strong", "pointer-events": "none",
     });
-    count.textContent = `${group.length} coats`;
+    count.textContent = `${group.length} finishes`;
     bandsG.appendChild(count);
   }
 }
@@ -963,7 +1019,7 @@ function renderList() {
     "#cfc6b8",
     "Wall",
     wallTitle,
-    "Drag the top, or type the height",
+    "Drag the bottom to move it, or the top for the height",
     `${group(wallHeight)} mm`,
     () => choose("wall"),
   ));
@@ -1024,6 +1080,7 @@ function renderBar() {
   document.getElementById("product-label").hidden = !showIdentity;
   document.getElementById("op-fields").hidden = !openingMode;
   document.getElementById("wall-fields").hidden = selected !== "wall";
+  document.getElementById("base-fields").hidden = selected !== "wall";
   document.getElementById("edge-mode").hidden = !canShape(finish);
   document.getElementById("add").hidden = Boolean(pending);
   document.getElementById("places").hidden = !pending;
@@ -1066,8 +1123,9 @@ function renderBar() {
   } else if (selected === "wall") {
     swatch.style.background = "#cfc6b8";
     document.getElementById("sel-which").textContent = document.getElementById("wall-name").textContent;
-    document.getElementById("sel-meta").textContent = "Drag the top of the wall";
+    document.getElementById("sel-meta").textContent = "Drag the bottom to move it, or the top for the height";
     fillMm("wall-mm", wallHeight);
+    fillMm("base-mm", wallBase);
     document.getElementById("sel-remove").hidden = true;
   } else {
     swatch.style.background = "transparent";
@@ -1094,7 +1152,7 @@ function syncFlash() {
   const words = sideWords(key);
   const label = words.side.charAt(0).toUpperCase() + words.side.slice(1);
   document.getElementById("plan-label").textContent = label;
-  document.getElementById("plan-btn").setAttribute("aria-label", `On plan. ${label}. Flash on plan blinks this side on the drawing.`);
+  document.getElementById("plan-btn").setAttribute("aria-label", `${label}. Flip face.`);
 }
 function flashOnPlan() {
   const key = sideKey();
@@ -1626,12 +1684,8 @@ function setFace(next) {
     faceId = next;
     pending = null;
     drawing = false;
-    if (!finishes().some((f) => selected === `finish:${f.id}`) && !selected.startsWith("opening:")) {
-      selected = `finish:${finishes().find((f) => f.source === "run")?.id || finishes()[0].id}`;
-    }
+    selected = "wall";
   }
-  document.getElementById("plan-pop").hidden = true;
-  document.getElementById("plan-btn").setAttribute("aria-expanded", "false");
   render();
 }
 
@@ -1693,13 +1747,20 @@ document.getElementById("wall-mm").addEventListener("change", () => {
   const next = readMm("wall-mm");
   if (next === null) return;
   const prev = wallHeight;
-  wallHeight = clamp(snap(next), MIN_WALL, NEXT_FLOOR);
+  wallHeight = clamp(snap(next), MIN_WALL, maxWallHeight());
   for (const list of Object.values(byFace)) {
     for (const f of list) {
       if (f.top != null && Math.abs(f.top - prev) < 20) f.top = wallHeight;
       if (f.points) f.points.forEach((p) => { if (Math.abs(p[1] - prev) < 20) p[1] = wallHeight; });
     }
   }
+  render();
+});
+document.getElementById("base-mm").addEventListener("change", () => {
+  if (selected !== "wall") return;
+  const next = readMm("base-mm");
+  if (next === null) return;
+  setWallBase(next);
   render();
 });
 document.getElementById("add").addEventListener("click", () => {
@@ -1729,22 +1790,12 @@ document.getElementById("sel-remove").addEventListener("click", () => {
     render();
   }
 });
-document.getElementById("flip").addEventListener("click", () => setFace(faceId === "kitchen" ? "passage" : "kitchen"));
 document.getElementById("fit").addEventListener("click", () => {
   view = { zoom: 1, panX: 0, panY: 0 };
   applyView();
 });
 document.getElementById("plan-btn").addEventListener("click", () => {
-  const pop = document.getElementById("plan-pop");
-  pop.hidden = !pop.hidden;
-  document.getElementById("plan-btn").setAttribute("aria-expanded", String(!pop.hidden));
-});
-document.querySelectorAll("[data-face]").forEach((btn) => btn.addEventListener("click", () => setFace(btn.dataset.face)));
-document.addEventListener("click", (evt) => {
-  if (!evt.target.closest(".plan-wrap")) {
-    document.getElementById("plan-pop").hidden = true;
-    document.getElementById("plan-btn").setAttribute("aria-expanded", "false");
-  }
+  setFace(faceId === "kitchen" ? "passage" : "kitchen");
 });
 document.getElementById("elev").addEventListener("click", (evt) => {
   if (!drawing) return;
@@ -1811,7 +1862,7 @@ document.getElementById("elev").addEventListener("pointerdown", (evt) => {
     pending = null;
     selected = `opening:${o.id}`;
     drag = { kind: "opening-move", id: o.id, dx: m.along - o.from, dy: m.up - o.sill };
-  } else if (t.id === "top-handle" && !shapingFinish()) {
+  } else if (t.id === "top-handle" && wallChosen()) {
     pending = null;
     selected = "wall";
     const stuck = [];
@@ -1824,6 +1875,12 @@ document.getElementById("elev").addEventListener("pointerdown", (evt) => {
       }
     }
     drag = { kind: "wall-top", stuck };
+    evt.preventDefault();
+    render();
+  } else if (t.id === "base-handle" && wallChosen()) {
+    pending = null;
+    selected = "wall";
+    drag = { kind: "wall-move" };
     evt.preventDefault();
     render();
   }
@@ -1920,9 +1977,14 @@ window.addEventListener("pointermove", (evt) => {
     if (!o) return;
     o.from = clamp(m.along - drag.dx, 0, WALL.length - o.width);
     o.sill = clamp(m.up - drag.dy, 0, wallHeight - o.height);
+  } else if (drag.kind === "wall-move") {
+    setWallBase(pointerRaw(evt).abs);
   } else if (drag.kind === "wall-top") {
-    const next = clamp(snap(pointerMm(evt, NEXT_FLOOR).up), MIN_WALL, NEXT_FLOOR);
-    wallHeight = next;
+    const raw = pointerRaw(evt);
+    let next = snap(raw.abs - wallBase);
+    if (Math.abs(raw.abs - NEXT_FLOOR) <= 10) next = NEXT_FLOOR - wallBase;
+    wallHeight = clamp(next, MIN_WALL, maxWallHeight());
+    next = wallHeight;
     for (const ref of drag.stuck) {
       if (ref.key === "top") ref.f.top = next;
       else if (ref.f.points?.[ref.i]) ref.f.points[ref.i][1] = next;
@@ -2025,7 +2087,7 @@ document.getElementById("elev").addEventListener("wheel", (evt) => {
 }, { passive: false });
 document.getElementById("elev").addEventListener("click", (evt) => {
   if (didDrag || drawing) return;
-  if (evt.target.classList?.contains("elev-bg") || evt.target.id === "top-handle") {
+  if (evt.target.classList?.contains("elev-bg") || evt.target.id === "top-handle" || evt.target.id === "base-handle") {
     selected = "wall";
     pending = null;
     render();
@@ -2044,7 +2106,11 @@ function closeFace() {
 }
 function openFace() {
   faceOpen = true;
+  selected = "wall";
+  pending = null;
+  drawing = false;
   document.querySelector(".workspace").hidden = false;
+  render();
   const stage = document.getElementById("plan-stage");
   stage.hidden = true;
   stage.classList.remove("is-home");
