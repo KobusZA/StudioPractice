@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,560&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="./v2.css" />
+  <link rel="stylesheet" href="./v2.css?v=20261102-more-align" />
   <style>
     html, body {
       overflow: auto;
@@ -371,13 +371,13 @@
   <section class="mock-notes">
     <h2>What to look for</h2>
     <ul>
-      <li><strong>Empty plan.</strong> Simple should show PDF / image, then the drawing types. Full still shows Hide, DWG, Ramp, and the rest of the roadmap.</li>
-      <li><strong>Sheet loaded.</strong> Simple replaces PDF / image with Set scale / Move / Hide. Full keeps the whole Add drawing group.</li>
+      <li><strong>Empty plan.</strong> Simple should show PDF / image, then the drawing types. Full keeps Sheet list, Hide and Remove under Add drawing’s More, and DWG / CAD on Output. Ramp stays grey on Structure.</li>
+      <li><strong>Sheet loaded.</strong> Simple still offers PDF / image and Satellite, plus the sheet tools. Full keeps those two on the row; Hide and Remove stay under More.</li>
       <li><strong>Wall selected.</strong> Simple unlocks Modify and adds Rotate / Copy / Delete on the plan header. Full does not change.</li>
       <li>Resize the window. Groups on the right shrink first (large → stacked → icon → a dropdown), so the ribbon stays one row instead of growing a scrollbar.</li>
     </ul>
   </section>
 
-  <script type="module" src="./ribbon-mock.js"></script>
+  <script type="module" src="./ribbon-mock.js?v=20261102-ribbon-more"></script>
 </body>
 </html>

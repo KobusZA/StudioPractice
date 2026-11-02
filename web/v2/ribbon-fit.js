@@ -46,7 +46,6 @@ const GLYPHS = {
   plumbing: '<path d="M8 4v6a4 4 0 008 0V4M12 14v6"/>',
   waterheater: '<rect x="7" y="4" width="10" height="16" rx="3"/><path d="M12 9v4"/>',
   drainage: '<path d="M4 6h16M6 6v6a6 6 0 0012 0V6"/>',
-  "service-place": '<circle cx="12" cy="12" r="5"/><path d="M12 3v4M12 17v4M3 12h4M17 12h4"/>',
   "service-route": '<path d="M4 18h8V8h8"/><circle cx="4" cy="18" r="1.6"/><circle cx="20" cy="8" r="1.6"/>',
   "service-node": '<path d="M3 17l7-6 11 3"/><circle cx="3" cy="17" r="1.6"/><circle cx="21" cy="14" r="1.6"/><circle cx="10" cy="11" r="2.4"/>',
   "service-rise": '<path d="M12 20V6M7 11l5-5 5 5"/><path d="M5 20h14"/>',
@@ -99,6 +98,7 @@ const GLYPHS = {
   "part-m": '<path d="M4 20h4v-4h4v-4h4V8h4"/>',
   zoning: '<rect x="4" y="4" width="7" height="7"/><rect x="13" y="13" width="7" height="7"/>',
   gaps: '<path d="M8 7h8M8 12h5M8 17h8"/>',
+  more: '<circle cx="6" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="18" cy="12" r="1.3" fill="currentColor" stroke="none"/>',
 };
 
 function glyphSvg(id) {
@@ -117,8 +117,11 @@ function fillItemFace(btn, id, caption) {
 
 /** Close every open overflow dropdown, e.g. on an outside click or before a re-fit. */
 export function closeOverflowMenus(except) {
-  document.querySelectorAll(".ribbon-group.is-open").forEach((g) => {
-    if (g !== except) g.classList.remove("is-open");
+  document.querySelectorAll(".ribbon-group.is-open, .ribbon-group.is-menu-open").forEach((g) => {
+    if (g === except) return;
+    g.classList.remove("is-open");
+    g.classList.remove("is-menu-open");
+    g.querySelector(".ribbon-more-btn")?.setAttribute("aria-expanded", "false");
   });
 }
 
@@ -150,6 +153,20 @@ export function decorateRibbon(functionsEl) {
       });
       const label = group.querySelector(".ribbon-group-label");
       group.insertBefore(ov, label);
+    }
+    const more = group.querySelector(".ribbon-more-btn");
+    const menuButtons = [...group.querySelectorAll(".ribbon-menu .ribbon-item")];
+    if (more && menuButtons.length && !more.querySelector(".glyph")) {
+      fillItemFace(more, "more", "More");
+      more.title = menuButtons.map((b) => b.querySelector(".caption")?.textContent || b.textContent.trim()).join(", ");
+      more.classList.toggle("active", menuButtons.some((b) => b.classList.contains("active")));
+      more.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const open = group.classList.contains("is-menu-open");
+        closeOverflowMenus();
+        group.classList.toggle("is-menu-open", !open);
+        more.setAttribute("aria-expanded", String(!open));
+      });
     }
   }
 }

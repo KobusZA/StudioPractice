@@ -1204,6 +1204,10 @@ tbody tr:hover { background: rgba(26, 22, 18, 0.04); }
   line-height: 1.15;
 }
 
+#v2-ctx-remove {
+  color: var(--copper-dark, #8d3416);
+}
+
 .planner-fields .insp-status {
   align-self: stretch;
 }
@@ -2319,28 +2323,180 @@ body.library-home {
   display: none;
 }
 
-.plan-column.is-wall-face > .planner-canvas-wrap {
-  flex: 0 0 96px;
-}
-
-.plan-column.is-wall-face.is-plan-peek > .planner-canvas-wrap {
-  flex: 1 1 42%;
-}
-
-.plan-column.is-wall-face > .svc-profile-dock {
+/* Half the column for the plan, half for the elevation or the floor picture.
+   The drag handle can give that strip up to 75%. */
+.plan-column.is-wall-face > .planner-canvas-wrap,
+.plan-column.is-floor-face > .planner-canvas-wrap {
   flex: 1 1 auto;
-  height: auto !important;
+  height: auto;
+  max-height: none;
   min-height: 0;
 }
 
-.plan-column.is-wall-face > .svc-profile-dock .svc-profile-resize {
-  display: none;
+.plan-column.is-wall-face > .svc-profile-dock,
+.plan-column.is-floor-face > .svc-profile-dock {
+  flex: 0 0 auto;
+  height: 50%;
+  max-height: 75%;
+  min-height: 0;
+}
+
+.svc-profile-dock.is-floor-picture .face-editor-band {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 46px;
+  flex: 0 0 46px;
+  margin: 0 0 6px;
+}
+
+.svc-profile-dock.is-floor-picture .face-editor {
+  display: flex;
+  align-items: center;
+  height: 46px;
+  min-height: 46px;
+  max-height: 46px;
+  padding: 0 10px;
+  overflow: hidden;
+}
+
+.svc-profile-dock.is-floor-picture .face-editor-line {
+  flex: 1 1 auto;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
+.svc-profile-dock.is-floor-picture .face-editor label {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  width: auto;
+  max-width: none;
+  flex: 0 1 auto;
+}
+
+.svc-profile-dock.is-floor-picture .face-editor-controls {
+  flex-wrap: nowrap;
+}
+
+.svc-profile-dock.is-floor-picture .face-editor-controls select,
+.svc-profile-dock.is-floor-picture .face-editor-controls input {
+  width: 132px;
+  height: 28px;
+}
+
+.svc-profile-dock.is-floor-picture .face-editor-band.is-adding {
+  height: auto;
+  flex-basis: auto;
+}
+
+.svc-profile-dock.is-floor-picture .face-editor-band.is-adding .face-editor {
+  height: auto;
+  max-height: none;
+  flex-wrap: wrap;
+  overflow: visible;
+}
+
+.svc-profile-dock.is-floor-picture .face-editor-band.is-adding .face-editor-line,
+.svc-profile-dock.is-floor-picture .face-editor-band.is-adding .face-editor-controls {
+  flex-wrap: wrap;
+}
+
+.svc-profile-dock.is-floor-picture #v2-face-add {
+  position: static;
+  margin-left: 0;
+  height: 30px;
+  flex: 0 0 auto;
+}
+
+.face-area {
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.face-area[hidden] { display: none; }
+
+#v2-floor-place {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+#v2-floor-place[hidden] { display: none !important; }
+
+.floor-stack-key {
+  position: relative;
+  flex: 0 0 auto;
+  margin: 6px 0 0;
+  font-size: 12px;
+}
+
+.floor-stack-key[hidden] { display: none; }
+
+.floor-stack-key summary {
+  height: 30px;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  background: var(--bg-elevated, #fffdf8);
+  border: 1px solid var(--line, rgba(26, 22, 18, 0.14));
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-soft, #5c5348);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.floor-stack-key p {
+  position: absolute;
+  z-index: 5;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 4px);
+  margin: 0;
+  padding: 8px 10px;
+  background: var(--bg-elevated, #fffdf8);
+  border: 1px solid var(--line-strong, rgba(26, 22, 18, 0.25));
+  border-radius: 4px;
+  box-shadow: 0 8px 22px rgba(26, 22, 18, 0.16);
+  color: var(--ink-soft, #5c5348);
+}
+
+.elev-floor-host { fill: #fffdf8; }
+.elev-floor-outline { fill: none; stroke: #1a1612; stroke-width: 1.6; pointer-events: none; }
+.elev-floor-select { fill: none; stroke: var(--copper, #b2451e); stroke-width: 2.5; pointer-events: none; }
+.elev-floor-name, .elev-floor-area {
+  font-family: "Source Sans 3", "Segoe UI", sans-serif;
+  font-weight: 700;
+  pointer-events: none;
+}
+.elev-floor-name { font-size: 13px; fill: #1a1612; }
+.elev-floor-area { font-size: 12px; fill: #1a1612; }
+.elev-floor-name.is-selected, .elev-floor-area.is-selected { fill: var(--copper-dark, #8d3416); }
+
+.plan-column.is-wall-face .svc-profile-head .svc-profile-all,
+.plan-column.is-floor-face .svc-profile-head .svc-profile-all {
+  margin-left: 0;
+}
+
+/* Same vertical breathing room as the finish card below (8px). The dock
+   already pads 6px at the top, so 2px here makes the space above this row
+   match the space under it. */
+.plan-column.is-wall-face .svc-profile-head,
+.plan-column.is-floor-face .svc-profile-head {
+  padding-top: 2px;
+  margin-bottom: 8px;
 }
 
 .face-editor-band {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+  display: block;
   margin: 0 0 6px;
   min-width: 0;
   max-width: 100%;
@@ -2360,22 +2516,42 @@ body.library-home {
 }
 
 #v2-face-add {
-  flex: 0 0 auto;
-  align-self: center;
-  height: 40px;
-  padding: 0 14px;
+  margin-left: auto;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 2px 10px;
   border: 1px solid var(--copper-dark, #8d3416);
-  border-radius: 4px;
+  border-radius: 5px;
   background: var(--copper, #b2451e);
   color: #fffdf8;
-  font: inherit;
-  font-size: 0.82rem;
-  font-weight: 700;
   white-space: nowrap;
   cursor: pointer;
 }
 
 #v2-face-add:hover { background: var(--copper-dark, #8d3416); }
+
+#v2-face-add[hidden] { display: none; }
+
+#v2-face-foundation {
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 2px 10px;
+  border: 1px solid var(--line-strong, rgba(26, 22, 18, 0.25));
+  border-radius: 5px;
+  background: #fffdf8;
+  color: var(--ink, #1a1612);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+#v2-face-foundation:hover {
+  border-color: var(--copper, #b2451e);
+  color: var(--copper-dark, #8d3416);
+}
+
+#v2-face-foundation[hidden] { display: none; }
 
 .face-editor-line {
   display: flex;
@@ -2431,6 +2607,12 @@ body.library-home {
   width: 148px;
   max-width: 148px;
   min-width: 5.5rem;
+}
+
+#v2-face-editor.is-foundation .face-editor-controls label {
+  flex: 1 1 240px;
+  width: auto;
+  max-width: 320px;
 }
 
 .face-editor-controls select,
@@ -2494,27 +2676,7 @@ body.library-home {
   color: var(--copper-dark, #8d3416);
 }
 
-.key-plan-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  height: auto;
-  padding: 3px 8px 3px 4px;
-}
-
-.key-plan {
-  width: 96px;
-  height: 48px;
-  display: block;
-  background: #fffdf8;
-  border-radius: 2px;
-}
-
-.key-plan .key-wall { stroke: #8a8074; stroke-width: 1.25; }
-.key-plan .key-this { stroke: #1a1612; stroke-width: 2.5; }
-.key-plan .key-side { stroke: var(--copper, #b2451e); stroke-width: 3.5; stroke-linecap: round; }
-.key-plan .key-room { fill: #8a8074; font-family: "Source Sans 3", sans-serif; }
-.key-plan .key-room.is-on { fill: var(--copper-dark, #8d3416); font-weight: 700; }
+#v2-face-plan { margin-left: 0; }
 
 .status-action {
   font: inherit;
@@ -2526,15 +2688,6 @@ body.library-home {
   cursor: pointer;
   text-decoration: underline;
 }
-
-.key-plan-copy {
-  display: grid;
-  text-align: left;
-  line-height: 1.15;
-}
-
-.key-plan-copy strong { color: var(--copper-dark, #8d3416); font-size: 0.78rem; }
-.key-plan-copy span { font-size: 0.68rem; color: var(--ink-muted, #8a8074); }
 
 .face-hover {
   position: absolute;
@@ -2623,9 +2776,7 @@ button.fin-kind {
   background: transparent;
 }
 
-/* Fit stays on the right of the title. */
 #v2-elev-fit {
-  margin-left: auto;
   margin-right: 0;
 }
 
@@ -2899,6 +3050,87 @@ button.fin-kind {
 }
 .elev-card-stage { position: relative; }
 
+/* A selected room or slab leads with this picture. Clicking it opens the floor strip. */
+.planner-fields button.floor-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  min-height: 0;
+  padding: 0;
+  border: 1px solid var(--line, rgba(26, 22, 18, 0.18));
+  border-radius: 4px;
+  background: #fffdf8;
+  overflow: hidden;
+  text-align: left;
+  cursor: pointer;
+  font-weight: 600;
+}
+.planner-fields button.floor-card:hover,
+.planner-fields button.floor-card:focus-visible {
+  border-color: var(--copper);
+  box-shadow: 0 0 0 3px rgba(178, 69, 30, 0.08);
+}
+.floor-card-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 9px;
+  background: var(--paper-2);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--ink-muted, #8a8074);
+}
+.floor-card-label em {
+  font-style: normal;
+  font-weight: 600;
+  font-size: 0.75rem;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--copper-dark, #8d3416);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.floor-card-stage {
+  display: block;
+  height: 132px;
+  background: #fffdf8;
+}
+.floor-card-stage svg {
+  display: block;
+  width: 100%;
+  height: 132px;
+}
+.floor-card .open-overlay {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 28px;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(26, 22, 18, 0);
+  opacity: 0;
+  color: #fffdf8;
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+  pointer-events: none;
+  transition: opacity 0.12s, background 0.12s;
+}
+.floor-card:hover .open-overlay,
+.floor-card:focus-visible .open-overlay {
+  opacity: 1;
+  background: rgba(26, 22, 18, 0.38);
+}
+
 .elev-preview {
   border: 0;
   border-radius: 0;
@@ -2992,6 +3224,8 @@ button.fin-kind {
 .elev-bg { fill: #fffdf8; }
 .elev-wall { fill: #e4dccd; stroke: #1a1612; stroke-width: 1.5; }
 .elev-foundation { fill: #d4cbbd; stroke: #5c5348; stroke-width: 1.25; stroke-dasharray: 5 3; cursor: pointer; }
+.elev-foundation-add { fill: rgba(212, 203, 189, 0.45); stroke: var(--copper, #b2451e); stroke-width: 1.25; cursor: pointer; }
+.elev-foundation-add-label { font: 700 12px "Source Sans 3", sans-serif; fill: var(--copper-dark, #8d3416); pointer-events: none; }
 .elev-wall-host,
 .elev-host .elev-band { cursor: pointer; }
 .elev-wall-ghost { fill: none; stroke: #8a8174; stroke-width: 1; stroke-dasharray: 4 3; pointer-events: none; }
@@ -3170,6 +3404,34 @@ button.fin-kind {
   letter-spacing: 0.04em;
   color: var(--ink-soft);
   font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+/* The editor replaces the millimetre readout in place. A native input is
+   ~20 characters wide and left-aligned, so it sat clear of the other
+   elevations. Keep it the same size and on the same right edge. */
+input.level-station-elev {
+  justify-self: end;
+  align-self: center;
+  box-sizing: border-box;
+  width: 7.2ch;
+  min-width: 0;
+  height: 1.35em;
+  margin: 0;
+  padding: 0 1px 0 2px;
+  border: 1px solid var(--copper);
+  border-radius: 2px;
+  background: #fff;
+  font-family: inherit;
+  font-size: 0.74rem;
+  font-weight: inherit;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  line-height: 1.15;
+  text-align: right;
+  color: inherit;
+}
+input.level-station-elev:focus {
+  outline: none;
 }
 .level-stations button[aria-current="true"] .level-station-elev { color: var(--copper); }
 
@@ -3416,9 +3678,11 @@ button.fin-kind {
 
 .ribbon-group[data-kind="stack"] .ribbon-item,
 .ribbon-group[data-kind="large"][data-big="0"] .ribbon-item,
-.ribbon-rest .ribbon-item {
+.ribbon-rest .ribbon-item,
+.ribbon-rest .ribbon-more-btn {
   flex-direction: row;
   justify-content: flex-start;
+  align-items: center;
   height: var(--row);
   min-width: var(--colw);
   padding: 0 8px;
@@ -3427,19 +3691,46 @@ button.fin-kind {
   font-weight: 400;
   white-space: nowrap;
   text-align: left;
+  border-color: transparent;
+}
+
+/* More is not a .ribbon-item, so it never picked up display:flex. Without
+   that the three-dot glyph sits on the text baseline and reads high. */
+.ribbon-more-btn {
+  display: flex;
+  align-items: center;
+  border: 1px solid transparent;
+  background: transparent;
+  line-height: 1.1;
 }
 
 .ribbon-group[data-kind="stack"] .ribbon-item .glyph,
 .ribbon-group[data-kind="large"][data-big="0"] .ribbon-item .glyph,
-.ribbon-rest .ribbon-item .glyph {
+.ribbon-rest .ribbon-item .glyph,
+.ribbon-rest .ribbon-more-btn .glyph {
   width: var(--ico);
   height: var(--ico);
+  flex-shrink: 0;
+  display: block;
 }
 
 .ribbon-group[data-kind="stack"] .ribbon-item .caption,
 .ribbon-group[data-kind="large"][data-big="0"] .ribbon-item .caption,
-.ribbon-rest .ribbon-item .caption {
+.ribbon-rest .ribbon-item .caption,
+.ribbon-rest .ribbon-more-btn .caption {
   max-width: none;
+}
+
+.ribbon-more-btn:hover:not(.active) {
+  background: rgba(26, 22, 18, 0.06);
+  border-color: transparent;
+}
+
+.ribbon-more-btn.active,
+.ribbon-more-btn.active:hover {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--paper);
 }
 
 /* Tight small buttons trade padding for width. */
@@ -3511,13 +3802,15 @@ button.fin-kind {
 }
 
 .ribbon-group[data-icons="all"] .ribbon-item,
-.ribbon-group[data-icons="rest"] .ribbon-rest .ribbon-item {
+.ribbon-group[data-icons="rest"] .ribbon-rest .ribbon-item,
+.ribbon-group[data-icons="rest"] .ribbon-rest .ribbon-more-btn {
   min-width: 0 !important;
   padding: 0 6px !important;
 }
 
 .ribbon-group[data-icons="all"] .ribbon-item .glyph,
-.ribbon-group[data-icons="rest"] .ribbon-rest .ribbon-item .glyph {
+.ribbon-group[data-icons="rest"] .ribbon-rest .ribbon-item .glyph,
+.ribbon-group[data-icons="rest"] .ribbon-rest .ribbon-more-btn .glyph {
   width: 16px !important;
   height: 16px !important;
 }
@@ -3572,6 +3865,65 @@ button.fin-kind {
 .ribbon-group[data-scale="collapsed"].is-open .glyph {
   width: 16px;
   height: 16px;
+}
+
+/* A few commands stay in the group menu even when the group itself is open.
+   The whole-group dropdown (data-scale=collapsed) still lists them with the rest. */
+.ribbon-menu {
+  display: none;
+}
+
+.ribbon-rest .ribbon-more {
+  position: relative;
+  height: var(--row);
+  min-width: var(--colw);
+}
+
+.ribbon-rest .ribbon-more .ribbon-more-btn {
+  width: 100%;
+  height: 100%;
+}
+
+.ribbon-group.is-menu-open .ribbon-menu {
+  display: flex;
+  flex-direction: column;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 20;
+  min-width: 11rem;
+  padding: 4px;
+  background: #fff;
+  border: 1px solid var(--line);
+}
+
+.ribbon-group.is-menu-open .ribbon-menu .ribbon-item {
+  flex-direction: row;
+  justify-content: flex-start;
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  padding: 5px 8px;
+  gap: 8px;
+}
+
+.ribbon-group.is-menu-open .ribbon-menu .caption {
+  display: inline;
+  max-width: none;
+}
+
+.ribbon-group.is-menu-open .ribbon-menu .glyph {
+  width: 16px;
+  height: 16px;
+}
+
+.ribbon-group[data-scale="collapsed"] .ribbon-more,
+.ribbon-group[data-scale="collapsed"] .ribbon-menu {
+  display: contents;
+}
+
+.ribbon-group[data-scale="collapsed"] .ribbon-more-btn {
+  display: none;
 }
 
 /* Simple's Modify tab, shown before anything is selected. */

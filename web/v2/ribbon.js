@@ -19,6 +19,9 @@ export const RIBBON = [
     groups: [
       {
         label: "Add drawing",
+        // Once-a-sheet commands stay one click away, in this group's menu,
+        // instead of taking a column on the row. DWG and CAD live on Output.
+        menu: ["sheet-list", "underlay-toggle", "underlay-off"],
         items: [
           // `anchor` items are the group's lead buttons: they render large,
           // stacked or side by side depending on room (see ribbon-fit.js).
@@ -27,12 +30,10 @@ export const RIBBON = [
           { id: "underlay-adjust", label: "Adjust", command: "underlay-adjust" },
           { id: "calibrate", label: "Set scale", command: "calibrate" },
           { id: "reference", label: "Elevations & sections", command: "reference" },
-          { id: "sheet-list", label: "Sheet list", command: "sheet-list" },
           { id: "align-floors", label: "Align sheets", command: "align-floors" },
+          { id: "sheet-list", label: "Sheet list", command: "sheet-list" },
           { id: "underlay-toggle", label: "Hide", command: "underlay-toggle" },
           { id: "underlay-off", label: "Remove…", command: "underlay-off" },
-          { id: "dwg", label: "DWG", todo: "DWG is vector; the raster underlay lands first and a DWG parser follows." },
-          { id: "cad", label: "CAD", todo: "DXF shares the DWG parser and lands with it." },
         ],
       },
       {
@@ -52,6 +53,15 @@ export const RIBBON = [
           { id: "walls", label: "Walls", tool: "wall", categories: ["wall"] },
           { id: "boundary", label: "Boundary", tool: "wall", categories: ["boundarywall"] },
           { id: "foundations", label: "Foundations", tool: "wall", categories: ["foundation"] },
+        ],
+      },
+      {
+        // The room names a space the walls already enclose. It sits with the
+        // walls, not with the drawing marks.
+        label: "Rooms",
+        items: [
+          { id: "rooms", label: "Room", tool: "room", categories: ["floor"] },
+          { id: "room-sep", label: "Separate", command: "room-sep" },
         ],
       },
       {
@@ -107,16 +117,17 @@ export const RIBBON = [
           { id: "plumbing", label: "Plumbing", tool: "place", categories: ["sanitary"] },
           { id: "waterheater", label: "Water heating", tool: "place", categories: ["waterheater"] },
           { id: "drainage", label: "Drainage", tool: "place", categories: ["drainage"] },
-          // 2.5D routing (Full only - Simple's Services group is unchanged).
-          // Place component is the same click-to-place as the four above,
-          // across every service category; the rest draw and edit routes.
-          { id: "service-place", label: "Place component", tool: "place", categories: ["electrical", "sanitary", "waterheater", "drainage"] },
+          // 2.5D routing (Full only — Simple's Services group is unchanged).
+          // The four buttons above already place a component with the palette
+          // filtered to one trade. Draw route is the other create action.
+          // The rest edit a route that exists, so they render only while a
+          // route or node is selected (`needs: "service"`).
           { id: "service-route", label: "Draw route", command: "service-route" },
-          { id: "service-node", label: "Add node", command: "service-node" },
-          { id: "service-rise", label: "Rise / drop", command: "service-rise" },
-          { id: "service-connect", label: "Connect", command: "service-connect" },
-          { id: "service-type", label: "Change size / type", command: "service-type" },
-          { id: "service-slope", label: "Drainage slope", command: "service-slope" },
+          { id: "service-node", label: "Add node", command: "service-node", needs: "service" },
+          { id: "service-rise", label: "Rise / drop", command: "service-rise", needs: "service" },
+          { id: "service-connect", label: "Connect", command: "service-connect", needs: "service" },
+          { id: "service-type", label: "Change size / type", command: "service-type", needs: "service" },
+          { id: "service-slope", label: "Drainage slope", command: "service-slope", needs: "service" },
         ],
       },
       {
@@ -132,13 +143,6 @@ export const RIBBON = [
     id: "document",
     label: "Document",
     groups: [
-      {
-        label: "Rooms",
-        items: [
-          { id: "rooms", label: "Room", tool: "room", categories: ["floor"] },
-          { id: "room-sep", label: "Separate", command: "room-sep" },
-        ],
-      },
       {
         label: "Lines",
         items: [
@@ -242,6 +246,10 @@ export const RIBBON = [
         items: [
           { id: "export-dxf", label: "Export CAD", command: "export-dxf" },
           { id: "export-ifc", label: "Export IFC", command: "export-ifc" },
+          // Import formats, still unbuilt. They used to sit on Add drawing;
+          // a file format belongs with the other exchange commands.
+          { id: "dwg", label: "DWG", todo: "DWG is vector; the raster underlay lands first and a DWG parser follows." },
+          { id: "cad", label: "CAD", todo: "DXF shares the DWG parser and lands with it." },
         ],
       },
       {
@@ -320,7 +328,6 @@ export const HINTS = {
   plumbing: "Click to place sanitary ware.",
   waterheater: "Click to place a water heater.",
   drainage: "Click to place a drainage fitting.",
-  "service-place": "Click to place a service component: a fitting, sanitary ware, water heater or drainage fitting.",
   "service-route": "Click to start a route, click to add points. Enter or Esc finishes. Click an existing point to join it.",
   "service-node": "Click on a route run to add a node there. Drag a node to move it; select it and press Delete to remove it (the run joins up). Use Rise / drop on a node to change its height.",
   "service-rise": "Select a route point, then rise or drop it to a new height or level.",
@@ -329,10 +336,10 @@ export const HINTS = {
   "service-slope": "Select drainage runs, then set the fall. Flow runs from the first point to the second.",
   furniture: "Click to place a piece of furniture.",
   casework: "Click to place casework.",
-  rooms: "Click inside the walls to fill the room. Where there are no walls, click each corner and press Enter. Set its use in the inspector — compliance checks depend on it.",
-  "room-sep": "Click one end, then the other. A separation line bounds a room where there is no wall.",
+  rooms: "Click inside the walls. The area is already shown; this names the room. Set its use in the inspector. Where there are no walls, click each corner and press Enter.",
+  "room-sep": "Click one end, then the other. Ends snap to wall corners and faces. Type a length, as with a wall. A separation line bounds a room where there is no wall.",
   region: "Click each corner of the patch, then Enter. Pick Brick red, Concrete or Concrete 2 in the inspector. The patch stays ink on the drawing.",
-  finishes: "Pick one of the template's floor types. It is assigned to the selected room, or to the next room you place.",
+  finishes: "Picture of this floor. Add a finish, then cover the whole floor or draw an area. Floor types stay on Floors.",
   dimensions: "Click two points. The dimension stays on this level and prints on its sheet. Select it and press Delete to remove it.",
   rotate: "Select something first, then rotate.",
   attach: "Click a wall or beam on this storey or the one below to sit the selection on top of it. Esc to cancel.",
@@ -391,6 +398,7 @@ export const SIMPLE_TABS = [
       { label: "Sheet", collapseAfterLoad: true, items: ["underlay", "satellite", "calibrate", "reference", "sheet-list", "align-floors", "underlay-adjust", "underlay-toggle"] },
       { label: "Levels", items: ["level-isolate"] },
       { label: "Walls", items: ["walls"] },
+      { label: "Rooms", items: ["rooms", "room-sep"] },
       { label: "Finishes", items: ["wall-finishes", "finishes"] },
       { label: "Floors & roofs", items: ["floors", "roofs"] },
       { label: "Ceilings", items: ["ceilings"] },
@@ -403,7 +411,6 @@ export const SIMPLE_TABS = [
     id: "annotate",
     label: "Annotate",
     groups: [
-      { label: "Rooms", items: ["rooms"] },
       { label: "Measure", items: ["dimensions"] },
     ],
   },
@@ -470,7 +477,8 @@ function simpleTabsForState(state) {
  * a task-ordered subset via `state.skuCount`/`state.sheetLoaded`, hides todo
  * and empty-catalog items outright, and gates the Modify tab on
  * `state.hasSelection()`. Full renders every RIBBON tab/item as-is, including
- * the grey roadmap items.
+ * the grey roadmap items. `state.serviceSelected()` decides whether route-edit
+ * commands (`needs: "service"`) are on the row.
  * `state.skuCount(categories)` decides whether a catalog-backed function has
  * anything behind it: a function pointing at an empty category is disabled and
  * says so, rather than opening a blank palette.
@@ -525,7 +533,16 @@ export function renderRibbon(tabsEl, functionsEl, state) {
       restEl.className = "ribbon-rest";
       items.append(anchorsEl, restEl);
     }
+    // Commands listed on the group stay out of the row and open from More.
+    // Simple groups do not set this, so their copy of the same ids stays put.
+    const menuIds = new Set(group.menu || []);
+    const menuEl = document.createElement("div");
+    menuEl.className = "ribbon-menu";
+    let menuCount = 0;
     for (const item of group.items) {
+      // Route edits are useless until a route or node is selected. Omit them
+      // rather than greying a second column onto Build.
+      if (item.needs === "service" && !state.serviceSelected?.()) continue;
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = item.anchor ? "ribbon-item anchor" : "ribbon-item";
@@ -553,7 +570,26 @@ export function renderRibbon(tabsEl, functionsEl, state) {
         }
         btn.addEventListener("click", () => state.onFunction(item));
       }
-      (hasAnchors ? (item.anchor ? anchorsEl : restEl) : items).appendChild(btn);
+      if (menuIds.has(item.id)) {
+        menuEl.appendChild(btn);
+        menuCount += 1;
+      } else {
+        (hasAnchors ? (item.anchor ? anchorsEl : restEl) : items).appendChild(btn);
+      }
+    }
+    if (menuCount) {
+      // The menu is a child of the More button's cell, so it opens under
+      // that button rather than at the left edge of the group.
+      const moreWrap = document.createElement("div");
+      moreWrap.className = "ribbon-more";
+      const more = document.createElement("button");
+      more.type = "button";
+      more.className = "ribbon-more-btn";
+      more.textContent = "More";
+      more.setAttribute("aria-haspopup", "menu");
+      more.setAttribute("aria-expanded", "false");
+      moreWrap.append(more, menuEl);
+      (restEl || items).appendChild(moreWrap);
     }
 
     const label = document.createElement("span");

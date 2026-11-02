@@ -518,19 +518,28 @@ test("floor coverage reports bare floor and overlap, including a concave outline
   assert.equal(side.overlapCount, 0);
 });
 
-test("finishes sit on the Build ribbon after Walls, in Full and Simple", () => {
+test("Rooms sit between Walls and Finishes on Build and on simple Draw", () => {
   const build = RIBBON.find((t) => t.id === "build");
   const names = build.groups.map((g) => g.label);
-  assert.equal(names[names.indexOf("Walls") + 1], "Finishes");
+  assert.equal(names[names.indexOf("Walls") + 1], "Rooms");
+  assert.equal(names[names.indexOf("Rooms") + 1], "Finishes");
+  assert.deepEqual(build.groups.find((g) => g.label === "Rooms").items.map((i) => i.id), ["rooms", "room-sep"]);
   const fin = build.groups.find((g) => g.label === "Finishes");
   assert.deepEqual(fin.items.map((i) => i.id), ["wall-finishes", "finishes"]);
-  const project = RIBBON.find((t) => t.id === "document").groups.find((g) => g.label === "Project");
+  const document = RIBBON.find((t) => t.id === "document");
+  assert.equal(document.groups.find((g) => g.label === "Rooms"), undefined);
+  const project = document.groups.find((g) => g.label === "Project");
   assert.deepEqual(project.items.map((i) => i.id), ["project-info"]);
   const draw = SIMPLE_TABS.find((t) => t.id === "draw");
   const simpleNames = draw.groups.map((g) => g.label);
-  assert.equal(simpleNames[simpleNames.indexOf("Walls") + 1], "Finishes");
+  assert.equal(simpleNames[simpleNames.indexOf("Walls") + 1], "Rooms");
+  assert.equal(simpleNames[simpleNames.indexOf("Rooms") + 1], "Finishes");
+  assert.deepEqual(draw.groups.find((g) => g.label === "Rooms").items, ["rooms", "room-sep"]);
   assert.deepEqual(draw.groups.find((g) => g.label === "Finishes").items, ["wall-finishes", "finishes"]);
-  const views = RIBBON.find((t) => t.id === "document").groups.find((g) => g.label === "Views");
+  const annotate = SIMPLE_TABS.find((t) => t.id === "annotate");
+  assert.equal(annotate.groups.find((g) => g.label === "Rooms"), undefined);
+  assert.ok(annotate.groups.some((g) => g.items.includes("dimensions")));
+  const views = document.groups.find((g) => g.label === "Views");
   assert.equal(views.items.find((i) => i.id === "elevation")?.label, "Elevation");
 });
 

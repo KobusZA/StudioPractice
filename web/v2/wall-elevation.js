@@ -9,7 +9,9 @@
 // end; side -1 is mirrored. Offsets in the model are always in viewing order.
 
 import { defaultWallTop, isReferenceLevel, levelAboveRise } from "./level-view.js";
-import { resolvedBase } from "./compile.js";
+import { levelElevation, resolvedBase } from "./compile.js";
+import { nid } from "./model.js";
+import { foundationStorey, isFoundationLevel } from "./placement-warn.js";
 import {
   openingOnWall,
   openingSize,
@@ -100,8 +102,10 @@ function naturalWallHeight(pack, wall) {
  * Heights are absolute (level datum plus offset), `base` and `top` bound the
  * wall, and each opening's `sill` is measured up from `base`. `guide` is the
  * next floor or the roof, kept even when the wall stops short of it.
+ * `foundationSku` previews that footing under a bare wall; omitted, the job's
+ * default foundation is used.
  */
-export function elevationModel(doc, pack, faceRef, walls = null) {
+export function elevationModel(doc, pack, faceRef, walls = null, foundationSku = null) {
   if (!doc || !pack || !faceRef?.wallId) return null;
   const all = walls || deriveWalls(doc, pack);
   const wall = all.find((w) => w.id === faceRef.wallId);
@@ -141,6 +145,12 @@ export function elevationModel(doc, pack, faceRef, walls = null) {
   openings.sort((a, b) => a.offset - b.offset);
 
   const foundations = foundationsUnder(doc, pack, wall, all, base, flip);
+  // Nothing under this wall yet, and it starts on the ground storey: the
+  // elevation can place the job's default footing. A wall that starts at the
+  // next floor already sits on that floor.
+  const foundationOffer = wall.category === "foundation" || foundations.length
+    ? null
+    : foundationOfferFor(pack, base, foundationSku);
 
   const levels = (pack.levels || [])
     .filter((l) => Number.isFinite(l.elevation))
@@ -171,6 +181,9 @@ export function elevationModel(doc, pack, faceRef, walls = null) {
     // Foundations on this line, in viewing order. `from`/`to` run along the
     // face; `base` and `top` are absolute, and `top` never rises above this wall.
     foundations,
+    // Null once a footing is already under this wall, or the wall starts higher
+    // than the ground storey. `base`/`top` are absolute; `top` is this wall's base.
+    foundationOffer,
     // Finish bands in viewing order, heights above `base`. Room rules and
     // runs are editable; the computed plaster default is not.
     finishBands: faceFinishBands(doc, pack, all, wall, side, {
@@ -235,6 +248,82 @@ function foundationsUnder(doc, pack, wall, all, wallBase, flip) {
   }
   out.sort((a, b) => a.from - b.from || a.base - b.base);
   return out;
+}
+
+/** True when `wallBase` is still on the ground storey, below the next floor. */
+function footingBelongsUnder(pack, wallBase) {
+  if (!Number.isFinite(wallBase)) return false;
+  const storeys = (pack?.levels || [])
+    .filter((l) => Number.isFinite(l.elevation) && !l.parentId && !isReferenceLevel(l) && !isFoundationLevel(l))
+    .sort((a, b) => a.elevation - b.elevation);
+  const above = storeys[1];
+  if (!storeys[0] || !above) return Boolean(storeys[0]);
+  return wallBase < above.elevation - 0.05;
+}
+
+/** Foundation types the elevation can place, in catalogue order. */
+export function foundationTypes(pack) {
+  const out = [];
+  for (const sku of pack?.skus || []) {
+    if (sku.category !== "foundation") continue;
+    const depth = skuDrawnHeight(sku);
+    if (!(depth > 0)) continue;
+    out.push({ id: sku.id, name: sku.name || sku.id, depth });
+  }
+  return out;
+}
+
+/**
+ * The footing the elevation would add under a bare ground-storey wall.
+ * `skuId` picks one of `foundationTypes`; anything else falls back to the
+ * job's default, then the first type that has a depth. The top meets the
+ * wall's base. Null when this wall does not take a footing.
+ */
+function foundationOfferFor(pack, wallBase, skuId) {
+  if (!footingBelongsUnder(pack, wallBase)) return null;
+  const types = foundationTypes(pack);
+  if (!types.length) return null;
+  const chosen = types.find((t) => t.id === skuId)
+    || types.find((t) => t.id === pack?.system?.defaultFoundationSku)
+    || types[0];
+  return {
+    skuId: chosen.id,
+    name: chosen.name,
+    depth: chosen.depth,
+    base: wallBase - chosen.depth,
+    top: wallBase,
+  };
+}
+
+/**
+ * Draw a foundation along this wall, top flush with the wall base. `skuId`
+ * chooses the type; omitted, the job's default is used. Filed on the
+ * foundation storey when the pack has one, otherwise on the wall's own level
+ * with the offset that puts it in the ground. Mutates `doc` (the caller owns
+ * undo and persist). Returns the new segment, or null when this wall already
+ * has a footing or should not gain one.
+ */
+export function addFoundationUnderWall(doc, pack, faceRef, walls = null, skuId = null) {
+  const all = walls || deriveWalls(doc, pack);
+  const wall = all.find((w) => w.id === faceRef?.wallId);
+  if (!wall || wall.category === "foundation") return null;
+  const offer = elevationModel(doc, pack, faceRef, all, skuId)?.foundationOffer;
+  if (!offer) return null;
+  const home = foundationStorey(pack.levels || []);
+  const levelId = home?.id || wall.level;
+  const seg = {
+    id: nid("s"),
+    sku: offer.skuId,
+    level: levelId,
+    x1: wall.x1,
+    y1: wall.y1,
+    x2: wall.x2,
+    y2: wall.y2,
+    status: wall.status === "existing" ? "existing" : "planned",
+    baseOffset: Math.round((offer.base - levelElevation(pack, levelId)) * 1000) / 1000,
+  };
+  (doc.segments || (doc.segments = [])).push(seg);
+  return { id: seg.id, name: offer.name };
 }
 
 /**

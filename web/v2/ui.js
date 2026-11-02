@@ -6,7 +6,8 @@
 //  - A rectangle resizes from the options strip until you drag it. Dragging a
 //    corner or an edge turns it into a polygon: Corner adds a point, Line moves
 //    the edge, with the same cursors as a floor finish. Identity and type live
-//    in the Inspector. New rooms/slabs/roofs are two-click rectangles with the HUD.
+//    in the Inspector. New slabs and roofs are two-click rectangles with the HUD.
+//    A room is a click inside closed walls, or corners where there are no walls.
 //  - No modal type picker; clicking a type SKU sets the active tool/SKU
 //    directly, or retypes the current selection if the category matches.
 //  - Marquee selection uses each shape's bounding box, not exact polygon
@@ -20,8 +21,8 @@
 import { complianceGaps, normalizePackUnits, GEOMETRY_LENGTH_KEYS } from "./schema.js";
 import { RULE_PACK, evaluateCompliance, groupFindingsByPart, summarizeFindings } from "./rules.js";
 import { deriveBuildingLine, hitPropertyLine, setBuildingLine, setPropertyLine, setSgReference } from "./site.js?v=20261015-property";
-import { HINTS, firstTabId, renderRibbon } from "./ribbon.js?v=20261026-inspector";
-import { closeOverflowMenus, decorateRibbon, fitRibbon } from "./ribbon-fit.js?v=20261022-ribbon-fit";
+import { HINTS, firstTabId, renderRibbon } from "./ribbon.js?v=20261102-sep-snap";
+import { closeOverflowMenus, decorateRibbon, fitRibbon } from "./ribbon-fit.js?v=20261102-ribbon-full";
 import {
   ghostContext,
   MAX_FLOORS_TO_ADD,
@@ -159,21 +160,23 @@ import {
   polyShape,
   shapeAsPoly,
   roomPolygon,
-  roomUse,
+  roomTagLines,
   shapePolygon,
   finishRegionPolygon,
   finishRegionSlab,
   hostedFinishRegionsOf,
   carryFinishRegionsToLevel,
   translateShape,
-} from "./model.js";
-import { enclosedFace, syncRoomBounds } from "./room-bound.js";
+} from "./model.js?v=20261102-room-tag";
+import { enclosedFace, spaceAt, syncRoomBounds } from "./room-bound.js?v=20261102-face-join";
 import { REGION_CONVENTIONS, regionConvention } from "./region.js";
-import { ELEVATION_SNAP, FINISH_MIN_M, OPENING_MIN_M, alignOutlineShift, applyBandEdit, applyOpeningEdit, applyOutlinePoints, applyTypedGap, applyWallTopEdit, axisAlignedOutline, elevationModel, faceRefForSelection, maxTypedGap, openingSnapEdges, resizeOpeningCorner, snapElevation, translateOutlineEdge } from "./wall-elevation.js?v=20261101-face-align";
-import { createFinishRegion, createFinishRun, dependentsOfWalls, finishProductById, libraryLine, planWallFinishMarks, presetFromRoom, roomsBySide, rulesFromPreset, savePreset } from "./finish-model.js?v=20261101-face-editor";
+import { ELEVATION_SNAP, FINISH_MIN_M, OPENING_MIN_M, addFoundationUnderWall, alignOutlineShift, applyBandEdit, applyOpeningEdit, applyOutlinePoints, applyTypedGap, applyWallTopEdit, axisAlignedOutline, elevationModel, faceRefForSelection, foundationTypes, maxTypedGap, openingSnapEdges, resizeOpeningCorner, snapElevation, translateOutlineEdge } from "./wall-elevation.js?v=20261102-foundation-block";
+import { FACE_CORNER_ALONG, FACE_CORNER_TRAVEL, FACE_CUE_INTRO_MS, FACE_CUE_PULSE_MS, FACE_CUE_REST_ALPHA, faceCornerMarks, faceCueZoom } from "./face-plan-cue.js?v=20261102-face-corners";
+import { createFinishRegion, createFinishRun, dependentsOfWalls, finishProductById, floorCoverage, libraryLine, planWallFinishMarks, presetFromRoom, roomsBySide, rulesFromPreset, savePreset } from "./finish-model.js?v=20261101-face-editor";
 import { FINISH_CATEGORIES, finishId, finishSwatch, normalizeFinishProducts, normalizeFinishSettings } from "./finish-data.js";
-import { HEIGHT_PRESETS, bandFaceLine, compareBands, draftBandPreviewHtml, faceFinishHtml, finishCalloutHtml, openingCalloutHtml, floorProductSuggestions, parseTarget, productsHtml, roomFinishHtml, slabFinishHtml, targetOptions } from "./finish-panel.js?v=20261101-coat-stack";
-import { clampElevationView, edgeResizeCursor, elevationSvg, finishLocate, zoomElevationView } from "./wall-elevation-render.js?v=20261101-finish-stack";
+import { HEIGHT_PRESETS, bandFaceLine, compareBands, draftBandPreviewHtml, faceFinishHtml, finishCalloutHtml, floorOpenHtml, formatFloorArea, openingCalloutHtml, floorProductSuggestions, parseTarget, productsHtml, roomFinishHtml, slabFinishHtml, targetOptions } from "./finish-panel.js?v=20261102-floor-list";
+import { clampElevationView, edgeResizeCursor, elevationSvg, finishLocate, zoomElevationView } from "./wall-elevation-render.js?v=20261102-floor-gap";
+import { FLOOR_TYPE_GROUPS, alignFloorPoint, faceToPlan, floorFaceOf, floorPictureSvg, planToFace, resolveFloorFinishOpen } from "./floor-picture.js?v=20261102-floor-gap";
 import { CORNER_JOIN_TOL, deriveWalls, drawnSegmentFromWall, drawnWallThickness, isStripFooting, skuDrawnHeight, statusVisible } from "./walls.js";
 import { findJoinTarget, resolveJoin, sideTowardTarget } from "./wall-join.js?v=20261022-corner-b";
 import {
@@ -500,8 +503,12 @@ const el = {
   ctxOHeightWrap: document.getElementById("v2-ctx-oheight-wrap"),
   ctxOSizeNote: document.getElementById("v2-ctx-osize-note"),
   ctxConvert: document.getElementById("v2-ctx-convert"),
+  ctxRemove: document.getElementById("v2-ctx-remove"),
   ctxOOffset: document.getElementById("v2-ctx-ooffset"),
   ctxOOffsetWrap: document.getElementById("v2-ctx-ooffset-wrap"),
+  ctxFloor: document.getElementById("v2-ctx-floor"),
+  ctxFloorName: document.getElementById("v2-ctx-floor-name"),
+  ctxFloorPic: document.getElementById("v2-ctx-floor-pic"),
   ctxElevWrap: document.getElementById("v2-ctx-elev-wrap"),
   ctxElevFace: document.getElementById("v2-ctx-elev-face"),
   ctxElev: document.getElementById("v2-ctx-elev"),
@@ -515,10 +522,19 @@ const el = {
   ctxShapePolyHint: document.getElementById("v2-ctx-shape-poly-hint"),
   elevBody: document.getElementById("v2-elevation-body"),
   faceEditor: document.getElementById("v2-face-editor"),
+  faceAdd: document.getElementById("v2-face-add"),
+  faceFoundation: document.getElementById("v2-face-foundation"),
+  faceFoundationAdd: document.getElementById("v2-face-foundation-add"),
   facePlan: document.getElementById("v2-face-plan"),
   elevFlash: document.getElementById("v2-elev-flash"),
   faceWhich: document.getElementById("v2-face-which"),
   faceMeta: document.getElementById("v2-face-meta"),
+  faceArea: document.getElementById("v2-face-area"),
+  floorPlace: document.getElementById("v2-floor-place"),
+  floorWhole: document.getElementById("v2-floor-whole"),
+  floorDraw: document.getElementById("v2-floor-draw"),
+  floorCancel: document.getElementById("v2-floor-cancel"),
+  floorStackKey: document.getElementById("v2-floor-stack-key"),
   faceSwatch: document.getElementById("v2-face-swatch"),
   faceType: document.getElementById("v2-face-type"),
   faceProduct: document.getElementById("v2-face-product"),
@@ -532,9 +548,6 @@ const el = {
   facePlaceRow: document.getElementById("v2-face-place-row"),
   faceUp: document.getElementById("v2-face-up"),
   faceAlong: document.getElementById("v2-face-along"),
-  faceOpeningRow: document.getElementById("v2-face-opening-row"),
-  faceWallRow: document.getElementById("v2-face-wall-row"),
-  faceWallH: document.getElementById("v2-face-wall-h"),
   faceTypeLabel: document.getElementById("v2-face-type-label"),
   faceProductLabel: document.getElementById("v2-face-product-label"),
   faceHover: document.getElementById("v2-face-hover"),
@@ -702,8 +715,10 @@ let lineStart = null;
 // Site > Property line: the vertices clicked so far, while tool === "property".
 // Closed by clicking near the first point again, Enter, or double-click.
 let siteDraft = null;
-// Document > Rooms, when the click is not already inside walls: corners so far.
+// Build > Rooms, when the click is not inside walls and the walls do not close: corners so far.
 let roomDraft = null;
+// The space under the pointer: enclosed area, open ends, or nothing. Not stored.
+let spaceNow = { kind: "empty" };
 // Document > Annotate > Region: corners so far.
 let regionDraft = null;
 // The drawn boundary is selected. Corners can be dragged; the line itself moves.
@@ -767,6 +782,25 @@ let wallsCache = [];
 // follows the selection (see wall-elevation.js). Selecting a wall does not
 // open it: the plan stays full size until the face is asked for.
 let elevationOpen = false;
+// The floor picture uses the same strip as a wall elevation. Opening one
+// clears the other. Null unless a room or a slab is showing its floor.
+let floorPicture = null;
+let floorAddPending = null;
+let floorDraft = null;
+let floorFlash = null;
+let floorFramedId = "";
+let floorInfoForce = false;
+// Alignment on the picture, in the floor's face (s across, z up the picture).
+let floorGuides = null;
+// A corner or edge pressed and not dragged. Its clearance stays up so a number
+// can be typed. A real drag clears it. Arrows remember which side was chosen.
+let floorHeld = null;
+let floorTyping = null;
+let floorTypingAxis = "h";
+let floorLocatePin = { h: null, v: null };
+// A foundation type chosen on the open face, not yet placed. The strip shows
+// that type's depth; Add, or a second click on the strip, stores it.
+let foundationPick = null;
 // A finish chosen on the face, not yet given a place, so nothing is stored.
 let faceAddPending = null;
 // The open face can select the wall itself. This is not the plan selection:
@@ -787,6 +821,7 @@ let elevTypingAxis = "h";
 // The same arrow returns it to that side. h is "left" | "right", v is "up" | "down".
 let elevLocatePin = { h: null, v: null };
 let elevPreviewKey = "";
+let floorCardKey = "";
 // Finishes: the inspector section's last markup and whether Products is open,
 // and, while a floor finish region is being drawn, its { category, productId }
 // (finishing the draft then writes doc.finishRegions).
@@ -2330,6 +2365,7 @@ function applySnap(wx, wy, exclude) {
     }
   }
   const origin = near ? align.nearest : null;
+  point = lockSeparationEnd(point);
   snapGuide = {
     x: point.x,
     y: point.y,
@@ -2369,6 +2405,7 @@ function snapPreviewTool() {
   return tool === "wall" || tool === "beam" || tool === "room" || tool === "slab"
     || tool === "roof" || tool === "property" || tool === "sg-ref" || tool === "camera" || tool === "section"
     || tool === "callout" || tool === "revision" || tool === "model-line" || tool === "annot-line"
+    || tool === "separation"
     || tool === "measure" || tool === "service-route" || tool === "region";
 }
 
@@ -2608,6 +2645,7 @@ function editStationElevation(span, station) {
   input.type = "text";
   input.className = "level-station-elev";
   input.inputMode = "decimal";
+  input.size = 6;
   input.value = String(Math.round(station.elevation * 1000));
   span.replaceWith(input);
   input.focus();
@@ -3306,7 +3344,10 @@ function draw() {
   wallFinishExtents = new Map();
   const rect = el.canvasWrap.getBoundingClientRect();
   ctx.clearRect(0, 0, rect.width, rect.height);
-  if (!pack) return;
+  if (!pack) {
+    spaceNow = { kind: "empty" };
+    return;
+  }
 
   if (underlayIsVisible()) drawUnderlay(ctx, store.doc, worldToScreen, cam.scale);
   drawGrid(rect);
@@ -3406,7 +3447,9 @@ function draw() {
   if (tool === "callout" && calloutDraft?.a) drawCalloutDraft();
   if (tool === "revision" && revisionCloudDraft?.a) drawRevisionCloudDraft();
   if (tool === "measure" && measureDraft?.a) drawMeasureDraft();
+  drawFloorPlanMark();
   drawLocateFlash();
+  drawFacePlanCue();
   drawSnapGuide(rect);
   drawEndpointHandles();
   drawPropertyChrome();
@@ -3419,6 +3462,8 @@ function draw() {
   drawOpeningDraft(walls);
   if (isSatelliteUnderlay(store.doc) && underlayIsVisible()) drawSatelliteAttribution(rect);
   if (store.doc.sheetSet && underlayIsVisible()) drawSheetCaption(rect);
+  refreshSpaceNow();
+  drawSpaceReadout();
 
   el.empty.hidden = shouldHidePlanEmpty();
   el.legend.hidden = !store.hasContent();
@@ -3664,6 +3709,12 @@ function drawRevisionCloudDraft() {
 
 let lastRibbonHasSelection = null;
 let lastRibbonDoor = null;
+let lastRibbonService = false;
+
+/** A route run or one of its points is selected, so Build may show the route-edit commands. */
+function serviceRibbonSelection() {
+  return store.selected.some((ref) => ref.kind === "serviceEdge" || ref.kind === "serviceNode");
+}
 
 function render() {
   releaseFinishEditForOpening();
@@ -3680,17 +3731,27 @@ function render() {
   restoreStoredUnderlay();
   syncAttachPanel();
   syncHeaderModify();
-  // Simple's Modify tab gates its whole content on selection; refresh it
-  // only when that flips (not on every render(), which pointer drags call
-  // continuously) so the tab unlocks the moment something is picked.
+  // Simple's Modify tab gates its whole content on selection, and Full's
+  // Build tab grows the route-edit commands only while a route or node is
+  // selected. Refresh on those flips, not on every render() — pointer drags
+  // call this continuously.
   const hasSel = store.selected.length > 0;
   const doorNow = Boolean(selectedDoor());
-  if ((density === "simple" && activeTab === "modify" && hasSel !== lastRibbonHasSelection) || doorNow !== lastRibbonDoor) {
+  const serviceNow = serviceRibbonSelection();
+  if (
+    (density === "simple" && activeTab === "modify" && hasSel !== lastRibbonHasSelection)
+    || doorNow !== lastRibbonDoor
+    || (density === "full" && activeTab === "build" && serviceNow !== lastRibbonService)
+  ) {
     drawRibbon();
   }
   lastRibbonHasSelection = hasSel;
   lastRibbonDoor = doorNow;
-  const hintKey = `${tool}|${activeFunction || ""}|${store.selected.length}|${store.primary?.kind || ""}|${store.primary?.id || ""}|${panMode ? 1 : 0}`;
+  lastRibbonService = serviceNow;
+  const spaceKey = spaceNow.kind === "enclosed"
+    ? `e${spaceNow.occupied ? 1 : 0}:${Number(spaceNow.area).toFixed(1)}`
+    : spaceNow.kind;
+  const hintKey = `${tool}|${activeFunction || ""}|${store.selected.length}|${store.primary?.kind || ""}|${store.primary?.id || ""}|${panMode ? 1 : 0}|${wallDraft ? 1 : 0}|${spaceKey}`;
   if (hintKey !== lastPlanHintKey) {
     lastPlanHintKey = hintKey;
     updateRibbonHint();
@@ -4283,21 +4344,25 @@ function drawRoom(room) {
   if (poly.length < 3) return;
   drawPolyFill(poly, "rgba(180, 69, 30, 0.06)", statusStroke(objectStatus(room)));
   const [cx, cy] = worldToScreen(...centroidOf(poly));
+  const { title, subtitle } = roomTagLines(room);
+  const rows = [{ text: title, strong: true }];
+  if (subtitle) rows.push({ text: subtitle, strong: false });
+  rows.push({ text: `${roomArea(room).toFixed(1)} m²`, strong: false });
   ctx.save();
-  ctx.fillStyle = "#1a1612";
-  ctx.font = "600 12px Source Sans 3, sans-serif";
   ctx.textAlign = "center";
-  ctx.fillText(room.name || "Room", cx, cy - 14);
-  ctx.font = "11px Source Sans 3, sans-serif";
-  ctx.fillStyle = "#5c5348";
-  const useLabel = room.use && room.use !== "other" ? roomUse(room.use).label : "Use not set";
-  ctx.fillText(useLabel, cx, cy);
-  ctx.fillText(`${roomArea(room).toFixed(1)} m²`, cx, cy + 14);
+  const step = 14;
+  let y = cy - ((rows.length - 1) * step) / 2;
+  for (const row of rows) {
+    ctx.font = row.strong ? "600 12px Source Sans 3, sans-serif" : "11px Source Sans 3, sans-serif";
+    ctx.fillStyle = row.strong ? "#1a1612" : "#5c5348";
+    ctx.fillText(row.text, cx, y);
+    y += step;
+  }
   const floorLabel = roomFloorRuleLabel(room, poly);
   if (floorLabel) {
     ctx.font = "600 11px Source Sans 3, sans-serif";
     ctx.fillStyle = "#1a1612";
-    ctx.fillText(floorLabel, cx, cy + 28);
+    ctx.fillText(floorLabel, cx, y);
   }
   ctx.restore();
 }
@@ -4329,6 +4394,71 @@ function roomFloorRuleLabel(room, poly) {
 function centroidOf(poly) {
   const b = bbox(poly);
   return [b.x + b.w / 2, b.y + b.h / 2];
+}
+
+/** Walls and separations, folded into one number so a moved wall recomputes the area. */
+function boundaryStamp() {
+  let s = (store.doc.rooms || []).length;
+  const add = (seg) => {
+    s += seg.x1 + seg.y1 * 2 + seg.x2 * 3 + seg.y2 * 4;
+  };
+  for (const seg of store.doc.segments || []) add(seg);
+  for (const seg of store.doc.separations || []) add(seg);
+  return `${activeLevel}|${s}`;
+}
+
+/**
+ * The space under the pointer. Select, wall and room tools only. A line draft
+ * or a room outline in progress owns the pointer; panning does too. A wall
+ * still being drawn keeps its own hint, and the area still draws, because the
+ * number is what you look for the moment the walls close.
+ */
+function refreshSpaceNow() {
+  const quiet = panMode || drag?.kind === "pan" || !pack || !hoverPoint
+    || !Number.isFinite(hoverPoint.x) || !Number.isFinite(hoverPoint.y);
+  const armed = tool === "select" || tool === "wall" || tool === "room";
+  if (quiet || !armed || lineStart || roomDraft?.length) {
+    spaceNow = { kind: "empty" };
+    return;
+  }
+  const qx = Math.round(hoverPoint.x * 20);
+  const qy = Math.round(hoverPoint.y * 20);
+  const stamp = boundaryStamp();
+  if (spaceNow.qx === qx && spaceNow.qy === qy && spaceNow.stamp === stamp) return;
+  const found = spaceAt(store.doc, pack, activeLevel, hoverPoint.x, hoverPoint.y);
+  spaceNow = { ...found, qx, qy, stamp };
+}
+
+function spaceHintText() {
+  if (spaceNow.kind === "enclosed" && !spaceNow.occupied && Number.isFinite(spaceNow.area)) {
+    const lead = `${spaceNow.area.toFixed(1)} m² inside the walls.`;
+    if (tool === "room") return { text: `${lead} Click to place the room.`, warn: false };
+    return { text: lead, warn: false };
+  }
+  return null;
+}
+
+/**
+ * Inside walls that already close, Room is one click that names the space.
+ * The crosshair and the gap lengths belong to the other use of the tool:
+ * clicking corners where the walls do not close.
+ */
+function roomClickPlaces() {
+  return tool === "room" && !roomDraft?.length
+    && spaceNow.kind === "enclosed" && !spaceNow.occupied;
+}
+
+/** The inner area, before a room is placed. Shown only inside walls that close. */
+function drawSpaceReadout() {
+  if (spaceNow.kind !== "enclosed" || spaceNow.occupied || !spaceNow.poly || spaceNow.poly.length < 3) return;
+  const [cx, cy] = worldToScreen(...centroidOf(spaceNow.poly));
+  ctx.save();
+  ctx.fillStyle = "#5c5348";
+  ctx.font = "11px Source Sans 3, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(`${spaceNow.area.toFixed(1)} m²`, cx, cy);
+  ctx.restore();
 }
 
 function drawWall(wall, { marker = false } = {}) {
@@ -4852,9 +4982,9 @@ function drawSelectionHighlights(walls) {
     if (ref.kind === "room" || ref.kind === "slab" || ref.kind === "roof") {
       pathForPoly(shapePolygon(obj.shape));
       ctx.stroke();
-      // While the covering finish is the thing being dragged, its own corners
-      // are the handles. The floor's would sit on the same spots.
-      const showCorners = refsToDraw().length === 1 && !editingCoveringFinish();
+      // A selected finish owns the corners. The floor outline waits until Floor
+      // itself is selected, so the two are never both grabbable.
+      const showCorners = refsToDraw().length === 1 && !editingFinishRegion();
       const corners = showCorners ? shapeOutlinePoints(obj) : null;
       if (corners) {
         ctx.fillStyle = "#f4ede1";
@@ -5630,16 +5760,13 @@ function hitPolyEdgeIndex(points, wx, wy, tol) {
 // --- floor finish regions: editing on the plan --------------------------------
 //
 // Tiles, waterproofing and the like are polygons stored in doc.finishRegions
-// (finish-model.js). They are edited through the floor they sit on: with that
-// floor (or room) selected, click inside a region, or press "Edit corners" in
-// the inspector, and its corners show. Drag a corner. Drag an edge to add one,
-// or, with Line, to move that edge. Shift uses the other for a single drag.
-// Delete removes the selected corner, drag inside to move the region. Corners
-// stay inside the floor. Moving the floor itself carries its regions.
-//
-// A finish that covers the whole floor has no outline of its own. A click on
-// it edits the floor, and the finish follows. Edit corners is what picks the
-// finish up, and Done puts it down.
+// (finish-model.js). One thing is edited at a time. Floor selected: the floor
+// outline. A finish selected, including one that still covers the whole floor:
+// that finish's corners, and the floor outline stays put until Floor is
+// clicked again. Drag a corner. Drag an edge to add one, or, with Line, to
+// move that edge. Shift uses the other for a single drag. Delete removes the
+// selected corner, or asks before it removes the finish. Corners stay inside
+// the floor. Moving the floor itself carries its regions.
 
 /** Regions of the floor or room that is the one thing selected. */
 function regionsOfSelection() {
@@ -5739,18 +5866,6 @@ function regionCoversHost(region) {
   return host.every(([x, y]) => pointOnOrInRing(x, y, poly)) && poly.every(([x, y]) => pointOnOrInRing(x, y, host));
 }
 
-/** The finish on the selected floor that still covers the whole outline. */
-function coveringFinishRegion() {
-  const regions = regionsOfSelection();
-  return regions.find((r) => r.whole) || regions.find((r) => regionCoversHost(r)) || null;
-}
-
-/** The finish being edited, when it is the one that covers the floor. */
-function editingCoveringFinish() {
-  const region = editingFinishRegion();
-  return region && regionCoversHost(region) ? region : null;
-}
-
 /** The corners to hit-test: the stored ones for a free polygon, else the outline it resolves to. */
 function finishRegionRing(region) {
   if (region.shape?.kind === "poly" && !region.whole && Array.isArray(region.shape.points)) return region.shape.points;
@@ -5768,7 +5883,8 @@ function finishRegionPoints(region) {
 
 /** Line moves the edge. Corner inserts a node. Shift swaps them for this drag. */
 function floorEdgeMoves(ev) {
-  return ev.shiftKey ? floorEdgeMode !== "line" : floorEdgeMode === "line";
+  const mode = floorHostNow() ? elevEdgeMode : floorEdgeMode;
+  return ev.shiftKey ? mode !== "line" : mode === "line";
 }
 
 /**
@@ -5827,8 +5943,44 @@ function applyEdgeSnap(a0, b0, push, exclude) {
   return { x, y };
 }
 
+/** Name a floor finish the way a wall finish is named: the product, then the type. */
+function floorFinishLabel(region) {
+  const category = floorRegionCategory(region);
+  const label = FINISH_CATEGORIES[category]?.label || "This finish";
+  const product = finishProductById(store.doc, region?.productId);
+  const named = product?.name || product?.code;
+  return named ? `${named} (${label})` : label;
+}
+
+/** What Delete will do with this floor finish, said when it is selected. */
+function announceFloorFinish(region, { corner = false, edge = false } = {}) {
+  if (!region) return;
+  const name = floorFinishLabel(region);
+  const gap = " Type the clearance, or press an arrow to choose the side.";
+  setStatusMessage(corner
+    ? `Corner selected. Delete removes this corner. The finish stays.${gap}`
+    : edge
+      ? `${name} selected. Type the clearance, or press an arrow to choose the side. Delete removes this finish. The floor stays.`
+      : `${name} selected. Drag a corner to reshape it. Delete removes this finish. The floor stays.`, "ok");
+}
+
+/** Ask before Delete takes a floor finish off. The floor underneath stays. */
+function floorFinishDeletePrompt(region) {
+  const name = floorFinishLabel(region);
+  return {
+    title: `Delete ${name}?`,
+    message: `${name} will be deleted from this floor. The floor stays.`,
+    action: "Delete finish",
+    cancel: "Keep the finish",
+    kept: `${name} stays on the floor.`,
+    done: `${name} deleted. The floor stays.`,
+  };
+}
+
 /** Begin a corner, edge or whole-region drag on the region being edited. */
-function beginFinishRegionDrag(ev, wx, wy) {
+function beginFinishRegionDrag(ev, wx, wy, opts = {}) {
+  floorHeld = null;
+  floorTyping = null;
   const region = editingFinishRegion();
   selectedRegionVertex = null;
   if (!region) return false;
@@ -5836,18 +5988,23 @@ function beginFinishRegionDrag(ev, wx, wy) {
   if (ring.length < 3) return false;
   const grab = (next) => {
     drag = { ...next, id: region.id, moved: false };
-    el.canvas.setPointerCapture(ev.pointerId);
+    const host = ev.currentTarget === el.elevBody ? el.elevBody : el.canvas;
+    host?.setPointerCapture?.(ev.pointerId);
     return true;
   };
-  const vi = hitPolyVertexIndex(ring, wx, wy, shapeEditTol());
-  if (vi != null) {
+  const vi = Number.isInteger(opts.vertex)
+    ? opts.vertex
+    : (Number.isInteger(opts.edge) ? null : hitPolyVertexIndex(ring, wx, wy, shapeEditTol()));
+  if (vi != null && vi >= 0 && vi < ring.length) {
     store.pushUndo();
     finishRegionPoints(region);
     selectedRegionVertex = { id: region.id, index: vi };
     return grab({ kind: "region-vertex", index: vi });
   }
-  const ei = hitPolyEdgeIndex(ring, wx, wy, propertyPickTol());
-  if (ei != null) {
+  const ei = Number.isInteger(opts.edge)
+    ? opts.edge
+    : hitPolyEdgeIndex(ring, wx, wy, propertyPickTol());
+  if (ei != null && ei >= 0 && ei < ring.length) {
     store.pushUndo();
     const points = finishRegionPoints(region);
     if (floorEdgeMoves(ev)) {
@@ -5865,6 +6022,8 @@ function beginFinishRegionDrag(ev, wx, wy) {
     selectedRegionVertex = { id: region.id, index: insertAt };
     return grab({ kind: "region-vertex", index: insertAt, inserted: true });
   }
+  // A shared patch cycles on the fill. Only a handle or an edge starts a drag.
+  if (opts.edgesOnly) return false;
   // Shift inside the region, off its edges, still adds the floor to the selection.
   if (ev.shiftKey) return false;
   if (pointInPoly(wx, wy, finishRegionPolygon(store.doc, region))) {
@@ -5922,11 +6081,73 @@ function pickFinishRegionAt(wx, wy) {
   }
 }
 
+/** Corners the picture may line up with. The point being dragged is left out. */
+function floorSnapTargets(except = []) {
+  const skip = (x, y) => except.some((p) => Math.abs(p[0] - x) < 1e-9 && Math.abs(p[1] - y) < 1e-9);
+  const points = [];
+  const push = (x, y) => {
+    if (!Number.isFinite(x) || !Number.isFinite(y) || skip(x, y)) return;
+    points.push([x, y]);
+  };
+  for (const p of floorHostPoly()) push(p[0], p[1]);
+  for (const region of regionsOfSelection()) {
+    for (const p of finishRegionPolygon(store.doc, region)) push(p[0], p[1]);
+  }
+  return points;
+}
+
+/** A corner or an edge on the picture: snap in the floor's face, not on the plan. */
+function dragFloorOnPicture(region, wx, wy) {
+  snapGuide = null;
+  const face = floorFaceOf(floorHostPoly());
+  const scale = elevationLayout?.scaleX || cam.scale || 1;
+  if (drag.kind === "region-edge") {
+    const origin = drag.origin;
+    const i = drag.index;
+    const j = (i + 1) % origin.length;
+    const a0 = origin[i];
+    const b0 = origin[j];
+    const push = perpendicularEdgeMove(a0[0], a0[1], b0[0], b0[1], wx - drag.grabX, wy - drag.grabY);
+    const aligned = alignFloorPoint(a0[0] + push.dx, a0[1] + push.dy, face, floorSnapTargets([a0, b0]));
+    const along = (aligned.x - a0[0]) * push.nx + (aligned.y - a0[1]) * push.ny;
+    const host = finishRegionHost(region);
+    const next = translatePolyEdge(origin, i, push.nx * along, push.ny * along, host);
+    const at = next[i];
+    if (Math.hypot(at[0] - a0[0], at[1] - a0[1]) * scale > 2) drag.moved = true;
+    const landedX = a0[0] + push.nx * along;
+    const landedY = a0[1] + push.ny * along;
+    const guideS = Math.abs(at[0] - landedX) > 1e-4 ? null : aligned.guideS;
+    const guideZ = Math.abs(at[1] - landedY) > 1e-4 ? null : aligned.guideZ;
+    floorGuides = guideS == null && guideZ == null ? null : { s: guideS, z: guideZ };
+    if (drag.moved) region.shape.points = next;
+    return;
+  }
+  const pt = region.shape?.points?.[drag.index];
+  if (!pt) return;
+  const aligned = alignFloorPoint(wx, wy, face, floorSnapTargets([pt]));
+  const host = finishRegionHost(region);
+  const at = host.length >= 3 ? clampToPoly(aligned.x, aligned.y, host) : aligned;
+  if (Math.hypot(at.x - pt[0], at.y - pt[1]) * scale > 2) drag.moved = true;
+  const guideS = Math.abs(at.x - aligned.x) > 1e-6 ? null : aligned.guideS;
+  const guideZ = Math.abs(at.y - aligned.y) > 1e-6 ? null : aligned.guideZ;
+  floorGuides = guideS == null && guideZ == null ? null : { s: guideS, z: guideZ };
+  if (drag.moved) region.shape.points[drag.index] = [at.x, at.y];
+}
+
 /** A finish region's drag, from pointer move. Returns true when it handled the drag. */
 function dragFinishRegion(wx, wy) {
   if (drag?.kind !== "region-vertex" && drag?.kind !== "region-move" && drag?.kind !== "region-edge") return false;
   const region = (store.doc.finishRegions || []).find((r) => r.id === drag.id);
   if (!region) return true;
+  if (floorHostNow() && (drag.kind === "region-vertex" || drag.kind === "region-edge")) {
+    dragFloorOnPicture(region, wx, wy);
+    render();
+    return true;
+  }
+  if (floorHostNow()) {
+    snapGuide = null;
+    floorGuides = null;
+  }
   if (drag.kind === "region-edge") {
     const origin = drag.origin;
     const i = drag.index;
@@ -6056,6 +6277,7 @@ function drawHoveredFinishRegion() {
 
 /** The region's corners, drawn over the plan while it is being edited. */
 function drawEditingFinishRegion() {
+  if (floorHostNow()) return;
   const region = editingFinishRegion();
   if (!region) return;
   // During a floor drag the snapshot is refitted on each move, so a corner
@@ -7550,6 +7772,7 @@ function drawRibbon() {
     skuCount,
     commandState: ribbonCommandState,
     hasSelection: () => store.selected.length > 0,
+    serviceSelected: serviceRibbonSelection,
     sheetLoaded: () => Boolean(store.doc.underlay),
     onTab: (id) => {
       activeTab = id;
@@ -7633,7 +7856,9 @@ function updateRibbonHint() {
   }
   if (tool === "model-line" || tool === "annot-line" || tool === "separation") {
     setRibbonHint(lineStart
-      ? "Click the other end."
+      ? (tool === "separation"
+        ? "Click the other end, or type a length and press Enter. Ends snap to wall corners and faces."
+        : "Click the other end.")
       : HINTS[tool === "annot-line" ? "annot-lines" : tool === "separation" ? "room-sep" : "model-lines"]);
     return;
   }
@@ -7689,6 +7914,20 @@ function updateRibbonHint() {
       setRibbonHint("Drag the window along the wall to move it.");
     }
     return;
+  }
+  // A wall segment in progress keeps its own hint. The area still draws.
+  if (floorHostNow()) {
+    setRibbonHint(floorDraft
+      ? "Click each corner on this floor. Double-click or Esc finishes the shape."
+      : HINTS.finishes);
+    return;
+  }
+  if (!wallDraft) {
+    const spaceHint = spaceHintText();
+    if (spaceHint) {
+      setRibbonHint(spaceHint.text, spaceHint.warn);
+      return;
+    }
   }
   const hint = activeFunction && HINTS[activeFunction];
   setRibbonHint(hint || "");
@@ -8316,6 +8555,8 @@ function commitLine(kind, a, b) {
 
 function startSeparation() {
   lineStart = null;
+  sizeDraft = null;
+  paletteFilter = null;
   roomDraft = null;
   regionDraft = null;
   tool = "separation";
@@ -8388,12 +8629,13 @@ function finishRegionDraft() {
 function placeRoomAt(p) {
   const face = enclosedFace(store.doc, pack, activeLevel, p.x, p.y);
   if (!face) return false;
-  commitRoomRecord({
+  const room = commitRoomRecord({
     shape: polyShape(face),
     seed: { x: p.x, y: p.y },
     bound: true,
   });
-  setStatusMessage("Room filled to the surrounding walls. Set its use in the inspector.", "ok");
+  store.setSelection([{ kind: "room", id: room.id }]);
+  setStatusMessage("Room placed. Set its use in the inspector.", "ok");
   render();
   return true;
 }
@@ -8406,39 +8648,32 @@ function finishRoomDraft() {
   const points = roomDraft.map((p) => [p.x, p.y]);
   const [cx, cy] = points.reduce((s, p) => [s[0] + p[0], s[1] + p[1]], [0, 0]).map((n) => n / points.length);
   const face = enclosedFace(store.doc, pack, activeLevel, cx, cy);
-  if (face) {
-    commitRoomRecord({ shape: polyShape(face), seed: { x: cx, y: cy }, bound: true });
-    setStatusMessage("Room filled to the surrounding walls. Set its use in the inspector.", "ok");
-  } else {
-    commitRoomRecord({ shape: polyShape(points) });
-    setStatusMessage("Room placed. Set its use in the inspector.", "ok");
-  }
+  const room = face
+    ? commitRoomRecord({ shape: polyShape(face), seed: { x: cx, y: cy }, bound: true })
+    : commitRoomRecord({ shape: polyShape(points) });
   roomDraft = null;
+  store.setSelection([{ kind: "room", id: room.id }]);
+  setStatusMessage("Room placed. Set its use in the inspector.", "ok");
   updateRibbonHint();
   render();
 }
 
 function openFloorFinishes() {
-  const floors = (pack?.skus || []).filter((s) => s.category === "floor");
-  if (!floors.length) {
-    setStatusMessage("The template has no floor types.", "warn");
-    return;
-  }
+  tool = "select";
   activeFunction = "finishes";
-  paletteFilter = ["floor"];
-  lastPaletteLabel = "Floor finishes";
-  const selectedRoom = store.selected.some((r) => r.kind === "room");
-  if (!selectedRoom) {
-    tool = "room";
-    activeFunction = "rooms";
-  }
-  setTypeFlyoutOpen(true);
+  setTypeFlyoutOpen(false);
   syncToolButtons();
   drawRibbon();
-  renderPalette();
-  setStatusMessage(selectedRoom
-    ? "Pick a floor type. It is assigned to the selected room."
-    : "Pick a floor type, then place the room.", "ok");
+  const picked = resolveFloorFinishOpen(store.selected);
+  const host = picked.open ? objByRef(picked.host) : null;
+  const ceiling = host && picked.host.kind === "slab" && skuById(host.sku)?.category === "ceiling";
+  if (!picked.open || !host || ceiling) {
+    setStatusMessage("Select a room or a slab.", "warn");
+    render();
+    return;
+  }
+  openFloorPicture(picked.host);
+  setStatusMessage("The picture of this floor. Add a finish, then cover the floor or draw an area.", "ok");
   render();
 }
 
@@ -9101,15 +9336,23 @@ function drawActiveSheet() {
       const [tx, ty] = project(room.centroid[0], room.centroid[1]);
       sctx.textAlign = "center";
       sctx.textBaseline = "alphabetic";
-      sctx.font = `600 ${Math.max(9, Math.min(14, pxPerM * 0.22))}px "Source Sans 3", sans-serif`;
+      const { title, subtitle } = roomTagLines(room);
+      const titleSize = Math.max(9, Math.min(14, pxPerM * 0.22));
+      const subSize = Math.max(8, Math.min(12, pxPerM * 0.18));
+      let y = ty - 10;
+      sctx.font = `600 ${titleSize}px "Source Sans 3", sans-serif`;
       sctx.fillStyle = "#1a1612";
-      sctx.fillText(room.name || "Room", tx, ty - 10);
-      sctx.font = `${Math.max(8, Math.min(12, pxPerM * 0.18))}px "Source Sans 3", sans-serif`;
+      sctx.fillText(title, tx, y);
+      sctx.font = `${subSize}px "Source Sans 3", sans-serif`;
       sctx.fillStyle = "#5c5348";
-      const useLabel = room.use && room.use !== "other" ? roomUse(room.use).label : "Use not set";
-      sctx.fillText(useLabel, tx, ty + 2);
-      const areaText = Number.isFinite(room.area) ? `${room.area.toFixed(1)} m²` : "";
-      if (areaText) sctx.fillText(areaText, tx, ty + 14);
+      if (subtitle) {
+        y += 12;
+        sctx.fillText(subtitle, tx, y);
+      }
+      if (Number.isFinite(room.area)) {
+        y += 12;
+        sctx.fillText(`${room.area.toFixed(1)} m²`, tx, y);
+      }
     }
     if (view.kind === "plan") {
       for (const line of planDimensionLines(sheetDimensionBoxes(store.doc, forms || []))) {
@@ -10958,7 +11201,8 @@ function wireCanvas() {
     }
     const wasProp = propertyHover;
     propertyHover = null;
-    if (wasProp || tool === "door" || tool === "window" || wallDraft || shapeDraft || beamStart || lineStart || (tool === "camera" && cameraDraft?.a) || (tool === "section" && sectionDraft?.a) || (tool === "callout" && calloutDraft?.a) || (tool === "revision" && revisionCloudDraft?.a) || (tool === "measure" && measureDraft?.a)) render();
+    const hadSpace = spaceNow.kind !== "empty";
+    if (wasProp || hadSpace || tool === "door" || tool === "window" || wallDraft || shapeDraft || beamStart || lineStart || (tool === "camera" && cameraDraft?.a) || (tool === "section" && sectionDraft?.a) || (tool === "callout" && calloutDraft?.a) || (tool === "revision" && revisionCloudDraft?.a) || (tool === "measure" && measureDraft?.a)) render();
   });
   window.addEventListener("pointerup", onPointerUp);
   el.canvas.addEventListener("wheel", onWheel, { passive: false });
@@ -11098,8 +11342,9 @@ function onPointerDown(ev) {
 
   // A room, floor or roof: a corner moves that corner. An edge follows Corner
   // or Line, the same as a finish. Shift uses the other for this drag. While
-  // the covering finish is chosen, its own drag already consumed the press.
-  if (tool === "select" && !attachPick && !editingCoveringFinish()) {
+  // a finish is selected, its corners are the ones that move. The floor
+  // outline waits until Floor is clicked.
+  if (tool === "select" && !attachPick && !editingFinishRegion()) {
     const editable = editableShapeRef();
     if (!ev.shiftKey) selectedShapeVertex = null;
     if (editable) {
@@ -11350,6 +11595,9 @@ function onPointerDown(ev) {
   }
   if (tool === "room") {
     underlaySelected = false;
+    // The point under the cursor already sits in the room. Snapping it onto
+    // a wall would leave the face and start a corner outline instead.
+    if (!roomDraft?.length && placeRoomAt({ x: wx, y: wy })) return;
     const p = applySnap(wx, wy);
     if (!roomDraft?.length) {
       if (placeRoomAt(p)) return;
@@ -11415,13 +11663,16 @@ function onPointerDown(ev) {
     underlaySelected = false;
     if (!lineStart) {
       lineStart = applySnap(wx, wy);
+      if (tool === "separation") sizeDraft = { lockW: false, lockH: false, typedW: "", typedH: "", axis: "w" };
     } else {
       const end = applySnap(wx, wy);
       if (tool === "separation") commitSeparation(lineStart, end);
       else commitLine(tool === "annot-line" ? "annotation" : "model", lineStart, end);
       lineStart = null;
+      if (tool === "separation") sizeDraft = null;
       snapGuide = null;
     }
+    updateRibbonHint();
     render();
     return;
   }
@@ -11448,6 +11699,13 @@ function onPointerDown(ev) {
 
   const hit = hitTest(wx, wy);
   if (hit) {
+    // The floor outline is editable only while Floor is the selection. A press
+    // on that floor, while a finish is selected, selects Floor and does not
+    // start a drag.
+    if (!ev.shiftKey && editingFinishRegion() && (hit.kind === "room" || hit.kind === "slab") && store.isSelected(hit.kind, hit.id)) {
+      selectFloorHost();
+      return;
+    }
     if (underlaySelected) drawRibbon();
     underlaySelected = false;
     propertySelected = false;
@@ -11701,6 +11959,10 @@ function clearRouteIfLeavingServices() {
  * the run just drawn brings the profile straight back.
  */
 function exitRouteProfile() {
+  if (floorHostNow()) {
+    closeFloorPicture();
+    return;
+  }
   if (elevationShowing() || (elevationOpen && selectedElevationFace())) {
     closeOpenFace();
     return;
@@ -11970,10 +12232,10 @@ function finishRegionCursor(wx, wy) {
   return ringEdgeCursor(finishRegionRing(region), wx, wy);
 }
 
-/** The same cursor on an edge of the floor, room or roof. Hidden while the
- *  covering finish is the outline being edited — those edges are the finish's. */
+/** The same cursor on an edge of the floor, room or roof. Hidden while a
+ *  finish is selected: those edges belong to the finish until Floor is clicked. */
 function floorShapeCursor(wx, wy) {
-  if (editingCoveringFinish()) return null;
+  if (editingFinishRegion()) return null;
   const editable = editableShapeRef();
   if (!editable) return null;
   return ringEdgeCursor(editable.points, wx, wy);
@@ -11984,6 +12246,10 @@ function floorShapeCursor(wx, wy) {
 function placeFloorEdgeMode() {
   const node = el.floorEdgeMode;
   if (!node) return;
+  if (floorHostNow()) {
+    setHidden(node, true);
+    return;
+  }
   const region = tool === "select" ? editingFinishRegion() : null;
   const shape = tool === "select" && !attachPick ? editableShapeRef() : null;
   const show = Boolean(region || shape);
@@ -12323,7 +12589,8 @@ function onPointerMove(ev) {
     el.canvas.style.cursor = planSelectCursor(wx, wy, uHandle);
   } else if (!drag) {
     propertyHover = null;
-    el.canvas.style.cursor = "crosshair";
+    if (tool === "room" && !roomDraft?.length) refreshSpaceNow();
+    el.canvas.style.cursor = roomClickPlaces() ? "pointer" : "crosshair";
   } else {
     propertyHover = null;
   }
@@ -12346,7 +12613,8 @@ function onPointerMove(ev) {
     render();
     return;
   }
-  if (!drag && (snapPreviewTool() || beamStart || lineStart || wallDraft || shapeDraft)) applySnap(wx, wy);
+  if (!drag && roomClickPlaces()) snapGuide = null;
+  else if (!drag && (snapPreviewTool() || beamStart || lineStart || wallDraft || shapeDraft)) applySnap(wx, wy);
   else if (!drag) snapGuide = null;
   render();
 }
@@ -12408,8 +12676,15 @@ function onPointerUp(ev) {
     else if (drag.kind === "shape-edge") setStatusMessage("Line moved.", "ok");
   } else if (drag.kind === "region-vertex" || drag.kind === "region-edge" || drag.kind === "region-move") {
     // A press that moved nothing leaves no undo step, unless it added a corner.
-    if (!drag.moved && !drag.inserted) store.undoStack.pop();
-    else if (drag.inserted) setStatusMessage("Corner added. Drag it, or click another edge. Delete removes the selected corner.", "ok");
+    // Put the document back: selecting a corner of a whole-floor finish must
+    // not turn it into a free polygon before it is dragged.
+    if (!drag.moved && !drag.inserted) {
+      const prev = store.undoStack.pop();
+      if (prev) store.doc = prev;
+      const region = (store.doc.finishRegions || []).find((r) => r.id === drag.id);
+      if (drag.kind === "region-vertex" && region) announceFloorFinish(region, { corner: true });
+      else if (region) announceFloorFinish(region);
+    } else if (drag.inserted) setStatusMessage("Corner added. Drag it, or click another edge. Delete removes the selected corner.", "ok");
     else if (drag.kind === "region-edge") setStatusMessage("Line moved.", "ok");
   } else if (drag.kind === "property-vertex" || drag.kind === "property-move") {
     if (!drag.moved) store.undoStack.pop();
@@ -12611,25 +12886,37 @@ function deleteSelection() {
     });
     return;
   }
-  // While a region's corners are showing, Delete is about them, never the floor under them.
+  // A selected floor finish is what Delete removes. A selected corner of it
+  // goes instead, and the floor underneath stays either way.
   const editing = editingFinishRegion();
   if (editing) {
     const vref = selectedRegionVertex;
-    selectedRegionVertex = null;
-    const pts = editing.shape?.points;
-    if (vref && vref.id === editing.id && pts && pts[vref.index]) {
-      if (pts.length <= 3) {
-        setStatusMessage("A region needs at least three corners.", "warn");
+    const ring = finishRegionRing(editing);
+    if (vref && vref.id === editing.id && ring[vref.index]) {
+      if (ring.length <= 3) {
+        setStatusMessage("A finish needs at least three corners.", "warn");
         return;
       }
+      selectedRegionVertex = null;
       store.pushUndo();
-      pts.splice(vref.index, 1);
+      const points = finishRegionPoints(editing);
+      points.splice(vref.index, 1);
       store.persist();
+      finishKey = "";
       setStatusMessage("Corner removed.", "ok");
       render();
-    } else {
-      setStatusMessage("Click a corner of the region, then Delete. Use Remove in the inspector to take the region off.", "warn");
+      return;
     }
+    const prompt = floorFinishDeletePrompt(editing);
+    askDelete(prompt, () => {
+      const current = editingFinishRegion();
+      if (!current || current.id !== editing.id) {
+        setStatusMessage("That finish is no longer selected.", "warn");
+        return;
+      }
+      removeFloorRegion();
+      setStatusMessage(prompt.done, "ok");
+    });
     return;
   }
   if (selectedShapeVertex) {
@@ -12768,12 +13055,13 @@ function wireKeyboard() {
     // face, blurring the field is the whole press.
     if (typing && ev.key === "Escape") {
       document.activeElement.blur();
-      if (elevationOpen && selectedElevationFace()) return;
+      if ((elevationOpen && selectedElevationFace()) || floorHostNow()) return;
     } else if (typing) return;
 
     // Digits, Backspace, Enter and the arrows. Escape is ordered with the
     // rest of the face, after a drawing and a finish that is waiting.
     if (ev.key !== "Escape" && elevationGapKey(ev)) return;
+    if (floorGapKey(ev)) return;
 
     if (ev.key === "Escape") {
       if (accountIsOpen()) {
@@ -12905,6 +13193,9 @@ function wireKeyboard() {
     } else if (ev.key === "Enter" && wallDraft) {
       ev.preventDefault();
       finishWallSegment();
+    } else if (ev.key === "Enter" && tool === "separation" && lineStart) {
+      ev.preventDefault();
+      finishSeparationDraft();
     } else if (ev.key === "Enter" && shapeDraft?.rect) {
       ev.preventDefault();
       finishShapeRect();
@@ -12962,8 +13253,7 @@ function floorSkuForPlacement() {
 }
 
 function commitRoomRecord({ shape, seed = null, bound = false }) {
-  store.pushUndo();
-  store.doc.rooms.push({
+  const room = {
     id: nid("r"),
     name: "Room",
     use: "other",
@@ -12974,14 +13264,16 @@ function commitRoomRecord({ shape, seed = null, bound = false }) {
     bound,
     seed,
     shape,
-  });
+  };
+  store.pushUndo();
+  store.doc.rooms.push(room);
   store.persist();
-  return true;
+  return room;
 }
 
 function commitRoom(rect) {
   if (!canCommitRect(rect, "room-new")) return false;
-  return commitRoomRecord({ shape: rectShape(rect.x, rect.y, rect.w, rect.h) });
+  return Boolean(commitRoomRecord({ shape: rectShape(rect.x, rect.y, rect.w, rect.h) }));
 }
 
 function commitSlab(rect) {
@@ -13108,6 +13400,66 @@ function wallDraftLength() {
   return segmentLength(wallDraft.x1, wallDraft.y1, wallDraft.x2, wallDraft.y2);
 }
 
+/** A typed length wins over the snapped cursor, the same way a wall draft does.
+ * Direction stays the pointer's, including a snap onto a wall corner or face. */
+function lockSeparationEnd(point) {
+  if (tool !== "separation" || !lineStart || !sizeDraft?.lockW || !point) return point;
+  const len = parseLengthInput(sizeDraft.typedW, segmentLength(lineStart.x, lineStart.y, point.x, point.y) || MIN_TRACE);
+  return setLineLength(lineStart, point, len, (n) => roundGrid(n, activeGrid()));
+}
+
+function syncSeparationSizeFields() {
+  if (!lineStart || !el.ctxLen) return;
+  const end = snapGuide ? { x: snapGuide.x, y: snapGuide.y } : (hoverPoint || lineStart);
+  const len = segmentLength(lineStart.x, lineStart.y, end.x, end.y);
+  const ang = headingDeg(lineStart.x, lineStart.y, end.x, end.y);
+  if (document.activeElement !== el.ctxLen) {
+    el.ctxLen.value = sizeDraft?.lockW ? sizeDraft.typedW : (len < 0.05 ? "" : formatLengthMm(len));
+  }
+  if (el.ctxAng && document.activeElement !== el.ctxAng) {
+    el.ctxAng.value = len < 0.05 ? "" : ang.toFixed(1);
+  }
+}
+
+function separationDraftLength() {
+  if (!lineStart || !snapGuide) return 0;
+  return segmentLength(lineStart.x, lineStart.y, snapGuide.x, snapGuide.y);
+}
+
+function setSeparationDraftLength(length) {
+  if (!lineStart) return;
+  const aim = snapGuide
+    ? { x: snapGuide.x, y: snapGuide.y }
+    : { x: lineStart.x + Math.max(length, MIN_TRACE), y: lineStart.y };
+  const end = setLineLength(lineStart, aim, length, (n) => roundGrid(n, activeGrid()));
+  if (snapGuide) {
+    snapGuide.x = end.x;
+    snapGuide.y = end.y;
+  }
+}
+
+function setSeparationDraftHeading(deg) {
+  if (!lineStart) return;
+  const cur = separationDraftLength() || MIN_TRACE;
+  const len = sizeDraft?.lockW ? parseLengthInput(sizeDraft.typedW, cur) : cur;
+  const end = setLineHeading(lineStart, len, deg, (n) => roundGrid(n, activeGrid()));
+  if (snapGuide) {
+    snapGuide.x = end.x;
+    snapGuide.y = end.y;
+  }
+}
+
+function finishSeparationDraft() {
+  if (!lineStart) return;
+  const end = snapGuide ? { x: snapGuide.x, y: snapGuide.y } : hoverPoint;
+  if (end) commitSeparation(lineStart, end);
+  lineStart = null;
+  sizeDraft = null;
+  snapGuide = null;
+  updateRibbonHint();
+  render();
+}
+
 function setWallDraftLength(length) {
   if (!wallDraft) return;
   const grid = activeGrid();
@@ -13162,12 +13514,14 @@ function syncSizeHud() {
 }
 
 function handleSizeTyping(ev) {
-  if (!wallDraft && !shapeDraft) return false;
-  if (ev.target !== el.hudW && ev.target !== el.hudH && ev.target !== el.ctxLen) return false;
+  const sepDraft = tool === "separation" && lineStart;
+  if (!wallDraft && !shapeDraft && !sepDraft) return false;
+  if (ev.target !== el.hudW && ev.target !== el.hudH && ev.target !== el.ctxLen && ev.target !== el.ctxAng) return false;
   if (!sizeDraft) sizeDraft = { lockW: false, lockH: false, typedW: "", typedH: "", axis: "w" };
   if (ev.key === "Enter") {
     ev.preventDefault();
     if (wallDraft) finishWallSegment();
+    else if (sepDraft) finishSeparationDraft();
     else if (shapeDraft?.rect) finishShapeRect();
     return true;
   }
@@ -13181,7 +13535,8 @@ function handleSizeTyping(ev) {
 
 function handleDraftNumericShortcut(ev) {
   if (ev.ctrlKey || ev.metaKey || ev.altKey) return false;
-  if (!wallDraft && !shapeDraft) return false;
+  const sepDraft = tool === "separation" && lineStart;
+  if (!wallDraft && !shapeDraft && !sepDraft) return false;
   if (ev.key.length !== 1 || !/[0-9.,]/.test(ev.key)) return false;
   const tag = document.activeElement?.tagName;
   if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return false;
@@ -13190,8 +13545,9 @@ function handleDraftNumericShortcut(ev) {
   sizeDraft.lockW = true;
   sizeDraft.typedW = ev.key === "," ? "." : ev.key;
   if (wallDraft) setWallDraftLength(parseLengthInput(sizeDraft.typedW, wallDraftLength() || 1));
+  else if (sepDraft) setSeparationDraftLength(parseLengthInput(sizeDraft.typedW, separationDraftLength() || 1));
   render();
-  (wallDraft ? el.ctxLen : el.hudW)?.focus();
+  (wallDraft || sepDraft ? el.ctxLen : el.hudW)?.focus();
   return true;
 }
 
@@ -13452,10 +13808,9 @@ function syncHeightFields(obj, kind) {
 
   const size = opening ? openingSize(pack, opening) : null;
   const isWindow = Boolean(opening && skuById(opening.sku)?.category === "window");
-  const faceEditing = elevationOpen && Boolean(selectedElevationFace());
-  setHidden(el.ctxSillWrap, !isWindow || faceEditing);
-  setHidden(el.ctxOWidthWrap, !opening || faceEditing);
-  setHidden(el.ctxOHeightWrap, !opening || faceEditing);
+  setHidden(el.ctxSillWrap, !isWindow);
+  setHidden(el.ctxOWidthWrap, !opening);
+  setHidden(el.ctxOHeightWrap, !opening);
   setHidden(el.ctxOSizeNote, !size?.nonStandard);
   if (!opening) return;
   const put = (input, metres) => {
@@ -13516,6 +13871,17 @@ function setOpeningSize(field, raw, { allowZero = false } = {}) {
 el.ctxSill?.addEventListener("change", (e) => setOpeningSize("sill", e.target.value, { allowZero: true }));
 el.ctxOWidth?.addEventListener("change", (e) => setOpeningSize("width", e.target.value));
 el.ctxOHeight?.addEventListener("change", (e) => setOpeningSize("height", e.target.value));
+
+el.ctxRemove?.addEventListener("click", () => {
+  const room = soleOf("room");
+  if (!room) return;
+  const name = room.name || "Room";
+  const id = room.id;
+  deleteSelection();
+  if (store.selected.some((r) => r.kind === "room" && r.id === id)) return;
+  setStatusMessage(`${name} removed. The walls stay.`, "ok");
+  render();
+});
 
 el.ctxConvert?.addEventListener("click", () => {
   const room = soleOf("room");
@@ -13652,6 +14018,7 @@ function leaveFinishEdit() {
  * a drawing on the plan.
  */
 function escapeOpenFace() {
+  if (floorHostNow()) return escapeFloorPicture();
   const faceOpen = Boolean(elevationOpen && selectedElevationFace());
   if (!faceOpen && !elevFinishDraft) return false;
   if (elevFinishDraft) {
@@ -13665,6 +14032,11 @@ function escapeOpenFace() {
     }
     finishElevFinishDraft();
     if (elevFinishDraft) elevFinishDraft.escAgainCancels = true;
+    return true;
+  }
+  if (foundationPick && foundationPick.wallId === elevationFace?.wallId) {
+    foundationPick = null;
+    render();
     return true;
   }
   if (faceAddPending && faceAddPending.wallId === elevationFace?.wallId) {
@@ -13695,6 +14067,7 @@ function escapeOpenFace() {
 /** Close the open face in one press. The plan keeps whatever it had selected. */
 function closeOpenFace() {
   elevationOpen = false;
+  foundationPick = null;
   faceAddPending = null;
   elevationDrag = null;
   elevFinishDraft = null;
@@ -13805,8 +14178,14 @@ function applyElevationDrag(doc, face, d) {
   return null;
 }
 
+/** The foundation type the open face is previewing, if the choice is still open. */
+function pendingFoundationSku(face) {
+  return foundationPick && face && foundationPick.wallId === face.wallId ? foundationPick.skuId : null;
+}
+
 /** The model for the open face, with a drag in progress already applied. */
 function elevationModelNow(face) {
+  const foundationSku = pendingFoundationSku(face);
   if (elevationDrag && elevationDrag.face.wallId === face.wallId && (elevationDrag.moved || elevationDrag.part === "outline")) {
     const preview = {
       ...store.doc,
@@ -13818,11 +14197,11 @@ function elevationModelNow(face) {
     const applied = applyElevationDrag(preview, face, elevationDrag);
     if (elevationDrag.part === "wall-top") {
       const next = applied?.wallId ? { ...face, wallId: applied.wallId } : face;
-      return elevationModel(preview, pack, next);
+      return elevationModel(preview, pack, next, null, foundationSku);
     }
-    return elevationModel(preview, pack, face, wallsCache);
+    return elevationModel(preview, pack, face, wallsCache, foundationSku);
   }
-  return elevationModel(store.doc, pack, face, wallsCache);
+  return elevationModel(store.doc, pack, face, wallsCache, foundationSku);
 }
 
 let elevationLayout = null;
@@ -13854,6 +14233,9 @@ function resetElevationView() {
 }
 
 const ELEV_INFO_KEY = "v2-elev-info-dismissed";
+const FLOOR_INFO_KEY = "v2-floor-info-dismissed";
+const WALL_INFO_BAR = "Drag the top of the wall to set its height.";
+const FLOOR_INFO_BAR = "Cover whole floor fills this outline. Or click the corners of an area. Line moves an edge. Corner adds a point. Hold a corner and type the clearance.";
 const ELEV_COACH_KEY = "v2-elev-coach-dismissed";
 // True only while the coach is actually on screen, so closing the strip
 // dismisses it and a services profile that borrows the dock does not.
@@ -13865,6 +14247,11 @@ function elevDismissed(key) {
 
 function elevDismiss(key) {
   try { window.localStorage.setItem(key, "1"); } catch { /* private mode */ }
+}
+
+function setInfoBarText(text) {
+  const node = el.elevInfoBar?.querySelector("p");
+  if (node && node.textContent !== text) node.textContent = text;
 }
 
 function dismissElevCoach() {
@@ -13882,6 +14269,7 @@ function syncElevHints(show) {
     if (!elevationOpen) elevCoachLive = false;
     return;
   }
+  setInfoBarText(WALL_INFO_BAR);
   setHidden(el.elevInfoBar, elevDismissed(ELEV_INFO_KEY));
   const handle = el.elevBody?.querySelector(".elev-wall-top-handle");
   const showCoach = !elevDismissed(ELEV_COACH_KEY) && Boolean(handle);
@@ -13920,65 +14308,26 @@ function faceSideTitle(model) {
   return names.length ? `${names.join(" and ")} side` : "Outside";
 }
 
-/** Room names on one side of a wall, or "Outside" when that side has no room. */
-function faceSideName(wall, side) {
-  const ids = [...(roomsBySide(store.doc, wall)[side] || [])];
-  const names = ids.map((id) => (store.doc.rooms || []).find((r) => r.id === id)?.name).filter(Boolean);
-  return names.length ? names.join(" and ") : "Outside";
-}
-
 function wallProductName(wall) {
   return skuById(wall?.sku)?.name || "Wall";
-}
-
-/**
- * A thumbnail centred on this wall. The copper edge and the copper room name
- * are the side being viewed. The other side's name stays quiet.
- */
-function keyPlanSvg(face) {
-  const wall = wallsCache.find((w) => w.id === face?.wallId);
-  if (!wall) return "";
-  const walls = wallsCache.filter((w) => w.level === wall.level);
-  const mx = (wall.x1 + wall.x2) / 2;
-  const my = (wall.y1 + wall.y2) / 2;
-  const half = Math.max(wall.length * 0.85, 1.4);
-  const size = half * 2;
-  const viewed = face.side === -1 ? -1 : 1;
-  const n = wallNormal(wall, viewed);
-  const off = Math.max(wall.thickness || 0.22, size * 0.03);
-  const font = (size * 0.16).toFixed(3);
-  const line = (w, cls) => `<line x1="${w.x1}" y1="${w.y1}" x2="${w.x2}" y2="${w.y2}" class="${cls}" vector-effect="non-scaling-stroke"/>`;
-  const others = walls.filter((w) => w.id !== wall.id).map((w) => line(w, "key-wall")).join("");
-  const sideBar = line({
-    x1: wall.x1 + n.x * off,
-    y1: wall.y1 + n.y * off,
-    x2: wall.x2 + n.x * off,
-    y2: wall.y2 + n.y * off,
-  }, "key-side");
-  const names = [1, -1].map((side) => {
-    let label = faceSideName(wall, side);
-    if (label.length > 16) label = `${label.slice(0, 15)}…`;
-    const nn = wallNormal(wall, side);
-    const dist = half * 0.42;
-    const on = side === viewed ? " is-on" : "";
-    return `<text x="${(mx + nn.x * dist).toFixed(3)}" y="${(my + nn.y * dist).toFixed(3)}" text-anchor="middle" dominant-baseline="middle" font-size="${font}" class="key-room${on}">${escapeHtml(label)}</text>`;
-  }).join("");
-  const vb = [mx - half, my - half, size, size].map((v) => +v.toFixed(3)).join(" ");
-  return `<svg class="key-plan" viewBox="${vb}" preserveAspectRatio="xMidYMid meet" aria-hidden="true">${others}${line(wall, "key-this")}${sideBar}${names}</svg>`;
 }
 
 function syncKeyPlan(face) {
   const btn = el.facePlan;
   if (!btn || !face) return;
   const side = faceSideTitle(face) || "This face";
-  const html = `${keyPlanSvg(face)}<span class="key-plan-copy"><strong>${escapeHtml(side)}</strong><span>Flip face</span></span>`;
-  if (btn.innerHTML !== html) btn.innerHTML = html;
+  btn.textContent = "Flip face";
+  btn.title = `View the other face. Now showing the ${side}.`;
   btn.setAttribute("aria-label", `${side}. Flip face.`);
 }
 
 function fillFaceTypeSelect() {
   const select = el.faceType;
-  if (!select || select.options.length) return;
+  if (!select) return;
+  if (select.dataset.kind === "finish" && select.options.length) return;
+  select.dataset.kind = "finish";
+  select.setAttribute("aria-label", "Finish type");
+  select.innerHTML = "";
   const ids = Object.keys(FINISH_CATEGORIES).filter((id) => FINISH_CATEGORIES[id].surfaces.includes("wall"));
   const add = (label, list) => {
     const group = document.createElement("optgroup");
@@ -14002,9 +14351,29 @@ function setFaceField(node, value) {
 
 function syncWallFaceChrome(show) {
   const column = document.getElementById("v2-plan-column");
+  const was = column?.classList.contains("is-wall-face");
   column?.classList.toggle("is-wall-face", show);
-  if (!show) column?.classList.remove("is-plan-peek");
-  setHidden(el.faceEditor, !show);
+  const dock = el.serviceProfileDock;
+  const handle = document.getElementById("v2-resize-profile");
+  if (handle) {
+    handle.setAttribute("aria-label", show ? "Resize wall elevation" : "Resize route profile");
+    handle.title = show ? "Drag to give the plan or the elevation more room" : "Drag to change height";
+  }
+  if (show && !was) {
+    const parentH = column?.clientHeight || 0;
+    const stored = Number(window.localStorage.getItem(elevDockHeightKey()));
+    applyElevDockHeight(Number.isFinite(stored) && stored > 0 ? stored : parentH * ELEV_DOCK_RATIO);
+  }
+  if (!show && was && dock) {
+    const remembered = Number(window.localStorage.getItem(PROFILE_HEIGHT_KEY));
+    dock.style.height = Number.isFinite(remembered) && remembered > 0 ? `${Math.round(remembered)}px` : "";
+    fitServiceProfileHeight();
+  }
+  setHidden(el.faceAdd, !show);
+  const draftingFace = Boolean(show && elevFinishDraft && elevFinishDraft.face?.wallId === elevationFace?.wallId);
+  const foundationOffer = show && !draftingFace ? elevationModelNow(elevationFace)?.foundationOffer : null;
+  setHidden(el.faceFoundation, !foundationOffer);
+  if (el.faceFoundation && foundationOffer) el.faceFoundation.title = "Choose a foundation for this wall";
   setHidden(el.facePlan, !show);
   const exit = document.getElementById("v2-profile-exit");
   if (exit) {
@@ -14016,34 +14385,48 @@ function syncWallFaceChrome(show) {
   if (show) {
     syncKeyPlan(elevationFace);
     syncFaceEditor();
-  } else if (el.faceHover) el.faceHover.textContent = "";
+  } else {
+    setHidden(el.faceEditor, true);
+    if (el.faceHover) el.faceHover.textContent = "";
+  }
 }
 
-/** The copper box on the face: the selected finish, the opening, or a finish not yet placed. */
+/** The copper box, only while a finish is being placed or a finish or opening is selected. */
 function syncFaceEditor() {
-  fillFaceTypeSelect();
+  el.faceEditor?.classList.remove("is-adding");
+  if (el.faceArea) el.faceArea.hidden = true;
   const model = finishFaceModel();
+  if (model && pendingFoundationSku(model)) {
+    syncFoundationEditor(model);
+    return;
+  }
+  el.faceEditor?.classList.remove("is-foundation");
+  document.querySelectorAll("[data-face-place]").forEach((btn) => { btn.hidden = false; });
+  setHidden(el.faceFoundationAdd, true);
+  fillFaceTypeSelect();
+  const drafting = Boolean(elevFinishDraft && elevFinishDraft.face?.wallId === model?.wallId);
   const pending = Boolean(faceAddPending && faceAddPending.wallId === model?.wallId);
-  const wallOn = faceWallSelected && !pending && !elevFinishDraft;
-  const openingId = wallOn ? null : selectedOpeningId();
+  const wallOn = faceWallSelected && !pending && !drafting;
+  const openingId = wallOn || drafting ? null : selectedOpeningId();
   const opening = openingId ? model?.openings.find((o) => o.id === openingId) : null;
-  const band = !opening && !wallOn && selectedBandId ? model?.finishBands.find((b) => b.id === selectedBandId) : null;
+  const band = !opening && !wallOn && !drafting && selectedBandId ? model?.finishBands.find((b) => b.id === selectedBandId) : null;
   const product = band ? finishProductById(store.doc, band.productId) : null;
-  // Colour and millimetres belong to a finish that exists. A new one gets them once it is placed.
+  const showBox = !drafting && Boolean(pending || band || opening);
+  setHidden(el.faceEditor, !showBox);
+  if (!showBox) return;
+  // Colour belongs to a finish that exists. A new one gets it once it is placed.
   const paint = band?.category === "paint" && band.editable;
   // Presets only while a new finish is waiting. A placed finish is moved by
   // the gap labels, so the up and along fields stay off.
   setHidden(el.facePlaceRow, !pending);
-  setHidden(el.faceOpeningRow, !opening);
-  setHidden(el.faceWallRow, !wallOn);
-  setHidden(el.faceTypeLabel, wallOn);
-  setHidden(el.faceProductLabel, wallOn);
-  setHidden(el.faceColourRow, !paint || Boolean(opening) || wallOn);
+  setHidden(el.faceTypeLabel, Boolean(opening));
+  setHidden(el.faceProductLabel, Boolean(opening));
+  setHidden(el.faceColourRow, !paint);
   setHidden(el.faceUp, true);
   setHidden(el.faceAlong, true);
   if (el.faceRemove) {
     const rule = band?.source === "rule";
-    el.faceRemove.hidden = wallOn || (!pending && !(band?.editable));
+    el.faceRemove.hidden = Boolean(opening) || (!pending && !(band?.editable));
     el.faceRemove.textContent = pending ? "Cancel" : rule ? "Remove rule" : "Remove";
     el.faceRemove.title = pending
       ? "Leave this finish unplaced."
@@ -14058,14 +14441,6 @@ function syncFaceEditor() {
     if (el.faceWhich) el.faceWhich.textContent = opening.name || kind;
     if (el.faceMeta) el.faceMeta.textContent = `${kind} · ${Math.round(opening.width * 1000)} × ${Math.round(opening.height * 1000)}`;
     if (el.faceSwatch) el.faceSwatch.style.background = "#fffdf8";
-    const door = opening.category === "door";
-    const width = document.getElementById("v2-face-owidth");
-    if (width) width.disabled = door;
-    setHidden(document.getElementById("v2-face-sill-label"), door);
-    setFaceField(width, formatLengthMm(opening.width));
-    setFaceField(document.getElementById("v2-face-oheight"), formatLengthMm(opening.height));
-    setFaceField(document.getElementById("v2-face-osill"), formatLengthMm(opening.sill));
-    setFaceField(document.getElementById("v2-face-oleft"), formatLengthMm(Math.max(0, opening.offset)));
     return;
   }
   const kicker = document.getElementById("v2-face-place-kicker");
@@ -14078,19 +14453,6 @@ function syncFaceEditor() {
       btn.setAttribute("aria-pressed", "false");
       btn.disabled = false;
     });
-    return;
-  }
-  if (wallOn) {
-    if (el.faceWhich) el.faceWhich.textContent = model?.name || "This wall";
-    if (el.faceMeta) el.faceMeta.textContent = "Drag the top of the wall";
-    if (el.faceSwatch) el.faceSwatch.style.background = "#cfc6b8";
-    setFaceField(el.faceWallH, formatLengthMm(model?.height));
-    return;
-  }
-  if (!band) {
-    if (el.faceWhich) el.faceWhich.textContent = faceSideTitle(model) || "This face";
-    if (el.faceMeta) el.faceMeta.textContent = "Click a finish, an opening, or the wall.";
-    if (el.faceSwatch) el.faceSwatch.style.background = "transparent";
     return;
   }
   // A room rule is not counted: the inspector lists it in its own section.
@@ -14131,6 +14493,34 @@ function syncFaceEditor() {
   if (el.faceSwatchInput && document.activeElement !== el.faceSwatchInput && product?.swatch) el.faceSwatchInput.value = product.swatch;
 }
 
+/** The same named block as a new finish: the type on the right, place underneath. */
+function syncFoundationEditor(model) {
+  const offer = elevationModelNow(model)?.foundationOffer;
+  el.faceEditor?.classList.toggle("is-foundation", Boolean(offer));
+  setHidden(el.faceEditor, !offer);
+  if (!offer) return;
+  fillFoundationTypeSelect(offer);
+  setHidden(el.facePlaceRow, false);
+  setHidden(el.faceTypeLabel, false);
+  setHidden(el.faceProductLabel, true);
+  setHidden(el.faceColourRow, true);
+  setHidden(el.faceUp, true);
+  setHidden(el.faceAlong, true);
+  document.querySelectorAll("[data-face-place]").forEach((btn) => { btn.hidden = true; });
+  setHidden(el.faceFoundationAdd, false);
+  if (el.faceType) el.faceType.disabled = false;
+  if (el.faceRemove) {
+    el.faceRemove.hidden = false;
+    el.faceRemove.textContent = "Cancel";
+    el.faceRemove.title = "Leave this foundation unplaced.";
+  }
+  const kicker = document.getElementById("v2-face-place-kicker");
+  if (kicker) kicker.textContent = "Place this foundation";
+  if (el.faceWhich) el.faceWhich.textContent = "New foundation";
+  if (el.faceMeta) el.faceMeta.textContent = `${Math.round(offer.depth * 1000)} mm deep. Nothing is added until you place it under the wall.`;
+  if (el.faceSwatch) el.faceSwatch.style.background = "#d4cbbd";
+}
+
 function bandsUnderPoint(model, s, z) {
   if (!model) return [];
   const hit = (model.finishBands || []).filter((b) => {
@@ -14142,12 +14532,931 @@ function bandsUnderPoint(model, s, z) {
   return hit.reverse();
 }
 
+/** The room or slab whose floor picture is open, or null once the selection has moved on. */
+function floorHostNow() {
+  if (!floorPicture || store.selected.length !== 1 || !store.primary) return null;
+  if (store.primary.kind !== floorPicture.kind || store.primary.id !== floorPicture.id) return null;
+  const obj = objByRef(store.primary);
+  if (!obj) return null;
+  if (store.primary.kind === "slab" && skuById(obj.sku)?.category === "ceiling") return null;
+  return obj;
+}
+
+function floorHostPoly(host = floorHostNow()) {
+  if (!host) return [];
+  if (store.primary?.kind === "slab") return shapePolygon(host.shape);
+  return roomPolygon(host);
+}
+
+function floorRegionCategory(region) {
+  if (region?.category && FINISH_CATEGORIES[region.category]) return region.category;
+  return finishProductById(store.doc, region?.productId)?.category || null;
+}
+
+/** Top finish first, then the one under it. Screed is always underneath. */
+function floorFinishesAt(x, y) {
+  const ranked = regionsOfSelection().map((region, index) => ({
+    region,
+    index,
+    rank: floorRegionCategory(region) === "screed" ? 1 : 2,
+  }));
+  ranked.sort((a, b) => a.rank - b.rank || a.index - b.index);
+  const hits = [];
+  for (const row of ranked) {
+    const poly = finishRegionPolygon(store.doc, row.region);
+    if (poly.length >= 3 && pointInPoly(x, y, poly)) hits.push(row.region);
+  }
+  return hits.reverse();
+}
+
+function floorPictureWorld(ev) {
+  const rect = el.elevBody.getBoundingClientRect();
+  const px = ev.clientX - rect.left;
+  const py = ev.clientY - rect.top;
+  const scaleX = elevationLayout?.scaleX || elevationLayout?.scale || 1;
+  const scaleY = elevationLayout?.scaleY || elevationLayout?.scale || 1;
+  const minX = elevationLayout?.minX || 0;
+  const s = (px - (elevationLayout?.originX || 0)) / scaleX + minX;
+  const z = ((elevationLayout?.originY || 0) - py) / scaleY;
+  return [s, -z];
+}
+
+function dropFloorGap() {
+  floorHeld = null;
+  floorTyping = null;
+  floorGuides = null;
+  floorLocatePin = { h: null, v: null };
+}
+
+/** The corner or edge whose clearance can take a number. A drawing only shows it. */
+function floorGapLive() {
+  if (!floorHostNow()) return null;
+  if (drag && (drag.kind === "region-vertex" || drag.kind === "region-edge")) {
+    return { kind: drag.kind === "region-edge" ? "edge" : "vertex", id: drag.id, index: drag.index };
+  }
+  if (floorHeld) return floorHeld;
+  return null;
+}
+
+function floorFacePoints(points, face) {
+  return points.map(([x, y]) => planToFace(x, y, face));
+}
+
+function attachFloorTyping(spec) {
+  if (!spec && !floorTyping) return null;
+  const out = spec ? { ...spec } : {};
+  out.typeable = true;
+  if (floorTyping) out.typing = { axis: floorTyping.axis, text: floorTyping.text };
+  return out.side || out.vert ? out : null;
+}
+
+function noteFloorGapAxis(spec) {
+  if (!spec) return;
+  if (spec.vert && !spec.side) floorTypingAxis = "v";
+  else if (spec.side && !spec.vert) floorTypingAxis = "h";
+}
+
+/** Clearance for the corner under the cursor, or for the corner or edge that is dragged or held. */
+function floorLocateNow() {
+  if (!floorHostNow()) return null;
+  const host = floorHostPoly();
+  if (host.length < 3) return null;
+  const face = floorFaceOf(host);
+  const pin = floorLocatePin;
+  if (floorDraft?.hover) {
+    const point = planToFace(floorDraft.hover.x, floorDraft.hover.y, face);
+    return finishLocate(null, { mode: "point", point, length: face.length, height: face.height, pin });
+  }
+  const region = editingFinishRegion();
+  if (!region) return null;
+  const ring = finishRegionPolygon(store.doc, region);
+  if (ring.length < 3) return null;
+  const points = floorFacePoints(ring, face);
+  const length = face.length;
+  const height = face.height;
+  if (drag?.kind === "region-move" && drag.id === region.id) {
+    return finishLocate(points, { mode: "move", length, height });
+  }
+  const live = floorGapLive();
+  if (!live || live.id !== region.id) return null;
+  return attachFloorTyping(finishLocate(points, {
+    mode: live.kind === "edge" ? "edge" : "corner",
+    index: live.index,
+    length,
+    height,
+    pin,
+  }));
+}
+
+/** Enter: move the held or dragged corner so the gap equals the typed millimetres. One undo step. */
+function commitFloorGap() {
+  const live = floorGapLive();
+  const typing = floorTyping;
+  floorTyping = null;
+  if (!live || !typing?.text) { render(); return; }
+  const mm = Number(typing.text);
+  if (!Number.isFinite(mm)) { render(); return; }
+  const host = floorHostPoly();
+  const face = floorFaceOf(host);
+  const region = (store.doc.finishRegions || []).find((r) => r.id === live.id);
+  if (!region || host.length < 3) { render(); return; }
+  const ring = finishRegionPolygon(store.doc, region);
+  const points = floorFacePoints(ring, face);
+  const spec = finishLocate(points, {
+    mode: live.kind === "edge" ? "edge" : "corner",
+    index: live.index,
+    length: face.length,
+    height: face.height,
+    pin: floorLocatePin,
+  });
+  const target = { kind: live.kind === "edge" ? "edge" : "vertex", points, index: live.index };
+  const next = spec ? applyTypedGap(target, typing.axis, mm / 1000, spec, face) : null;
+  if (!next?.points) { render(); return; }
+  const unchanged = next.points.length === points.length && next.points.every((p, i) => (
+    Math.abs(p.s - points[i].s) < 1e-9 && Math.abs(p.z - points[i].z) < 1e-9
+  ));
+  if (unchanged) { render(); return; }
+  const plan = next.points.map((p) => {
+    const at = faceToPlan(p.s, p.z, face);
+    const clamped = clampToPoly(at.x, at.y, host);
+    return [clamped.x, clamped.y];
+  });
+  const dragging = Boolean(drag && (drag.kind === "region-vertex" || drag.kind === "region-edge") && drag.id === live.id);
+  const unused = dragging && !drag.moved;
+  if (unused) {
+    const prev = store.undoStack.pop();
+    if (prev) store.doc = prev;
+  }
+  drag = null;
+  floorGuides = null;
+  floorHeld = { kind: live.kind, id: live.id, index: live.index };
+  const write = () => {
+    const row = (store.doc.finishRegions || []).find((r) => r.id === live.id);
+    if (!row) return;
+    finishRegionPoints(row);
+    row.shape.points = plan.map((p) => [p[0], p[1]]);
+    delete row.whole;
+  };
+  // A drag that already moved has its undo. A click that did not, or a held
+  // corner, still needs one step for the typed gap.
+  if (dragging && !unused) {
+    write();
+    store.persist();
+    finishKey = "";
+    render();
+  } else finishCommit(write);
+  setStatusMessage(`Gap set to ${Math.round(mm)} mm.`, "ok");
+}
+
+/** Digits, Backspace, Enter, Escape and the arrows, while a floor corner or edge is held or dragged. */
+function floorGapKey(ev) {
+  if (!floorHostNow() || ev.ctrlKey || ev.metaKey || ev.altKey) return false;
+  const tag = document.activeElement?.tagName;
+  if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return false;
+  const live = floorGapLive();
+  const arrow = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down" }[ev.key];
+  if (arrow && (live || floorDraft)) {
+    ev.preventDefault();
+    const axis = arrow === "left" || arrow === "right" ? "h" : "v";
+    floorLocatePin[axis] = floorLocatePin[axis] === arrow ? null : arrow;
+    floorTypingAxis = axis;
+    floorTyping = null;
+    if (live) noteFloorGapAxis(floorLocateNow());
+    render();
+    return true;
+  }
+  if (!live) return false;
+  if (/^[0-9]$/.test(ev.key)) {
+    ev.preventDefault();
+    if (!floorTyping || floorTyping.axis !== floorTypingAxis) floorTyping = { axis: floorTypingAxis, text: "" };
+    const next = floorTyping.text + ev.key;
+    if (next.length > 6) return true;
+    const host = floorHostPoly();
+    const face = floorFaceOf(host);
+    const region = (store.doc.finishRegions || []).find((r) => r.id === live.id);
+    const ring = region ? finishRegionPolygon(store.doc, region) : [];
+    const points = floorFacePoints(ring, face);
+    const spec = finishLocate(points, {
+      mode: live.kind === "edge" ? "edge" : "corner",
+      index: live.index,
+      length: face.length,
+      height: face.height,
+      pin: floorLocatePin,
+    });
+    const target = { kind: live.kind === "edge" ? "edge" : "vertex", points, index: live.index };
+    const maxMm = Math.round(maxTypedGap(target, floorTyping.axis, spec, face) * 1000);
+    if (Number(next) > maxMm) return true;
+    floorTyping = { axis: floorTyping.axis, text: next };
+    render();
+    return true;
+  }
+  if (ev.key === "Escape" && floorTyping) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    floorTyping = null;
+    render();
+    return true;
+  }
+  if (!floorTyping) return false;
+  if (ev.key === "Backspace") {
+    ev.preventDefault();
+    floorTyping = { axis: floorTyping.axis, text: floorTyping.text.slice(0, -1) };
+    render();
+    return true;
+  }
+  if (ev.key === "Enter") {
+    ev.preventDefault();
+    commitFloorGap();
+    return true;
+  }
+  return false;
+}
+
+function floorDraftPoint(wx, wy) {
+  const host = floorHostPoly();
+  if (host.length < 3) return { x: wx, y: wy };
+  const face = floorFaceOf(host);
+  const aligned = alignFloorPoint(wx, wy, face, floorSnapTargets());
+  const edge = hitPolyEdgeIndex(host, aligned.x, aligned.y, Math.max(0.15, 10 / (elevationLayout?.scaleX || 1)));
+  let x = aligned.x;
+  let y = aligned.y;
+  if (edge != null) {
+    const p = pointOnRingEdge(host, edge, aligned.x, aligned.y);
+    x = p[0];
+    y = p[1];
+  } else {
+    const clamped = clampToPoly(aligned.x, aligned.y, host);
+    x = clamped.x;
+    y = clamped.y;
+  }
+  const guideS = Math.abs(x - aligned.x) > 1e-6 ? null : aligned.guideS;
+  const guideZ = Math.abs(y - aligned.y) > 1e-6 ? null : aligned.guideZ;
+  floorGuides = guideS == null && guideZ == null ? null : { s: guideS, z: guideZ };
+  return { x, y };
+}
+
+function selectFloorHost() {
+  floorAddPending = null;
+  floorDraft = null;
+  editingRegionId = null;
+  selectedRegionVertex = null;
+  finishKey = "";
+  dropFloorGap();
+  setStatusMessage("This floor is selected.", "ok");
+  render();
+}
+
+function openFloorPicture(host) {
+  elevationOpen = false;
+  foundationPick = null;
+  faceAddPending = null;
+  elevationDrag = null;
+  elevFinishDraft = null;
+  dropElevGapHold();
+  faceWallSelected = false;
+  selectedBandId = null;
+  selectedElevVertex = null;
+  floorPicture = { kind: host.kind, id: host.id };
+  floorAddPending = null;
+  floorDraft = null;
+  editingRegionId = null;
+  selectedRegionVertex = null;
+  dropFloorGap();
+  const key = `floor:${host.kind}:${host.id}`;
+  if (elevationViewFace !== key) {
+    elevationViewFace = key;
+    elevationView = { zoom: 1, panX: 0, panY: 0 };
+    floorFramedId = "";
+  }
+}
+
+function closeFloorPicture() {
+  if (!floorPicture) return;
+  floorPicture = null;
+  floorAddPending = null;
+  floorDraft = null;
+  editingRegionId = null;
+  selectedRegionVertex = null;
+  dropFloorGap();
+  if (drag?.kind === "region-vertex" || drag?.kind === "region-edge" || drag?.kind === "region-move") drag = null;
+  setStatusMessage("This floor is closed.", "ok");
+  render();
+}
+
+function escapeFloorPicture() {
+  if (floorDraft) {
+    if (floorDraft.escAgainCancels || floorDraft.points.length < 3) {
+      floorDraft = null;
+      floorAddPending = null;
+      floorGuides = null;
+      setStatusMessage("Drawing cancelled.", "ok");
+      render();
+      return true;
+    }
+    finishFloorDraftShape();
+    if (floorDraft) floorDraft.escAgainCancels = true;
+    return true;
+  }
+  if (floorAddPending) {
+    selectFloorHost();
+    return true;
+  }
+  if (floorTyping) {
+    floorTyping = null;
+    render();
+    return true;
+  }
+  if (floorHeld) {
+    floorHeld = null;
+    render();
+    return true;
+  }
+  if (editingFinishRegion()) {
+    if (drag?.kind === "region-vertex" || drag?.kind === "region-edge" || drag?.kind === "region-move") {
+      const selection = store.selected.slice();
+      const primary = store.primary;
+      store.undo();
+      store.setSelection(selection, primary);
+      drag = null;
+    }
+    editingRegionId = null;
+    selectedRegionVertex = null;
+    finishKey = "";
+    setStatusMessage("This floor is selected.", "ok");
+    render();
+    return true;
+  }
+  closeFloorPicture();
+  return true;
+}
+
+function beginFloorAdd() {
+  if (!floorHostNow()) return;
+  floorDraft = null;
+  editingRegionId = null;
+  selectedRegionVertex = null;
+  dropFloorGap();
+  floorAddPending = { category: "floorTile", productName: "" };
+  setStatusMessage("Choose where it goes. Nothing is added until then.", "ok");
+  render();
+  if (el.faceType) el.faceType.value = floorAddPending.category;
+  if (el.faceProduct) el.faceProduct.value = "";
+  el.faceProduct?.focus();
+}
+
+function cancelFloorAdd() {
+  floorAddPending = null;
+  floorDraft = null;
+  selectFloorHost();
+}
+
+function floorPendingTarget() {
+  const bucket = floorAddPending || floorDraft;
+  let category = bucket?.category || "floorTile";
+  let productName = bucket?.productName || "";
+  if (floorHostNow() && bucket) {
+    if (el.faceType?.value) category = el.faceType.value;
+    productName = String(el.faceProduct?.value ?? productName);
+  }
+  return { category, productName };
+}
+
+function coverWholeFloor() {
+  const host = floorHostNow();
+  const target = floorPendingTarget();
+  if (!host || (!floorAddPending && !floorDraft)) return;
+  floorAddPending = null;
+  floorDraft = null;
+  const ref = store.primary;
+  finishCommit(() => {
+    let region = null;
+    if (ref.kind === "slab") {
+      const room = roomHoldingPoly(shapePolygon(host.shape));
+      region = createFinishRegion(store.doc, {
+        level: host.level ?? activeLevel,
+        roomId: room?.id || null,
+        slabId: host.id,
+        category: target.category,
+        productId: target.productName ? ensureFinishProduct(store.doc, target.category, target.productName) : null,
+        whole: true,
+        shape: structuredClone(host.shape),
+      });
+    } else {
+      region = createFinishRegion(store.doc, {
+        level: effectiveLevel(host, pack) ?? activeLevel,
+        roomId: host.id,
+        category: target.category,
+        productId: target.productName ? ensureFinishProduct(store.doc, target.category, target.productName) : null,
+        shape: polyShape(roomPolygon(host)),
+      });
+    }
+    editingRegionId = region?.id || null;
+  });
+  setStatusMessage("The finish covers this floor.", "ok");
+}
+
+function beginFloorDraw() {
+  if (!floorHostNow()) return;
+  const target = floorPendingTarget();
+  floorAddPending = null;
+  editingRegionId = null;
+  floorDraft = { points: [], hover: null, category: target.category, productName: target.productName, escAgainCancels: false };
+  setStatusMessage("Click each corner on this floor. Double-click or Esc finishes the shape.", "ok");
+  render();
+}
+
+function finishFloorDraftShape() {
+  if (!floorDraft || floorDraft.points.length < 3 || !floorHostNow()) return;
+  const target = floorPendingTarget();
+  floorGuides = null;
+  const points = floorDraft.points.map((p) => [p.x, p.y]);
+  const ref = store.primary;
+  floorDraft = null;
+  const roomId = ref.kind === "room" ? ref.id : (roomHoldingPoly(points)?.id || null);
+  const slabId = ref.kind === "slab" ? ref.id : null;
+  finishCommit(() => {
+    const region = createFinishRegion(store.doc, {
+      level: activeLevel,
+      roomId,
+      slabId,
+      category: target.category,
+      productId: target.productName ? ensureFinishProduct(store.doc, target.category, target.productName) : null,
+      shape: polyShape(points),
+    });
+    editingRegionId = region?.id || null;
+  });
+  setStatusMessage("Floor region added on this floor.", "ok");
+}
+
+function removeFloorRegion() {
+  const region = editingFinishRegion();
+  if (!region) return;
+  const id = region.id;
+  editingRegionId = null;
+  finishCommit(() => {
+    store.doc.finishRegions = (store.doc.finishRegions || []).filter((r) => r.id !== id);
+  });
+}
+
+function endRegionDrag() {
+  if (drag?.kind === "region-vertex" || drag?.kind === "region-edge" || drag?.kind === "region-move") {
+    const onPicture = Boolean(floorHostNow());
+    if (!drag.moved && !drag.inserted) {
+      const prev = store.undoStack.pop();
+      if (prev) store.doc = prev;
+      const region = (store.doc.finishRegions || []).find((r) => r.id === drag.id);
+      if (onPicture && (drag.kind === "region-vertex" || drag.kind === "region-edge") && region) {
+        floorHeld = { kind: drag.kind === "region-edge" ? "edge" : "vertex", id: drag.id, index: drag.index };
+        noteFloorGapAxis(floorLocateNow());
+        announceFloorFinish(region, { corner: drag.kind === "region-vertex", edge: drag.kind === "region-edge" });
+      } else if (drag.kind === "region-vertex" && region) announceFloorFinish(region, { corner: true });
+      else if (region) announceFloorFinish(region);
+    } else if (drag.inserted) setStatusMessage("Corner added. Drag it, or click another edge. Delete removes the selected corner.", "ok");
+    else if (drag.kind === "region-edge") setStatusMessage("Line moved.", "ok");
+    if (drag.moved || drag.inserted) {
+      floorHeld = null;
+      floorTyping = null;
+    }
+  }
+  drag = null;
+  floorGuides = null;
+  store.persist();
+  render();
+}
+
+function onFloorPicturePointerDown(ev) {
+  if (ev.button !== 0) return;
+  ev.preventDefault();
+  const gapLabel = ev.target.closest?.("[data-elev-op='locate-h'],[data-elev-op='locate-v']");
+  if (gapLabel) {
+    const axis = gapLabel.dataset.elevOp === "locate-v" ? "v" : "h";
+    const spec = floorLocateNow();
+    const metres = axis === "h"
+      ? (spec?.side ? spec.side.s1 - spec.side.s0 : NaN)
+      : (spec?.vert ? spec.vert.z1 - spec.vert.z0 : NaN);
+    if (floorGapLive() && Number.isFinite(metres)) {
+      floorTypingAxis = axis;
+      floorTyping = { axis, text: String(Math.round(metres * 1000)) };
+      render();
+    }
+    return;
+  }
+  floorTyping = null;
+  floorHeld = null;
+  const [wx, wy] = floorPictureWorld(ev);
+  if (floorDraft) {
+    if (ev.detail >= 2) {
+      finishFloorDraftShape();
+      return;
+    }
+    const pt = floorDraftPoint(wx, wy);
+    const last = floorDraft.points[floorDraft.points.length - 1];
+    if (!last || last.x !== pt.x || last.y !== pt.y) floorDraft.points.push(pt);
+    floorDraft.hover = pt;
+    floorDraft.escAgainCancels = false;
+    const n = floorDraft.points.length;
+    setStatusMessage(n >= 3
+      ? `Corner ${n} placed. Double-click or Esc finishes the shape.`
+      : `Corner ${n} placed. Keep clicking each corner.`, "ok");
+    render();
+    return;
+  }
+  const hits = floorFinishesAt(wx, wy);
+  const current = editingFinishRegion();
+  const vertex = Number(ev.target?.closest?.("[data-floor-vertex]")?.dataset.floorVertex);
+  const edge = Number(ev.target?.closest?.("[data-floor-edge]")?.dataset.floorEdge);
+  const onHandle = Number.isInteger(vertex) || Number.isInteger(edge);
+  if (current && (onHandle || hits.some((region) => region.id === current.id))) {
+    const picked = {};
+    if (Number.isInteger(vertex)) picked.vertex = vertex;
+    else if (Number.isInteger(edge)) picked.edge = edge;
+    if (beginFinishRegionDrag(ev, wx, wy, { ...picked, edgesOnly: true })) return;
+  }
+  if (hits.length > 1 && hits.some((region) => region.id === editingRegionId)) {
+    const at = hits.findIndex((region) => region.id === editingRegionId);
+    const next = hits[(at + 1) % hits.length];
+    editingRegionId = next.id;
+    floorAddPending = null;
+    selectedRegionVertex = null;
+    finishKey = "";
+    announceFloorFinish(next);
+    render();
+    return;
+  }
+  if (current && hits[0]?.id === current.id) {
+    if (beginFinishRegionDrag(ev, wx, wy)) return;
+  }
+  if (hits.length) {
+    editingRegionId = hits[0].id;
+    floorAddPending = null;
+    selectedRegionVertex = null;
+    finishKey = "";
+    announceFloorFinish(hits[0]);
+    render();
+    return;
+  }
+  selectFloorHost();
+}
+
+function showFloorOnPlan() {
+  if (!floorHostNow()) return;
+  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  floorFlash = { start: performance.now(), reduced };
+  const live = document.getElementById("v2-face-flash-live");
+  if (live) live.textContent = `${reduced ? "Showing" : "Flashing"} this floor on the plan.`;
+  const tick = () => {
+    if (!floorFlash) return;
+    if (performance.now() - floorFlash.start > 1440) {
+      floorFlash = null;
+      render();
+      return;
+    }
+    render();
+    requestAnimationFrame(tick);
+  };
+  render();
+  if (!reduced) requestAnimationFrame(tick);
+}
+
+function frameFloorMarker(poly) {
+  if (!el.canvas || poly.length < 3) return;
+  const rect = el.canvas.getBoundingClientRect();
+  if (rect.width < 8 || rect.height < 8) return;
+  const xs = poly.map((p) => p[0]);
+  const ys = poly.map((p) => p[1]);
+  const pad = 0.6;
+  const w = Math.max(0.4, Math.max(...xs) - Math.min(...xs) + pad * 2);
+  const h = Math.max(0.4, Math.max(...ys) - Math.min(...ys) + pad * 2);
+  cam.scale = Math.min(90, Math.max(MIN_VIEW_SCALE, Math.min((rect.width - 12) / w, (rect.height - 8) / h)));
+  const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
+  const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+  cam.ox = rect.width / 2 - cx * cam.scale;
+  cam.oy = rect.height / 2 - cy * cam.scale;
+}
+
+/** An L at each corner of the open floor, in screen pixels. `settle` 0 starts
+ *  each corner outside the outline; 1 sits it on the vertex. The legs run
+ *  along the two edges, the same length as a wall face's corner marks. */
+function strokeFloorCorners(poly, settle) {
+  if (!poly || poly.length < 3) return;
+  const t = Math.min(1, Math.max(0, Number(settle) || 0));
+  const travel = (1 - t) * FACE_CORNER_TRAVEL;
+  const screen = poly.map(([x, y]) => worldToScreen(x, y));
+  const cx = screen.reduce((sum, p) => sum + p[0], 0) / screen.length;
+  const cy = screen.reduce((sum, p) => sum + p[1], 0) / screen.length;
+  const marks = screen.map(([vx, vy], i) => {
+    const prev = screen[(i - 1 + screen.length) % screen.length];
+    const next = screen[(i + 1) % screen.length];
+    const ox = vx - cx;
+    const oy = vy - cy;
+    const olen = Math.hypot(ox, oy) || 1;
+    const px = vx + (ox / olen) * travel;
+    const py = vy + (oy / olen) * travel;
+    const leg = (ax, ay) => {
+      const dx = ax - px;
+      const dy = ay - py;
+      const len = Math.hypot(dx, dy) || 1;
+      const along = Math.min(FACE_CORNER_ALONG, len * 0.3);
+      return [px + (dx / len) * along, py + (dy / len) * along];
+    };
+    return [leg(prev[0], prev[1]), [px, py], leg(next[0], next[1])];
+  });
+  const stroke = (style, width) => {
+    ctx.save();
+    ctx.strokeStyle = style;
+    ctx.globalAlpha = 1;
+    ctx.lineWidth = width;
+    ctx.lineCap = "square";
+    ctx.lineJoin = "miter";
+    ctx.setLineDash([]);
+    for (const mark of marks) {
+      ctx.beginPath();
+      mark.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+      ctx.stroke();
+    }
+    ctx.restore();
+  };
+  stroke("#f4eee4", 5.5);
+  stroke(COLOUR.selection, 2.4);
+}
+
+function drawFloorPlanMark() {
+  const host = floorHostNow();
+  if (!host) return;
+  const poly = floorHostPoly(host);
+  if (poly.length < 3) return;
+  let settle = 1;
+  ctx.save();
+  pathForPoly(poly);
+  ctx.lineJoin = "miter";
+  ctx.lineCap = "square";
+  ctx.setLineDash([]);
+  ctx.strokeStyle = "#b2451e";
+  ctx.lineWidth = 3;
+  if (floorFlash && !floorFlash.reduced) {
+    const elapsed = performance.now() - floorFlash.start;
+    const linear = Math.min(1, elapsed / FACE_CUE_INTRO_MS);
+    settle = 1 - (1 - linear) ** 3;
+    const t = elapsed / 480;
+    ctx.globalAlpha = 0.25 + 0.75 * Math.abs(Math.sin(t * Math.PI));
+  }
+  ctx.stroke();
+  ctx.restore();
+  strokeFloorCorners(poly, settle);
+}
+
+let faceAddHome = null;
+
+function parkFaceAdd(beside) {
+  if (!el.faceAdd) return;
+  if (!faceAddHome) faceAddHome = { parent: el.faceAdd.parentElement, next: el.faceAdd.nextElementSibling };
+  if (beside && el.faceEditor) el.faceEditor.append(el.faceAdd);
+  else if (faceAddHome.parent) faceAddHome.parent.insertBefore(el.faceAdd, faceAddHome.next);
+}
+
+function fillFloorTypeSelect() {
+  const select = el.faceType;
+  if (!select) return;
+  if (select.dataset.kind === "floor" && select.options.length) return;
+  select.dataset.kind = "floor";
+  select.setAttribute("aria-label", "Finish type");
+  select.innerHTML = "";
+  for (const group of FLOOR_TYPE_GROUPS) {
+    const node = document.createElement("optgroup");
+    node.label = group.label;
+    for (const id of group.ids) {
+      if (!FINISH_CATEGORIES[id]) continue;
+      const option = document.createElement("option");
+      option.value = id;
+      option.textContent = FINISH_CATEGORIES[id].label;
+      node.appendChild(option);
+    }
+    select.appendChild(node);
+  }
+}
+
+function syncFloorEditor() {
+  const host = floorHostNow();
+  fillFloorTypeSelect();
+  const adding = Boolean(floorAddPending || floorDraft);
+  const region = adding ? null : editingFinishRegion();
+  setHidden(el.faceEditor, !host);
+  el.faceEditor?.classList.toggle("is-adding", Boolean(host && adding));
+  setHidden(el.faceColourRow, true);
+  setHidden(el.facePlaceRow, true);
+  setHidden(el.faceUp, true);
+  setHidden(el.faceAlong, true);
+  setHidden(el.floorPlace, !adding);
+  setHidden(el.faceTypeLabel, !(adding || region));
+  setHidden(el.faceProductLabel, !(adding || region));
+  if (el.faceArea) el.faceArea.hidden = adding || (!region && !host);
+  if (el.faceRemove) {
+    el.faceRemove.hidden = adding || !region;
+    el.faceRemove.textContent = "Remove";
+    el.faceRemove.title = "";
+  }
+  if (el.floorDraw) el.floorDraw.setAttribute("aria-pressed", String(Boolean(floorDraft)));
+  if (el.floorWhole) el.floorWhole.setAttribute("aria-pressed", "false");
+  if (!host) return;
+  if (adding) {
+    if (el.faceWhich) el.faceWhich.textContent = "New finish";
+    if (el.faceMeta) {
+      el.faceMeta.textContent = floorDraft
+        ? "Click the corners on this floor. Nothing is added until the shape closes."
+        : "Choose where it goes. Nothing is added until then.";
+    }
+    const category = floorAddPending?.category || floorDraft?.category || "floorTile";
+    const productName = floorAddPending?.productName ?? floorDraft?.productName ?? "";
+    setFaceField(el.faceType, category);
+    setFaceField(el.faceProduct, productName);
+    if (el.faceType) el.faceType.disabled = false;
+    if (el.faceProduct) el.faceProduct.disabled = false;
+    if (el.faceSwatch) el.faceSwatch.style.background = finishSwatch(category);
+    return;
+  }
+  if (!region) {
+    if (el.faceWhich) el.faceWhich.textContent = "Floor";
+    if (el.faceMeta) el.faceMeta.textContent = store.primary?.kind === "slab" ? "Follows the floor outline" : `${host.name || "This floor"} · follows the outline`;
+    if (el.faceSwatch) el.faceSwatch.style.background = "#e4d3b4";
+    if (el.faceArea) el.faceArea.textContent = formatFloorArea(Math.abs(polyArea(floorHostPoly(host))));
+    return;
+  }
+  const category = floorRegionCategory(region) || "screed";
+  const product = finishProductById(store.doc, region.productId);
+  const areas = floorCoverage(floorHostPoly(host), regionsOfSelection().map((item) => finishRegionPolygon(store.doc, item)));
+  const index = regionsOfSelection().findIndex((item) => item.id === region.id);
+  if (el.faceWhich) el.faceWhich.textContent = FINISH_CATEGORIES[category]?.label || "Finish";
+  if (el.faceMeta) {
+    const where = region.whole || regionCoversHost(region) ? "Whole floor, follows the outline" : "Drawn area";
+    el.faceMeta.textContent = product?.name ? `${where} · ${product.name}` : where;
+  }
+  if (el.faceSwatch) el.faceSwatch.style.background = finishSwatch(category);
+  if (el.faceArea) el.faceArea.textContent = formatFloorArea(areas.clipped[index] || 0);
+  setFaceField(el.faceType, category);
+  setFaceField(el.faceProduct, product?.name || "");
+  if (el.faceType) el.faceType.disabled = false;
+  if (el.faceProduct) el.faceProduct.disabled = false;
+}
+
+function placeFloorEdgeChip(poly) {
+  const node = el.elevEdgeMode;
+  const host = el.elevBody;
+  if (!node || node.hidden || !host || !elevationLayout || !poly?.length) return;
+  const scaleX = elevationLayout.scaleX || elevationLayout.scale;
+  const scaleY = elevationLayout.scaleY || elevationLayout.scale;
+  const minX = elevationLayout.minX || 0;
+  const xs = poly.map(([x]) => elevationLayout.originX + (x - minX) * scaleX);
+  const ys = poly.map(([, y]) => elevationLayout.originY + y * scaleY);
+  const width = node.offsetWidth || 148;
+  const height = node.offsetHeight || 44;
+  const left = host.offsetLeft + Math.min(...xs);
+  const top = host.offsetTop + Math.min(...ys) - height - 6;
+  const minLeft = host.offsetLeft + 8;
+  const maxLeft = host.offsetLeft + host.clientWidth - width - 8;
+  const minTop = host.offsetTop + 8;
+  const maxTop = host.offsetTop + host.clientHeight - height - 8;
+  node.style.left = `${Math.round(Math.max(minLeft, Math.min(left, maxLeft)))}px`;
+  node.style.top = `${Math.round(Math.max(minTop, Math.min(top, maxTop)))}px`;
+}
+
+function syncFloorPictureDock() {
+  const dock = el.serviceProfileDock;
+  const column = document.getElementById("v2-plan-column");
+  const host = floorHostNow();
+  if (!host || !dock) return false;
+  const was = column?.classList.contains("is-floor-face");
+  column?.classList.add("is-floor-face");
+  column?.classList.remove("is-wall-face");
+  dock.classList.add("is-floor-picture");
+  if (!was) {
+    const parentH = column?.clientHeight || 0;
+    const stored = Number(window.localStorage.getItem(elevDockHeightKey()));
+    applyElevDockHeight(Number.isFinite(stored) && stored > 0 ? stored : parentH * ELEV_DOCK_RATIO);
+  }
+  setHidden(dock, false);
+  setHidden(el.serviceProfileCanvas, true);
+  setHidden(dock.querySelector(".svc-profile-mode"), true);
+  setHidden(document.getElementById("v2-profile-select-all"), true);
+  setHidden(el.elevBody, false);
+  setHidden(el.elevFit, false);
+  setHidden(el.elevFlash, false);
+  setHidden(el.elevInfo, false);
+  setHidden(el.facePlan, true);
+  setHidden(el.faceFoundation, true);
+  setHidden(el.floorStackKey, false);
+  setHidden(el.elevCoach, true);
+  parkFaceAdd(true);
+  setHidden(el.faceAdd, false);
+  if (el.elevFit) {
+    el.elevFit.disabled = elevationViewFitted();
+    el.elevFit.title = "Show the whole floor again";
+  }
+  if (el.elevFlash) el.elevFlash.title = "Show this floor on the plan";
+  const exit = document.getElementById("v2-profile-exit");
+  if (exit) exit.title = "Close this floor. Escape selects the floor first, then closes.";
+  const handle = document.getElementById("v2-resize-profile");
+  if (handle) {
+    handle.setAttribute("aria-label", "Resize floor picture");
+    handle.title = "Drag to give the plan or the floor more room";
+  }
+  if (el.elevInfo) el.elevInfo.title = "How this floor works";
+  const live = document.getElementById("v2-face-flash-live");
+  if (live && !floorFlash) live.textContent = `Showing ${host.name || "this floor"} on the plan.`;
+  const poly = floorHostPoly(host);
+  const area = formatFloorArea(Math.abs(polyArea(poly)));
+  if (el.serviceProfileTitle) el.serviceProfileTitle.textContent = `This floor · ${host.name || "Floor"} · ${area}`;
+  setInfoBarText(FLOOR_INFO_BAR);
+  setHidden(el.elevInfoBar, elevDismissed(FLOOR_INFO_KEY) && !floorInfoForce);
+  closeElevInfo();
+  syncFloorEditor();
+  const frameKey = `${store.primary.kind}:${store.primary.id}`;
+  if (floorFramedId !== frameKey) {
+    floorFramedId = frameKey;
+    requestAnimationFrame(() => {
+      if (!floorHostNow()) return;
+      frameFloorMarker(floorHostPoly());
+      render();
+    });
+  }
+  const regions = regionsOfSelection();
+  const cover = floorCoverage(poly, regions.map((region) => finishRegionPolygon(store.doc, region)));
+  const selected = editingFinishRegion();
+  const shaping = Boolean(selected && !floorDraft && !floorAddPending);
+  setHidden(el.elevEdgeMode, !shaping);
+  el.elevEdgeMode?.querySelectorAll("[data-elev-edge]").forEach((button) => {
+    const on = button.dataset.elevEdge === (shaping && elevEdgeMode === "line" ? "line" : "corner");
+    button.classList.toggle("active", on);
+    button.setAttribute("aria-pressed", String(on));
+  });
+  const w = el.elevBody.clientWidth;
+  const h = el.elevBody.clientHeight;
+  const viewModels = regions.map((region, index) => ({
+    id: region.id,
+    category: floorRegionCategory(region) || "screed",
+    label: FINISH_CATEGORIES[floorRegionCategory(region)]?.label || "Finish",
+    fill: finishSwatch(floorRegionCategory(region)),
+    poly: finishRegionPolygon(store.doc, region),
+    areaText: formatFloorArea(cover.clipped[index] || 0),
+    coversHost: Boolean(region.whole) || regionCoversHost(region),
+  })).sort((a, b) => (a.category === "screed" ? 0 : 1) - (b.category === "screed" ? 0 : 1));
+  el.elevBody?.classList.toggle("is-drawing", Boolean(floorDraft));
+  const guides = floorDraft || drag ? floorGuides : null;
+  const locate = floorLocateNow();
+  const key = `${w}x${h}|${elevationView.zoom}|${elevationView.panX}|${elevationView.panY}|${selected?.id || ""}|${elevEdgeMode}|${JSON.stringify(viewModels)}|${JSON.stringify(floorDraft)}|${floorAddPending ? "add" : ""}|${JSON.stringify(guides)}|${JSON.stringify(locate)}`;
+  if (key !== elevationKey && w > 40 && h > 40) {
+    elevationKey = key;
+    const drawn = floorPictureSvg({
+      width: w,
+      height: h,
+      host: poly,
+      regions: viewModels,
+      selectedId: selected?.id || null,
+      view: elevationView,
+      draft: floorDraft,
+      edgeMode: shaping && elevEdgeMode === "line" ? "line" : "corner",
+      name: host.name || "This floor",
+      guides,
+      locate,
+    });
+    elevationLayout = { scale: drawn.scaleY, scaleX: drawn.scaleX, scaleY: drawn.scaleY, originX: drawn.originX, originY: drawn.originY, minX: drawn.minX || 0, fit: drawn.fit };
+    el.elevBody.innerHTML = drawn.svg;
+    syncElevEdgeCursors();
+  }
+  if (shaping) placeFloorEdgeChip(finishRegionPolygon(store.doc, selected));
+  markHotFloor();
+  return true;
+}
+
 function syncElevationDock() {
+  if (floorPicture && !floorHostNow()) {
+    floorPicture = null;
+    floorAddPending = null;
+    floorDraft = null;
+    dropFloorGap();
+  }
+  if (floorPicture) return syncFloorPictureDock();
+  const leavingFloor = el.serviceProfileDock?.classList.contains("is-floor-picture");
+  document.getElementById("v2-plan-column")?.classList.remove("is-floor-face");
+  if (leavingFloor) {
+    parkFaceAdd(false);
+    if (el.elevInfo) el.elevInfo.title = "How this elevation works";
+    const live = document.getElementById("v2-face-flash-live");
+    if (live) live.textContent = "";
+    el.serviceProfileDock.classList.remove("is-floor-picture");
+  }
+  setHidden(el.floorStackKey, true);
+  setHidden(el.floorPlace, true);
   const dock = el.serviceProfileDock;
   const face = selectedElevationFace();
   const show = Boolean(elevationOpen && face && !serviceDockActive());
   if (elevationOpen && !show && !serviceDockActive()) elevationOpen = false;
+  if (leavingFloor && !show && dock) {
+    const remembered = Number(window.localStorage.getItem(PROFILE_HEIGHT_KEY));
+    dock.style.height = Number.isFinite(remembered) && remembered > 0 ? `${Math.round(remembered)}px` : "";
+    fitServiceProfileHeight();
+  }
   if (!show) {
+    foundationPick = null;
     if (face) elevationFace = face;
     elevationLayout = null;
     elevationKey = "";
@@ -14169,6 +15478,7 @@ function syncElevationDock() {
     return false;
   }
   elevationFace = face;
+  if (foundationPick && foundationPick.wallId !== face.wallId) foundationPick = null;
   const model = elevationModelNow(face);
   if (!model) {
     elevationOpen = false;
@@ -14193,6 +15503,7 @@ function syncElevationDock() {
     elevationViewFace = faceKey;
     elevationView = { zoom: 1, panX: 0, panY: 0 };
     if (el.elevFit) el.elevFit.disabled = true;
+    placeFaceCorners(face);
   }
   const shaping = !elevFinishDraft && model.finishBands.some((b) => b.id === selectedBandId && elevRing(b));
   const lineMode = shaping && elevEdgeMode === "line";
@@ -14215,7 +15526,8 @@ function syncElevationDock() {
   const draft = elevFinishDraft && elevFinishDraft.face.wallId === face.wallId ? elevFinishDraft : null;
   const guides = elevationGuides();
   const locate = elevationLocate(model);
-  const key = `${w}x${h}|${elevationView.zoom}|${elevationView.panX}|${elevationView.panY}|${selectedId}|${selectedBandId}|${selectedElevVertex}|${faceWallSelected ? "wall" : ""}|${lineMode ? "line" : "corner"}|${JSON.stringify(model)}|${JSON.stringify(draft)}|${JSON.stringify(guides)}|${JSON.stringify(locate)}`;
+  const pickingFoundation = Boolean(pendingFoundationSku(face));
+  const key = `${w}x${h}|${elevationView.zoom}|${elevationView.panX}|${elevationView.panY}|${selectedId}|${selectedBandId}|${selectedElevVertex}|${faceWallSelected ? "wall" : ""}|${lineMode ? "line" : "corner"}|${pickingFoundation ? "found" : ""}|${JSON.stringify(model)}|${JSON.stringify(draft)}|${JSON.stringify(guides)}|${JSON.stringify(locate)}`;
   if (key === elevationKey) {
     placeElevEdgeMode(model);
     syncElevHints(true);
@@ -14235,6 +15547,7 @@ function syncElevationDock() {
     view: elevationView,
     locate,
     wallSelected: faceWallSelected,
+    foundationPicking: pickingFoundation,
   });
   elevationLayout = { scale: drawn.scale, scaleX: drawn.scaleX, scaleY: drawn.scaleY, originX: drawn.originX, originY: drawn.originY, fit: drawn.fit };
   el.elevBody.innerHTML = drawn.svg;
@@ -14786,6 +16099,10 @@ function onElevationPointerDown(ev, layout) {
   // Pan mode's left-drag does the same. The gesture never starts an edit.
   if (ev.currentTarget === el.elevBody && (ev.button === 1 || ev.altKey || (panMode && ev.button === 0))) {
     clearGapGesture();
+    if (floorHostNow()) {
+      floorHeld = null;
+      floorTyping = null;
+    }
     elevationPan = {
       pointerId: ev.pointerId,
       startX: ev.clientX,
@@ -14796,6 +16113,10 @@ function onElevationPointerDown(ev, layout) {
     ev.currentTarget.classList.add("is-panning");
     try { ev.currentTarget.setPointerCapture(ev.pointerId); } catch { /* capture can fail if the pointer already ended */ }
     ev.preventDefault();
+    return;
+  }
+  if (ev.currentTarget === el.elevBody && floorHostNow()) {
+    onFloorPicturePointerDown(ev);
     return;
   }
   if (ev.button !== 0 || !elevationFace || !layout) return;
@@ -14871,6 +16192,13 @@ function onElevationPointerDown(ev, layout) {
     return;
   }
   clearGapGesture();
+  const addFoundation = ev.target.closest?.("[data-elev-add-foundation]");
+  if (addFoundation && ev.currentTarget === el.elevBody) {
+    ev.preventDefault();
+    if (pendingFoundationSku(elevationFace)) addFoundationFromFace();
+    else beginFoundationPick();
+    return;
+  }
   const foundHit = ev.target.closest?.("[data-elev-foundation]");
   if (foundHit?.dataset.elevFoundation && ev.currentTarget === el.elevBody) {
     faceAddPending = null;
@@ -15152,6 +16480,34 @@ function alignElevationDrag(ev, d) {
 }
 
 function onElevationPointerMove(ev) {
+  if (floorHostNow() && !(elevationPan && ev.currentTarget === el.elevBody)) {
+    if (drag?.kind === "region-vertex" || drag?.kind === "region-edge" || drag?.kind === "region-move") {
+      const [wx, wy] = floorPictureWorld(ev);
+      dragFinishRegion(wx, wy);
+      return;
+    }
+    if (floorDraft && ev.currentTarget === el.elevBody) {
+      const hover = floorDraftPoint(...floorPictureWorld(ev));
+      const prev = floorDraft.hover;
+      if (!prev || prev.x !== hover.x || prev.y !== hover.y) {
+        floorDraft.hover = hover;
+        elevationKey = "";
+        render();
+      }
+      if (el.faceHover) el.faceHover.textContent = "";
+    } else if (ev.currentTarget === el.elevBody && el.faceHover) {
+      const [wx, wy] = floorPictureWorld(ev);
+      const hits = floorFinishesAt(wx, wy);
+      const label = hits.length > 1 ? hits.map((region) => floorFinishLabel(region)).join(" · ") : "";
+      el.faceHover.textContent = label;
+      // Out of flow, pinned to the picture, so the line cannot shift the floor under the cursor.
+      if (label && el.elevBody) {
+        el.faceHover.style.left = `${el.elevBody.offsetLeft + 8}px`;
+        el.faceHover.style.top = `${el.elevBody.offsetTop + 8}px`;
+      }
+    }
+    return;
+  }
   if (!elevationDrag && !elevationPan && ev.currentTarget === el.elevBody && elevationLayout && elevationFace) {
     const raw = elevRawPoint(ev, ev.currentTarget, elevationLayout);
     const under = bandsUnderPoint(elevationModelNow(elevationFace), raw.s, raw.z).map((b) => finishDisplayName(b));
@@ -15318,10 +16674,18 @@ function bindElevationHost(node, layoutOf) {
   node.addEventListener("pointermove", onElevationPointerMove);
   node.addEventListener("pointerup", (ev) => {
     if (node === el.elevBody) endElevationPan(ev);
+    if (node === el.elevBody && (drag?.kind === "region-vertex" || drag?.kind === "region-edge" || drag?.kind === "region-move")) {
+      endRegionDrag();
+      return;
+    }
     endElevationDrag(true);
   });
   node.addEventListener("pointercancel", (ev) => {
     if (node === el.elevBody) endElevationPan(ev);
+    if (node === el.elevBody && (drag?.kind === "region-vertex" || drag?.kind === "region-edge" || drag?.kind === "region-move")) {
+      endRegionDrag();
+      return;
+    }
     endElevationDrag(false);
   });
 }
@@ -15357,6 +16721,13 @@ function closeElevInfo() {
 }
 
 el.elevInfo?.addEventListener("click", () => {
+  if (floorHostNow()) {
+    const show = Boolean(el.elevInfoBar?.hidden);
+    floorInfoForce = show;
+    if (!show) elevDismiss(FLOOR_INFO_KEY);
+    setHidden(el.elevInfoBar, !show);
+    return;
+  }
   const open = Boolean(el.elevInfoNote?.hidden);
   setHidden(el.elevInfoNote, !open);
   el.elevInfo.setAttribute("aria-expanded", String(open));
@@ -15369,6 +16740,9 @@ document.addEventListener("pointerdown", (ev) => {
 });
 
 function openWallFace() {
+  floorPicture = null;
+  floorAddPending = null;
+  floorDraft = null;
   elevationOpen = true;
 }
 
@@ -15388,7 +16762,37 @@ el.ctxElevOpen?.addEventListener("click", () => {
   toggleWallElevation();
 });
 
+el.ctxFloor?.addEventListener("click", (ev) => {
+  const picked = resolveFloorFinishOpen(store.selected);
+  if (!picked.open) return;
+  const host = objByRef(picked.host);
+  if (!host || (picked.host.kind === "slab" && skuById(host.sku)?.category === "ceiling")) return;
+  tool = "select";
+  openFloorPicture(host);
+  const regionId = ev.target.closest?.("[data-floor-fill]")?.dataset.floorFill || null;
+  floorAddPending = null;
+  floorDraft = null;
+  editingRegionId = regionId;
+  selectedRegionVertex = null;
+  finishKey = "";
+  dropFloorGap();
+  if (regionId) {
+    const region = (store.doc.finishRegions || []).find((item) => item.id === regionId);
+    if (region) announceFloorFinish(region);
+    else setStatusMessage("The picture of this floor. Add a finish, then cover the floor or draw an area.", "ok");
+  } else {
+    setStatusMessage("The picture of this floor. Add a finish, then cover the floor or draw an area.", "ok");
+  }
+  render();
+});
+
 el.elevInfoDismiss?.addEventListener("click", () => {
+  if (floorHostNow()) {
+    floorInfoForce = false;
+    elevDismiss(FLOOR_INFO_KEY);
+    setHidden(el.elevInfoBar, true);
+    return;
+  }
   elevDismiss(ELEV_INFO_KEY);
   setHidden(el.elevInfoBar, true);
 });
@@ -15401,7 +16805,8 @@ function flipElevationFace() {
   if (!elevationFace) return;
   dropElevGapHold();
   elevationFace = { ...elevationFace, side: elevationFace.side === -1 ? 1 : -1 };
-  render();
+  if (elevationOpen) showFaceOnPlan();
+  else render();
 }
 
 el.ctxElevFlip?.addEventListener("click", flipElevationFace);
@@ -15410,51 +16815,132 @@ el.facePlan?.addEventListener("click", (ev) => {
   flipElevationFace();
 });
 
-// True only when Flash on plan opened the peek, so the end of the blink can
-// put the plan away again.
-let faceFlashPeek = false;
-
-function flashFaceOnPlan() {
-  const face = elevationFace;
-  const wall = wallsCache.find((w) => w.id === face?.wallId);
-  if (!face || !wall || !elevationOpen) return;
-  const n = wallNormal(wall, face.side === -1 ? -1 : 1);
+/** The viewed side of a wall, offset just clear of the wall stroke. */
+function liveFaceLine(wallId, side) {
+  const wall = wallsCache.find((w) => w.id === wallId);
+  if (!wall) return null;
+  const n = wallNormal(wall, side === -1 ? -1 : 1);
   const off = (wall.thickness || 0.22) / 2 + 0.12;
-  const a = { x: wall.x1 + n.x * off, y: wall.y1 + n.y * off };
-  const b = { x: wall.x2 + n.x * off, y: wall.y2 + n.y * off };
-  const column = document.getElementById("v2-plan-column");
-  if (column && !column.classList.contains("is-plan-peek")) {
-    column.classList.add("is-plan-peek");
-    faceFlashPeek = true;
-  } else {
-    faceFlashPeek = false;
-  }
-  if (wall.level && wall.level !== activeLevel) {
-    activeLevel = wall.level;
+  return {
+    wall,
+    a: { x: wall.x1 + n.x * off, y: wall.y1 + n.y * off },
+    b: { x: wall.x2 + n.x * off, y: wall.y2 + n.y * off },
+    nx: n.x,
+    ny: n.y,
+    levelId: wall.level || activeLevel,
+  };
+}
+
+/**
+ * Pan the face into view. Zoom only when it is too short on screen for the
+ * corner marks. A face already readable stays at the current scale, and one
+ * already on screen is not recentred.
+ */
+function frameFaceForCue(line, { zoom = true } = {}) {
+  const span = Math.hypot(line.b.x - line.a.x, line.b.y - line.a.y) || 1;
+  const ux = (line.b.x - line.a.x) / span;
+  const uy = (line.b.y - line.a.y) / span;
+  const m = 28 / Math.max(cam.scale, MIN_VIEW_SCALE);
+  const a = { x: line.a.x - ux * m + line.nx * m, y: line.a.y - uy * m + line.ny * m };
+  const b = { x: line.b.x + ux * m + line.nx * m, y: line.b.y + uy * m + line.ny * m };
+  framePlanPoints([a, b, { x: line.wall.x1, y: line.wall.y1 }, { x: line.wall.x2, y: line.wall.y2 }]);
+  if (!zoom) return;
+  const view = planViewExtent();
+  if (!view) return;
+  const [ax, ay] = worldToScreen(line.a.x, line.a.y);
+  const [bx, by] = worldToScreen(line.b.x, line.b.y);
+  const next = faceCueZoom(Math.hypot(bx - ax, by - ay), cam.scale, MAX_VIEW_SCALE);
+  if (next === cam.scale) return;
+  cam.scale = next;
+  cam.ox = view.viewW / 2 - ((line.a.x + line.b.x) / 2) * cam.scale;
+  cam.oy = view.viewH / 2 - ((line.a.y + line.b.y) / 2) * cam.scale;
+}
+
+let faceCueRepaint = false;
+
+/**
+ * Corners and the quiet side line, with no pulse. Opening the elevation, or
+ * moving it to another wall, should say which face this is. Show on plan and
+ * Flip face still play the lock-on. Pan only when the face is off screen.
+ */
+function placeFaceCorners(face) {
+  const wallId = face?.wallId;
+  const side = face?.side === -1 ? -1 : 1;
+  if (!wallId) return;
+  if (locateFlash?.faceCue && locateFlash.wallId === wallId && locateFlash.side === side) return;
+  const line = liveFaceLine(wallId, side);
+  if (!line) return;
+  if (line.levelId !== activeLevel) {
+    activeLevel = line.levelId;
     drawLevelSwitcher();
   }
-  framePlanPoints([a, b, { x: wall.x1, y: wall.y1 }, { x: wall.x2, y: wall.y2 }]);
+  frameFaceForCue(line, { zoom: false });
+  facePlanCue = { wallId, side };
+  const sideName = faceSideTitle(face) || "This side";
+  const phrase = sideName.charAt(0).toLowerCase() + sideName.slice(1);
+  const live = document.getElementById("v2-face-flash-live");
+  if (live) live.textContent = `Showing the ${phrase} of ${wallProductName(line.wall)} on the plan.`;
+  if (faceCueRepaint) return;
+  faceCueRepaint = true;
+  requestAnimationFrame(() => {
+    faceCueRepaint = false;
+    render();
+  });
+}
+
+/**
+ * Show the open face on the plan: corners lock onto the ends, the side
+ * flashes, then both stay as a quiet mark until the elevation closes.
+ * Flip face runs this again so the swap is the thing you see.
+ */
+function showFaceOnPlan() {
+  const face = elevationFace;
+  const wallId = face?.wallId;
+  const side = face?.side === -1 ? -1 : 1;
+  const line = wallId && elevationOpen ? liveFaceLine(wallId, side) : null;
+  if (!line) return;
+  if (line.levelId !== activeLevel) {
+    activeLevel = line.levelId;
+    drawLevelSwitcher();
+  }
+  frameFaceForCue(line);
   const sideName = faceSideTitle(face) || "This side";
   const phrase = sideName.charAt(0).toLowerCase() + sideName.slice(1);
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const live = document.getElementById("v2-face-flash-live");
-  if (live) live.textContent = `${reduced ? "Showing" : "Flashing"} the ${phrase} of ${wallProductName(wall)} on the plan.`;
-  const backToFace = elevationOpen;
-  startLocateFlash([a, b], wall.level || activeLevel, {
-    pulses: 3,
-    ms: 1560,
+  if (live) live.textContent = `${reduced ? "Showing" : "Flashing"} the ${phrase} of ${wallProductName(line.wall)} on the plan.`;
+  if (locateFlash?.faceCue) clearLocateFlash();
+  const cue = { wallId, side };
+  if (reduced) {
+    facePlanCue = cue;
+    render();
+    return;
+  }
+  facePlanCue = null;
+  startLocateFlash([line.a, line.b], line.levelId, {
+    pulses: 2,
+    ms: FACE_CUE_PULSE_MS,
+    introMs: FACE_CUE_INTRO_MS,
     segment: true,
-    steady: reduced,
+    corners: true,
+    nx: line.nx,
+    ny: line.ny,
+    faceCue: true,
+    wallId,
+    side,
     onDone: () => {
-      if (faceFlashPeek && backToFace && elevationOpen) {
-        column?.classList.remove("is-plan-peek");
-      }
-      faceFlashPeek = false;
+      if (!elevationOpen || !elevationFace) return;
+      if (elevationFace.wallId !== wallId || (elevationFace.side === -1 ? -1 : 1) !== side) return;
+      facePlanCue = cue;
     },
   });
+  render();
 }
 
-el.elevFlash?.addEventListener("click", flashFaceOnPlan);
+el.elevFlash?.addEventListener("click", () => {
+  if (floorHostNow()) { showFloorOnPlan(); return; }
+  showFaceOnPlan();
+});
 
 function faceBandNow() {
   const model = finishFaceModel();
@@ -15535,9 +17021,68 @@ el.faceEditor?.addEventListener("click", (ev) => {
   if (place) placeOnFace(place);
 });
 
+el.faceFoundation?.addEventListener("click", () => {
+  beginFoundationPick();
+});
+
+el.faceFoundationAdd?.addEventListener("click", () => {
+  addFoundationFromFace();
+});
+
+/** Open the named block. The dashed strip shows the chosen depth; nothing is stored yet. */
+function beginFoundationPick() {
+  const face = selectedElevationFace() || elevationFace;
+  if (!face) return;
+  if (foundationPick?.wallId === face.wallId) {
+    el.faceType?.focus();
+    return;
+  }
+  const offer = elevationModel(store.doc, pack, face, wallsCache)?.foundationOffer;
+  if (!offer) return;
+  faceAddPending = null;
+  selectedBandId = null;
+  foundationPick = { wallId: face.wallId, skuId: offer.skuId };
+  render();
+  el.faceType?.focus();
+}
+
+function fillFoundationTypeSelect(offer) {
+  const select = el.faceType;
+  if (!select || !foundationPick) return;
+  const types = foundationTypes(pack);
+  const signature = types.map((t) => t.id).join("|");
+  if (select.dataset.kind !== "foundation" || select.dataset.types !== signature) {
+    select.dataset.kind = "foundation";
+    select.dataset.types = signature;
+    select.setAttribute("aria-label", "Foundation type");
+    select.innerHTML = types.map((t) => `<option value="${escapeHtml(t.id)}">${escapeHtml(t.name)}</option>`).join("");
+  }
+  const skuId = types.some((t) => t.id === foundationPick.skuId) ? foundationPick.skuId : offer?.skuId;
+  if (skuId && select.value !== skuId && document.activeElement !== select) select.value = skuId;
+}
+
+/** Place the chosen foundation along the open wall. The wall stays selected, so the elevation stays open and the new footing appears under it. */
+function addFoundationFromFace() {
+  const face = selectedElevationFace() || elevationFace;
+  const skuId = pendingFoundationSku(face);
+  if (!face || !skuId) return;
+  store.pushUndo();
+  const added = addFoundationUnderWall(store.doc, pack, face, wallsCache, skuId);
+  if (!added) return;
+  foundationPick = null;
+  store.persist();
+  setStatusMessage(`Added ${added.name} under this wall.`, "ok");
+  render();
+}
+
 document.getElementById("v2-face-add")?.addEventListener("click", () => {
+  if (floorHostNow()) {
+    beginFloorAdd();
+    return;
+  }
   const face = selectedElevationFace();
   if (!face) return;
+  foundationPick = null;
   selectedBandId = null;
   faceWallSelected = false;
   faceAddPending = { wallId: face.wallId, side: face.side };
@@ -15549,6 +17094,16 @@ document.getElementById("v2-face-add")?.addEventListener("click", () => {
 });
 
 el.faceRemove?.addEventListener("click", () => {
+  if (floorHostNow()) {
+    if (floorAddPending || floorDraft) cancelFloorAdd();
+    else removeFloorRegion();
+    return;
+  }
+  if (foundationPick) {
+    foundationPick = null;
+    render();
+    return;
+  }
   if (faceAddPending) {
     faceAddPending = null;
     selectedBandId = null;
@@ -15560,6 +17115,33 @@ el.faceRemove?.addEventListener("click", () => {
 });
 
 el.faceType?.addEventListener("change", () => {
+  if (floorHostNow() && (floorAddPending || floorDraft)) {
+    const next = el.faceType.value || "floorTile";
+    const bucket = floorAddPending || floorDraft;
+    bucket.category = next;
+    bucket.productName = "";
+    if (el.faceProduct && document.activeElement !== el.faceProduct) el.faceProduct.value = "";
+    if (el.faceSwatch) el.faceSwatch.style.background = finishSwatch(next);
+    render();
+    return;
+  }
+  if (floorHostNow()) {
+    const region = editingFinishRegion();
+    const next = el.faceType.value;
+    const current = floorRegionCategory(region);
+    if (!region || !next || next === current) return;
+    finishCommit(() => {
+      const product = finishProductById(store.doc, region.productId);
+      region.category = next;
+      if (!product || product.category !== next) region.productId = null;
+    });
+    return;
+  }
+  if (foundationPick) {
+    foundationPick.skuId = el.faceType.value;
+    render();
+    return;
+  }
   if (faceAddPending) { render(); return; }
   const band = faceBandNow();
   const source = band ? bandSource(store.doc, band) : null;
@@ -15572,7 +17154,30 @@ el.faceType?.addEventListener("change", () => {
   });
 });
 
+el.faceProduct?.addEventListener("input", () => {
+  const bucket = floorAddPending || floorDraft;
+  if (!floorHostNow() || !bucket) return;
+  bucket.productName = String(el.faceProduct.value || "");
+});
+
 el.faceProduct?.addEventListener("change", () => {
+  if (floorHostNow() && (floorAddPending || floorDraft)) {
+    const bucket = floorAddPending || floorDraft;
+    bucket.productName = String(el.faceProduct.value || "");
+    return;
+  }
+  if (floorHostNow()) {
+    const region = editingFinishRegion();
+    if (!region) return;
+    const category = floorRegionCategory(region);
+    if (!category) return;
+    const name = String(el.faceProduct.value || "").trim();
+    finishCommit(() => {
+      region.category = category;
+      region.productId = name ? ensureFinishProduct(store.doc, category, name) : null;
+    });
+    return;
+  }
   if (faceAddPending) return;
   const band = faceBandNow();
   const source = band ? bandSource(store.doc, band) : null;
@@ -15587,21 +17192,6 @@ el.faceProduct?.addEventListener("change", () => {
 for (const id of ["v2-face-bottom", "v2-face-top", "v2-face-from", "v2-face-to"]) {
   document.getElementById(id)?.addEventListener("change", commitFaceSpan);
 }
-
-el.faceWallH?.addEventListener("change", () => {
-  if (!faceWallSelected || !elevationFace) { render(); return; }
-  const value = typedMm(el.faceWallH.value);
-  if (value == null) { render(); return; }
-  const face = elevationFace;
-  finishCommit(() => {
-    const applied = applyWallTopEdit(store.doc, pack, face, value, wallsCache);
-    if (applied?.wallId && applied.wallId !== face.wallId) {
-      elevationFace = { ...face, wallId: applied.wallId };
-      if (store.primary?.kind === "segment") store.selectOne({ kind: "segment", id: applied.wallId });
-    }
-  });
-  setStatusMessage("Wall height updated.", "ok");
-});
 
 function patchFaceColour(patch) {
   const band = faceBandNow();
@@ -15645,33 +17235,9 @@ el.faceColourName?.addEventListener("change", () => patchFaceColour({ colourName
 el.faceColourCode?.addEventListener("change", () => patchFaceColour({ colourCode: el.faceColourCode.value }));
 el.faceSwatchInput?.addEventListener("change", () => patchFaceColour({ swatch: el.faceSwatchInput.value }));
 
-function commitFaceOpening(edit) {
-  const face = elevationFace;
-  const id = selectedOpeningId();
-  if (!face || !id) return;
-  finishCommit(() => { applyOpeningEdit(store.doc, pack, face, id, edit, wallsCache); });
-}
-
-document.getElementById("v2-face-owidth")?.addEventListener("change", (e) => {
-  const value = typedMm(e.target.value);
-  if (value == null) { render(); return; }
-  commitFaceOpening({ width: value });
-});
-document.getElementById("v2-face-oheight")?.addEventListener("change", (e) => {
-  const value = typedMm(e.target.value);
-  if (value == null) { render(); return; }
-  commitFaceOpening({ height: value });
-});
-document.getElementById("v2-face-osill")?.addEventListener("change", (e) => {
-  const value = typedMm(e.target.value, { allowZero: true });
-  if (value === undefined) { render(); return; }
-  commitFaceOpening({ sill: value ?? 0 });
-});
-document.getElementById("v2-face-oleft")?.addEventListener("change", (e) => {
-  const value = typedMm(e.target.value, { allowZero: true });
-  if (value === undefined) { render(); return; }
-  commitFaceOpening({ left: value ?? 0 });
-});
+el.floorWhole?.addEventListener("click", () => coverWholeFloor());
+el.floorDraw?.addEventListener("click", () => beginFloorDraw());
+el.floorCancel?.addEventListener("click", () => cancelFloorAdd());
 
 el.elevEdgeMode?.addEventListener("click", (ev) => {
   const mode = ev.target.closest?.("[data-elev-edge]")?.dataset.elevEdge;
@@ -15699,7 +17265,7 @@ function syncElevationPreview() {
   const faceOpen = Boolean(model && elevationOpen && !serviceDockActive());
   setHidden(el.ctxElevWrap, !model || faceOpen);
   const opening = model && selectedOpeningId() ? model.openings.find((o) => o.id === selectedOpeningId()) : null;
-  setHidden(el.ctxOOffsetWrap, !opening || faceOpen);
+  setHidden(el.ctxOOffsetWrap, !opening);
   if (opening && el.ctxOOffset && document.activeElement !== el.ctxOOffset) el.ctxOOffset.value = formatLengthMm(opening.offset);
   if (!model) {
     elevPreviewKey = "";
@@ -15727,6 +17293,39 @@ function syncElevationPreview() {
   const drawn = elevationSvg(model, { width: w, height: 130, selectedId: selectedOpeningId(), selectedBandId, draft, guides: elevationGuides(), locate });
   elevPreviewLayout = { scale: drawn.scale, scaleX: drawn.scaleX, scaleY: drawn.scaleY, originX: drawn.originX, originY: drawn.originY };
   el.ctxElev.innerHTML = drawn.svg;
+}
+
+/** The inspector picture of a selected room or slab. Clicking it opens the floor strip. */
+function syncFloorCard(show, obj, kind) {
+  setHidden(el.ctxFloor, !show);
+  if (!show || !obj) {
+    floorCardKey = "";
+    return;
+  }
+  if (el.ctxFloorName) el.ctxFloorName.textContent = obj.name || "This floor";
+  const pic = el.ctxFloorPic;
+  if (!pic) return;
+  const poly = kind === "slab" ? shapePolygon(obj.shape) : roomPolygon(obj);
+  const regions = regionsOfSelection();
+  const clipped = poly.length >= 3
+    ? floorCoverage(poly, regions.map((region) => finishRegionPolygon(store.doc, region))).clipped
+    : regions.map(() => 0);
+  const viewModels = regions.map((region, index) => ({
+    id: region.id,
+    category: floorRegionCategory(region) || "screed",
+    label: FINISH_CATEGORIES[floorRegionCategory(region)]?.label || "Finish",
+    fill: finishSwatch(floorRegionCategory(region)),
+    poly: finishRegionPolygon(store.doc, region),
+    areaText: formatFloorArea(clipped[index] || 0),
+    coversHost: Boolean(region.whole) || regionCoversHost(region),
+  })).sort((a, b) => (a.category === "screed" ? 0 : 1) - (b.category === "screed" ? 0 : 1));
+  const w = Math.max(160, Math.round(pic.clientWidth || el.ctxFloor?.clientWidth || 240));
+  const key = `${w}|${JSON.stringify(viewModels)}|${JSON.stringify(poly)}`;
+  if (key !== floorCardKey) {
+    floorCardKey = key;
+    pic.innerHTML = floorPictureSvg({ width: w, height: 132, host: poly, regions: viewModels, preview: true }).svg;
+  }
+  markHotFloor();
 }
 
 // --- finishes (finish-model.js) --------------------------------------------
@@ -15768,6 +17367,46 @@ function syncFinishPanel(room, slab) {
     finishBareAsk = false;
   }
   const editingId = editingFinishRegion()?.id || null;
+  if (room || slab) {
+    const kind = room ? "room" : "slab";
+    const obj = room || slab;
+    const regions = regionsOfSelection();
+    const poly = kind === "slab" ? shapePolygon(obj.shape) : roomPolygon(obj);
+    let wallHeightText = "";
+    if (kind === "room") {
+      const own = wallsCache.find((w) => !w.drawn && w.roomIds?.includes(obj.id));
+      const metres = Number.isFinite(obj.wallHeight) ? obj.wallHeight : own?.height;
+      if (Number.isFinite(metres)) wallHeightText = `${formatLengthMm(metres)} mm`;
+    }
+    const html = floorOpenHtml(store.doc, {
+      name: obj.name || "This floor",
+      kind,
+      levelName: levelName(effectiveLevel(obj, pack)),
+      status: objectStatus(obj) === "existing" ? "Existing" : "Proposed",
+      wallHeightText,
+      outline: obj.shape?.kind === "rect"
+        ? "Rectangle. Corners of this floor are edited on the plan."
+        : "Polygon. Corners of this floor are edited on the plan.",
+      poly,
+    }, regions, {
+      coversHost: regions.filter((region) => regionCoversHost(region)).map((region) => region.id),
+      selectedId: editingId,
+      floorSelected: !editingId && !floorAddPending && !floorDraft,
+    });
+    if (html !== finishKey) {
+      const typing = host.contains(document.activeElement) && document.activeElement?.matches?.("input");
+      if (!(typing && finishKey)) {
+        finishKey = html;
+        host.innerHTML = html;
+      }
+    }
+    if (editingId !== finishScrolledId) {
+      finishScrolledId = editingId || null;
+      if (editingId) host.querySelector(`[data-fin-region="${editingId}"]`)?.scrollIntoView({ block: "nearest" });
+    }
+    markHotFloor();
+    return;
+  }
   const floorOpts = (kind, id) => ({
     savedRegionId: finishSavedRegionId,
     bareOn: bareFinishHost?.kind === kind && bareFinishHost?.id === id,
@@ -16179,19 +17818,60 @@ function noteFinishSaved(id) {
   }, 1600);
 }
 
+function markHotFloor() {
+  for (const host of [el.elevBody, el.ctxFloorPic]) {
+    if (!host) continue;
+    for (const node of host.querySelectorAll("[data-floor-fill]")) {
+      node.classList.toggle("is-hot", node.dataset.floorFill === hoverFinishRegionId);
+    }
+  }
+  el.ctxFinish?.querySelectorAll("[data-fin-region]").forEach((card) => {
+    card.classList.toggle("fin-hot", card.dataset.finRegion === hoverFinishRegionId);
+  });
+}
+
+function setHoverFloor(id) {
+  const next = id || null;
+  if (next === hoverFinishRegionId) return;
+  hoverFinishRegionId = next;
+  markHotFloor();
+}
+
+/** Open the selected room or slab. A click on a finish then sets which one. */
+function openSelectedFloor() {
+  const picked = resolveFloorFinishOpen(store.selected);
+  if (!picked.open) return false;
+  const host = objByRef(picked.host);
+  if (!host || (picked.host.kind === "slab" && skuById(host.sku)?.category === "ceiling")) return false;
+  tool = "select";
+  openFloorPicture(host);
+  return true;
+}
+
 el.ctxFinish?.addEventListener("pointerover", (e) => {
   const id = e.target.closest?.("[data-fin-region]")?.dataset.finRegion || null;
-  if (!id || id === hoverFinishRegionId) return;
-  hoverFinishRegionId = id;
-  render();
+  if (!id) return;
+  setHoverFloor(id);
 });
 
 el.ctxFinish?.addEventListener("pointerout", (e) => {
   const card = e.target.closest?.("[data-fin-region]");
   if (!card || e.relatedTarget?.closest?.("[data-fin-region]") === card) return;
   if (hoverFinishRegionId !== card.dataset.finRegion) return;
-  hoverFinishRegionId = null;
-  render();
+  setHoverFloor(null);
+});
+
+el.ctxFloor?.addEventListener("pointerover", (e) => {
+  setHoverFloor(e.target.closest?.("[data-floor-fill]")?.dataset.floorFill || null);
+});
+el.ctxFloor?.addEventListener("pointerleave", () => setHoverFloor(null));
+el.elevBody?.addEventListener("pointerover", (e) => {
+  if (!floorHostNow()) return;
+  setHoverFloor(e.target.closest?.("[data-floor-fill]")?.dataset.floorFill || null);
+});
+el.elevBody?.addEventListener("pointerleave", () => {
+  setHoverFloor(null);
+  if (floorHostNow() && el.faceHover) el.faceHover.textContent = "";
 });
 
 el.ctxFinish?.addEventListener("click", (e) => {
@@ -16219,17 +17899,27 @@ el.ctxFinish?.addEventListener("click", (e) => {
     const card = e.target.closest?.("[data-fin-region]");
     if (card && !e.target.closest("input, select, textarea, label") && pack) {
       const id = card.dataset.finRegion;
-      if (id && id !== editingRegionId) {
+      const closed = !floorHostNow();
+      if (id && (closed || id !== editingRegionId)) {
+        if (closed) openSelectedFloor();
+        else {
+          floorAddPending = null;
+          floorDraft = null;
+        }
         editingRegionId = id;
         selectedRegionVertex = null;
         finishKey = "";
+        dropFloorGap();
         const region = (store.doc.finishRegions || []).find((r) => r.id === id);
-        if (region && regionCoversHost(region)) {
-          setStatusMessage("Editing the finish. Press Done to edit the floor again. Until then the floor stays put.", "ok");
-        }
+        if (region) announceFloorFinish(region);
         render();
       }
     }
+    return;
+  }
+  if (btn.dataset.fin === "floor-host") {
+    if (!floorHostNow()) openSelectedFloor();
+    selectFloorHost();
     return;
   }
   if (!pack) return;
@@ -16316,9 +18006,7 @@ el.ctxFinish?.addEventListener("click", (e) => {
       finishKey = "";
       if (turningOn) {
         const region = (store.doc.finishRegions || []).find((r) => r.id === id);
-        if (region && regionCoversHost(region)) {
-          setStatusMessage("Editing the finish. Press Done to edit the floor again. Until then the floor stays put.", "ok");
-        }
+        if (region) announceFloorFinish(region);
       }
       render();
     }
@@ -16869,14 +18557,50 @@ if (el.serviceProfileCanvas) {
 const PROFILE_HEIGHT_KEY = "v2-profile-height";
 const PROFILE_MIN = 148;
 const PROFILE_PLAN_MIN = 180;
+const ELEV_DOCK_MIN = 260;
+const ELEV_DOCK_RATIO = 0.5;
+const ELEV_DOCK_MAX_RATIO = 0.75;
+
+function elevDockHeightKey() {
+  return "v2-elev-dock-height-50";
+}
+
+function dockHeightStorageKey() {
+  const parent = el.serviceProfileDock?.parentElement;
+  return parent?.classList.contains("is-wall-face") || parent?.classList.contains("is-floor-face")
+    ? elevDockHeightKey()
+    : PROFILE_HEIGHT_KEY;
+}
+
+/** Pixel height for the wall elevation: half the column, never above 75%,
+ *  and at least 260px when the column is tall enough for that floor. */
+function applyElevDockHeight(px) {
+  const dock = el.serviceProfileDock;
+  if (!dock) return 0;
+  const parentH = dock.parentElement?.clientHeight || 0;
+  let h = px;
+  if (!Number.isFinite(h) || h <= 0) h = parseFloat(dock.style.height);
+  if (!Number.isFinite(h) || h <= 0) {
+    const stored = Number(window.localStorage.getItem(elevDockHeightKey()));
+    h = Number.isFinite(stored) && stored > 0 ? stored : parentH * ELEV_DOCK_RATIO;
+  }
+  if (parentH > 0) {
+    const cap = Math.round(parentH * ELEV_DOCK_MAX_RATIO);
+    const floor = Math.min(ELEV_DOCK_MIN, cap);
+    h = Math.min(Math.max(h, floor), Math.max(floor, cap));
+  } else {
+    h = Math.max(h, ELEV_DOCK_MIN);
+  }
+  h = Math.round(h);
+  if (dock.style.height !== `${h}px`) dock.style.height = `${h}px`;
+  return h;
+}
 
 function fitServiceProfileHeight(px) {
   const dock = el.serviceProfileDock;
   if (!dock) return 0;
-  if (dock.parentElement?.classList.contains("is-wall-face")) {
-    if (dock.style.height) dock.style.height = "";
-    return dock.clientHeight;
-  }
+  const faceStrip = dock.parentElement?.classList;
+  if (faceStrip?.contains("is-wall-face") || faceStrip?.contains("is-floor-face")) return applyElevDockHeight(px);
   let h = px;
   if (!Number.isFinite(h) || h <= 0) h = parseFloat(dock.style.height) || 190;
   const parentH = dock.parentElement?.clientHeight || 0;
@@ -16900,7 +18624,7 @@ function bindServiceProfileResize() {
   if (Number.isFinite(remembered) && remembered > 0) dock.style.height = `${Math.round(remembered)}px`;
   const apply = (px, { store = false } = {}) => {
     const h = fitServiceProfileHeight(px);
-    if (store && h > 0) window.localStorage.setItem(PROFILE_HEIGHT_KEY, String(h));
+    if (store && h > 0) window.localStorage.setItem(dockHeightStorageKey(), String(h));
     if (frame) return;
     frame = requestAnimationFrame(() => {
       frame = 0;
@@ -16921,7 +18645,7 @@ function bindServiceProfileResize() {
       handle.removeEventListener("pointerup", onUp);
       handle.removeEventListener("pointercancel", onUp);
       const h = Math.round(dock.getBoundingClientRect().height);
-      if (h > 0) window.localStorage.setItem(PROFILE_HEIGHT_KEY, String(h));
+      if (h > 0) window.localStorage.setItem(dockHeightStorageKey(), String(h));
     };
     handle.addEventListener("pointermove", onMove);
     handle.addEventListener("pointerup", onUp);
@@ -17093,19 +18817,54 @@ if (el.serviceFields) {
   el.serviceFields.addEventListener("click", onServiceControl);
 }
 
-/** Wall millimetres sit behind one collapsed details. A room keeps its wall height beside the other room fields. */
+function pinFoldHome(node) {
+  if (!node || node.dataset.foldPinned) return;
+  const mark = document.createElement("span");
+  mark.hidden = true;
+  mark.dataset.foldHome = node.id;
+  node.before(mark);
+  node.dataset.foldPinned = "1";
+}
+
+function restoreFold(node) {
+  if (!node?.id) return;
+  const mark = document.querySelector(`[data-fold-home="${node.id}"]`);
+  if (mark && mark.nextSibling !== node) mark.after(node);
+}
+
+function setWallMoreTitle(text) {
+  const summary = el.ctxWallMore?.querySelector("summary");
+  if (summary && summary.textContent !== text) summary.textContent = text;
+}
+
+/** Wall millimetres sit behind one collapsed details. A selected floor does the same with level and the outline. */
 function syncWallSettingsFold(kind) {
   const details = el.ctxWallMore;
   const box = el.ctxWallMoreFields;
   if (!details || !box) return;
-  const nodes = [el.ctxTopWrap, el.ctxWallHWrap, el.ctxAttachWrap].filter(Boolean);
-  if (kind === "segment") {
-    for (const node of nodes) box.append(node);
-    setHidden(details, nodes.every((node) => node.hidden));
-  } else if (el.ctxFinish) {
-    el.ctxFinish.before(...nodes);
-    setHidden(details, true);
+  const wallNodes = [el.ctxTopWrap, el.ctxWallHWrap, el.ctxAttachWrap].filter(Boolean);
+  const floorNodes = [el.ctxOLevelWrap, el.ctxShapePoly, el.ctxShapePolyHint, el.ctxWallHWrap, el.ctxConvert].filter(Boolean);
+  for (const node of [...wallNodes, ...floorNodes]) pinFoldHome(node);
+  const hostObj = store.primary ? objByRef(store.primary) : null;
+  const floorKind = kind === "room" || (kind === "slab" && skuById(hostObj?.sku)?.category !== "ceiling");
+  const floorClosed = floorKind && !floorHostNow();
+  if (floorClosed) {
+    for (const node of wallNodes) if (!floorNodes.includes(node)) restoreFold(node);
+    for (const node of floorNodes) box.append(node);
+    setWallMoreTitle("Level and other settings");
+    setHidden(details, floorNodes.every((node) => node.hidden));
+    return;
   }
+  for (const node of floorNodes) if (!wallNodes.includes(node)) restoreFold(node);
+  if (kind === "segment") {
+    for (const node of wallNodes) box.append(node);
+    setWallMoreTitle("Wall height and other settings");
+    setHidden(details, wallNodes.every((node) => node.hidden));
+    return;
+  }
+  for (const node of wallNodes) restoreFold(node);
+  setWallMoreTitle("Wall height and other settings");
+  setHidden(details, true);
 }
 
 function syncPlanContext() {
@@ -17131,6 +18890,8 @@ function syncPlanContext() {
     const network = firstObj && (store.doc.serviceNetworks || []).find((n) => n.id === firstObj.networkId);
     syncInspectKicker(network ? network.name : (tool === "service-route" ? "Draw route" : "Services"));
     syncServiceDock();
+    setHidden(el.ctxFloor, true);
+    floorCardKey = "";
     return;
   }
   setHidden(el.serviceFields, true);
@@ -17165,10 +18926,11 @@ function syncPlanContext() {
   // The open face is the editor, so the inspector is only who the wall is and
   // its list. The type picker, status and cut level stay with the closed wall.
   const faceEditing = Boolean(elevationOpen && !draft && !multi && (linear || opening) && selectedElevationFace());
+  const floorEditing = Boolean(floorHostNow() && !draft && !multi && (room || floorSlab));
 
   if (el.dockContext) {
     el.dockContext.dataset.state = dockState;
-    el.dockContext.classList.toggle("is-face-open", faceEditing);
+    el.dockContext.classList.toggle("is-face-open", faceEditing || floorEditing);
   }
   setHidden(el.ctxTypePicker, faceEditing || !(showType || creating || room || multiTypeable));
   if (faceEditing) setTypeFlyoutOpen(false);
@@ -17211,7 +18973,8 @@ function syncPlanContext() {
   }
 
   const placingWall = tool === "wall";
-  setHidden(el.planOptions, !showGeom && !placingWall);
+  const placingSep = tool === "separation" && Boolean(lineStart);
+  setHidden(el.planOptions, !showGeom && !placingWall && !placingSep);
   setHidden(el.wallLoc, !placingWall);
   if (placingWall && el.wallLoc) {
     for (const btn of el.wallLoc.querySelectorAll("[data-wall-loc]")) {
@@ -17240,9 +19003,21 @@ function syncPlanContext() {
       : "Select a wall, room, roof or opening to edit its type and identity, or pick a tool on the ribbon to start drawing.";
   }
 
+  if (placingSep) {
+    setHidden(el.inspectEmpty, true);
+    syncInspectKicker("Separation");
+    setHidden(el.ctxLenWrap, false);
+    setHidden(el.ctxAngWrap, false);
+    setHidden(el.ctxWWrap, true);
+    setHidden(el.ctxHWrap, true);
+    syncSeparationSizeFields();
+  }
+
   if (!showInspect && !showGeom && !creating && !editingProperty) {
     planContextKey = "";
     setHidden(el.ctxElevWrap, true);
+    setHidden(el.ctxFloor, true);
+    floorCardKey = "";
     setHidden(el.ctxOOffsetWrap, true);
     setHidden(el.ctxFinish, true);
     return;
@@ -17251,8 +19026,8 @@ function syncPlanContext() {
   setHidden(el.ctxNameWrap, !room);
   setHidden(el.ctxUseWrap, !room);
   setHidden(el.ctxRegionWrap, !region);
-  setHidden(el.ctxLenWrap, !linear);
-  setHidden(el.ctxAngWrap, !linear);
+  setHidden(el.ctxLenWrap, !(linear || placingSep));
+  setHidden(el.ctxAngWrap, !(linear || placingSep));
   setHidden(el.ctxWWrap, !(rect || linear));
   setHidden(el.ctxHWrap, !(rect || linear));
   if (el.ctxW) el.ctxW.readOnly = linear;
@@ -17275,7 +19050,29 @@ function syncPlanContext() {
   syncHeightFields(obj && !draft ? obj : null, ref?.kind);
   syncWallSettingsFold(draft ? "segment" : ref?.kind);
   syncElevationPreview();
+  syncFloorCard(Boolean((room || floorSlab) && obj && !floorHostNow()), obj, room ? "room" : "slab");
   syncFinishPanel(room && !draft ? obj : null, floorSlab && !draft ? obj : null);
+  if (floorEditing) {
+    setHidden(el.ctxTypePicker, true);
+    setTypeFlyoutOpen(false);
+    setHidden(el.ctxNameWrap, true);
+    setHidden(el.ctxUseWrap, true);
+    setHidden(el.ctxStatusWrap, true);
+    setHidden(el.ctxWWrap, true);
+    setHidden(el.ctxHWrap, true);
+    setHidden(el.ctxShapePoly, true);
+    setHidden(el.ctxShapePolyHint, true);
+    setHidden(el.ctxOLevelWrap, true);
+    setHidden(el.ctxWallHWrap, true);
+    setHidden(el.ctxConvert, true);
+    setHidden(el.ctxRemove, true);
+    setHidden(el.ctxAttachWrap, true);
+    setHidden(el.planOptions, true);
+    syncInspectKicker(`Floor · ${obj?.name || "This floor"}`);
+  } else if ((room || floorSlab) && obj) {
+    syncInspectKicker(`${room ? "Room" : "Slab"} · ${obj.name || "This floor"}`);
+  }
+  setHidden(el.ctxRemove, !room || floorEditing);
 
   const skuId = draft ? placeSkuId : obj?.sku;
   const kind = draft ? "wall" : ref?.kind;
@@ -17302,6 +19099,8 @@ function syncPlanContext() {
     if (document.activeElement !== el.ctxAng) {
       el.ctxAng.value = len < 0.05 ? "" : ang.toFixed(1);
     }
+  } else if (placingSep) {
+    syncSeparationSizeFields();
   }
   if (room && document.activeElement !== el.ctxName) el.ctxName.value = obj.name;
   if (room && document.activeElement !== el.ctxUse) el.ctxUse.value = obj.use;
@@ -17323,11 +19122,12 @@ function syncPlanContext() {
 }
 
 el.ctxLen?.addEventListener("input", (ev) => {
-  if (wallDraft) {
+  if (wallDraft || (tool === "separation" && lineStart)) {
     if (!sizeDraft) sizeDraft = { lockW: false, lockH: false, typedW: "", typedH: "", axis: "w" };
     sizeDraft.lockW = true;
     sizeDraft.typedW = ev.target.value;
-    setWallDraftLength(parseLengthInput(sizeDraft.typedW, wallDraftLength() || 1));
+    if (wallDraft) setWallDraftLength(parseLengthInput(sizeDraft.typedW, wallDraftLength() || 1));
+    else setSeparationDraftLength(parseLengthInput(sizeDraft.typedW, separationDraftLength() || 1));
     render();
   }
 });
@@ -17372,6 +19172,13 @@ el.ctxAng?.addEventListener("change", (ev) => {
   if (wallDraft) {
     const cur = headingDeg(wallDraft.x1, wallDraft.y1, wallDraft.x2 ?? wallDraft.x1, wallDraft.y2 ?? wallDraft.y1);
     setWallDraftHeading(parseDegrees(ev.target.value, cur));
+    render();
+    return;
+  }
+  if (tool === "separation" && lineStart) {
+    const end = snapGuide || hoverPoint || lineStart;
+    const cur = headingDeg(lineStart.x, lineStart.y, end.x, end.y);
+    setSeparationDraftHeading(parseDegrees(ev.target.value, cur));
     render();
     return;
   }
@@ -18089,14 +19896,11 @@ function elementLevel(ref, obj, walls = null) {
   return effectiveLevel(obj, pack) || null;
 }
 
-/** Bring these points into the visible plan without changing zoom. If any
- *  part is already on screen, the camera stays put. Otherwise it shifts only
- *  along the axes where they sit off-screen, and only until the near edge
- *  clears the border — not until they are centred. */
-function framePlanPoints(points) {
-  if (!points.length || !el.canvas) return;
+/** The plan area that is not covered by a docked schedule, or null when the canvas is not on screen. */
+function planViewExtent() {
+  if (!el.canvas) return null;
   const rect = el.canvas.getBoundingClientRect();
-  if (rect.width < 8 || rect.height < 8) return;
+  if (rect.width < 8 || rect.height < 8) return null;
   // While peeking, the docked panel sits over the right of the canvas.
   // That strip is not "on screen": an element under the panel still needs a nudge.
   const panel = schedulePeeking ? el.scheduleOverlay?.querySelector(".schedule-panel") : null;
@@ -18107,9 +19911,20 @@ function framePlanPoints(points) {
       viewW = Math.max(160, p.left - rect.left - 12);
     }
   }
+  return { viewW, viewH: rect.height };
+}
+
+/** Bring these points into the visible plan without changing zoom. If any
+ *  part is already on screen, the camera stays put. Otherwise it shifts only
+ *  along the axes where they sit off-screen, and only until the near edge
+ *  clears the border — not until they are centred. */
+function framePlanPoints(points) {
+  if (!points.length) return;
+  const view = planViewExtent();
+  if (!view) return;
   const xs = points.map((p) => p.x);
   const ys = points.map((p) => p.y);
-  const pad = Math.min(24, viewW / 4, rect.height / 4);
+  const pad = Math.min(24, view.viewW / 4, view.viewH / 4);
   // How far to slide one axis so the near edge lands `pad` inside the view.
   // Zero when the extent already overlaps that axis.
   const shift = (near, far, vis0, vis1) => {
@@ -18117,19 +19932,21 @@ function framePlanPoints(points) {
     if (near > vis1) return vis1 - pad - near;
     return 0;
   };
-  cam.ox += shift(cam.ox + Math.min(...xs) * cam.scale, cam.ox + Math.max(...xs) * cam.scale, 0, viewW);
-  cam.oy += shift(cam.oy + Math.min(...ys) * cam.scale, cam.oy + Math.max(...ys) * cam.scale, 0, rect.height);
+  cam.ox += shift(cam.ox + Math.min(...xs) * cam.scale, cam.ox + Math.max(...xs) * cam.scale, 0, view.viewW);
+  cam.oy += shift(cam.oy + Math.min(...ys) * cam.scale, cam.oy + Math.max(...ys) * cam.scale, 0, view.viewH);
 }
 
 // A located element is selected, but on a busy plan a selection outline is
 // not enough to answer "which one did I just click". The flash is a short
 // pulsing ring over each located element, drawn on top of everything and
 // gone within the second - a pointer, not a state.
+// A wall face is different: the corners and a hairline stay while its
+// elevation is open. That remainder is `facePlanCue`, not the flash.
 const LOCATE_FLASH_MS = 1100;
 let locateFlash = null;
 let locateFlashFrame = 0;
-
 let locateFlashTimer = 0;
+let facePlanCue = null;
 
 function clearLocateFlash() {
   if (locateFlashFrame) cancelAnimationFrame(locateFlashFrame);
@@ -18146,11 +19963,20 @@ function finishLocateFlash() {
   render();
 }
 
+function clearFacePlanCue() {
+  facePlanCue = null;
+  if (locateFlash?.faceCue) clearLocateFlash();
+}
+
+function locateFlashSpan(flash) {
+  return (flash.introMs || 0) + (flash.ms || LOCATE_FLASH_MS);
+}
+
 /**
  * Pulse a ring over each point. `opts.pulses` is how many blinks (the schedule
- * uses two). `opts.segment` draws the points as one line, for a wall side.
- * `opts.steady` is one still highlight, for reduced motion. `opts.onDone`
- * runs when the flash ends.
+ * uses two). `opts.segment` draws the points as one line. `opts.corners` draws
+ * L marks that lock on for `opts.introMs` before that line pulses. `opts.steady`
+ * is one still highlight, for reduced motion. `opts.onDone` runs when the flash ends.
  */
 function startLocateFlash(points, levelId, opts = null) {
   clearLocateFlash();
@@ -18161,8 +19987,15 @@ function startLocateFlash(points, levelId, opts = null) {
     start: performance.now(),
     pulses: Number(opts?.pulses) || 2,
     ms: Number(opts?.ms) || LOCATE_FLASH_MS,
+    introMs: Math.max(0, Number(opts?.introMs) || 0),
     steady: Boolean(opts?.steady),
     segment: Boolean(opts?.segment),
+    corners: Boolean(opts?.corners),
+    nx: Number(opts?.nx) || 0,
+    ny: Number(opts?.ny) || 0,
+    faceCue: Boolean(opts?.faceCue),
+    wallId: opts?.wallId || null,
+    side: opts?.side === -1 ? -1 : 1,
     onDone: typeof opts?.onDone === "function" ? opts.onDone : null,
   };
   if (locateFlash.steady) {
@@ -18172,7 +20005,7 @@ function startLocateFlash(points, levelId, opts = null) {
   }
   const step = () => {
     if (!locateFlash) return;
-    if (performance.now() - locateFlash.start >= locateFlash.ms) {
+    if (performance.now() - locateFlash.start >= locateFlashSpan(locateFlash)) {
       finishLocateFlash();
       return;
     }
@@ -18182,38 +20015,125 @@ function startLocateFlash(points, levelId, opts = null) {
   locateFlashFrame = requestAnimationFrame(step);
 }
 
-function drawLocateFlash() {
-  if (!locateFlash || locateFlash.levelId !== activeLevel) return;
-  const ms = locateFlash.ms || LOCATE_FLASH_MS;
-  const t = locateFlash.steady ? 0 : (performance.now() - locateFlash.start) / ms;
-  if (!locateFlash.steady && t >= 1) return;
-  const pulses = locateFlash.pulses || 2;
-  const pulse = locateFlash.steady ? 1 : Math.abs(Math.sin(t * Math.PI * pulses));
-  const fade = locateFlash.steady ? 0.9 : (1 - t) * (0.35 + 0.65 * pulse);
-  ctx.save();
-  ctx.strokeStyle = COLOUR.hover;
-  ctx.globalAlpha = fade;
-  ctx.setLineDash([]);
-  if (locateFlash.segment && locateFlash.points.length >= 2) {
-    ctx.lineWidth = 5;
-    ctx.lineCap = "round";
-    ctx.beginPath();
-    locateFlash.points.forEach((p, i) => {
-      const [sx, sy] = worldToScreen(p.x, p.y);
-      if (i) ctx.lineTo(sx, sy);
-      else ctx.moveTo(sx, sy);
-    });
-    ctx.stroke();
-  } else {
-    ctx.lineWidth = 2.4;
-    for (const p of locateFlash.points) {
-      const [sx, sy] = worldToScreen(p.x, p.y);
+function strokeFaceCorners(a, b, nx, ny, settle) {
+  const [ax, ay] = worldToScreen(a.x, a.y);
+  const [bx, by] = worldToScreen(b.x, b.y);
+  const marks = faceCornerMarks(ax, ay, bx, by, nx, ny, settle);
+  if (!marks.length) return;
+  // A paper halo first. The wall itself is copper or warm grey, and a mark
+  // in that family disappears into the stroke.
+  const stroke = (style, width) => {
+    ctx.save();
+    ctx.strokeStyle = style;
+    ctx.globalAlpha = 1;
+    ctx.lineWidth = width;
+    ctx.lineCap = "square";
+    ctx.lineJoin = "miter";
+    ctx.setLineDash([]);
+    for (const mark of marks) {
       ctx.beginPath();
-      ctx.arc(sx, sy, 10 + 16 * pulse, 0, Math.PI * 2);
+      mark.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
       ctx.stroke();
     }
+    ctx.restore();
+  };
+  stroke("#f4eee4", 5.5);
+  stroke(COLOUR.selection, 2.4);
+}
+
+function drawLocateFlash() {
+  if (!locateFlash || locateFlash.levelId !== activeLevel) return;
+  let points = locateFlash.points;
+  let nx = locateFlash.nx;
+  let ny = locateFlash.ny;
+  if (locateFlash.faceCue) {
+    const face = selectedElevationFace();
+    const same = face && face.wallId === locateFlash.wallId && (face.side === -1 ? -1 : 1) === locateFlash.side;
+    if (!elevationOpen || !same) {
+      clearLocateFlash();
+      return;
+    }
+    const line = liveFaceLine(locateFlash.wallId, locateFlash.side);
+    if (line && line.levelId === activeLevel) {
+      points = [line.a, line.b];
+      nx = line.nx;
+      ny = line.ny;
+      locateFlash.points = points;
+      locateFlash.nx = nx;
+      locateFlash.ny = ny;
+    }
   }
+  const ms = locateFlash.ms || LOCATE_FLASH_MS;
+  const intro = locateFlash.introMs || 0;
+  const elapsed = locateFlash.steady ? intro : performance.now() - locateFlash.start;
+  const pulseT = locateFlash.steady ? 0 : (intro ? Math.max(0, elapsed - intro) / ms : elapsed / ms);
+  if (!locateFlash.steady && pulseT >= 1) return;
+  const showLine = locateFlash.steady || elapsed >= intro;
+  if (showLine) {
+    const pulses = locateFlash.pulses || 2;
+    const pulse = locateFlash.steady ? 1 : Math.abs(Math.sin(pulseT * Math.PI * pulses));
+    const fade = locateFlash.steady ? 0.9 : (1 - pulseT) * (0.35 + 0.65 * pulse);
+    ctx.save();
+    ctx.strokeStyle = COLOUR.hover;
+    ctx.globalAlpha = fade;
+    ctx.setLineDash([]);
+    if (locateFlash.segment && points.length >= 2) {
+      ctx.lineWidth = 5;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      points.forEach((p, i) => {
+        const [sx, sy] = worldToScreen(p.x, p.y);
+        if (i) ctx.lineTo(sx, sy);
+        else ctx.moveTo(sx, sy);
+      });
+      ctx.stroke();
+    } else {
+      ctx.lineWidth = 2.4;
+      for (const p of points) {
+        const [sx, sy] = worldToScreen(p.x, p.y);
+        ctx.beginPath();
+        ctx.arc(sx, sy, 10 + 16 * pulse, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
+  if (locateFlash.corners && points.length >= 2) {
+    const linear = locateFlash.steady || !intro ? 1 : Math.min(1, elapsed / intro);
+    const settle = 1 - Math.pow(1 - linear, 3);
+    strokeFaceCorners(points[0], points[1], nx, ny, settle);
+  }
+}
+
+/** Corners and a hairline left after Show on plan, until the elevation closes. */
+function drawFacePlanCue() {
+  const face = elevationOpen ? selectedElevationFace() : null;
+  if (!face || serviceDockActive()) {
+    if (facePlanCue || locateFlash?.faceCue) clearFacePlanCue();
+    return;
+  }
+  const side = face.side === -1 ? -1 : 1;
+  if (locateFlash?.faceCue) {
+    if (locateFlash.wallId !== face.wallId || locateFlash.side !== side) clearLocateFlash();
+    else return;
+  }
+  if (!facePlanCue || facePlanCue.wallId !== face.wallId || facePlanCue.side !== side) return;
+  const line = liveFaceLine(face.wallId, side);
+  if (!line || line.levelId !== activeLevel) return;
+  ctx.save();
+  ctx.strokeStyle = COLOUR.hover;
+  ctx.globalAlpha = FACE_CUE_REST_ALPHA;
+  ctx.lineWidth = 1.5;
+  ctx.lineCap = "round";
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  const [ax, ay] = worldToScreen(line.a.x, line.a.y);
+  const [bx, by] = worldToScreen(line.b.x, line.b.y);
+  ctx.moveTo(ax, ay);
+  ctx.lineTo(bx, by);
+  ctx.stroke();
   ctx.restore();
+  strokeFaceCorners(line.a, line.b, line.nx, line.ny, 1);
 }
 
 /**

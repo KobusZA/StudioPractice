@@ -26,6 +26,38 @@ const GROUPS = [
   { kind: "stack", prio: 0 }, // Services
 ];
 
+test("full Add drawing keeps once-a-sheet commands in the group menu", () => {
+  const add = RIBBON.find((t) => t.id === "build").groups.find((g) => g.label === "Add drawing");
+  assert.deepEqual(add.menu, ["sheet-list", "underlay-toggle", "underlay-off"]);
+  const ids = add.items.map((item) => item.id);
+  for (const id of add.menu) assert.ok(ids.includes(id), id);
+  assert.deepEqual(ids.filter((id) => !add.menu.includes(id)), [
+    "underlay", "satellite", "underlay-adjust", "calibrate", "reference", "align-floors",
+  ]);
+  const sheet = SIMPLE_TABS.find((t) => t.id === "draw").groups.find((g) => g.label === "Sheet");
+  assert.equal(sheet.menu, undefined);
+  assert.ok(sheet.items.includes("sheet-list"));
+  assert.ok(sheet.items.includes("underlay-toggle"));
+});
+
+test("DWG and CAD sit on Output with the export commands", () => {
+  const exchange = RIBBON.find((t) => t.id === "output").groups.find((g) => g.label === "Exchange");
+  assert.deepEqual(exchange.items.map((item) => item.id), ["export-dxf", "export-ifc", "dwg", "cad"]);
+  assert.equal(exchange.items.find((item) => item.id === "dwg").todo.length > 20, true);
+});
+
+test("route edits wait for a selection and place-component is not a second place tool", () => {
+  const services = RIBBON.find((t) => t.id === "build").groups.find((g) => g.label === "Services");
+  const ids = services.items.map((item) => item.id);
+  assert.equal(ids.includes("service-place"), false);
+  assert.deepEqual(services.items.filter((item) => item.needs !== "service").map((item) => item.id), [
+    "electrical", "plumbing", "waterheater", "drainage", "service-route",
+  ]);
+  assert.deepEqual(services.items.filter((item) => item.needs === "service").map((item) => item.id), [
+    "service-node", "service-rise", "service-connect", "service-type", "service-slope",
+  ]);
+});
+
 test("only Openings opts into large buttons", () => {
   const labels = [...RIBBON, ...SIMPLE_TABS]
     .flatMap((tab) => tab.groups)

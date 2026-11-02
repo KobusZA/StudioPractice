@@ -102,6 +102,21 @@ export function roomUse(id) {
 }
 
 /**
+ * The words drawn in a room. A known use replaces the placeholder name, so a
+ * study reads "Study" rather than "Room" with Study underneath. A name the
+ * user typed stays, and the use sits under it when the two differ.
+ */
+export function roomTagLines(room) {
+  const useKnown = Boolean(room?.use && room.use !== "other");
+  const useLabel = useKnown ? roomUse(room.use).label : "";
+  const raw = String(room?.name || "").trim();
+  const custom = raw && raw.toLowerCase() !== "room" ? raw : "";
+  const title = custom || useLabel || "Room";
+  const subtitle = useLabel && useLabel.toLowerCase() !== title.toLowerCase() ? useLabel : "";
+  return { title, subtitle };
+}
+
+/**
  * The level an object belongs to, falling back to the pack's default. Every
  * shaped and drawn object carries `level` once placed by the current UI, but
  * migrated v1 documents and anything created before levels existed do not, and
@@ -133,7 +148,7 @@ export function emptyDoc() {
     // Document > Lines (`model-lines`/`annot-lines`) - see LINE_KINDS above
     // for why one array serves both ribbon buttons.
     lines: [],
-    // Document > Rooms > Separate. A line that bounds a room where there is
+    // Build > Rooms > Separate. A line that bounds a room where there is
     // no wall. Not a model line (it is not part of the building export) and
     // not an annotation line (the room outline follows it).
     separations: [],

@@ -10,7 +10,7 @@
 // The preview never passes a view, so it stays fitted.
 
 import { FINISH_CATEGORIES, finishSwatch } from "./finish-data.js";
-import { area as polyArea, clipPolygon, offsetPolygonInward } from "./geom.js";
+import { area as polyArea, clipPolygon, offsetPolygonInward, pointInPoly } from "./geom.js";
 
 const PAD = 14;
 const HANDLE = 5;
@@ -361,7 +361,21 @@ function drawFinishLocate(parts, model, locate, xOf, yOf, W, H) {
   if (locate.vert) locateVert(parts, model, locate.vert, xOf, yOf, W, H, typing, typeable);
 }
 
+/** The wall's dashed alignment, drawn by a floor picture in its own frame. */
+export function appendAlignLines(parts, guides, xOf, yOf, width, height) {
+  alignLines(parts, { base: 0 }, guides, xOf, yOf, width, height);
+}
+
+/** The wall's clearance dimensions, drawn by a floor picture in its own frame. */
+export function appendFinishLocate(parts, locate, xOf, yOf, width, height) {
+  drawFinishLocate(parts, { base: 0 }, locate, xOf, yOf, width, height);
+}
+
 /** The same edge length the plan shows while a polygon is drawn or edited. */
+export function appendMeasureLabel(parts, x1, y1, x2, y2, metres) {
+  measureLabel(parts, x1, y1, x2, y2, metres);
+}
+
 function measureLabel(parts, x1, y1, x2, y2, metres) {
   if (!(metres > 0.02)) return;
   const mx = (x1 + x2) / 2;
@@ -473,8 +487,11 @@ function bandPolygon(b) {
   return [[b.from, b.bottom], [b.to, b.bottom], [b.to, b.top], [b.from, b.top]];
 }
 
-/** Coats at the bottom of the pile, then applied finishes, then a room rule. */
+/** Coats at the bottom of the pile, then applied finishes, then a room rule.
+ *  A floor picture sets `stackRank` so screed stays under the finishes on top.
+ *  Wall bands leave it unset, and keep the order they have always had. */
 function coatRank(band) {
+  if (Number.isFinite(band.stackRank)) return band.stackRank;
   if (band.source === "rule") return 3;
   if (FINISH_CATEGORIES[band.category]?.layer === "coat") return 1;
   return 2;
@@ -540,6 +557,11 @@ function coatStacks(model) {
   }));
 }
 
+/** The wall's shared-patch mark. A floor picture uses the same lines and the same pile. */
+export function appendCoatMarks(parts, model, xOf, yOf) {
+  drawCoatMarks(parts, model, xOf, yOf);
+}
+
 /**
  * Each shared patch carries a buried finish drawn just inside, in its own
  * colour, and a pile labelled "n finishes". The finishes are not coats:
@@ -547,7 +569,35 @@ function coatStacks(model) {
  * The wall-type plaster is left out, so paint on plaster is not a second finish.
  * The inspector preview leaves this mark off. The swatches and the count
  * crowd that small picture; the finish colours still show.
+ * A rectangular patch keeps the pile in its top-left corner. Any other shape
+ * puts it on the patch: the corner of the box around a diamond is empty margin.
  */
+
+/** Where the swatch pile sits, in screen pixels. The top-left of a rectangle's box is on the patch. */
+function pileAnchor(screen) {
+  const minX = Math.min(...screen.map((p) => p[0]));
+  const minY = Math.min(...screen.map((p) => p[1]));
+  if (pointInPoly(minX + 10, minY + 10, screen)) return [minX + 10, minY + 10];
+  const inset = offsetPolygonInward(screen, 16) || offsetPolygonInward(screen, 8);
+  if (inset?.length >= 3) {
+    let best = inset[0];
+    let bestScore = Infinity;
+    for (const p of inset) {
+      const score = (p[0] - minX) + (p[1] - minY);
+      if (score < bestScore) {
+        best = p;
+        bestScore = score;
+      }
+    }
+    return [best[0], best[1]];
+  }
+  const n = screen.length || 1;
+  return [
+    screen.reduce((sum, p) => sum + p[0], 0) / n,
+    screen.reduce((sum, p) => sum + p[1], 0) / n,
+  ];
+}
+
 function drawCoatMarks(parts, model, xOf, yOf) {
   const anchors = [];
   for (const stack of coatStacks(model)) {
@@ -566,9 +616,11 @@ function drawCoatMarks(parts, model, xOf, yOf) {
     }
     const host = stack.pieces.reduce((best, poly) => (Math.abs(polyArea(poly)) > Math.abs(polyArea(best)) ? poly : best));
     const screen = host.map(([s, z]) => [xOf(s), yOf(model.base + z)]);
-    let x = Math.min(...screen.map((p) => p[0])) + 10;
-    let y = Math.min(...screen.map((p) => p[1])) + 10;
-    while (anchors.some((p) => Math.hypot(p.x - x, p.y - y) < 18)) y += 16;
+    let [x, y] = pileAnchor(screen);
+    while (anchors.some((p) => Math.hypot(p.x - x, p.y - y) < 18)) {
+      if (!pointInPoly(x + 6, y + 22, screen)) break;
+      y += 16;
+    }
     anchors.push({ x, y });
     const size = 11;
     const peek = 4;
@@ -586,7 +638,7 @@ function drawCoatMarks(parts, model, xOf, yOf) {
  * @param {{width:number,height:number,interactive?:boolean,selectedId?:string|null,view?:{zoom?:number,panX?:number,panY?:number}|null}} opts
  * @returns {{svg:string, scale:number, scaleX:number, scaleY:number, originX:number, originY:number, fit:object}}
  */
-export function elevationSvg(model, { width, height, interactive = false, selectedId = null, selectedBandId = null, selectedVertex = null, draft = null, guides = null, edgeMode = "corner", view = null, locate = null, wallSelected = false } = {}) {
+export function elevationSvg(model, { width, height, interactive = false, selectedId = null, selectedBandId = null, selectedVertex = null, draft = null, guides = null, edgeMode = "corner", view = null, locate = null, wallSelected = false, foundationPicking = false } = {}) {
   const W = Math.max(80, Math.round(width));
   const H = Math.max(60, Math.round(height));
   if (!model) {
@@ -599,7 +651,9 @@ export function elevationSvg(model, { width, height, interactive = false, select
   const guide = model.guide && Number.isFinite(model.guide.elevation) ? model.guide : null;
   const spanTop = Math.max(model.top, guide?.elevation ?? model.top);
   const near = model.levels.filter((l) => l.elevation >= model.base - 0.6 && l.elevation <= spanTop + 0.6);
+  const offer = interactive && model.foundationOffer ? model.foundationOffer : null;
   const footBases = (model.foundations || []).map((f) => f.base);
+  if (offer) footBases.push(offer.base);
   const zLo = Math.min(model.base, ...footBases, ...near.map((l) => l.elevation)) - 0.1;
   const zHi = Math.max(spanTop, ...near.map((l) => l.elevation)) + 0.2;
   // Span the same width as the level lines. The open elevation keeps a strip
@@ -677,6 +731,19 @@ export function elevationSvg(model, { width, height, interactive = false, select
     parts.push(`<rect x="${fx}" y="${fy}" width="${fw}" height="${fh}" class="elev-foundation" data-elev-foundation="${esc(f.id)}"><title>${esc(f.name)}</title></rect>`);
     if (fh >= 14 && fw >= 36) {
       parts.push(`<text x="${fx + fw / 2}" y="${fy + fh / 2 + 4}" text-anchor="middle" class="elev-dim" pointer-events="none">${mm(f.depth)}</text>`);
+    }
+  }
+  if (offer) {
+    const fx = xOf(0);
+    const fy = yOf(offer.top);
+    const fw = model.length * scaleX;
+    const fh = offer.depth * scaleY;
+    if (fw >= 1 && fh >= 1) {
+      const label = foundationPicking ? mm(offer.depth) : "+ Foundation";
+      parts.push(`<rect x="${fx}" y="${fy}" width="${fw}" height="${fh}" class="elev-foundation elev-foundation-add" data-elev-add-foundation="1"><title>${esc(offer.name)}</title></rect>`);
+      if (fh >= 16 && fw >= 88) {
+        parts.push(`<text x="${fx + fw / 2}" y="${fy + fh / 2 + 4}" text-anchor="middle" class="elev-foundation-add-label" pointer-events="none">${label}</text>`);
+      }
     }
   }
 
@@ -869,7 +936,8 @@ export function elevationSvg(model, { width, height, interactive = false, select
   drawFinishLocate(parts, model, locate, xOf, yOf, W, H);
 
   if (interactive) {
-    const below = (model.foundations || []).reduce((y, f) => Math.max(y, yOf(f.base)), yOf(model.base));
+    let below = yOf(offer ? offer.base : model.base);
+    for (const f of model.foundations || []) below = Math.max(below, yOf(f.base));
     parts.push(`<text x="${wx + ww / 2}" y="${Math.min(H - 3, below + 12)}" text-anchor="middle" class="elev-dim">${mm(model.length)}</text>`);
   }
   if (interactive) {

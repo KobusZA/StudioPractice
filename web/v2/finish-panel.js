@@ -173,6 +173,132 @@ function formatM2(m) {
   return `${m.toFixed(digits)} m²`;
 }
 
+/** The same square-metre text the floor picture and its list both use. */
+export function formatFloorArea(m) {
+  return formatM2(m);
+}
+
+/** "Screed 2 of 2" where a type repeats, the plain type otherwise. */
+function floorLineName(doc, region, regions) {
+  const category = regionCategory(doc, region);
+  const label = FINISH_CATEGORIES[category]?.label || "Finish";
+  const same = (regions || []).filter((item) => regionCategory(doc, item) === category);
+  if (same.length < 2) return label;
+  const index = same.findIndex((item) => item.id === region.id) + 1;
+  return index > 0 ? `${label} ${index} of ${same.length}` : label;
+}
+
+function piecesArea(pieces) {
+  return (pieces || []).reduce((sum, poly) => sum + (poly?.length >= 3 ? Math.abs(polyArea(poly)) : 0), 0);
+}
+
+/**
+ * What sits on what, said the way a wall says "Paint on the plaster".
+ * Screed is the base. A later finish on an earlier one is named too.
+ */
+function floorStackNotesHtml(doc, regions) {
+  const rows = (regions || []).map((region, index) => ({
+    index,
+    category: regionCategory(doc, region),
+    poly: finishRegionPolygon(doc, region),
+  })).filter((row) => row.category && row.poly.length >= 3);
+  const own = new Map();
+  for (const row of rows) own.set(row.category, (own.get(row.category) || 0) + Math.abs(polyArea(row.poly)));
+  const notes = new Map();
+  for (let i = 0; i < rows.length; i += 1) {
+    for (let j = i + 1; j < rows.length; j += 1) {
+      const a = rows[i];
+      const b = rows[j];
+      if (a.category === b.category) continue;
+      const lower = a.category === "screed" ? a : b.category === "screed" ? b : a.index < b.index ? a : b;
+      const upper = lower === a ? b : a;
+      const area = piecesArea(clipPolygon(upper.poly, lower.poly));
+      if (area < 0.02) continue;
+      const key = `${upper.category}:${lower.category}`;
+      const note = notes.get(key) || { upper: upper.category, lower: lower.category, area: 0 };
+      note.area += area;
+      notes.set(key, note);
+    }
+  }
+  return [...notes.values()].map((note) => {
+    const area = Math.min(note.area, own.get(note.upper) || note.area);
+    const upper = FINISH_CATEGORIES[note.upper]?.label || "Finish";
+    const lower = (FINISH_CATEGORIES[note.lower]?.label || "finish").toLowerCase();
+    return `<p class="fin-on">${esc(upper)} on the ${esc(lower)}, ${formatM2(area)}.</p>`;
+  }).join("");
+}
+
+/**
+ * The floor inspector, with the strip open or closed. The floor is its own
+ * row, then the finishes. Wall rules stay on the wall. Level and the outline
+ * sit behind one collapsed row.
+ */
+export function floorOpenHtml(doc, host, regions, opts = {}) {
+  const list = regions || [];
+  const polys = list.map((region) => finishRegionPolygon(doc, region));
+  const cover = host?.poly?.length >= 3 ? floorCoverage(host.poly, polys) : { hostArea: host?.area || 0, clipped: [], finished: 0, bare: 0 };
+  const covers = new Set(opts.coversHost || []);
+  const pills = [host?.levelName, host?.status, formatM2(cover.hostArea)].filter(Boolean);
+  const lines = list.map((region, i) => {
+    const category = regionCategory(doc, region);
+    const spec = FINISH_CATEGORIES[category];
+    const product = finishProductById(doc, region.productId);
+    const named = Boolean(product);
+    const needs = !named && Boolean(spec?.needsProduct);
+    const follows = Boolean(region.whole) || covers.has(region.id);
+    return lineHtml({
+      attrs: `data-fin-region="${esc(region.id)}"`,
+      selected: region.id === opts.selectedId,
+      swatch: { fill: finishSwatch(category) },
+      name: floorLineName(doc, region, list),
+      place: follows ? "Whole floor, follows the outline" : "Drawn area",
+      prod: named ? productChoiceLabel(product) : needs ? "Needs a product" : "No product named",
+      warn: needs,
+      area: formatM2(cover.clipped[i] || 0),
+    });
+  }).join("") || '<p class="fin-note">No finishes on this floor yet.</p>';
+  const floorLine = lineHtml({
+    attrs: 'data-fin="floor-host"',
+    selected: Boolean(opts.floorSelected),
+    swatch: { fill: "#e4d3b4" },
+    name: "Floor",
+    place: host?.name || "This floor",
+    prod: host?.kind === "slab" ? "Follows the floor outline" : "Follows the room outline",
+    area: formatM2(cover.hostArea),
+  });
+  const height = host?.wallHeightText
+    ? `<div>Wall height · ${esc(host.wallHeightText)}</div>`
+    : "";
+  const wallNote = host?.kind === "room"
+    ? `<p class="fin-note">Finish a wall by selecting that wall. A rule for every wall of this room stays with the walls.</p>`
+    : `<p class="fin-note">Finish a wall by selecting that wall.</p>`;
+  const added = list.length;
+  return `<section class="fin-sec fin-open" data-fin-block="floor">
+    <div class="fin-identity" data-fin-block="identity">
+      <p class="fin-id-name">${esc(host?.name || "This floor")}</p>
+      <div class="fin-pills">${pills.map((p) => `<span class="fin-pill">${esc(p)}</span>`).join("")}</div>
+    </div>
+    <div class="fin-block" data-fin-block="host">
+      ${floorLine}
+    </div>
+    <section class="fin-block" data-fin-block="finishes">
+      <h3>Finishes on this floor</h3>
+      <p class="fin-note fin-tally">Finished <b>${formatM2(cover.finished)}</b> · Bare <b>${formatM2(cover.bare)}</b> · <b>${finishCountWords(added)}</b></p>
+      <div class="fin-lines">${lines}</div>
+      ${floorStackNotesHtml(doc, list)}
+      ${wallNote}
+    </section>
+    <details class="wall-more">
+      <summary>Level and other settings</summary>
+      <div class="wall-more-fields">
+        <div>Level · ${esc(host?.levelName || "—")}</div>
+        ${height}
+        <div>Outline · ${esc(host?.outline || "Corners of this floor are edited on the plan.")}</div>
+      </div>
+    </details>
+  </section>`;
+}
+
 function typeOptions(selected) {
   return FLOOR_FINISH_ORDER.map((id) => (
     `<option value="${esc(id)}"${id === selected ? " selected" : ""}>${esc(FINISH_CATEGORIES[id].label)}</option>`

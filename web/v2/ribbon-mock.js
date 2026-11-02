@@ -1,7 +1,7 @@
 // Evaluation mock: Simple vs Full ribbon. Does not change the live planner.
 // Full is the current RIBBON. Simple is a filtered, task-ordered overlay.
 
-import { RIBBON, renderRibbon } from "./ribbon.js";
+import { RIBBON, renderRibbon } from "./ribbon.js?v=20261102-ribbon-more";
 
 const EMPTY_CATEGORIES = new Set(["boundarywall", "beam", "furniture"]);
 
@@ -328,6 +328,7 @@ const GLYPHS = {
   "part-m": '<path d="M4 20h4v-4h4v-4h4V8h4"/>',
   zoning: '<rect x="4" y="4" width="7" height="7"/><rect x="13" y="13" width="7" height="7"/>',
   gaps: '<path d="M8 7h8M8 12h5M8 17h8"/>',
+  more: '<circle cx="6" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="18" cy="12" r="1.3" fill="currentColor" stroke="none"/>',
 };
 
 function fillItemFace(btn, id, caption) {
@@ -348,8 +349,11 @@ function overflowing(el) {
 }
 
 function closeOverflowMenus(except) {
-  document.querySelectorAll(".ribbon-group.is-open").forEach((g) => {
-    if (g !== except) g.classList.remove("is-open");
+  document.querySelectorAll(".ribbon-group.is-open, .ribbon-group.is-menu-open").forEach((g) => {
+    if (g === except) return;
+    g.classList.remove("is-open");
+    g.classList.remove("is-menu-open");
+    g.querySelector(".ribbon-more-btn")?.setAttribute("aria-expanded", "false");
   });
 }
 
@@ -376,6 +380,19 @@ function decorateRibbon(functionsEl) {
       });
       const label = group.querySelector(".ribbon-group-label");
       group.insertBefore(ov, label);
+    }
+    const more = group.querySelector(".ribbon-more-btn");
+    const menuButtons = [...group.querySelectorAll(".ribbon-menu .ribbon-item")];
+    if (more && menuButtons.length && !more.querySelector(".glyph")) {
+      fillItemFace(more, "more", "More");
+      more.title = menuButtons.map((b) => b.querySelector(".caption")?.textContent || b.textContent.trim()).join(", ");
+      more.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const open = group.classList.contains("is-menu-open");
+        closeOverflowMenus();
+        group.classList.toggle("is-menu-open", !open);
+        more.setAttribute("aria-expanded", String(!open));
+      });
     }
   }
 }

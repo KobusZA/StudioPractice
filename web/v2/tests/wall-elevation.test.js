@@ -8,7 +8,7 @@ import { normalizeDoc } from "../model.js";
 import { normalizePackUnits } from "../schema.js";
 import { deriveWalls } from "../walls.js";
 import { createFinishRun } from "../finish-model.js";
-import { alignOutlineShift, applyOpeningEdit, applyTypedGap, applyWallTopEdit, axisAlignedOutline, elevationModel, faceRefForSelection, maxTypedGap, openingSnapEdges, resizeOpeningCorner, snapElevation, translateOutlineEdge } from "../wall-elevation.js";
+import { addFoundationUnderWall, alignOutlineShift, applyOpeningEdit, applyTypedGap, applyWallTopEdit, axisAlignedOutline, elevationModel, faceRefForSelection, foundationTypes, maxTypedGap, openingSnapEdges, resizeOpeningCorner, snapElevation, translateOutlineEdge } from "../wall-elevation.js";
 
 const pack = normalizePackUnits(
   JSON.parse(readFileSync(new URL("../../samples/planner-pack-v2.json", import.meta.url))),
@@ -68,6 +68,7 @@ test("a foundation on this line is drawn below the wall, and the other side mirr
   });
   const face = elevationModel(doc, pack, { wallId: "w1", side: 1 });
   assert.equal(face.foundations.length, 1);
+  assert.equal(face.foundationOffer, null);
   const foot = face.foundations[0];
   assert.equal(foot.id, "f1");
   assert.ok(Math.abs(foot.from - 1) < 1e-9);
@@ -83,7 +84,89 @@ test("a foundation on this line is drawn below the wall, and the other side mirr
   const svg = elevationSvg(face, { width: 640, height: 280, interactive: true });
   assert.match(svg.svg, /data-elev-foundation="f1"/);
   assert.match(svg.svg, /1 foundation below/);
+  assert.doesNotMatch(svg.svg, /data-elev-add-foundation/);
+  assert.equal(bare.foundationOffer?.skuId, "TSP_CON052");
   assert.doesNotMatch(elevationSvg(bare, { width: 640, height: 280 }).svg, /elev-foundation/);
+});
+
+test("a bare ground-floor wall can gain the default foundation under it", async () => {
+  const { elevationSvg } = await import("../wall-elevation-render.js");
+  const doc = drawnDoc();
+  const bare = elevationModel(doc, pack, { wallId: "w1" });
+  assert.ok(Math.abs(bare.foundationOffer.depth - 0.6) < 1e-9);
+  assert.ok(Math.abs(bare.foundationOffer.base - -0.6) < 1e-9);
+  assert.ok(Math.abs(bare.foundationOffer.top) < 1e-9);
+  const open = elevationSvg(bare, { width: 640, height: 280, interactive: true });
+  assert.match(open.svg, /data-elev-add-foundation="1"/);
+  assert.match(open.svg, /\+ Foundation/);
+  const picking = elevationSvg(bare, { width: 640, height: 280, interactive: true, foundationPicking: true });
+  assert.match(picking.svg, /600/);
+  assert.doesNotMatch(picking.svg, /\+ Foundation/);
+  const added = addFoundationUnderWall(doc, pack, { wallId: "w1" });
+  assert.equal(added.name, bare.foundationOffer.name);
+  const seg = doc.segments.find((s) => s.id === added.id);
+  assert.equal(seg.sku, "TSP_CON052");
+  assert.equal(seg.level, "01 GFL");
+  assert.ok(Math.abs(seg.baseOffset - -0.6) < 1e-9);
+  assert.equal(seg.x1, 0);
+  assert.equal(seg.x2, 6);
+  const faced = elevationModel(doc, pack, { wallId: "w1" });
+  assert.equal(faced.foundationOffer, null);
+  assert.equal(faced.foundations.length, 1);
+  assert.ok(Math.abs(faced.foundations[0].from) < 1e-9);
+  assert.ok(Math.abs(faced.foundations[0].to - 6) < 1e-9);
+  assert.ok(Math.abs(faced.foundations[0].base - -0.6) < 1e-9);
+  assert.equal(addFoundationUnderWall(doc, pack, { wallId: "w1" }), null);
+});
+
+test("the elevation can preview and place a chosen foundation type", () => {
+  const doc = drawnDoc();
+  const types = foundationTypes(pack);
+  assert.ok(types.some((t) => t.id === "TSP_CON052"));
+  assert.ok(types.some((t) => t.id === "TSP_EW132"));
+  const alt = {
+    ...pack,
+    skus: pack.skus.map((s) => (s.id === "TSP_EW132"
+      ? { ...s, geometry: { ...s.geometry, height: 0.4 } }
+      : s)),
+  };
+  const preview = elevationModel(doc, alt, { wallId: "w1" }, null, "TSP_EW132");
+  assert.equal(preview.foundationOffer.skuId, "TSP_EW132");
+  assert.equal(preview.foundationOffer.name, "Masonry 220mm foundation (no plaster)");
+  assert.ok(Math.abs(preview.foundationOffer.depth - 0.4) < 1e-9);
+  assert.ok(Math.abs(preview.foundationOffer.base - -0.4) < 1e-9);
+  const added = addFoundationUnderWall(doc, alt, { wallId: "w1" }, null, "TSP_EW132");
+  const seg = doc.segments.find((s) => s.id === added.id);
+  assert.equal(seg.sku, "TSP_EW132");
+  assert.ok(Math.abs(seg.baseOffset - -0.4) < 1e-9);
+  const unknown = elevationModel(drawnDoc(), pack, { wallId: "w1" }, null, "not-a-foundation");
+  assert.equal(unknown.foundationOffer.skuId, "TSP_CON052");
+});
+
+test("a wall that starts on the next floor is not offered a foundation", () => {
+  const doc = normalizeDoc({
+    segments: [{ id: "w1", sku: "TSP_MAS009", level: "02 L1", x1: 0, y1: 0, x2: 6, y2: 0 }],
+  });
+  const m = elevationModel(doc, pack, { wallId: "w1" });
+  assert.equal(m.foundationOffer, null);
+  assert.equal(addFoundationUnderWall(doc, pack, { wallId: "w1" }), null);
+  assert.equal(doc.segments.length, 1);
+});
+
+test("the new footing is filed on the foundation storey when the pack has one", () => {
+  const doc = drawnDoc();
+  const withHome = {
+    ...pack,
+    levels: [{ id: "00 FND", name: "00 FND", elevation: -0.6 }, ...pack.levels],
+  };
+  const added = addFoundationUnderWall(doc, withHome, { wallId: "w1" });
+  const seg = doc.segments.find((s) => s.id === added.id);
+  assert.equal(seg.level, "00 FND");
+  assert.ok(Math.abs(seg.baseOffset) < 1e-9);
+  const faced = elevationModel(doc, withHome, { wallId: "w1" });
+  assert.equal(faced.foundations.length, 1);
+  assert.ok(Math.abs(faced.foundations[0].base - -0.6) < 1e-9);
+  assert.ok(Math.abs(faced.foundations[0].top) < 1e-9);
 });
 
 test("a wall's own height sets the top", () => {

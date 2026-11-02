@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,560&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="./v2.css?v=20261101-face-flip" />
+  <link rel="stylesheet" href="./v2.css?v=20261102-floor-gap" />
 </head>
 <body class="auth-pending">
   <div class="chrome">
@@ -341,16 +341,18 @@
             <button type="button" data-profile-mode="step" title="Dragging a node makes a vertical rise or drop (90 degrees). Hold Shift to use Slope for one drag.">Step</button>
             <button type="button" data-profile-mode="slope" title="Dragging a node changes only its height, so the runs beside it slope (use for drainage falls). Hold Shift to use Step for one drag.">Slope</button>
           </span>
-          <button type="button" class="svc-profile-all key-plan-btn" id="v2-face-plan" hidden
-                  title="Flip to the other face of this wall.">Plan</button>
-          <span class="visually-hidden" id="v2-face-flash-live" aria-live="polite"></span>
+          <button type="button" id="v2-face-add" hidden>Add a finish</button>
+          <button type="button" id="v2-face-foundation" hidden title="Choose a foundation for this wall">+ Foundation</button>
+          <button type="button" class="svc-profile-all" id="v2-face-plan" hidden
+                  title="View the other face of this wall.">Flip face</button>
           <button type="button" class="svc-profile-all" id="v2-elev-fit" hidden
                   title="Show the whole wall again">Fit</button>
           <button type="button" class="svc-profile-all" id="v2-elev-flash" hidden
-                  title="Blink this side of the wall on the plan">Flash on plan</button>
+                  title="Show this side of the wall on the plan">Show on plan</button>
           <button type="button" class="svc-profile-exit" id="v2-profile-exit"
                   title="Close the route profile and the Services panel. A click on empty plan leaves them open. Escape does the same.">Exit</button>
         </div>
+        <span class="visually-hidden" id="v2-face-flash-live" aria-live="polite"></span>
         <div class="face-editor-band" id="v2-face-editor" hidden>
           <div class="face-editor">
           <div class="face-editor-line face-editor-main">
@@ -359,7 +361,13 @@
               <strong id="v2-face-which">This face</strong>
               <span id="v2-face-meta"></span>
             </div>
+            <strong id="v2-face-area" class="face-area" hidden></strong>
             <div class="face-editor-controls">
+              <span id="v2-floor-place" hidden>
+                <button type="button" id="v2-floor-whole">Cover whole floor</button>
+                <button type="button" id="v2-floor-draw">Draw area</button>
+                <button type="button" id="v2-floor-cancel">Cancel</button>
+              </span>
               <label id="v2-face-type-label">Type <select id="v2-face-type" aria-label="Finish type"></select></label>
               <label id="v2-face-product-label">Product <input id="v2-face-product" type="text" aria-label="Product" /></label>
               <button type="button" id="v2-face-remove">Remove</button>
@@ -374,6 +382,7 @@
           </div>
           <div class="face-editor-line" id="v2-face-place-row" hidden>
             <span id="v2-face-place-kicker">Place this finish</span>
+            <button type="button" id="v2-face-foundation-add" hidden>Under this wall</button>
             <button type="button" data-face-place="whole">Whole face</button>
             <button type="button" data-face-place="150">Up to 150 mm</button>
             <button type="button" data-face-place="1200">Up to 1.2 m</button>
@@ -389,21 +398,11 @@
               <input id="v2-face-to" type="text" inputmode="decimal" aria-label="To, mm along the wall" /> mm
             </label>
           </div>
-          <div class="face-editor-line" id="v2-face-wall-row" hidden>
-            <label class="face-mm">Height <input id="v2-face-wall-h" type="text" inputmode="decimal" aria-label="Wall height, mm" /> mm</label>
           </div>
-          <div class="face-editor-line" id="v2-face-opening-row" hidden>
-            <label class="face-mm">Width <input id="v2-face-owidth" type="text" inputmode="decimal" aria-label="Opening width, mm" /> mm</label>
-            <label class="face-mm">Height <input id="v2-face-oheight" type="text" inputmode="decimal" aria-label="Opening height, mm" /> mm</label>
-            <label class="face-mm" id="v2-face-sill-label">Sill <input id="v2-face-osill" type="text" inputmode="decimal" aria-label="Sill, mm" /> mm</label>
-            <label class="face-mm">From the left <input id="v2-face-oleft" type="text" inputmode="decimal" aria-label="From the left, mm" /> mm</label>
-          </div>
-          </div>
-          <button type="button" id="v2-face-add">Add a finish</button>
         </div>
         <p class="face-hover" id="v2-face-hover"></p>
         <div class="elev-info-bar" id="v2-elev-info-bar" hidden>
-          <p>Drag the top of the wall to set its height. The line above is the next floor, or the roof on the top storey. Scroll to zoom; middle-drag or Alt-drag to move around. Fit shows the whole wall. Escape blurs a field, finishes or cancels a drawing, cancels a finish that is waiting, drops a typed gap, releases a corner, selects the wall, then closes it. Exit closes this wall in one press.</p>
+          <p>Drag the top of the wall to set its height.</p>
           <button type="button" id="v2-elev-info-dismiss">Don't show again</button>
         </div>
         <canvas id="v2-service-profile-canvas"></canvas>
@@ -415,6 +414,10 @@
           </span>
         </span>
         <div class="elev-dock-body" id="v2-elevation-body" hidden></div>
+        <details class="floor-stack-key" id="v2-floor-stack-key" hidden>
+          <summary>Click the same spot again to edit the finish underneath. The buried one is a line just inside, and the pile is counted.</summary>
+          <p>The top finish is selected first. The next click on that patch selects the one under it, then the next, then back to the top. Screed under a finish is “2 finishes”. Where another finish also sits on that one, it is “3 finishes”.</p>
+        </details>
         <div class="elev-coach" id="v2-elev-coach" hidden>
           <p>Drag the top of the wall to set its height.</p>
           <button type="button" id="v2-elev-coach-ok">Got it</button>
@@ -478,6 +481,11 @@
               <label><input type="radio" name="v2-ctx-status" value="planned" /> Proposed</label>
             </div>
           </fieldset>
+          <button type="button" class="floor-card" id="v2-ctx-floor" hidden aria-label="Open this floor">
+            <span class="floor-card-label"><span>This floor</span><em id="v2-ctx-floor-name"></em></span>
+            <span class="floor-card-stage" id="v2-ctx-floor-pic"></span>
+            <span class="open-overlay">Open floor</span>
+          </button>
           <label id="v2-ctx-form-wrap" hidden>Form
             <select id="v2-ctx-form">
               <option value="flat">flat</option>
@@ -574,6 +582,7 @@
             </div>
           </details>
           <button type="button" id="v2-ctx-convert" hidden title="Replace this room's walls with drawn walls you can select and edit one by one">Convert walls to drawn</button>
+          <button type="button" id="v2-ctx-remove" hidden title="Take this room off the plan. The walls stay.">Remove</button>
         </div>
         <!-- 2.5D services: route settings while Draw route is armed, and the
              properties of a selected route point or run. Rendered by
@@ -1104,6 +1113,6 @@
     </form>
   </div>
 
-  <script type="module" src="./ui.js?v=20261101-face-flip"></script>
+  <script type="module" src="./ui.js?v=20261102-floor-list"></script>
 </body>
 </html>
