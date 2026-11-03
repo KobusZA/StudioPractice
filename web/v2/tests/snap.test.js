@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { emptyDoc, rectShape } from "../model.js";
-import { ALIGN_ORIGIN_MAX_M, GAP_MAX_M, applyNicePoint, bestEndpointSnap, bestLinearMoveSnap, collectSnapEdges, collectSnapTargets, faceCorners, faceEdges, isExactPointSnap, nearestAlignments, probeAlongEdge, probeAlongOccupiedEdge, probeDirection, resolveProbes, snapCoord, snapEdgeToLine, snapLengthFrom, snapNiceDelta, snapPoint, snapToFace } from "../snap.js";
+import { ALIGN_ORIGIN_MAX_M, GAP_MAX_M, applyNicePoint, bestEndpointSnap, bestLinearMoveSnap, collectSnapEdges, collectSnapTargets, faceCorners, faceEdges, isExactPointSnap, nearestAlignments, probeAlongEdge, probeAlongOccupiedEdge, probeDirection, resolveProbes, snapCoord, snapEdgeToLine, snapLengthFrom, snapLinearEnd, snapNiceDelta, snapPoint, snapToFace } from "../snap.js";
 
 function docWithWall(x1, y1, x2, y2, id = "s1") {
   const doc = emptyDoc();
@@ -598,6 +598,61 @@ test("nearestAlignments beyond ALIGN_ORIGIN_MAX_M is still reported, for the cal
   assert.ok(result.dist > ALIGN_ORIGIN_MAX_M);
   assert.ok(result.dist <= GAP_MAX_M);
   assert.deepEqual(result.nearest, { x: 0, y: 5 });
+});
+
+test("a wall aimed along a line stores that direction", () => {
+  // Independent X/Y rounding used to turn 12° into about 13° at this zoom.
+  const ang = 12 * Math.PI / 180;
+  const from = { x: 0, y: 0 };
+  const length = 4.37;
+  const wx = Math.cos(ang) * length;
+  const wy = Math.sin(ang) * length;
+  const tol = 10 / 80;
+  const stored = snapLinearEnd(wx, wy, {
+    from, originsX: [0], originsY: [0], tolWorld: tol, lines: [],
+  });
+  const got = Math.atan2(stored.y - from.y, stored.x - from.x);
+  assert.ok(Math.abs(got - ang) < 1e-8, `stored ${got}, aimed ${ang}`);
+  const drifted = applyNicePoint(wx, wy, { from, originsX: [0], originsY: [0], tolWorld: tol });
+  const driftedAng = Math.atan2(drifted.y - from.y, drifted.x - from.x);
+  assert.ok(Math.abs(driftedAng - ang) > 1e-3);
+});
+
+test("a wall drawn near an axis is stored on that axis", () => {
+  const from = { x: 0, y: 0 };
+  const point = snapLinearEnd(4.2, 0.015, {
+    from, originsX: [0], originsY: [0], tolWorld: 10 / 80, lines: [],
+  });
+  assert.equal(point.y, 0);
+  assert.ok(point.x > 1);
+});
+
+test("a miss outside the snap tolerance keeps the aimed direction", () => {
+  const from = { x: 0, y: 0 };
+  const point = snapLinearEnd(4.2, 0.03, {
+    from, originsX: [0], originsY: [0], tolWorld: 10 / 400, lines: [],
+  });
+  const got = Math.atan2(point.y, point.x);
+  const aimed = Math.atan2(0.03, 4.2);
+  assert.ok(Math.abs(got - aimed) < 1e-8);
+});
+
+test("a wall continued along an existing wall stores that wall's direction", () => {
+  const ang = 12 * Math.PI / 180;
+  const ux = Math.cos(ang);
+  const uy = Math.sin(ang);
+  const from = { x: 0, y: 0 };
+  const line = { x1: 0, y1: 0, x2: ux * 3, y2: uy * 3 };
+  const nx = -uy;
+  const ny = ux;
+  const wx = ux * 3.8 + nx * 0.008;
+  const wy = uy * 3.8 + ny * 0.008;
+  const point = snapLinearEnd(wx, wy, {
+    from, originsX: [0], originsY: [0], tolWorld: 10 / 100, lines: [line],
+  });
+  const cross = point.x * uy - point.y * ux;
+  assert.ok(Math.abs(cross) < 1e-8, `off the wall by ${cross}`);
+  assert.ok(point.x * ux + point.y * uy > 1);
 });
 
 test("applyNicePoint keeps an X alignment and rounds the free length", () => {

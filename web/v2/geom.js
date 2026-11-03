@@ -129,11 +129,51 @@ function pointOnOrInPoly(x, y, poly) {
   return Math.hypot(c.x - x, c.y - y) <= 1e-4;
 }
 
+/** Where the segment (x0,y0)→(x0+dx, y0+dy) crosses an edge, as t in (0, 1]. */
+function segmentHitsEdge(x0, y0, dx, dy, x1, y1, x2, y2) {
+  const ex = x2 - x1;
+  const ey = y2 - y1;
+  const den = dx * ey - dy * ex;
+  if (Math.abs(den) < 1e-12) return null;
+  const t = ((x1 - x0) * ey - (y1 - y0) * ex) / den;
+  const u = ((x1 - x0) * dy - (y1 - y0) * dx) / den;
+  if (t <= 1e-9 || t > 1 + 1e-9 || u < -1e-8 || u > 1 + 1e-8) return null;
+  return Math.min(1, t);
+}
+
+/**
+ * Shorten a rigid translation until every vertex stays inside `host`.
+ * No host, or a delta that already fits, is returned unchanged.
+ * `t` is the fraction of `(dx, dy)` that fits. `stopped` is true when the
+ * host cut the move short.
+ */
+export function clampDeltaInside(points, dx, dy, host) {
+  const ring = points || [];
+  if (!ring.length || (Math.abs(dx) < 1e-12 && Math.abs(dy) < 1e-12)) {
+    return { dx: 0, dy: 0, t: 0, stopped: false };
+  }
+  const fits = (t) => {
+    if (!host || host.length < 3) return true;
+    return ring.every(([x, y]) => pointOnOrInPoly(x + dx * t, y + dy * t, host));
+  };
+  if (fits(1)) return { dx, dy, t: 1, stopped: false };
+  if (!fits(0)) return { dx: 0, dy: 0, t: 0, stopped: true };
+  let lo = 0;
+  let hi = 1;
+  for (let k = 0; k < 24; k += 1) {
+    const mid = (lo + hi) / 2;
+    if (fits(mid)) lo = mid;
+    else hi = mid;
+  }
+  return { dx: dx * lo, dy: dy * lo, t: lo, stopped: true };
+}
+
 /**
  * Move one edge of a ring by the same amount at both ends, so the line keeps
  * its length and direction. The delta is shortened until both ends stay inside
- * `host` (or on its boundary). No host means the full delta. `points` are
- * `[x, y]` pairs. Returns a new ring.
+ * `host` (or on its boundary). A move that would leave the floor stops on the
+ * outline, so a line can sit on the floor edge the way a corner can. No host
+ * means the full delta. `points` are `[x, y]` pairs. Returns a new ring.
  */
 export function translatePolyEdge(points, edgeIndex, dx, dy, host) {
   const n = points.length;
@@ -156,28 +196,43 @@ export function translatePolyEdge(points, edgeIndex, dx, dy, host) {
   if (!fits(1)) {
     if (!fits(0)) t = 0;
     else {
-      let lo = 0;
-      let hi = 1;
-      for (let k = 0; k < 24; k += 1) {
-        const mid = (lo + hi) / 2;
-        if (fits(mid)) lo = mid;
-        else hi = mid;
+      const hits = [];
+      for (const [x0, y0] of [[ax0, ay0], [bx0, by0]]) {
+        for (let e = 0; e < host.length; e += 1) {
+          const [x1, y1] = host[e];
+          const [x2, y2] = host[(e + 1) % host.length];
+          const hit = segmentHitsEdge(x0, y0, dx, dy, x1, y1, x2, y2);
+          if (hit != null) hits.push(hit);
+        }
       }
-      t = lo;
-      // The search stops a hair past the outline. Land on it, same delta at both ends.
-      const pull = (x, y, x0, y0) => {
-        if (pointInPoly(x, y, host)) return t;
-        const c = clampToPoly(x, y, host);
-        const len2 = dx * dx + dy * dy;
-        if (len2 < 1e-18) return t;
-        const hit = ((c.x - x0) * dx + (c.y - y0) * dy) / len2;
-        return Math.max(0, Math.min(t, hit));
-      };
-      const ax = ax0 + dx * t;
-      const ay = ay0 + dy * t;
-      const bx = bx0 + dx * t;
-      const by = by0 + dy * t;
-      t = Math.min(pull(ax, ay, ax0, ay0), pull(bx, by, bx0, by0));
+      hits.sort((a, b) => a - b);
+      t = 0;
+      let landed = false;
+      for (const hit of hits) {
+        if (!fits(hit)) break;
+        t = hit;
+        landed = true;
+      }
+      if (!landed) {
+        let lo = 0;
+        let hi = 1;
+        for (let k = 0; k < 24; k += 1) {
+          const mid = (lo + hi) / 2;
+          if (fits(mid)) lo = mid;
+          else hi = mid;
+        }
+        t = lo;
+        // Already on the outline, pushing further out. The tolerance that lets
+        // a line sit on the edge must not walk it past that edge.
+        const parked = (x0, y0) => {
+          const x = x0 + dx * t;
+          const y = y0 + dy * t;
+          if (pointInPoly(x, y, host)) return false;
+          const c = clampToPoly(x, y, host);
+          return Math.hypot(c.x - x0, c.y - y0) <= 1e-4;
+        };
+        if (parked(ax0, ay0) && parked(bx0, by0)) t = 0;
+      }
     }
   }
   return points.map((p, k) => (k === i || k === j ? [p[0] + dx * t, p[1] + dy * t] : [p[0], p[1]]));

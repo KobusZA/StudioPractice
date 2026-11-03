@@ -49,6 +49,25 @@ export function drawnWallThickness(sku) {
   return g.thickness ?? g.width ?? 0.22;
 }
 
+/**
+ * How a wall type is named beside its SKU. The plan draws `thickness`, the
+ * overall width. When a plastered type also states a thinner core, the
+ * difference is plaster and the label says so. A type with no core, or a
+ * core that is the whole thickness, stays one millimetre figure.
+ * Geometry is metres, as after `normalizePackUnits`.
+ */
+export function wallThicknessLabel(sku) {
+  const g = sku?.geometry || {};
+  const overall = g.thickness;
+  if (!(overall > 0)) return "";
+  const overallMm = Math.round(overall * 1000);
+  const core = g.coreThickness;
+  if (sku?.compliance?.plastered === true && core > 0 && overall - core > 0.0005) {
+    return `${Math.round(core * 1000)} mm masonry + plaster (${overallMm} mm overall)`;
+  }
+  return `${overallMm} mm`;
+}
+
 /** Height the SKU itself states, or the strip's depth. Null if unknown. */
 export function skuDrawnHeight(sku) {
   const g = sku?.geometry || {};

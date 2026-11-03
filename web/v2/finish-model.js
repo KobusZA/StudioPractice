@@ -19,7 +19,7 @@
 // wall's first end (the elevation view converts to viewing order).
 
 import { area as polyArea, clipPolygon, distToSeg, pointInPoly } from "./geom.js";
-import { effectiveLevel, finishRegionPolygon, finishRegionSlab, roomArea, roomPolygon, shapeAsPoly } from "./model.js";
+import { effectiveLevel, finishRegionPolygon, finishRegionSlab, polyShape, roomArea, roomPolygon, shapeAsPoly } from "./model.js";
 import { openingOnWall, openingSize, pointOnWall, skuById, wallForOpening, wallNormal } from "./openings.js";
 import { deriveWalls, isExternalWall } from "./walls.js";
 import {
@@ -46,6 +46,21 @@ export const PC_ALLOWANCE_LABEL = "PC allowance, product not chosen";
 export function finishRateModel(product, category) {
   if (product) return product.rateRef || `FINISH-P:${product.id}`;
   return `FINISH:${category}`;
+}
+
+/**
+ * The bill item a finish will price as. An unchosen product that the category
+ * requires stays an allowance. A missing rate reference is stated; no rate is
+ * invented. `text` is what the panel, the plan and the compiled row share.
+ */
+export function finishBillNote(category, product) {
+  const spec = FINISH_CATEGORIES[category];
+  if (!spec || spec.virtual) return null;
+  if (spec.needsProduct && !product) return { kind: "allowance", text: PC_ALLOWANCE_LABEL };
+  const rateRef = product?.rateRef || null;
+  if (rateRef) return { kind: "item", text: rateRef };
+  const model = finishRateModel(product?.id ? product : null, category);
+  return { kind: "gap", text: `No rate on file (${model})` };
 }
 
 // --- rectangles ------------------------------------------------------------
@@ -227,6 +242,38 @@ export function floorCoverage(host, polygons) {
     excess: Math.max(0, drawn - finished),
     overlapCount: involved.filter(Boolean).length,
   };
+}
+
+function sameFinishRing(a, b) {
+  if (!a || !b || a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (Math.abs(a[i][0] - b[i][0]) > 1e-9 || Math.abs(a[i][1] - b[i][1]) > 1e-9) return false;
+  }
+  return true;
+}
+
+/**
+ * The corners a drag must use. The picture draws this order (simplified,
+ * counter-clockwise). Stored points can be wound the other way, and an edge
+ * index from the picture would then move a different line.
+ */
+export function finishEditRing(doc, region) {
+  const drawn = finishRegionPolygon(doc, region);
+  return drawn.length >= 3 ? drawn : [];
+}
+
+/** Store that drawn ring on the region so a later edit keeps the same indices. */
+export function materializeFinishRing(doc, region) {
+  const drawn = finishEditRing(doc, region);
+  if (drawn.length < 3) return region?.shape?.points || [];
+  const raw = region.shape?.kind === "poly" && !region.whole && Array.isArray(region.shape.points)
+    ? region.shape.points
+    : null;
+  if (!sameFinishRing(raw, drawn)) {
+    region.shape = polyShape(drawn.map((p) => [p[0], p[1]]));
+    delete region.whole;
+  }
+  return region.shape.points;
 }
 
 /**
@@ -687,13 +734,16 @@ export function resolveFinishes(doc, pack, walls, { wallBases = null, onlyWallId
 
 function finishRow({ doc, spec, product, category, quantity, elementId, level, status, surface, face, source }) {
   const pc = spec.needsProduct && !product;
+  const note = category === "paint" ? finishBillNote(category, product) : null;
+  let type = product
+    ? [product.name || product.code || spec.label, product.size].filter(Boolean).join(", ")
+    : (pc ? `${spec.label}, ${PC_ALLOWANCE_LABEL}` : spec.label);
+  if (note) type = `${type} — ${note.text}`;
   const row = {
     category: "Finishes",
     model: finishRateModel(product, category),
     family: spec.label,
-    type: product
-      ? [product.name || product.code || spec.label, product.size].filter(Boolean).join(", ")
-      : (pc ? `${spec.label}, ${PC_ALLOWANCE_LABEL}` : spec.label),
+    type,
     elementId,
     count: 1,
     unit: spec.unit,
@@ -788,8 +838,8 @@ export function planWallFinishMarks(doc, pack, walls) {
       const roomIds = [...roomsBySide(doc, wall)[side]];
       const skirt = onSide.filter((b) => FINISH_CATEGORIES[b.category]?.unit === "m");
       const face = onSide.filter((b) => FINISH_CATEGORIES[b.category]?.unit !== "m");
-      const faceMarks = sweepFinishSpans(face);
-      const skirtMarks = sweepFinishSpans(skirt);
+      const faceMarks = sweepFinishSpans(face, doc);
+      const skirtMarks = sweepFinishSpans(skirt, doc);
       const overlaps = (a, b) => Math.min(a.to, b.to) - Math.max(a.from, b.from) > 1e-3;
       for (const span of faceMarks) marks.push(finishMark(wall, side, len, span, roomIds, false, false));
       for (const span of skirtMarks) {
@@ -800,8 +850,16 @@ export function planWallFinishMarks(doc, pack, walls) {
   return marks;
 }
 
+/** Paint names the bill item. Other finishes keep the category name. */
+function planFinishLabel(doc, band) {
+  const name = FINISH_CATEGORIES[band.category]?.label || band.category;
+  if (band.category !== "paint") return name;
+  const note = finishBillNote(band.category, finishProductById(doc, band.productId));
+  return note ? `${name} — ${note.text}` : name;
+}
+
 /** Merge overlapping bands on one face into spans, keeping the taller finish. */
-function sweepFinishSpans(bands) {
+function sweepFinishSpans(bands, doc) {
   if (!bands.length) return [];
   const cuts = [];
   for (const band of bands) cuts.push(band.from, band.to);
@@ -834,7 +892,7 @@ function sweepFinishSpans(bands) {
         from,
         to,
         category: winner.category,
-        label: FINISH_CATEGORIES[winner.category]?.label || winner.category,
+        label: planFinishLabel(doc, winner),
       });
     }
   }

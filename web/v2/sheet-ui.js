@@ -458,7 +458,7 @@ export function createSheetUi(ctx) {
 
       if (mode === "add" && doc.sheetSet) {
         // The ordinary path: nothing already on the drawing is touched.
-        ctx.pushUndo?.();
+        ctx.pushUndo?.("Added sheets");
         const { source } = addSource(doc.sheetSet, { name: result.name }, rows);
         closeDialog({ discard: false });
         api.attachSourceFile(doc, source.id, ctx.activeLevel());
@@ -487,7 +487,7 @@ export function createSheetUi(ctx) {
           choices: [{ id: "no", label: "Keep current", primary: true }, { id: "yes", label: "Replace" }],
         });
         if (choice !== "yes") return;
-        ctx.pushUndo?.();
+        ctx.pushUndo?.("Replaced sheets");
         replaceSource(doc.sheetSet, sourceId, { name: result.name }, rows);
         closeDialog({ discard: false });
         api.attachSourceFile(doc, sourceId, ctx.activeLevel());
@@ -609,7 +609,7 @@ export function createSheetUi(ctx) {
         });
         if (choice !== "yes") return;
       }
-      ctx.pushUndo?.();
+      ctx.pushUndo?.("Imported sheets");
       const outcome = applyRevision(set, sourceId, { name: result.name }, result.pages, chosen);
       closeDialog({ discard: false });
       api.attachSourceFile(doc, sourceId, ctx.activeLevel());
@@ -764,7 +764,7 @@ export function createSheetUi(ctx) {
     const set = doc.sheetSet;
     if (!set || !levelId || levelId === page.levelId) return;
     const showing = doc.underlay?.sheetPage === page.index;
-    ctx.pushUndo?.();
+    ctx.pushUndo?.(`Moved sheet ${page.label}`);
     const result = movePageToLevel(set, page.index, levelId, { follow: showing, levelIds: realLevelIds() });
     if (!result.ok) {
       ctx.setStatus(result.reason || "That sheet could not be moved.", "warn");
@@ -797,7 +797,7 @@ export function createSheetUi(ctx) {
       });
       if (choice !== "yes") return;
     }
-    ctx.pushUndo?.();
+    ctx.pushUndo?.("Moved sheets");
     const result = movePlansOnLevel(set, fromId, toId, { levelIds: realLevelIds(), sourceId });
     if (!result.ok) return;
     if (result.showing !== null) {
@@ -829,7 +829,7 @@ export function createSheetUi(ctx) {
       });
       if (choice !== "yes") return;
     }
-    ctx.pushUndo?.();
+    ctx.pushUndo?.("Changed sheet");
     if (!setPageRole(set, page.index, role).ok) return;
     const said = role === "elevation" ? `${page.label} is with the elevations.`
       : role === "section" ? `${page.label} is with the sections.`
@@ -845,7 +845,7 @@ export function createSheetUi(ctx) {
     const doc = ctx.doc();
     const set = doc.sheetSet;
     if (!set || !levelId) return;
-    ctx.pushUndo?.();
+    ctx.pushUndo?.("Placed sheet");
     const result = placePage(set, page.index, levelId, { levelIds: realLevelIds(), follow: true });
     if (!result.ok) {
       ctx.setStatus("That sheet could not be placed.", "warn");
@@ -873,7 +873,7 @@ export function createSheetUi(ctx) {
       });
       if (choice !== "yes") return;
     }
-    ctx.pushUndo?.();
+    ctx.pushUndo?.(`Took sheet ${page.label} off the plan`);
     if (!unplacePage(set, page.index).ok) return;
     ctx.setStatus(`${page.label} is no longer traced. It is under Not drawn.`, "ok");
     listTab = "other";
@@ -991,7 +991,7 @@ export function createSheetUi(ctx) {
           name.value = p.label;
           return;
         }
-        ctx.pushUndo?.();
+        ctx.pushUndo?.(`Renamed sheet ${p.label} to ${next}`);
         p.label = next;
         if (p.placement) p.placement.name = `${sourceOf(set, p)?.name ?? set.pdfName} - ${next}`;
         listSignature = "";
@@ -1041,7 +1041,7 @@ export function createSheetUi(ctx) {
       });
       eye.addEventListener("click", (e) => {
         e.stopPropagation();
-        ctx.pushUndo?.();
+        ctx.pushUndo?.("Changed sheet");
         setPageShown(set, p.index, !visible, showing);
         listSignature = "";
         ctx.changed();
@@ -1058,7 +1058,7 @@ export function createSheetUi(ctx) {
       let opacityUndone = false;
       opacity.addEventListener("input", () => {
         if (!opacityUndone) {
-          ctx.pushUndo?.();
+          ctx.pushUndo?.("Set sheet opacity");
           opacityUndone = true;
         }
         p.placement.opacity = Math.min(1, Math.max(0.05, Number(opacity.value) / 100));
@@ -1111,7 +1111,7 @@ export function createSheetUi(ctx) {
           ctx.setStatus("A sheet can only be reordered among the sheets of its own floor.", "warn");
           return;
         }
-        ctx.pushUndo?.();
+        ctx.pushUndo?.("Reordered sheets");
         reorderPage(set, from, p.index);
         listSignature = "";
         ctx.changed();
@@ -1267,7 +1267,7 @@ export function createSheetUi(ctx) {
       choices: [{ id: "no", label: "Keep it", primary: true }, { id: "yes", label: "Remove file" }],
     });
     if (choice !== "yes") return;
-    ctx.pushUndo?.();
+    ctx.pushUndo?.(`Removed ${source.name}`);
     // Close the file while the renderer still knows which pages are its.
     api.dropSourceFile?.(source.id);
     if (!removeSource(set, source.id).ok) return;
@@ -1452,7 +1452,7 @@ export function createSheetUi(ctx) {
         ctx.setStatus("Choose the level this height belongs to.", "warn");
         return;
       }
-      ctx.pushUndo?.();
+      ctx.pushUndo?.("Set ceiling height");
       if (!setCeilingHeight(set, levelSelect.value, metres)) {
         ctx.setStatus("Enter the floor-to-ceiling height in millimetres, e.g. 2700.", "warn");
         showCeiling();
@@ -1695,7 +1695,7 @@ export function createSheetUi(ctx) {
       if (!current) return;
       const n = parsePrintedScale(scaleField.value);
       if (n && n !== current.printedScale) {
-        ctx.pushUndo?.();
+        ctx.pushUndo?.("Set sheet scale");
         setPageScale(set, current.index, n);
         ctx.changed();
       }

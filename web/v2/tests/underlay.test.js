@@ -384,6 +384,143 @@ test("marking the same feature on two floors moves the upper sheet onto the lowe
   assert.ok(Math.abs(after.x - g.x) < 1e-9 && Math.abs(after.y - g.y) < 1e-9);
 });
 
+function wallLen(seg) {
+  return Math.hypot(seg.x2 - seg.x1, seg.y2 - seg.y1);
+}
+
+test("walls traced on each floor share the marked corner and keep their length", () => {
+  const doc = twoFloorDoc();
+  const [ground, first] = doc.sheetSet.pages;
+  const order = ["01 GFL", "02 L1"];
+
+  const g = underlayWorldFromPixel(ground.placement, 300, 200);
+  const gEnd = underlayWorldFromPixel(ground.placement, 700, 200);
+  const f = underlayWorldFromPixel(first.placement, 600, 450);
+  const fEnd = underlayWorldFromPixel(first.placement, 1000, 450);
+  doc.segments = [
+    { id: "gw", level: "01 GFL", x1: g.x, y1: g.y, x2: gEnd.x, y2: gEnd.y },
+    { id: "fw", level: "02 L1", x1: f.x, y1: f.y, x2: fEnd.x, y2: fEnd.y },
+  ];
+  const before = wallLen(doc.segments[1]);
+  const groundBefore = { ...doc.segments[0] };
+
+  doc.underlay = ground.placement;
+  markAlignmentPoint(doc, g.x, g.y, order);
+  doc.underlay = first.placement;
+  const marked = underlayWorldFromPixel(first.placement, 600, 450);
+  markAlignmentPoint(doc, marked.x, marked.y, order);
+
+  const corner = underlayWorldFromPixel(ground.placement, 300, 200);
+  const upper = doc.segments.find((s) => s.id === "fw");
+  const lower = doc.segments.find((s) => s.id === "gw");
+  assert.ok(Math.abs(upper.x1 - corner.x) < 1e-9 && Math.abs(upper.y1 - corner.y) < 1e-9);
+  assert.ok(Math.abs(wallLen(upper) - before) < 1e-9);
+  assert.ok(Math.abs((upper.x2 - upper.x1) - (fEnd.x - f.x)) < 1e-9);
+  assert.ok(Math.abs((upper.y2 - upper.y1) - (fEnd.y - f.y)) < 1e-9);
+  assert.equal(lower.x1, groundBefore.x1);
+  assert.equal(lower.y1, groundBefore.y1);
+  assert.equal(lower.x2, groundBefore.x2);
+  assert.equal(lower.y2, groundBefore.y2);
+});
+
+test("re-marking the lower floor drags the upper walls with the upper sheet", () => {
+  const doc = twoFloorDoc();
+  const [ground, first] = doc.sheetSet.pages;
+  const order = ["01 GFL", "02 L1"];
+  const f = underlayWorldFromPixel(first.placement, 100, 100);
+  doc.segments = [{ id: "fw", level: "02 L1", x1: f.x, y1: f.y, x2: f.x + 4, y2: f.y }];
+  doc.underlay = first.placement;
+  markAlignmentPoint(doc, f.x, f.y, order);
+  doc.underlay = ground.placement;
+  const g = underlayWorldFromPixel(ground.placement, 500, 500);
+  markAlignmentPoint(doc, g.x, g.y, order);
+  const landed = underlayWorldFromPixel(first.placement, 100, 100);
+  const wall = doc.segments[0];
+  assert.ok(Math.abs(wall.x1 - landed.x) < 1e-9 && Math.abs(wall.y1 - landed.y) < 1e-9);
+  assert.ok(Math.abs(wallLen(wall) - 4) < 1e-9);
+});
+
+test("a second sheet of the same floor moves without taking the walls with it", () => {
+  const rows = [
+    { index: 0, label: "WALLS", kind: "ground", use: true, levelId: "01 GFL", printedScale: 100, pixelWidth: 1000, pixelHeight: 800 },
+    { index: 1, label: "SERVICES", kind: "ground", use: true, levelId: "01 GFL", printedScale: 100, pixelWidth: 1000, pixelHeight: 800 },
+  ];
+  const doc = { sheetSet: createSheetSet("ground.pdf", rows), underlay: null, segments: [] };
+  const [walls, services] = doc.sheetSet.pages;
+  services.placement.x = 4;
+  services.placement.y = 2;
+  const w = underlayWorldFromPixel(walls.placement, 200, 150);
+  doc.segments.push({ id: "gw", level: "01 GFL", x1: w.x, y1: w.y, x2: w.x + 3, y2: w.y });
+  const before = { ...doc.segments[0] };
+  doc.underlay = walls.placement;
+  markAlignmentPoint(doc, w.x, w.y, ["01 GFL"]);
+  doc.underlay = services.placement;
+  const s = underlayWorldFromPixel(services.placement, 480, 320);
+  markAlignmentPoint(doc, s.x, s.y, ["01 GFL"]);
+  const wall = doc.segments[0];
+  assert.equal(wall.x1, before.x1);
+  assert.equal(wall.y1, before.y1);
+  assert.equal(wall.x2, before.x2);
+  assert.equal(wall.y2, before.y2);
+  const landed = underlayWorldFromPixel(services.placement, 480, 320);
+  assert.ok(Math.abs(landed.x - w.x) < 1e-9 && Math.abs(landed.y - w.y) < 1e-9);
+});
+
+test("two plan pages on a moved floor: the earlier page carries the walls", () => {
+  const rows = [
+    { index: 0, label: "GROUND", kind: "ground", use: true, levelId: "01 GFL", printedScale: 100, pixelWidth: 1000, pixelHeight: 800 },
+    { index: 1, label: "FIRST", kind: "first", use: true, levelId: "02 L1", printedScale: 100, pixelWidth: 1000, pixelHeight: 800 },
+    { index: 2, label: "FIRST SERVICES", kind: "first", use: true, levelId: "02 L1", printedScale: 100, pixelWidth: 1000, pixelHeight: 800 },
+  ];
+  const doc = { sheetSet: createSheetSet("plans.pdf", rows), underlay: null, segments: [] };
+  const [ground, first, services] = doc.sheetSet.pages;
+  first.placement.x = 3;
+  services.placement.x = 9;
+  const order = ["01 GFL", "02 L1"];
+  const g = underlayWorldFromPixel(ground.placement, 100, 100);
+  const f = underlayWorldFromPixel(first.placement, 400, 200);
+  doc.segments.push({ id: "fw", level: "02 L1", x1: f.x, y1: f.y, x2: f.x + 2, y2: f.y });
+  doc.underlay = ground.placement;
+  markAlignmentPoint(doc, g.x, g.y, order);
+  doc.underlay = first.placement;
+  markAlignmentPoint(doc, underlayWorldFromPixel(first.placement, 400, 200).x, underlayWorldFromPixel(first.placement, 400, 200).y, order);
+  const afterFirst = { x: doc.segments[0].x1, y: doc.segments[0].y1 };
+  doc.underlay = services.placement;
+  const servicesWorld = underlayWorldFromPixel(services.placement, 700, 300);
+  const result = markAlignmentPoint(doc, servicesWorld.x, servicesWorld.y, order);
+  assert.deepEqual(result.followed, []);
+  assert.equal(doc.segments[0].x1, afterFirst.x);
+  assert.equal(doc.segments[0].y1, afterFirst.y);
+  const corner = underlayWorldFromPixel(ground.placement, 100, 100);
+  const servicesLanded = underlayWorldFromPixel(services.placement, 700, 300);
+  assert.ok(Math.abs(servicesLanded.x - corner.x) < 1e-9 && Math.abs(servicesLanded.y - corner.y) < 1e-9);
+  assert.ok(Math.abs(servicesLanded.x - servicesWorld.x) > 1);
+});
+
+test("two levels scaled to the same known length land on the same model size", () => {
+  const doc = twoFloorDoc();
+  const [ground, first] = doc.sheetSet.pages;
+  doc.underlay = ground.placement;
+  const g0 = underlayWorldFromPixel(ground.placement, 100, 100);
+  const g1 = underlayWorldFromPixel(ground.placement, 600, 100);
+  assert.equal(calibrate(doc, g0, g1, 10).ok, true);
+  doc.underlay = first.placement;
+  const f0 = underlayWorldFromPixel(first.placement, 100, 100);
+  const f1 = underlayWorldFromPixel(first.placement, 600, 100);
+  assert.equal(calibrate(doc, f0, f1, 10).ok, true);
+  const glen = Math.hypot(
+    underlayWorldFromPixel(ground.placement, 600, 100).x - underlayWorldFromPixel(ground.placement, 100, 100).x,
+    underlayWorldFromPixel(ground.placement, 600, 100).y - underlayWorldFromPixel(ground.placement, 100, 100).y,
+  );
+  const flen = Math.hypot(
+    underlayWorldFromPixel(first.placement, 600, 100).x - underlayWorldFromPixel(first.placement, 100, 100).x,
+    underlayWorldFromPixel(first.placement, 600, 100).y - underlayWorldFromPixel(first.placement, 100, 100).y,
+  );
+  assert.ok(Math.abs(glen - 10) < 1e-6);
+  assert.ok(Math.abs(flen - 10) < 1e-6);
+  assert.ok(Math.abs(ground.placement.metresPerPixel - first.placement.metresPerPixel) < 1e-9);
+});
+
 test("re-marking the lower floor drags the upper sheet along with it", () => {
   const doc = twoFloorDoc();
   const [ground, first] = doc.sheetSet.pages;

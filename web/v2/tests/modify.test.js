@@ -12,10 +12,14 @@ import {
   joinSelection,
   mergeSelection,
   mirrorSelection,
+  moveWallEnd,
+  realignWallFaces,
   retypeSelection,
   rotateSelection,
   selectionBounds,
+  collinearWallJoints,
   splitSelection,
+  splitWallAt,
 } from "../modify.js";
 import { normalizePackUnits } from "../schema.js";
 
@@ -189,6 +193,155 @@ test("splitting a wall cuts it instead", () => {
   assert.equal(doc.segments[1].x1, 3);
 });
 
+test("a chosen point splits the wall and keeps hosts on their piece", () => {
+  const doc = docWith({
+    segments: [wall("w1", 0, 0, 6, 0)],
+    openings: [
+      { id: "near", sku: "D1", wallId: "w1", t: 0.25, status: "planned" },
+      { id: "far", sku: "D1", wallId: "w1", t: 0.75, status: "planned" },
+    ],
+    finishRuns: [
+      { id: "head-only", wallId: "w1", side: 1, a: 0.5, b: 1.5 },
+      { id: "tail-only", wallId: "w1", side: 1, a: 4, b: 5 },
+      { id: "across", wallId: "w1", side: -1, a: 1, b: 4, outline: [[0.5, 0], [3.5, 0], [3.5, 1], [0.5, 1]] },
+      { id: "whole", wallId: "w1", side: 1, a: null, b: null },
+    ],
+  });
+  const result = splitWallAt(doc, ref("segment", "w1"), { x: 2, y: 0 }, {
+    skuById: () => ({ category: "wall", geometry: { thickness: 0.22 } }),
+  });
+  assert.equal(result.ok, true);
+  assert.equal(doc.segments.length, 2);
+  const head = doc.segments[0];
+  const tail = doc.segments[1];
+  assert.equal(head.id, "w1");
+  assert.equal(head.x2, 2);
+  assert.equal(tail.x1, 2);
+  assert.equal(tail.x2, 6);
+  assert.equal(tail.sku, "W1");
+
+  const near = doc.openings.find((o) => o.id === "near");
+  const far = doc.openings.find((o) => o.id === "far");
+  assert.equal(near.wallId, head.id);
+  assert.equal(near.t, 1.5 / 2);
+  assert.equal(far.wallId, tail.id);
+  assert.equal(far.t, (4.5 - 2) / 4);
+
+  const headOnly = doc.finishRuns.find((r) => r.id === "head-only");
+  const tailOnly = doc.finishRuns.find((r) => r.id === "tail-only");
+  assert.equal(headOnly.wallId, head.id);
+  assert.equal(headOnly.a, 0.5);
+  assert.equal(headOnly.b, 1.5);
+  assert.equal(tailOnly.wallId, tail.id);
+  assert.equal(tailOnly.a, 2);
+  assert.equal(tailOnly.b, 3);
+
+  const acrossHead = doc.finishRuns.find((r) => r.side === -1 && r.wallId === head.id);
+  const acrossTail = doc.finishRuns.find((r) => r.side === -1 && r.wallId === tail.id);
+  assert.ok(acrossHead);
+  assert.ok(acrossTail);
+  assert.equal(acrossHead.a, 1);
+  assert.equal(acrossHead.b, 2);
+  assert.equal(acrossTail.a, 0);
+  assert.equal(acrossTail.b, 2);
+  assert.ok(acrossHead.outline.every(([s]) => s >= 0.5 - 1e-6 && s <= 2 + 1e-6));
+  assert.ok(acrossTail.outline.every(([s]) => s >= -1e-6 && s <= 1.5 + 1e-6));
+
+  const wholes = doc.finishRuns.filter((r) => r.a == null && r.b == null);
+  assert.equal(wholes.length, 2);
+  assert.deepEqual(wholes.map((r) => r.wallId).sort(), [head.id, tail.id].sort());
+});
+
+test("a collinear meeting is one joint, and a corner is not", () => {
+  const segments = [
+    wall("a", 0, 0, 2, 0),
+    wall("b", 2, 0, 5, 0),
+    wall("c", 2, 0, 2, 3),
+  ];
+  const one = collinearWallJoints(segments, ["a"]);
+  assert.equal(one.length, 1);
+  assert.equal(one[0].x, 2);
+  assert.equal(one[0].y, 0);
+  const both = collinearWallJoints(segments, ["a", "b"]);
+  assert.equal(both.length, 1);
+  const corner = collinearWallJoints(segments, ["c"]);
+  assert.equal(corner.length, 0);
+});
+
+function snapSku(id) {
+  if (id === "D1") return { id, category: "door", name: "Door" };
+  return thickSkuById(id);
+}
+
+test("moving an end lands the location line and keeps the door and the corner", () => {
+  // Exterior face on y = 0, drawn to the right. The 220 mm centreline sits 110 mm below it.
+  const doc = docWith({
+    segments: [
+      { ...wall("w1", 0, 0.11, 4, 0.11, "T220"), location: "exterior" },
+      wall("w2", 4, 0.11, 4, 3.11, "T220"),
+    ],
+    openings: [{ id: "d1", sku: "D1", wallId: "w1", t: 0.5, status: "planned" }],
+    finishRuns: [
+      { id: "part", wallId: "w1", side: 1, a: 0.5, b: 1.5 },
+      { id: "whole", wallId: "w1", side: 1, a: null, b: null },
+    ],
+  });
+  const result = moveWallEnd(doc, ref("segment", "w1"), 2, { x: 6, y: 0 }, { skuById: snapSku });
+  assert.equal(result.ok, true);
+  const wall1 = doc.segments[0];
+  const wall2 = doc.segments[1];
+  assert.ok(Math.abs(wall1.y1 - 0.11) < 1e-9 && Math.abs(wall1.y2 - 0.11) < 1e-9, `centreline at ${wall1.y1}`);
+  assert.equal(wall1.x2, 6);
+  assert.equal(wall1.location, "exterior");
+  assert.equal(wall2.x1, 6);
+  assert.equal(wall2.y1, 0.11);
+  assert.equal(wall2.x2, 4);
+  assert.equal(wall2.y2, 3.11);
+  assert.ok(Math.abs(doc.openings[0].t - (2 / 6)) < 1e-9, `door station ${doc.openings[0].t}`);
+  assert.equal(doc.finishRuns.find((run) => run.id === "part").a, 0.5);
+  assert.equal(doc.finishRuns.find((run) => run.id === "whole").a, null);
+});
+
+test("shortening a wall past its door does nothing", () => {
+  const doc = docWith({
+    segments: [{ ...wall("w1", 0, 0.11, 4, 0.11, "T220"), location: "exterior" }],
+    openings: [{ id: "d1", sku: "D1", wallId: "w1", t: 0.5, status: "planned" }],
+  });
+  const result = moveWallEnd(doc, ref("segment", "w1"), 2, { x: 1, y: 0 }, { skuById: snapSku });
+  assert.equal(result.ok, false);
+  assert.match(result.message, /door/);
+  assert.equal(doc.segments[0].x2, 4);
+  assert.equal(doc.openings[0].t, 0.5);
+});
+
+test("a finish past the shortened end is removed and the door stays put", () => {
+  const doc = docWith({
+    segments: [wall("w1", 0, 0, 6, 0, "T220")],
+    openings: [{ id: "d1", sku: "D1", wallId: "w1", t: 0.1, status: "planned" }],
+    finishRuns: [
+      { id: "keep", wallId: "w1", side: 1, a: 0.2, b: 1 },
+      { id: "drop", wallId: "w1", side: 1, a: 4, b: 5 },
+    ],
+  });
+  const result = moveWallEnd(doc, ref("segment", "w1"), 2, { x: 2.5, y: 0 }, { skuById: snapSku });
+  assert.equal(result.ok, true);
+  assert.equal(doc.segments[0].x2, 2.5);
+  assert.ok(Math.abs(doc.openings[0].t - (0.6 / 2.5)) < 1e-9);
+  assert.equal(doc.finishRuns.length, 1);
+  assert.equal(doc.finishRuns[0].id, "keep");
+  assert.equal(doc.finishRuns[0].b, 1);
+});
+
+test("a split refuses a point off the wall or against an end", () => {
+  const doc = docWith({ segments: [wall("w1", 0, 0, 6, 0)] });
+  const off = splitWallAt(doc, ref("segment", "w1"), { x: 2, y: 1 });
+  assert.equal(off.ok, false);
+  assert.equal(doc.segments.length, 1);
+  const end = splitWallAt(doc, ref("segment", "w1"), { x: 0.01, y: 0 });
+  assert.equal(end.ok, false);
+  assert.equal(doc.segments[0].x2, 6);
+});
+
 test("join welds two collinear walls that meet", () => {
   const doc = docWith({ segments: [wall("w1", 0, 0, 3, 0), wall("w2", 3, 0, 6, 0)] });
   const result = joinSelection(doc, [ref("segment", "w1"), ref("segment", "w2")]);
@@ -322,6 +475,58 @@ test("retype grows a centreline wall both ways, as before", () => {
   retypeSelection(doc, [ref("segment", "w1")], thickSkuById("T220"), { skuById: thickSkuById });
   assert.equal(doc.segments[0].y1, 1);
   assert.equal(doc.segments[0].y2, 1);
+});
+
+test("realign keeps the drawn line and closes a corner that shared an endpoint", () => {
+  // Exterior face along y = 0. The 220 mm centreline sits 110 mm below it.
+  // The return wall meets that centreline at x = 4.
+  const doc = docWith({
+    segments: [
+      { ...wall("w1", 0, 0.11, 4, 0.11, "T220"), location: "exterior" },
+      wall("w2", 4, 0.11, 4, 3, "T220"),
+    ],
+    openings: [{ id: "o1", sku: "D1", wallId: "w1", t: 0.25, status: "planned" }, { id: "o2", sku: "D1", wallId: "w2", t: 0.5, status: "planned" }],
+    finishRuns: [
+      { id: "f1", wallId: "w1", side: 1, a: 1, b: 2, x1: 1, y1: 0.11, x2: 2, y2: 0.11, vx: 1.5, vy: 0.3 },
+      { id: "f2", wallId: "w2", side: 1, a: 1, b: 1.5, x1: 4, y1: 1.11, x2: 4, y2: 1.61 },
+    ],
+  });
+  const result = realignWallFaces(doc, [ref("segment", "w1")], "center", { skuById: thickSkuById });
+  assert.equal(result.ok, true);
+  assert.equal(result.changed, true);
+  const moved = doc.segments[0];
+  const neighbour = doc.segments[1];
+  assert.ok(Math.abs(moved.y1) < 1e-9 && Math.abs(moved.y2) < 1e-9, `centreline at ${moved.y1}`);
+  assert.equal(moved.location, undefined);
+  assert.equal(moved.x1, 0);
+  assert.equal(moved.x2, 4);
+  assert.ok(Math.abs(neighbour.y1) < 1e-9, `join moved to ${neighbour.y1}`);
+  assert.equal(neighbour.x1, 4);
+  assert.equal(neighbour.x2, 4);
+  assert.equal(neighbour.y2, 3);
+  assert.equal(doc.openings[0].t, 0.25);
+  assert.ok(Math.abs(doc.finishRuns[0].a - 1) < 1e-9 && Math.abs(doc.finishRuns[0].y1) < 1e-9);
+  // The return wall grew at its start. The opening keeps its point in the plan.
+  const oldT = 0.5;
+  const oldY = 0.11 + oldT * (3 - 0.11);
+  assert.ok(Math.abs(neighbour.y1 + doc.openings[1].t * (neighbour.y2 - neighbour.y1) - oldY) < 1e-9);
+  assert.ok(Math.abs(doc.finishRuns[1].a - 1.11) < 1e-9, `finish station ${doc.finishRuns[1].a}`);
+});
+
+test("realign leaves a wall that is already on the chosen line", () => {
+  const doc = docWith({ segments: [wall("w1", 0, 1, 4, 1, "T220")] });
+  const result = realignWallFaces(doc, [ref("segment", "w1")], "center", { skuById: thickSkuById });
+  assert.equal(result.changed, false);
+  assert.equal(doc.segments[0].y1, 1);
+});
+
+test("realign does not move a foundation", () => {
+  const footing = { id: "FND", category: "foundation", name: "FND", geometry: { thickness: 0.22 } };
+  const skuById = (id) => (id === "FND" ? footing : thickSkuById(id));
+  const doc = docWith({ segments: [{ ...wall("f1", 0, 0, 4, 0, "FND"), location: "exterior" }] });
+  const result = realignWallFaces(doc, [ref("segment", "f1")], "center", { skuById });
+  assert.equal(result.ok, false);
+  assert.equal(doc.segments[0].y1, 0);
 });
 
 test("mirroring swaps the name of the face a wall was drawn on", () => {

@@ -13,13 +13,14 @@
 import {
   EPS,
   area,
+  fitPolygonToHost,
   normalizeWinding,
   pointInPoly,
   segNormal,
   signedArea,
   simplify,
 } from "./geom.js";
-import { effectiveLevel, roomPolygon } from "./model.js";
+import { effectiveLevel, roomPolygon, shapePolygon } from "./model.js";
 import { CORNER_JOIN_TOL, drawnWallThickness } from "./walls.js";
 
 const WELD = 0.001;
@@ -296,13 +297,13 @@ function insetFace(poly, distances) {
 }
 
 /**
- * The inner face of the smallest loop of walls and separation lines that
- * contains (x, y) on `level`. Null when the point is not enclosed.
+ * Every closed walk of the wall graph on `level`. A left turn keeps the
+ * interior on the left, so a room is counter-clockwise (positive area) and
+ * the outside of the building is clockwise (negative area).
  */
-export function enclosedFace(doc, pack, level, x, y) {
-  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+function closedFaces(doc, pack, level) {
   const pieces = splitAll(boundarySegments(doc, pack, level));
-  if (pieces.length < 3) return null;
+  if (pieces.length < 3) return [];
 
   const weld = new Map();
   const at = (px, py) => {
@@ -361,8 +362,7 @@ export function enclosedFace(doc, pack, level, x, y) {
   };
 
   const used = new Set();
-  let best = null;
-  let bestArea = Infinity;
+  const faces = [];
   for (const start of directed) {
     if (used.has(start.id)) continue;
     const poly = [];
@@ -385,16 +385,60 @@ export function enclosedFace(doc, pack, level, x, y) {
       guard += 1;
     } while (guard < directed.length + 1);
     if (!closed || poly.length < 3) continue;
-    const area = signedArea(poly);
-    if (area <= EPS) continue;
-    if (!pointInPoly(x, y, poly)) continue;
-    if (area < bestArea) {
-      bestArea = area;
-      best = { poly, distances };
+    const signed = signedArea(poly);
+    if (Math.abs(signed) <= EPS) continue;
+    faces.push({ poly, distances, signed });
+  }
+  return faces;
+}
+
+/** Counter-clockwise ring, with each edge still carrying its own inset. */
+function ccwFace(face) {
+  if (face.signed >= 0) return { poly: face.poly, distances: face.distances };
+  const n = face.poly.length;
+  const poly = face.poly.slice().reverse();
+  const distances = poly.map((_, k) => face.distances[(n - 2 - k + n) % n]);
+  return { poly, distances };
+}
+
+/**
+ * The inner face of one closed walk. `which` is "room" (smallest room around
+ * the point) or "footprint" (the external walls around the point).
+ */
+function faceAround(faces, x, y, which) {
+  let best = null;
+  let bestArea = Infinity;
+  for (const face of faces) {
+    const ring = which === "footprint"
+      ? (face.signed < -EPS ? ccwFace(face) : null)
+      : (face.signed > EPS ? face : null);
+    if (!ring || !pointInPoly(x, y, ring.poly)) continue;
+    const span = Math.abs(face.signed);
+    if (span < bestArea) {
+      bestArea = span;
+      best = ring;
     }
   }
   if (!best) return null;
   return insetFace(best.poly, best.distances);
+}
+
+/**
+ * The inner face of the smallest loop of walls and separation lines that
+ * contains (x, y) on `level`. Null when the point is not enclosed.
+ */
+export function enclosedFace(doc, pack, level, x, y) {
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return faceAround(closedFaces(doc, pack, level), x, y, "room");
+}
+
+/**
+ * The inner face of the external walls around (x, y). An internal wall is
+ * not part of this outline. Null when the point is not inside a closed building.
+ */
+export function footprintFace(doc, pack, level, x, y) {
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return faceAround(closedFaces(doc, pack, level), x, y, "footprint");
 }
 
 /**
@@ -505,17 +549,63 @@ export function spaceAt(doc, pack, level, x, y) {
   return { kind: "empty" };
 }
 
-/** Rewrite each bound room's polygon from the walls around its seed. */
+/** Drop the wall link so the stored outline is the one the user edits. */
+export function clearShapeLink(obj) {
+  if (!obj) return;
+  obj.bound = false;
+  obj.link = null;
+  obj.seed = null;
+}
+
+function writeFace(obj, face) {
+  if (!face || face.length < 3) return false;
+  const prev = obj.shape?.kind === "poly" ? obj.shape.points : null;
+  const same = prev && prev.length === face.length
+    && face.every((p, i) => Math.abs(p[0] - prev[i][0]) < 1e-4 && Math.abs(p[1] - prev[i][1]) < 1e-4);
+  if (same) return false;
+  obj.shape = { kind: "poly", points: face };
+  return true;
+}
+
+/** A finish drawn on part of a slab stays inside the slab after the walls move it. */
+function trimSlabFinishes(doc, slab) {
+  const host = shapePolygon(slab.shape);
+  if (host.length < 3) return;
+  for (const region of doc.finishRegions || []) {
+    if (region.whole || region.slabId !== slab.id) continue;
+    const poly = shapePolygon(region.shape);
+    const fitted = fitPolygonToHost(poly, host);
+    if (!fitted || fitted.length < 3 || fitted === poly) continue;
+    region.shape = { kind: "poly", points: fitted.map((p) => [p[0], p[1]]) };
+  }
+}
+
+/**
+ * Rewrite each linked outline from the walls around its seed.
+ * A room, and a floor linked to a room, uses the smallest enclosing face.
+ * A floor or roof linked to the footprint uses the external walls.
+ * Returns true when an outline changed.
+ */
 export function syncRoomBounds(doc, pack) {
-  if (!doc || !pack) return;
+  if (!doc || !pack) return false;
+  const cache = new Map();
+  const facesOf = (obj) => {
+    const level = effectiveLevel(obj, pack);
+    if (!cache.has(level)) cache.set(level, closedFaces(doc, pack, level));
+    return cache.get(level);
+  };
+  let changed = false;
   for (const room of doc.rooms || []) {
     if (!room.bound || !room.seed) continue;
-    const level = effectiveLevel(room, pack);
-    const face = enclosedFace(doc, pack, level, room.seed.x, room.seed.y);
-    if (!face || face.length < 3) continue;
-    const prev = room.shape?.kind === "poly" ? room.shape.points : null;
-    const same = prev && prev.length === face.length
-      && face.every((p, i) => Math.abs(p[0] - prev[i][0]) < 1e-4 && Math.abs(p[1] - prev[i][1]) < 1e-4);
-    if (!same) room.shape = { kind: "poly", points: face };
+    if (writeFace(room, faceAround(facesOf(room), room.seed.x, room.seed.y, "room"))) changed = true;
   }
+  for (const row of [...(doc.slabs || []), ...(doc.roofs || [])]) {
+    if (!row.bound || !row.seed) continue;
+    if (row.link !== "room" && row.link !== "footprint") continue;
+    const which = row.link === "footprint" ? "footprint" : "room";
+    if (!writeFace(row, faceAround(facesOf(row), row.seed.x, row.seed.y, which))) continue;
+    changed = true;
+    if (row.link && doc.slabs?.includes(row)) trimSlabFinishes(doc, row);
+  }
+  return changed;
 }

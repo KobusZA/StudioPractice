@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { emptyDoc, normalizeDoc, roomArea, roomPolygon, roomTagLines } from "../model.js";
-import { enclosedFace, spaceAt, syncRoomBounds } from "../room-bound.js";
+import { clearShapeLink, enclosedFace, footprintFace, spaceAt, syncRoomBounds } from "../room-bound.js";
 import { compile } from "../compile.js";
 import { deriveWalls, drawnWallThickness } from "../walls.js";
 import { normalizePackUnits } from "../schema.js";
@@ -193,6 +193,114 @@ test("an annotation line across a room does not split the area", () => {
   assert.equal(north.kind, "enclosed");
   assert.ok(Math.abs(south.area - north.area) < 1e-6);
   assert.ok(south.area > 12);
+});
+
+test("the footprint is the external walls, not the room a partition makes", () => {
+  const doc = squareDoc();
+  doc.segments.push(wall("mid", 2, 0, 2, 4));
+  const room = enclosedFace(doc, pack, LEVEL, 1, 2);
+  const foot = footprintFace(doc, pack, LEVEL, 1, 2);
+  assert.ok(room && foot);
+  const roomAreaM = roomArea({ shape: { kind: "poly", points: room } });
+  const footAreaM = roomArea({ shape: { kind: "poly", points: foot } });
+  assert.ok(footAreaM > roomAreaM * 1.5, "footprint covers both rooms");
+  assert.ok(footAreaM < 16);
+  const bare = footprintFace(squareDoc(), pack, LEVEL, 2, 2);
+  const bareRoom = enclosedFace(squareDoc(), pack, LEVEL, 2, 2);
+  assert.ok(Math.abs(roomArea({ shape: { kind: "poly", points: bare } }) - roomArea({ shape: { kind: "poly", points: bareRoom } })) < 0.05);
+});
+
+test("a footprint floor follows an external wall and ignores a partition", () => {
+  const doc = squareDoc();
+  doc.segments.push(wall("mid", 2, 0, 2, 4));
+  doc.slabs.push({
+    id: "s1", sku: "SLAB", level: LEVEL, status: "planned",
+    bound: true, link: "footprint", seed: { x: 1, y: 2 },
+    shape: { kind: "rect", x: 0, y: 0, w: 1, h: 1 },
+  });
+  syncRoomBounds(doc, pack);
+  const before = roomArea(doc.slabs[0]);
+  doc.segments.find((s) => s.id === "mid").x1 = 3;
+  doc.segments.find((s) => s.id === "mid").x2 = 3;
+  syncRoomBounds(doc, pack);
+  assert.ok(Math.abs(roomArea(doc.slabs[0]) - before) < 0.05);
+  const east = doc.segments.find((s) => s.id === "b");
+  east.x1 = 5;
+  east.x2 = 5;
+  doc.segments.find((s) => s.id === "a").x2 = 5;
+  doc.segments.find((s) => s.id === "c").x1 = 5;
+  syncRoomBounds(doc, pack);
+  assert.ok(roomArea(doc.slabs[0]) > before);
+});
+
+test("a floor linked to a room follows that room, and a free floor stays put", () => {
+  const doc = squareDoc();
+  doc.segments.push(wall("mid", 2, 0, 2, 4));
+  doc.slabs.push({
+    id: "room-floor", sku: "SLAB", level: LEVEL, status: "planned",
+    bound: true, link: "room", seed: { x: 1, y: 2 },
+    shape: { kind: "rect", x: 0, y: 0, w: 4, h: 4 },
+  });
+  doc.slabs.push({
+    id: "free", sku: "SLAB", level: LEVEL, status: "planned",
+    bound: false, link: null, seed: null,
+    shape: { kind: "rect", x: 0, y: 0, w: 1, h: 1 },
+  });
+  doc.roofs.push({
+    id: "rf", sku: "ROOF", level: LEVEL, status: "planned", form: "gable", pitch: 30, ridge: "long",
+    bound: true, link: "footprint", seed: { x: 1, y: 2 },
+    shape: { kind: "rect", x: 0, y: 0, w: 1, h: 1 },
+  });
+  syncRoomBounds(doc, pack);
+  const roomFloor = roomArea(doc.slabs[0]);
+  const roof = roomArea(doc.roofs[0]);
+  assert.ok(roof > roomFloor * 1.5);
+  doc.segments.find((s) => s.id === "mid").x1 = 3;
+  doc.segments.find((s) => s.id === "mid").x2 = 3;
+  syncRoomBounds(doc, pack);
+  assert.ok(Math.abs(roomArea(doc.slabs[0]) - roomFloor) > 0.2);
+  assert.equal(roomArea(doc.slabs[1]), 1);
+  clearShapeLink(doc.roofs[0]);
+  const frozen = JSON.stringify(doc.roofs[0].shape);
+  doc.segments.find((s) => s.id === "b").x1 = 6;
+  doc.segments.find((s) => s.id === "b").x2 = 6;
+  syncRoomBounds(doc, pack);
+  assert.equal(JSON.stringify(doc.roofs[0].shape), frozen);
+});
+
+test("a saved floor keeps its wall link, and a floor without one does not grow one", () => {
+  const linked = normalizeDoc({
+    slabs: [{
+      id: "s1", sku: "SLAB", level: LEVEL, status: "planned",
+      bound: true, link: "footprint", seed: { x: 1, y: 1 },
+      shape: { kind: "rect", x: 0, y: 0, w: 2, h: 2 },
+    }],
+    roofs: [{
+      id: "rf", sku: "ROOF", level: LEVEL,
+      bound: true, link: "room", seed: { x: 2, y: 2 },
+      shape: { kind: "poly", points: [[0, 0], [3, 0], [3, 3]] },
+    }],
+  });
+  assert.equal(linked.slabs[0].link, "footprint");
+  assert.equal(linked.slabs[0].bound, true);
+  assert.deepEqual(linked.slabs[0].seed, { x: 1, y: 1 });
+  assert.equal(linked.roofs[0].link, "room");
+  const plain = normalizeDoc({
+    slabs: [{ id: "s2", sku: "SLAB", level: LEVEL, shape: { kind: "rect", x: 0, y: 0, w: 2, h: 2 } }],
+  });
+  assert.equal(plain.slabs[0].bound, false);
+  assert.equal(plain.slabs[0].link, null);
+  assert.equal(plain.slabs[0].seed, null);
+});
+
+test("editing the outline in the plan drops the wall link", () => {
+  const src = readFileSync(new URL("../ui.js", import.meta.url), "utf8");
+  const edgeAt = src.indexOf('if (drag?.kind === "shape-edge")');
+  const vertexAt = src.indexOf('if (drag?.kind === "shape-vertex")', edgeAt);
+  assert.match(src.slice(edgeAt, vertexAt), /clearShapeLink\(obj\)/);
+  const propAt = src.indexOf('if (drag?.kind === "property-vertex")', vertexAt);
+  assert.match(src.slice(vertexAt, propAt), /clearShapeLink\(obj\)/);
+  assert.match(src, /clearShapeLink\(editable\.obj\)/);
 });
 
 test("a known use replaces the placeholder room name on the plan", () => {

@@ -638,7 +638,7 @@ function drawCoatMarks(parts, model, xOf, yOf) {
  * @param {{width:number,height:number,interactive?:boolean,selectedId?:string|null,view?:{zoom?:number,panX?:number,panY?:number}|null}} opts
  * @returns {{svg:string, scale:number, scaleX:number, scaleY:number, originX:number, originY:number, fit:object}}
  */
-export function elevationSvg(model, { width, height, interactive = false, selectedId = null, selectedBandId = null, selectedVertex = null, draft = null, guides = null, edgeMode = "corner", view = null, locate = null, wallSelected = false, foundationPicking = false } = {}) {
+export function elevationSvg(model, { width, height, interactive = false, selectedId = null, selectedBandId = null, selectedVertex = null, draft = null, guides = null, edgeMode = "corner", view = null, locate = null, wallSelected = false, foundationPicking = false, dropGuide = null } = {}) {
   const W = Math.max(80, Math.round(width));
   const H = Math.max(60, Math.round(height));
   if (!model) {
@@ -815,6 +815,13 @@ export function elevationSvg(model, { width, height, interactive = false, select
         parts.push(`<rect x="${hx - HANDLE}" y="${hy - HANDLE}" width="${HANDLE * 2}" height="${HANDLE * 2}" class="elev-handle elev-handle-${part}" data-elev-op="${part}" data-elev-id="${esc(o.id)}"/>`);
       }
     }
+  }
+
+  if (Number.isFinite(dropGuide)) {
+    const gy = yOf(model.base + dropGuide);
+    const down = Math.round((model.height - dropGuide) * 1000);
+    parts.push(`<line x1="${wx}" x2="${wx + ww}" y1="${gy}" y2="${gy}" class="elev-drop-guide" pointer-events="none"/>`);
+    labels.push(`<text x="${wx + 4}" y="${gy - 3}" class="elev-drop-label" pointer-events="none">${down} mm down</text>`);
   }
 
   // Finish band edges: the top and bottom of a room rule or a run, and the

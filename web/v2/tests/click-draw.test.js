@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
+import { headingDeg, roundGrid } from "../geom.js";
 import {
   MIN_ROOM,
   MIN_TRACE,
@@ -17,6 +18,7 @@ import {
   mirroredWallLocation,
   normalizeWallLocation,
   rectFromCorners,
+  realignAboutLocation,
   rethickenAboutLocation,
   setLineHeading,
   setLineLength,
@@ -113,6 +115,36 @@ test("a thicker type grows away from the face the wall was drawn on", () => {
   near(face.y2, 0);
 });
 
+test("switching a face-drawn wall to centreline lands the middle on the drawn line", () => {
+  const seg = { ...centerlineFromLocation({ x: 0, y: 0 }, { x: 4, y: 0 }, 0.22, "exterior"), location: "exterior" };
+  assert.equal(realignAboutLocation(seg, 0.22, "center"), true);
+  near(seg.y1, 0);
+  near(seg.y2, 0);
+  assert.equal(seg.location, undefined);
+  const face = locationLineOf(seg, 0.22, "center");
+  near(face.y1, 0);
+});
+
+test("switching exterior to interior shifts a wall by its full thickness", () => {
+  const seg = { ...centerlineFromLocation({ x: 0, y: 0 }, { x: 4, y: 0 }, 0.22, "exterior"), location: "exterior" };
+  const before = seg.y1;
+  realignAboutLocation(seg, 0.22, "interior");
+  near(seg.y1 - before, -0.22);
+  near(locationLineOf(seg, 0.22).y1, 0);
+  assert.equal(seg.location, "interior");
+});
+
+test("a centreline wall can move onto a face, and repeating the choice does nothing", () => {
+  const seg = { x1: 0, y1: 1, x2: 4, y2: 1 };
+  assert.equal(realignAboutLocation(seg, 0.22, "center"), false);
+  assert.equal(realignAboutLocation(seg, 0.22, "exterior"), true);
+  near(locationLineOf(seg, 0.22).y1, 1);
+  assert.equal(seg.location, "exterior");
+  const y = seg.y1;
+  assert.equal(realignAboutLocation(seg, 0.22, "exterior"), false);
+  near(seg.y1, y);
+});
+
 test("a centreline wall is not moved by a thickness change", () => {
   const seg = { x1: 0, y1: 1, x2: 4, y2: 1 };
   rethickenAboutLocation(seg, 0.11, 0.22);
@@ -159,6 +191,21 @@ test("heading keeps the current length", () => {
   const start = { x: 1, y: 1 };
   const end = setLineHeading(start, 2, 0);
   assert.deepEqual(end, { x: 3, y: 1 });
+});
+
+test("a typed heading stays on the axis when the start is off the grid", () => {
+  const start = { x: 0, y: 2.006 };
+  const end = setLineHeading(start, 4, 0, (n) => roundGrid(n, 0.01));
+  assert.equal(end.y, start.y);
+  assert.equal(headingDeg(start.x, start.y, end.x, end.y), 0);
+});
+
+test("a typed length does not rotate a horizontal wall off the grid", () => {
+  const start = { x: 0, y: 2.006 };
+  const end = setLineLength(start, { x: 4, y: 2.006 }, 4, (n) => roundGrid(n, 0.01));
+  assert.equal(end.y, start.y);
+  assert.equal(headingDeg(start.x, start.y, end.x, end.y), 0);
+  assert.ok(Math.abs(end.x - 4) < 1e-9);
 });
 
 test("a room rectangle needs MIN_ROOM on both sides", () => {

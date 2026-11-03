@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,560&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="./v2.css?v=20261102-floor-gap" />
+  <link rel="stylesheet" href="./v2.css?v=20261103-history-icons" />
 </head>
 <body class="auth-pending">
   <div class="chrome">
@@ -161,6 +161,8 @@
           <button type="button" data-tool="select" class="active">Select</button>
           <button type="button" id="v2-pan" aria-pressed="false" title="Pan the plan with the left button. Esc or Pan again goes back to the tool you were using. The middle button, or Alt-drag, pans without switching.">Pan</button>
           <button type="button" id="v2-undo">Undo</button>
+          <button type="button" id="v2-redo" disabled>Redo</button>
+          <button type="button" id="v2-history-toggle" aria-pressed="true" title="Show or hide the history (F6)">History</button>
           <div class="seg" role="group" aria-label="Show on plan">
             <button type="button" data-plan-status="both" class="active">Both</button>
             <button type="button" data-plan-status="existing">Existing</button>
@@ -173,6 +175,13 @@
           </span>
         </div>
         <canvas id="v2-canvas"></canvas>
+        <span class="elev-edge-mode" id="v2-wall-edit" hidden role="group" aria-label="Edit this wall">
+          <span class="elev-edge-subject">This wall</span>
+          <span class="elev-edge-actions">
+            <button type="button" data-wall-edit="snap" title="Move an end onto a snap point.">Snap</button>
+            <button type="button" data-wall-edit="split" title="Drag along this wall. Release to split it.">Split</button>
+          </span>
+        </span>
         <span class="elev-edge-mode" id="v2-floor-edge-mode" hidden role="group" aria-label="Drag an edge to">
           <span class="elev-edge-subject" data-edge-subject>Editing the floor</span>
           <span class="elev-edge-actions">
@@ -183,6 +192,13 @@
         <div class="canvas-status">
           <p class="ribbon-hint" id="v2-ribbon-hint" hidden></p>
           <div class="plan-options" id="v2-plan-options" hidden>
+            <div class="plan-loc words" id="v2-shape-link" hidden>
+              <div class="seg" role="group" aria-label="How this outline is drawn">
+                <button type="button" data-shape-link="sketch" class="active" aria-pressed="true" title="Click each corner of the outline. Enter closes it. It does not follow the walls until you ask.">Sketch</button>
+                <button type="button" data-shape-link="room" aria-pressed="false" title="Click a room. The outline copies that room and follows it when the room follows the walls.">Room</button>
+                <button type="button" data-shape-link="footprint" aria-pressed="false" title="Click inside the building. The outline follows the external walls.">External walls</button>
+              </div>
+            </div>
             <div class="wall-opts" id="v2-wall-opts" hidden>
             <div class="plan-loc" id="v2-wall-loc" hidden>
               <div class="seg" role="group" aria-label="Draw on">
@@ -332,6 +348,9 @@
         <div class="svc-profile-head">
           <div class="svc-profile-title-row">
             <p class="svc-profile-title" id="v2-service-profile-title">Route profile</p>
+            <label class="elev-drop-field" id="v2-elev-guideline-wrap" hidden>Down from top
+              <input id="v2-elev-guideline" type="text" inputmode="decimal" placeholder="mm" aria-label="Guideline, millimetres down from the top of the wall" />
+            </label>
             <button type="button" class="elev-info" id="v2-elev-info" hidden aria-expanded="false" aria-controls="v2-elev-info-note" title="How this elevation works">i</button>
             <p class="elev-info-note" id="v2-elev-info-note" hidden>Drag the top of the wall to set its height. The line above is the next floor, or the roof on the top storey. Scroll to zoom; middle-drag or Alt-drag to move around. Fit shows the whole wall. Escape blurs a field, finishes or cancels a drawing, cancels a finish that is waiting, drops a typed gap, releases a corner, selects the wall, then closes it. Exit closes this wall in one press.</p>
           </div>
@@ -360,6 +379,7 @@
             <div class="face-who">
               <strong id="v2-face-which">This face</strong>
               <span id="v2-face-meta"></span>
+              <span id="v2-face-bill" class="face-bill" hidden></span>
             </div>
             <strong id="v2-face-area" class="face-area" hidden></strong>
             <div class="face-editor-controls">
@@ -511,6 +531,8 @@
           </label>
           <button type="button" id="v2-ctx-shape-poly" hidden title="Turn this rectangle into a polygon so corners can be dragged and edges split, e.g. to notch out a cupboard run">Edit as polygon</button>
           <p class="hint" id="v2-ctx-shape-poly-hint" hidden>Drag a corner to reshape it. Click an edge to add a corner there. Delete removes the selected corner.</p>
+          <button type="button" id="v2-ctx-follow" hidden>Follow external walls</button>
+          <p class="hint" id="v2-ctx-follow-note" hidden></p>
           <div class="insp-metrics">
             <label id="v2-ctx-sill-wrap" hidden>Sill
               <span class="plan-context-field">
@@ -590,6 +612,21 @@
              fields while it is showing, rather than sitting among them. -->
         <div class="planner-fields svc-fields" id="v2-service-fields" hidden></div>
       </div>
+      <section class="history-window" id="v2-history" aria-label="History">
+        <header class="history-titlebar">
+          <span>History</span>
+          <button type="button" id="v2-history-hide" aria-label="Hide history" title="Hide history">×</button>
+        </header>
+        <div class="history-list" id="v2-history-list" role="list"></div>
+        <div class="history-tools" role="toolbar" aria-label="History steps">
+          <button type="button" id="v2-history-undo" aria-label="Undo" title="Undo" disabled>
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 9H3V6"/><path d="M3.2 9a5.2 5.2 0 1 1 1 2.8"/></svg>
+          </button>
+          <button type="button" id="v2-history-redo" aria-label="Redo" title="Redo" disabled>
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 9h3V6"/><path d="M12.8 9a5.2 5.2 0 1 0-1 2.8"/></svg>
+          </button>
+        </div>
+      </section>
     </aside>
   </main>
 
@@ -1113,6 +1150,6 @@
     </form>
   </div>
 
-  <script type="module" src="./ui.js?v=20261102-floor-list"></script>
+  <script type="module" src="./ui.js?v=20261103-history-icons"></script>
 </body>
 </html>

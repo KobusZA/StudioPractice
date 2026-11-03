@@ -8,7 +8,20 @@ import { normalizeDoc } from "../model.js";
 import { normalizePackUnits } from "../schema.js";
 import { deriveWalls } from "../walls.js";
 import { createFinishRun } from "../finish-model.js";
-import { addFoundationUnderWall, alignOutlineShift, applyOpeningEdit, applyTypedGap, applyWallTopEdit, axisAlignedOutline, elevationModel, faceRefForSelection, foundationTypes, maxTypedGap, openingSnapEdges, resizeOpeningCorner, snapElevation, translateOutlineEdge } from "../wall-elevation.js";
+import { addFoundationUnderWall, alignOutlineShift, applyOpeningEdit, applyTypedGap, applyWallTopEdit, axisAlignedOutline, dropGuideZ, elevationModel, faceRefForSelection, foundationTypes, includeDropGuide, maxTypedGap, openingSnapEdges, resizeOpeningCorner, snapElevation, translateOutlineEdge } from "../wall-elevation.js";
+import { elevationSvg } from "../wall-elevation-render.js";
+
+test("a guideline is measured down from the top of the wall and is a snap target", () => {
+  assert.equal(dropGuideZ(2.4, 750), 1.65);
+  assert.equal(dropGuideZ(2.4, 0), null);
+  assert.equal(dropGuideZ(2.4, 3000), null);
+  assert.deepEqual(includeDropGuide([0, 2.4], 1.65), [0, 2.4, 1.65]);
+  const drawn = elevationSvg({
+    length: 4, height: 2.4, top: 2.4, base: 0, levels: [], openings: [], finishBands: [], foundations: [],
+  }, { width: 240, height: 160, dropGuide: 1.65 });
+  assert.ok(drawn.svg.includes("elev-drop-guide"));
+  assert.ok(drawn.svg.includes("750 mm down"));
+});
 
 const pack = normalizePackUnits(
   JSON.parse(readFileSync(new URL("../../samples/planner-pack-v2.json", import.meta.url))),

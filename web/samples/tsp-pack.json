@@ -3849,6 +3849,7 @@
       },
       "geometry": {
         "thickness": 130,
+        "coreThickness": 110,
         "height": 3000
       },
       "cost": {
@@ -3894,6 +3895,7 @@
       },
       "geometry": {
         "thickness": 240,
+        "coreThickness": 220,
         "height": 3000
       },
       "cost": {
@@ -4017,6 +4019,7 @@
       },
       "geometry": {
         "thickness": 240,
+        "coreThickness": 220,
         "height": 1970
       },
       "cost": {

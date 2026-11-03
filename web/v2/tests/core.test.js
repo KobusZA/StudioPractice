@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 
 import {
   area,
+  clampDeltaInside,
   clampToPoly,
   translatePolyEdge,
   lineKey,
@@ -146,6 +147,23 @@ test("clampToPoly keeps interior points and pulls outsiders onto the nearest edg
   assert.deepEqual(short, { x: 9, y: 9, inside: true });
 });
 
+test("clampDeltaInside moves a tiled area until the floor stops it", () => {
+  const host = rectPoly(0, 0, 4, 4);
+  const tile = [[1, 1], [2, 1], [2, 2], [1, 2]];
+  const free = clampDeltaInside(tile, 0.5, 0, null);
+  assert.equal(free.stopped, false);
+  assert.equal(free.dx, 0.5);
+  const inside = clampDeltaInside(tile, 0.5, 0, host);
+  assert.equal(inside.stopped, false);
+  assert.equal(inside.dx, 0.5);
+  const stopped = clampDeltaInside(tile, 10, 0, host);
+  assert.equal(stopped.stopped, true);
+  assert.ok(Math.abs(stopped.dx - 2) < 1e-3);
+  assert.equal(stopped.dy, 0);
+  const none = clampDeltaInside(tile, 0, 0, host);
+  assert.deepEqual(none, { dx: 0, dy: 0, t: 0, stopped: false });
+});
+
 test("translatePolyEdge keeps the line and stays inside the floor", () => {
   const host = rectPoly(0, 0, 4, 3);
   const ring = [[1, 0], [3, 0], [3, 2], [1, 2]];
@@ -166,6 +184,57 @@ test("translatePolyEdge keeps the line and stays inside the floor", () => {
   const free = translatePolyEdge(ring, 0, 0, -1, null);
   assert.equal(free[0][1], -1);
   assert.equal(free[1][1], -1);
+});
+
+test("one floor edge moves and the other corners stay", () => {
+  // A stepped slab, the outline Floris edits. Host is null: this is the floor
+  // itself, so the line is not stopped on an old outline the way a finish is.
+  const floor = [[0, 0], [10, 0], [10, 8], [6, 8], [6, 5], [0, 5]];
+  const next = translatePolyEdge(floor, 3, -1, 0, null);
+  assert.deepEqual(next[3], [5, 8]);
+  assert.deepEqual(next[4], [5, 5]);
+  assert.deepEqual(next[0], floor[0]);
+  assert.deepEqual(next[1], floor[1]);
+  assert.deepEqual(next[2], floor[2]);
+  assert.deepEqual(next[5], floor[5]);
+  assert.equal(next[4][0] - next[3][0], floor[4][0] - floor[3][0]);
+  assert.equal(next[4][1] - next[3][1], floor[4][1] - floor[3][1]);
+
+  const corner = next.map((p, i) => (i === 1 ? [p[0] + 0.4, p[1]] : [p[0], p[1]]));
+  assert.deepEqual(corner[1], [10.4, 0]);
+  assert.deepEqual(corner[0], next[0]);
+  assert.deepEqual(corner[2], next[2]);
+  assert.deepEqual(corner[3], next[3]);
+});
+
+test("the plan moves the floor outline, and a finish stays inside it", () => {
+  const src = readFileSync(new URL("../ui.js", import.meta.url), "utf8");
+  const edgeAt = src.indexOf('if (drag?.kind === "shape-edge") {');
+  const vertexAt = src.indexOf('if (drag?.kind === "shape-vertex")', edgeAt);
+  const edge = src.slice(edgeAt, vertexAt);
+  assert.match(edge, /translatePolyEdge\(origin, i, push\.nx \* along, push\.ny \* along, null\)/);
+  assert.match(edge, /obj\.shape = polyShape\(next\)/);
+  const downAt = src.indexOf("A room, floor or roof:");
+  const down = src.slice(downAt, src.indexOf("A press inside a region of the floor that is selected", downAt));
+  assert.match(down, /kind: "shape-edge"/);
+  assert.match(down, /selectedShapeEdge/);
+  assert.match(down, /kind: "shape-vertex"/);
+  assert.match(down, /materializeShapePoly/);
+  const finishAt = src.indexOf('} else if (drag.kind === "region-vertex")');
+  const finish = src.slice(src.lastIndexOf('if (drag.kind === "region-edge")', finishAt), finishAt);
+  assert.match(finish, /translatePolyEdge\(origin, i, push\.nx \* along, push\.ny \* along, host\)/);
+});
+
+test("translatePolyEdge seats a line on the floor edge", () => {
+  const host = rectPoly(0, 0, 10, 5);
+  const ring = [[2, 2], [8, 2], [8, 4], [2, 4]];
+  const next = translatePolyEdge(ring, 0, 0, 4, host);
+  assert.equal(next[0][1], 5);
+  assert.equal(next[1][1], 5);
+  assert.equal(next[0][0], 2);
+  assert.equal(next[1][0], 8);
+  assert.deepEqual(next[2], [8, 4]);
+  assert.deepEqual(next[3], [2, 4]);
 });
 
 test("fitPolygonToHost drops the vertices past both ends of a cut", () => {
@@ -579,6 +648,98 @@ test("undo restores the previous document", () => {
   assert.equal(store.doc.rooms.length, 1);
   assert.equal(store.undo(), true);
   assert.equal(store.doc.rooms.length, 2);
+});
+
+test("undo and redo restore the document and the selection, one step", () => {
+  const store = new PlanStore(twoRoomDoc());
+  store.setSelection([{ kind: "room", id: "a" }]);
+  store.pushUndo("Drew wall");
+  store.clearSelection();
+  store.doc.rooms.pop();
+  assert.equal(store.undo(), true);
+  assert.equal(store.doc.rooms.length, 2);
+  assert.equal(store.selected[0]?.id, "a");
+  assert.equal(store.redoStack.length, 1);
+  assert.equal(store.redoStack[0].label, "Drew wall");
+  assert.equal(store.redo(), true);
+  assert.equal(store.doc.rooms.length, 1);
+  assert.equal(store.selected.length, 0);
+  assert.equal(store.undoStack.at(-1).label, "Drew wall");
+  assert.equal(store.undo(), true);
+  assert.equal(store.doc.rooms.length, 2);
+  assert.equal(store.undo(), false);
+  assert.equal(store.redo(), true);
+  assert.equal(store.redo(), false);
+});
+
+test("a new edit after undo drops the later steps", () => {
+  const store = new PlanStore(twoRoomDoc());
+  store.pushUndo("Drew wall");
+  store.doc.rooms.pop();
+  store.undo();
+  store.pushUndo("Drew floor");
+  assert.equal(store.redoStack.length, 0);
+  assert.equal(store.takeHistoryNotice(), "Removed 1 later step.");
+  assert.equal(store.takeHistoryNotice(), null);
+});
+
+test("the oldest step drops past the limit", () => {
+  const store = new PlanStore(twoRoomDoc(), { undoLimit: 60 });
+  for (let i = 0; i < 61; i++) store.pushUndo(`Step ${i}`);
+  assert.equal(store.undoStack.length, 60);
+  assert.equal(store.undoStack[0].label, "Step 1");
+  assert.equal(store.takeHistoryNotice(), "Earlier steps dropped.");
+});
+
+test("a click that has not moved stays off the history list", () => {
+  const store = new PlanStore(twoRoomDoc());
+  store.pushUndo("Drew wall");
+  store.undo();
+  assert.equal(store.redoStack.length, 1);
+  store.pushUndo("Moved wall Bedroom", { pending: true });
+  assert.equal(store.canUndo(), false);
+  assert.equal(store.redoStack.length, 1);
+  assert.equal(store.takeHistoryNotice(), null);
+  store.dropUndo({ pendingOnly: true });
+  assert.equal(store.undoStack.length, 0);
+  assert.equal(store.redoStack.length, 1);
+  assert.equal(store.dropUndo({ pendingOnly: true }), false);
+});
+
+test("a drag that moves joins the list and drops later steps", () => {
+  const store = new PlanStore(twoRoomDoc());
+  store.pushUndo("Drew wall");
+  store.undo();
+  store.pushUndo("Moved wall Bedroom", { pending: true });
+  assert.equal(store.commitPending(), true);
+  assert.equal(store.canUndo(), true);
+  assert.equal(store.undoStack[0].label, "Moved wall Bedroom");
+  assert.equal(store.redoStack.length, 0);
+  assert.equal(store.takeHistoryNotice(), "Removed 1 later step.");
+});
+
+test("dropUndo restores a speculative edit without a redo step", () => {
+  const store = new PlanStore(twoRoomDoc());
+  store.setSelection([{ kind: "room", id: "b" }]);
+  store.pushUndo("Moved");
+  store.doc.rooms.pop();
+  store.clearSelection();
+  assert.equal(store.dropUndo({ restore: true }), true);
+  assert.equal(store.doc.rooms.length, 2);
+  assert.equal(store.selected[0]?.id, "b");
+  assert.equal(store.redoStack.length, 0);
+  assert.equal(store.dropUndo(), false);
+});
+
+test("history stays off the document", () => {
+  const store = new PlanStore(twoRoomDoc());
+  store.pushUndo("Drew wall");
+  assert.equal(store.doc.undoStack, undefined);
+  store.undo();
+  assert.equal(store.doc.redoStack, undefined);
+  assert.equal(store.undo(), false);
+  store.redo();
+  assert.equal(store.redo(), false);
 });
 
 test("grouping and ungrouping survives selection expansion", () => {

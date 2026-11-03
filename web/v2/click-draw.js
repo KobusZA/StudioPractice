@@ -90,6 +90,30 @@ export function rethickenAboutLocation(seg, oldThickness, newThickness) {
   return seg;
 }
 
+/**
+ * Move an existing wall onto a different location line. The line it was drawn
+ * on stays where it is; the centreline shifts so the chosen face or middle
+ * lands on that line. A centreline wall stores no `location`. Returns false
+ * when the wall is already on that line, or has no length or thickness to
+ * shift about. Mutates `seg`.
+ */
+export function realignAboutLocation(seg, thickness, newLocation) {
+  const nextLoc = normalizeWallLocation(newLocation);
+  if (!seg || nextLoc === normalizeWallLocation(seg.location)) return false;
+  const len = Math.hypot((seg.x2 ?? 0) - (seg.x1 ?? 0), (seg.y2 ?? 0) - (seg.y1 ?? 0));
+  if (!(thickness > 0) || len < 1e-9) return false;
+  const line = locationLineOf(seg, thickness);
+  const next = centerlineFromLocation({ x: line.x1, y: line.y1 }, { x: line.x2, y: line.y2 }, thickness, nextLoc);
+  seg.x1 = next.x1;
+  seg.y1 = next.y1;
+  seg.x2 = next.x2;
+  seg.y2 = next.y2;
+  if (Number.isFinite(seg.length)) seg.length = Math.hypot(next.x2 - next.x1, next.y2 - next.y1);
+  if (nextLoc === "center") delete seg.location;
+  else seg.location = nextLoc;
+  return true;
+}
+
 /** Space swaps the two faces. From the centreline, the first press picks the exterior. */
 export function flipWallLocation(location) {
   const loc = normalizeWallLocation(location);
@@ -110,25 +134,28 @@ export function mirroredWallLocation(location) {
   return loc === "exterior" ? "interior" : "exterior";
 }
 
+/**
+ * `round` snaps the length. It is not applied to each coordinate: rounding
+ * X and Y separately rotates the run off the line it was on.
+ */
 export function setLineLength(start, toward, length, round = (n) => n) {
-  const next = Math.max(MIN_TRACE, Number(length) || MIN_TRACE);
+  const next = Math.max(MIN_TRACE, round(Number(length) || MIN_TRACE));
   const cur = lineLength(start, toward);
-  if (cur < 1e-6) {
-    return { x: round(start.x + next), y: start.y };
-  }
+  if (cur < 1e-6) return { x: start.x + next, y: start.y };
   const s = next / cur;
   return {
-    x: round(start.x + (toward.x - start.x) * s),
-    y: round(start.y + (toward.y - start.y) * s),
+    x: start.x + (toward.x - start.x) * s,
+    y: start.y + (toward.y - start.y) * s,
   };
 }
 
+/** `round` snaps the length. The end stays on the heading, including 0°. */
 export function setLineHeading(start, length, deg, round = (n) => n) {
   const rad = (Number(deg) * Math.PI) / 180;
-  const len = length || MIN_TRACE;
+  const len = Math.max(MIN_TRACE, round(Number(length) || MIN_TRACE));
   return {
-    x: round(start.x + Math.cos(rad) * len),
-    y: round(start.y + Math.sin(rad) * len),
+    x: start.x + Math.cos(rad) * len,
+    y: start.y + Math.sin(rad) * len,
   };
 }
 
@@ -166,6 +193,7 @@ export function hasClickDraft(state) {
     || state.lineStart
     || state.siteDraft?.length
     || state.roomDraft?.length
+    || state.boundaryDraft?.length
     || state.regionDraft?.length
     || state.cameraDraft?.a
     || state.sectionDraft?.a

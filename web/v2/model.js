@@ -610,22 +610,139 @@ export class PlanStore {
     this.sink = sink;
     this.undoLimit = undoLimit;
     this.undoStack = [];
+    this.redoStack = [];
+    this.historyNotice = null;
     this.selected = [];
     this.primary = null;
   }
 
-  pushUndo() {
-    this.undoStack.push(clone(this.doc));
-    if (this.undoStack.length > this.undoLimit) this.undoStack.shift();
+  /**
+   * Snapshot the document and selection before an edit. `label` is the name
+   * of the edit that follows, shown in the history list. A new edit drops
+   * any steps that had been undone.
+   */
+  pushUndo(label = "Edit", { pending = false } = {}) {
+    // A press may become a drag. Until it does, the snapshot stays off the
+    // list and does not discard steps that were undone.
+    if (pending) {
+      if (this.undoStack.at(-1)?.pending) this.undoStack.pop();
+      const entry = this.#historyEntry(label);
+      entry.pending = true;
+      this.undoStack.push(entry);
+      return;
+    }
+    if (this.undoStack.at(-1)?.pending) this.commitPending();
+    this.#cutHistoryTail();
+    this.undoStack.push(this.#historyEntry(label));
+    this.#trimHistory();
   }
 
+  /** The press turned into an edit. The row may join the list. */
+  commitPending() {
+    const entry = this.undoStack.at(-1);
+    if (!entry?.pending) return false;
+    delete entry.pending;
+    this.#cutHistoryTail();
+    this.#trimHistory();
+    return true;
+  }
+
+  #cutHistoryTail() {
+    if (!this.redoStack.length) return;
+    const n = this.redoStack.length;
+    this.redoStack = [];
+    this.historyNotice = n === 1 ? "Removed 1 later step." : `Removed ${n} later steps.`;
+  }
+
+  #trimHistory() {
+    while (this.undoStack.filter((entry) => !entry.pending).length > this.undoLimit) {
+      const index = this.undoStack.findIndex((entry) => !entry.pending);
+      if (index < 0) break;
+      this.undoStack.splice(index, 1);
+      if (!this.historyNotice) this.historyNotice = "Earlier steps dropped.";
+    }
+  }
+
+  canUndo() {
+    return this.undoStack.some((entry) => !entry.pending);
+  }
+
+  #historyEntry(label) {
+    return {
+      label: label || "Edit",
+      doc: clone(this.doc),
+      selected: clone(this.selected || []),
+      primary: this.primary ? clone(this.primary) : null,
+    };
+  }
+
+  #restoreEntry(entry) {
+    this.doc = entry.doc;
+    this.setSelection(entry.selected || [], entry.primary);
+  }
+
+  /** One step back. The step stays on the redo stack, marked removed in the list. */
   undo() {
-    const prev = this.undoStack.pop();
-    if (!prev) return false;
-    this.doc = prev;
-    this.clearSelection();
+    const entry = this.undoStack.pop();
+    if (!entry) return false;
+    // A press that has not become an edit is not a step. Put the drawing
+    // back and leave the list alone.
+    if (entry.pending) {
+      this.#restoreEntry(entry);
+      this.persist();
+      return true;
+    }
+    this.redoStack.push({
+      label: entry.label,
+      doc: this.doc,
+      selected: clone(this.selected || []),
+      primary: this.primary ? clone(this.primary) : null,
+    });
+    this.#restoreEntry(entry);
     this.persist();
     return true;
+  }
+
+  /** One step forward. Does not drop the other undone steps. */
+  redo() {
+    const entry = this.redoStack.pop();
+    if (!entry) return false;
+    this.undoStack.push({
+      label: entry.label,
+      doc: this.doc,
+      selected: clone(this.selected || []),
+      primary: this.primary ? clone(this.primary) : null,
+    });
+    if (this.undoStack.length > this.undoLimit) this.undoStack.shift();
+    this.#restoreEntry(entry);
+    this.persist();
+    return true;
+  }
+
+  /**
+   * Discard the speculative snapshot from a gesture that never became an edit.
+   * `restore` puts that snapshot back. Nothing is added to the redo stack.
+   */
+  dropUndo({ restore = false, pendingOnly = false } = {}) {
+    const entry = this.undoStack.at(-1);
+    if (!entry) return false;
+    if (pendingOnly && !entry.pending) return false;
+    this.undoStack.pop();
+    if (restore) this.#restoreEntry(entry);
+    return true;
+  }
+
+  clearHistory() {
+    this.undoStack = [];
+    this.redoStack = [];
+    this.historyNotice = null;
+  }
+
+  /** The status line reads a branch-cut or a dropped old step once. */
+  takeHistoryNotice() {
+    const notice = this.historyNotice;
+    this.historyNotice = null;
+    return notice;
   }
 
   persist() {
@@ -728,10 +845,10 @@ export class PlanStore {
       .filter((g) => g.members.length >= 2);
   }
 
-  groupSelection() {
+  groupSelection(label = "Grouped") {
     const members = uniqueRefs(this.selected).filter((ref) => this.exists(ref));
     if (members.length < 2) return false;
-    this.pushUndo();
+    this.pushUndo(label);
     this.ungroupRefs(members);
     this.groups().push({
       id: nid("g"),
@@ -743,10 +860,10 @@ export class PlanStore {
     return true;
   }
 
-  ungroupSelection() {
+  ungroupSelection(label = "Ungrouped") {
     const refs = this.selected.length ? this.selected : (this.primary ? [this.primary] : []);
     if (!refs.some((ref) => this.groupForRef(ref))) return false;
-    this.pushUndo();
+    this.pushUndo(label);
     this.ungroupRefs(refs);
     this.persist();
     return true;
@@ -761,7 +878,21 @@ export class PlanStore {
     // A floor's finish regions (tiles, waterproofing) travel with it.
     const carried = hostedFinishRegionsOf(this.doc, moving)
       .map((r) => ({ kind: "finishRegion", id: r.id }));
-    for (const ref of [...moving, ...carried]) {
+    // A floor point travels with its slab. A wall plug does not: its station
+    // on the wall is what moves it, and a free drag would pull it off.
+    const seen = new Set([...moving, ...carried].map((r) => `${r.kind}:${r.id}`));
+    const carriedSockets = [];
+    for (const ref of moving) {
+      if (ref.kind !== "slab") continue;
+      for (const item of this.doc.items || []) {
+        if (item.host !== "slab" || item.slabId !== ref.id) continue;
+        const key = `item:${item.id}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        carriedSockets.push({ kind: "item", id: item.id });
+      }
+    }
+    for (const ref of [...moving, ...carried, ...carriedSockets]) {
       const obj = objectByRef(this.doc, ref);
       if (!obj) continue;
       if (obj.shape) snaps.push({ ref, shape: clone(obj.shape), seed: obj.seed ? clone(obj.seed) : null });
@@ -923,6 +1054,16 @@ function normalizeFileUnderlay(raw) {
   };
 }
 
+/** A slab or roof follows walls only when it was asked to, and the seed survived. */
+function shapeLinkFields(row) {
+  const seed = Number.isFinite(row?.seed?.x) && Number.isFinite(row?.seed?.y)
+    ? { x: row.seed.x, y: row.seed.y }
+    : null;
+  const link = row?.link === "footprint" || row?.link === "room" ? row.link : null;
+  const bound = row?.bound === true && Boolean(seed) && Boolean(link);
+  return { bound, link: bound ? link : null, seed: bound ? seed : null };
+}
+
 export function normalizeDoc(raw) {
   const doc = emptyDoc();
   if (!raw || typeof raw !== "object") return doc;
@@ -987,12 +1128,13 @@ export function normalizeDoc(raw) {
       : rectShape(row.rect?.x ?? 0, row.rect?.y ?? 0, row.rect?.w ?? 1, row.rect?.h ?? 1),
   }));
 
-  doc.slabs = mapShaped(raw.slabs, "sl");
+  doc.slabs = mapShaped(raw.slabs, "sl").map((row) => ({ ...row, ...shapeLinkFields(row) }));
   doc.roofs = mapShaped(raw.roofs, "rf").map((roof) => ({
     ...roof,
     form: roof.form || "flat",
     pitch: Number.isFinite(roof.pitch) ? roof.pitch : 30,
     ridge: roof.ridge === "short" ? "short" : "long",
+    ...shapeLinkFields(roof),
   }));
 
   doc.openings = (raw.openings || []).map((o) => migrateOpening(o));

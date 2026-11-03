@@ -32,6 +32,26 @@ export function snapElevation(value, step = ELEVATION_SNAP) {
   return Math.round(Math.round(value / step) * step * 1000) / 1000;
 }
 
+/**
+ * Height of a construction line measured down from the top of the wall.
+ * `offsetMm` is what the user typed. The result is metres up from the base,
+ * so a finish corner can snap to it. Blank, zero, or past the wall is no line.
+ */
+export function dropGuideZ(heightM, offsetMm) {
+  const mm = Number(offsetMm);
+  if (!Number.isFinite(heightM) || heightM <= 0) return null;
+  if (!Number.isFinite(mm) || mm <= 0) return null;
+  const z = heightM - mm / 1000;
+  if (z < -1e-6 || z > heightM + 1e-6) return null;
+  return Math.max(0, Math.min(heightM, Math.round(z * 1000) / 1000));
+}
+
+/** Snap targets for an elevation point, plus the drop guideline when it exists. */
+export function includeDropGuide(targets, z) {
+  if (!Number.isFinite(z)) return targets;
+  return targets.includes(z) ? targets : [...targets, z];
+}
+
 function normSide(side) {
   return side === -1 ? -1 : 1;
 }

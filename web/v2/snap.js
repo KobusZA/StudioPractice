@@ -134,6 +134,65 @@ export function applyNicePoint(wx, wy, opts = {}) {
   return { x, y };
 }
 
+/**
+ * Where a wall's free end lands.
+ *
+ * An exact join, or a single-axis alignment, is unchanged. Otherwise the
+ * direction is chosen before the length. A run within `tolWorld` of the
+ * horizontal or vertical through `from` is stored on that axis (the grid
+ * line through the start). A run within `tolWorld` of an existing line,
+ * with the start on that line too, is stored on that line's direction.
+ * Anything else keeps the ray from `from` through the pointer: only the
+ * length is pulled to a round millimetre. Rounding X and Y separately
+ * turns that ray, which is how a wall aimed along a line was stored off it.
+ */
+export function snapLinearEnd(wx, wy, opts = {}) {
+  const join = opts.join || { snapped: false, x: wx, y: wy, guideX: null, guideY: null };
+  const from = opts.from || null;
+  if (!from || isExactPointSnap(join) || (join.snapped && (join.guideX != null || join.guideY != null))) {
+    return applyNicePoint(wx, wy, opts);
+  }
+  const tolWorld = opts.tolWorld ?? 0;
+  const locked = runDirection(from, wx, wy, opts.lines || [], tolWorld);
+  const aim = locked || { x: wx, y: wy };
+  return snapLengthFrom(from, aim, tolWorld, opts.minStep ?? NICE_MIN_STEP_M);
+}
+
+function runDirection(from, wx, wy, lines, tolWorld) {
+  let best = null;
+  const offer = (dist, dirx, diry, kind) => {
+    if (!(dist <= tolWorld)) return;
+    const closer = !best || dist < best.dist - 1e-9;
+    const lineWinsTie = best && Math.abs(dist - best.dist) <= 1e-9 && kind === "line" && best.kind !== "line";
+    if (closer || lineWinsTie) best = { dist, dirx, diry, kind };
+  };
+
+  const dx = wx - from.x;
+  const dy = wy - from.y;
+  offer(Math.abs(dy), dx >= 0 ? 1 : -1, 0, "axis");
+  offer(Math.abs(dx), 0, dy >= 0 ? 1 : -1, "axis");
+
+  for (const edge of lines) {
+    const ex = edge.x2 - edge.x1;
+    const ey = edge.y2 - edge.y1;
+    const len = Math.hypot(ex, ey);
+    if (len < 1e-9) continue;
+    const ux = ex / len;
+    const uy = ey / len;
+    const dFrom = Math.abs((from.x - edge.x1) * -uy + (from.y - edge.y1) * ux);
+    if (dFrom > tolWorld) continue;
+    const dPtr = Math.abs((wx - edge.x1) * -uy + (wy - edge.y1) * ux);
+    const along = dx * ux + dy * uy;
+    const sign = along >= 0 ? 1 : -1;
+    offer(dPtr, ux * sign, uy * sign, "line");
+  }
+
+  if (!best) return null;
+  const span = dx * best.dirx + dy * best.diry;
+  if (Math.abs(span) < 1e-9) return { x: from.x, y: from.y };
+  return { x: from.x + best.dirx * span, y: from.y + best.diry * span };
+}
+
 /** Past this, a gap label would be measuring across empty site, not an eave. */
 export const GAP_MAX_M = 4;
 
@@ -179,6 +238,8 @@ function isActiveShape(opts, kind, id) {
 function isActiveCorner(opts, kind, id, x, y) {
   const a = activeShapeOf(opts);
   if (!a || a.kind !== kind || a.id !== id) return false;
+  // A whole shape being translated is not a target for itself.
+  if (a.all) return true;
   if (Math.abs(x - a.x) < 1e-9 && Math.abs(y - a.y) < 1e-9) return true;
   const b = a.also;
   return Boolean(b && Math.abs(x - b.x) < 1e-9 && Math.abs(y - b.y) < 1e-9);

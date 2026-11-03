@@ -214,7 +214,7 @@ function emptyItem(item) {
 
 function extraDisabled(item, opts) {
   if (opts?.mode === "simple" && opts?.needsSelection && !hasSelection()) {
-    if (item.command && ["rotate", "mirror", "copy", "align", "split", "join", "group", "ungroup", "delete"].includes(item.command)) {
+    if (item.command && ["move", "rotate", "mirror", "copy", "align", "split", "join", "group", "ungroup", "delete"].includes(item.command)) {
       return true;
     }
   }
@@ -302,6 +302,7 @@ const GLYPHS = {
   contours: '<path d="M4 16c3-2 5 2 8 0s5 2 8 0"/>',
   contour: '<path d="M4 16c3-2 5 2 8 0s5 2 8 0"/>',
   platform: '<path d="M4 18h16M6 18l3-8h6l3 8"/>',
+  move: '<path d="M12 4v16M4 12h16M12 4l-3 3M12 4l3 3M12 20l-3-3M12 20l3-3M4 12l3-3M4 12l3 3M20 12l-3-3M20 12l-3 3"/>',
   rotate: '<path d="M20 12a8 8 0 11-3-6.3"/><path d="M20 4v5h-5"/>',
   mirror: '<path d="M12 4v16M6 8l6 4-6 4M18 8l-6 4 6 4"/>',
   copy: '<rect x="8" y="8" width="11" height="11"/><path d="M5 16V5h11"/>',

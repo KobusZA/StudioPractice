@@ -7,7 +7,7 @@
 //   products   the products on this job and the two job settings
 
 import { finishSwatch } from "./finish-data.js";
-import { floorCoverage, FINISH_CATEGORIES, categoriesForSurface, finishProductById, regionsOnSlab } from "./finish-model.js";
+import { floorCoverage, FINISH_CATEGORIES, categoriesForSurface, finishBillNote, finishProductById, regionsOnSlab } from "./finish-model.js";
 import { area as polyArea, clipPolygon } from "./geom.js";
 import { finishRegionPolygon, roomPolygon, shapePolygon } from "./model.js";
 
@@ -741,12 +741,15 @@ function bandCardHtml(doc, b, model, { selectedId, savedId, index, total, compac
         <span class="fin-area">${area}</span>
       </div>`;
   const where = editing && which ? `${which} · ${place}` : place;
+  const bill = b.category === "paint" ? finishBillNote(b.category, product) : null;
+  const billLine = bill ? `<p class="fin-bill">${esc(bill.text)}</p>` : "";
   const mini = compact ? "" : bandMiniHtml(b, model);
   return `<div class="fin-kind fin-kind-face${picked ? " fin-editing" : ""}" data-fin-band="${esc(b.id)}">
     ${mini}
     <div class="fin-kind-main">
       ${head}
       <p class="fin-where">${esc(where)}</p>
+      ${billLine}
       ${productLine}
       ${badge}
       ${editing || needs ? productField : ""}
@@ -1080,7 +1083,10 @@ function faceOpenHtml(doc, model, opts) {
   const runs = bands.filter((b) => b.source !== "default" && b.source !== "rule").sort(compareBands);
   const rules = bands.filter((b) => b.source === "rule").sort(compareBands);
   const added = runs.filter((b) => b.category !== "none").length;
-  const wall = lineHtml({
+  // The size fields are mounted under the selected row by the inspector.
+  // They stay out of the button, and out of the block above this list,
+  // so choosing a wall, an opening, or a finish does not reflow the top.
+  const wall = `<div class="fin-line-host">${lineHtml({
     attrs: 'data-fin="face-wall"',
     selected: Boolean(opts.wallSelected),
     swatch: { fill: "#cfc6b8" },
@@ -1088,17 +1094,17 @@ function faceOpenHtml(doc, model, opts) {
     place: model.name || "This wall",
     prod: "Drag the top, or type the height",
     area: `${mm(model.height)} mm`,
-  });
+  })}<div class="fin-line-fields" data-fin-fields="wall"></div></div>`;
   const openings = (model.openings || []).map((o) => {
     const door = o.category === "door";
-    return lineHtml({
+    return `<div class="fin-line-host">${lineHtml({
       attrs: `data-opening-id="${esc(o.id)}"`,
       selected: o.id === opts.openingId,
       swatch: { kind: "opening" },
       name: o.name || (door ? "Door" : "Window"),
       place: `${door ? "Door" : `Sill ${mm(o.sill)} mm`} · ${mm(Math.max(0, o.offset))} mm from the left`,
       area: `${mm(o.width)} × ${mm(o.height)}`,
-    });
+    })}<div class="fin-line-fields" data-fin-fields="opening" data-for-opening="${esc(o.id)}"></div></div>`;
   }).join("");
   const finishes = runs.map((b) => bandLineHtml(doc, b, model, bands, opts.selectedId)).join("")
     || '<p class="fin-note">Nothing added on this face yet.</p>';
@@ -1160,6 +1166,7 @@ export function faceFinishHtml(doc, model, opts = {}) {
           ${productNameField(doc, first, { attr: "new-band-product", value: "", listId: "fin-new-band-product", label: "Product for the new finish", placeholder: "Product name" })}
         </label>
         <p class="fin-note fin-hint" data-fin-hint>Wall tile needs a product name. You can add it now, or on the card after.</p>
+        <p class="fin-note fin-bill" data-fin-bill hidden></p>
         <label class="fin-pick">Height
           <select data-fin="band-height" aria-label="Height of the finish">${HEIGHT_PRESETS.map((p) => `<option value="${p.id}">${esc(p.label)}</option>`).join("")}</select>
         </label>

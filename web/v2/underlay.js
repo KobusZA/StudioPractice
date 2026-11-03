@@ -18,6 +18,7 @@ import {
   resolveLocation,
 } from "./satellite.js?v=20261015-geocode";
 import { COARSE_DPI, REFERENCE_DPI, isPlanPage, pagesForLevel, referencePixelSize, resolveActivePage, setSheetSetHidden, shownPagesBeside } from "./sheet-set.js";
+import { translateShape } from "./model.js";
 import { DEFAULT_OPS, buildLinework, snapLinework } from "./pdf-snap.js";
 
 // pdf.js 4.6.82 ships with the app (vendor/), so a site with no signal still opens a PDF.
@@ -1127,6 +1128,12 @@ export function drawUnderlay(ctx, doc, worldToScreen, camScale) {
 // earliest page. Every other marked sheet is translated so its mark lands on
 // the datum's mark. Translation only: the sheets are assumed to share scale
 // and orientation once calibrated.
+//
+// Walls traced before that move are in the same coordinates as the sheet was.
+// A floor that is not the datum's floor moves with its earliest marked plan
+// page, both ends of a wall by the same amount, so the stored length stays.
+// Another sheet of the datum floor is paper only: the walls stay with the
+// sheet that does not move.
 
 /** Page indexes drawn faintly beneath the active sheet so an alignment can be checked by eye. */
 let ghostIndexes = [];
@@ -1173,13 +1180,15 @@ export function markAlignmentPoint(doc, wx, wy, levelOrder = []) {
   return { ok: true, ...alignSheets(doc, levelOrder), page };
 }
 
-/** Translate every marked sheet onto the datum's mark. Returns { moved: [page indexes], datum: page|null }. */
+/** Translate every marked sheet onto the datum's mark. Returns { moved, followed, datum }.
+ *  `followed` is the page indexes whose floor geometry moved with the sheet. */
 export function alignSheets(doc, levelOrder = []) {
   const set = doc.sheetSet;
   const datum = set ? datumPage(set, levelOrder) : null;
-  if (!datum) return { moved: [], datum: null };
+  if (!datum) return { moved: [], followed: [], datum: null };
   const target = underlayWorldFromPixel(datum.placement, datum.anchor.x, datum.anchor.y);
   const moved = [];
+  const shifts = new Map();
   for (const page of set.pages) {
     if (!page.placement || !page.anchor || page === datum) continue;
     const here = underlayWorldFromPixel(page.placement, page.anchor.x, page.anchor.y);
@@ -1189,8 +1198,108 @@ export function alignSheets(doc, levelOrder = []) {
     page.placement.x += dx;
     page.placement.y += dy;
     moved.push(page.index);
+    shifts.set(page.index, { dx, dy });
   }
-  return { moved, datum };
+  const followed = followSheetWithLevel(doc, set, datum, shifts);
+  return { moved, followed, datum };
+}
+
+/**
+ * The earliest marked plan page on a floor other than the datum's is the
+ * drawing that floor was traced from. Later pages on that floor are overlays
+ * and do not move the model a second time.
+ */
+function followSheetWithLevel(doc, set, datum, shifts) {
+  const driver = new Map();
+  const pages = [...set.pages].sort((a, b) => a.index - b.index);
+  for (const page of pages) {
+    if (!isPlanPage(page) || !page.anchor || page === datum) continue;
+    if (!page.levelId || page.levelId === datum.levelId) continue;
+    if (!driver.has(page.levelId)) driver.set(page.levelId, page.index);
+  }
+  const followed = [];
+  for (const [levelId, index] of driver) {
+    const shift = shifts.get(index);
+    if (!shift) continue;
+    translateLevelPlan(doc, levelId, shift.dx, shift.dy);
+    followed.push(index);
+  }
+  return followed;
+}
+
+function translateEnds(obj, dx, dy) {
+  obj.x1 += dx;
+  obj.y1 += dy;
+  obj.x2 += dx;
+  obj.y2 += dy;
+}
+
+function onLevel(obj, levelId) {
+  return obj?.level === levelId;
+}
+
+/** Slide every plan position stored on `levelId`. Lengths and along-wall parameters stay. */
+function translateLevelPlan(doc, levelId, dx, dy) {
+  for (const key of ["segments", "beams", "lines", "separations", "dimensions"]) {
+    for (const obj of doc[key] || []) {
+      if (onLevel(obj, levelId)) translateEnds(obj, dx, dy);
+    }
+  }
+  for (const key of ["rooms", "slabs", "roofs", "regions"]) {
+    for (const obj of doc[key] || []) {
+      if (!onLevel(obj, levelId)) continue;
+      if (obj.shape) obj.shape = translateShape(obj.shape, dx, dy, null);
+      if (Number.isFinite(obj.seed?.x) && Number.isFinite(obj.seed?.y)) {
+        obj.seed = { ...obj.seed, x: obj.seed.x + dx, y: obj.seed.y + dy };
+      }
+    }
+  }
+  for (const obj of doc.items || []) {
+    if (onLevel(obj, levelId) && Number.isFinite(obj.x) && Number.isFinite(obj.y)) {
+      obj.x += dx;
+      obj.y += dy;
+    }
+  }
+  for (const obj of doc.stairs || []) {
+    if (onLevel(obj, levelId) && Number.isFinite(obj.x) && Number.isFinite(obj.y)) {
+      obj.x += dx;
+      obj.y += dy;
+    }
+  }
+  for (const cloud of doc.revisionClouds || []) {
+    if (!onLevel(cloud, levelId) || !cloud.rect) continue;
+    const rect = cloud.rect;
+    cloud.rect = {
+      ...rect,
+      minX: rect.minX + dx,
+      minY: rect.minY + dy,
+      maxX: rect.maxX + dx,
+      maxY: rect.maxY + dy,
+    };
+  }
+  for (const node of doc.serviceNodes || []) {
+    if (onLevel(node, levelId) && Number.isFinite(node.x) && Number.isFinite(node.y)) {
+      node.x += dx;
+      node.y += dy;
+    }
+  }
+  for (const region of doc.finishRegions || []) {
+    const hostLevel = region.slabId
+      ? (doc.slabs || []).find((s) => s.id === region.slabId)?.level
+      : region.roomId
+        ? (doc.rooms || []).find((r) => r.id === region.roomId)?.level
+        : null;
+    if (region.level !== levelId && hostLevel !== levelId) continue;
+    if (region.shape) region.shape = translateShape(region.shape, dx, dy, null);
+  }
+  for (const run of doc.finishRuns || []) {
+    if (run.level !== levelId) continue;
+    if ([run.x1, run.y1, run.x2, run.y2].every(Number.isFinite)) translateEnds(run, dx, dy);
+    if (Number.isFinite(run.vx) && Number.isFinite(run.vy)) {
+      run.vx += dx;
+      run.vy += dy;
+    }
+  }
 }
 
 /** World position of a sheet's alignment mark, or null. */

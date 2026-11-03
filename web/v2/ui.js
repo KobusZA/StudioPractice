@@ -6,23 +6,26 @@
 //  - A rectangle resizes from the options strip until you drag it. Dragging a
 //    corner or an edge turns it into a polygon: Corner adds a point, Line moves
 //    the edge, with the same cursors as a floor finish. Identity and type live
-//    in the Inspector. New slabs and roofs are two-click rectangles with the HUD.
-//    A room is a click inside closed walls, or corners where there are no walls.
+//    in the Inspector. A floor or roof is sketched corner by corner, copied from
+//    a room, or tied to the external walls. A room is a click inside closed walls,
+//    or corners where there are no walls.
 //  - No modal type picker; clicking a type SKU sets the active tool/SKU
 //    directly, or retypes the current selection if the category matches.
 //  - Marquee selection uses each shape's bounding box, not exact polygon
 //    overlap. Exact for rectangles, which is everything this UI draws.
-//  - Free-angle walls are drawable (a v1 impossibility) but not snapped to
-//    common angles; hold Shift while dragging an end to keep the current
-//    heading. Walls are click–click and chain from the last end. Length is
+//  - Free-angle walls are drawable (a v1 impossibility) and are not snapped
+//    to common angles. A run within the snap tolerance of an axis, or of an
+//    existing wall, is stored on that line. Hold Shift while dragging an
+//    end to keep the current heading. Walls are click–click and chain from
+//    the last end. Length is
 //    labelled on the visible part of the wall (so zooming into an end does
 //    not hide it), and in the options strip with angle.
 
 import { complianceGaps, normalizePackUnits, GEOMETRY_LENGTH_KEYS } from "./schema.js";
 import { RULE_PACK, evaluateCompliance, groupFindingsByPart, summarizeFindings } from "./rules.js";
 import { deriveBuildingLine, hitPropertyLine, setBuildingLine, setPropertyLine, setSgReference } from "./site.js?v=20261015-property";
-import { HINTS, firstTabId, renderRibbon } from "./ribbon.js?v=20261102-sep-snap";
-import { closeOverflowMenus, decorateRibbon, fitRibbon } from "./ribbon-fit.js?v=20261102-ribbon-full";
+import { HINTS, firstTabId, renderRibbon } from "./ribbon.js?v=20261103-history";
+import { closeOverflowMenus, decorateRibbon, fitRibbon } from "./ribbon-fit.js?v=20261103-history";
 import {
   ghostContext,
   MAX_FLOORS_TO_ADD,
@@ -55,10 +58,15 @@ import {
   joinSelection,
   mergeSelection,
   mirrorSelection,
+  moveWallEnd,
+  realignWallFaces,
   retypeSelection,
   rotateSelection,
+  collinearWallJoints,
   splitSelection,
-} from "./modify.js?v=20261022-wall-loc";
+  splitWallAt,
+  MIN_WALL_SPLIT_M,
+} from "./modify.js?v=20261103-bos07c";
 import {
   calibrate,
   activateSheetForLevel,
@@ -118,7 +126,7 @@ import {
   snapReferencePixel,
 } from "./underlay.js?v=20261028-eye";
 import { alignablePages, applyCeilingHeights, setCeilingHeight, isPlanPage, mirrorLegacySource, pagesOfSource, sameSheetGeometry } from "./sheet-set.js";
-import { createSheetUi } from "./sheet-ui.js?v=20261029-snap-header";
+import { createSheetUi } from "./sheet-ui.js?v=20261103-history-names";
 import { SATELLITE_ATTRIBUTION, locateSuggestion, suggestAddresses } from "./satellite.js?v=20261015-geocode";
 import { pickedDimension, planDimensionLines } from "./dimensions.js?v=20260917-measure";
 import {
@@ -137,9 +145,19 @@ import {
   rectFromCorners,
   setLineHeading,
   setLineLength,
-} from "./click-draw.js?v=20261022-wall-loc";
-import { area as polyArea, bbox, clampToPoly, clipSegToRect, distToSeg, fitPolygonToHost, formatLengthMm, headingDeg, parseLengthMm, pointInPoly, roundGrid, translatePolyEdge } from "./geom.js?v=20261029-fit-host";
-import { SNAP_PIXEL_TOL, GAP_MAX_M, ALIGN_ORIGIN_MAX_M, NICE_MIN_STEP_M, PROBE_VECTORS, applyNicePoint, bestLinearMoveSnap, collectSnapEdges, collectSnapTargets, isExactPointSnap, nearestAlignments, resolveProbes, snapEdgeToLine, snapLengthFrom, snapNiceDelta, snapPoint, snapToFace } from "./snap.js?v=20261030-face-move";
+} from "./click-draw.js?v=20261103-wall-line";
+import {
+  armPlacement,
+  nextTraceView,
+  noteRecentDoor,
+  openingStaysArmed,
+  recentDoorSkus,
+  rememberFunctionSku,
+  wallFootprint,
+  wallPlanColour,
+} from "./drawing-defaults.js?v=20261103-wave1";
+import { area as polyArea, bbox, clampDeltaInside, clampToPoly, clipSegToRect, distToSeg, fitPolygonToHost, formatLengthMm, headingDeg, parseLengthMm, pointInPoly, roundGrid, translatePolyEdge } from "./geom.js?v=20261103-bos14";
+import { SNAP_PIXEL_TOL, GAP_MAX_M, ALIGN_ORIGIN_MAX_M, NICE_MIN_STEP_M, PROBE_VECTORS, applyNicePoint, bestLinearMoveSnap, collectSnapEdges, collectSnapTargets, isExactPointSnap, nearestAlignments, resolveProbes, snapEdgeToLine, snapLengthFrom, snapLinearEnd, snapNiceDelta, snapPoint, snapToFace } from "./snap.js?v=20261103-bos14";
 import { DEFAULT_ROOF_PITCH, roofGuideLines } from "./roof.js";
 import {
   ATTACHABLE_KINDS,
@@ -168,16 +186,17 @@ import {
   carryFinishRegionsToLevel,
   translateShape,
 } from "./model.js?v=20261102-room-tag";
-import { enclosedFace, spaceAt, syncRoomBounds } from "./room-bound.js?v=20261102-face-join";
+import { historyAction, historyListHtml } from "./history-panel.js?v=20261103-history-icons";
+import { clearShapeLink, enclosedFace, footprintFace, spaceAt, syncRoomBounds } from "./room-bound.js?v=20261103-bos11";
 import { REGION_CONVENTIONS, regionConvention } from "./region.js";
-import { ELEVATION_SNAP, FINISH_MIN_M, OPENING_MIN_M, addFoundationUnderWall, alignOutlineShift, applyBandEdit, applyOpeningEdit, applyOutlinePoints, applyTypedGap, applyWallTopEdit, axisAlignedOutline, elevationModel, faceRefForSelection, foundationTypes, maxTypedGap, openingSnapEdges, resizeOpeningCorner, snapElevation, translateOutlineEdge } from "./wall-elevation.js?v=20261102-foundation-block";
+import { ELEVATION_SNAP, FINISH_MIN_M, OPENING_MIN_M, addFoundationUnderWall, alignOutlineShift, applyBandEdit, applyOpeningEdit, applyOutlinePoints, applyTypedGap, applyWallTopEdit, axisAlignedOutline, dropGuideZ, elevationModel, faceRefForSelection, foundationTypes, includeDropGuide, maxTypedGap, openingSnapEdges, resizeOpeningCorner, snapElevation, translateOutlineEdge } from "./wall-elevation.js?v=20261103-wave1";
 import { FACE_CORNER_ALONG, FACE_CORNER_TRAVEL, FACE_CUE_INTRO_MS, FACE_CUE_PULSE_MS, FACE_CUE_REST_ALPHA, faceCornerMarks, faceCueZoom } from "./face-plan-cue.js?v=20261102-face-corners";
-import { createFinishRegion, createFinishRun, dependentsOfWalls, finishProductById, floorCoverage, libraryLine, planWallFinishMarks, presetFromRoom, roomsBySide, rulesFromPreset, savePreset } from "./finish-model.js?v=20261101-face-editor";
+import { createFinishRegion, createFinishRun, dependentsOfWalls, finishBillNote, finishEditRing, finishProductById, floorCoverage, libraryLine, materializeFinishRing, planWallFinishMarks, presetFromRoom, roomsBySide, rulesFromPreset, savePreset } from "./finish-model.js?v=20261103-wave1";
 import { FINISH_CATEGORIES, finishId, finishSwatch, normalizeFinishProducts, normalizeFinishSettings } from "./finish-data.js";
-import { HEIGHT_PRESETS, bandFaceLine, compareBands, draftBandPreviewHtml, faceFinishHtml, finishCalloutHtml, floorOpenHtml, formatFloorArea, openingCalloutHtml, floorProductSuggestions, parseTarget, productsHtml, roomFinishHtml, slabFinishHtml, targetOptions } from "./finish-panel.js?v=20261102-floor-list";
-import { clampElevationView, edgeResizeCursor, elevationSvg, finishLocate, zoomElevationView } from "./wall-elevation-render.js?v=20261102-floor-gap";
+import { HEIGHT_PRESETS, bandFaceLine, compareBands, draftBandPreviewHtml, faceFinishHtml, finishCalloutHtml, floorOpenHtml, formatFloorArea, openingCalloutHtml, floorProductSuggestions, parseTarget, productsHtml, roomFinishHtml, slabFinishHtml, targetOptions } from "./finish-panel.js?v=20261103-wave1";
+import { clampElevationView, edgeResizeCursor, elevationSvg, finishLocate, zoomElevationView } from "./wall-elevation-render.js?v=20261103-wave1";
 import { FLOOR_TYPE_GROUPS, alignFloorPoint, faceToPlan, floorFaceOf, floorPictureSvg, planToFace, resolveFloorFinishOpen } from "./floor-picture.js?v=20261102-floor-gap";
-import { CORNER_JOIN_TOL, deriveWalls, drawnSegmentFromWall, drawnWallThickness, isStripFooting, skuDrawnHeight, statusVisible } from "./walls.js";
+import { CORNER_JOIN_TOL, deriveWalls, drawnSegmentFromWall, drawnWallThickness, isStripFooting, skuDrawnHeight, statusVisible, wallThicknessLabel } from "./walls.js";
 import { findJoinTarget, resolveJoin, sideTowardTarget } from "./wall-join.js?v=20261022-corner-b";
 import {
   doorSwing,
@@ -193,6 +212,13 @@ import {
   wallForOpening,
   wallNormal,
 } from "./openings.js?v=20261029-opening-move";
+import {
+  floorSocketDraft,
+  slideWallSocket,
+  socketSurface,
+  syncHostedSockets,
+  wallSocketDraft,
+} from "./socket-host.js?v=20261103-bos20";
 import {
   attachPreview,
   attachReport,
@@ -426,6 +452,7 @@ const el = {
   wallCorner: document.getElementById("v2-wall-corner"),
   wallOpts: document.getElementById("v2-wall-opts"),
   floorEdgeMode: document.getElementById("v2-floor-edge-mode"),
+  wallEdit: document.getElementById("v2-wall-edit"),
   inspectKicker: document.getElementById("v2-inspect-kicker"),
   inspectEmpty: document.getElementById("v2-inspect-empty"),
   inspectFields: document.getElementById("v2-inspect-fields"),
@@ -520,6 +547,9 @@ const el = {
   ctxFinish: document.getElementById("v2-ctx-finish"),
   ctxShapePoly: document.getElementById("v2-ctx-shape-poly"),
   ctxShapePolyHint: document.getElementById("v2-ctx-shape-poly-hint"),
+  ctxFollow: document.getElementById("v2-ctx-follow"),
+  ctxFollowNote: document.getElementById("v2-ctx-follow-note"),
+  shapeLink: document.getElementById("v2-shape-link"),
   elevBody: document.getElementById("v2-elevation-body"),
   faceEditor: document.getElementById("v2-face-editor"),
   faceAdd: document.getElementById("v2-face-add"),
@@ -528,6 +558,7 @@ const el = {
   facePlan: document.getElementById("v2-face-plan"),
   elevFlash: document.getElementById("v2-elev-flash"),
   faceWhich: document.getElementById("v2-face-which"),
+  faceBill: document.getElementById("v2-face-bill"),
   faceMeta: document.getElementById("v2-face-meta"),
   faceArea: document.getElementById("v2-face-area"),
   floorPlace: document.getElementById("v2-floor-place"),
@@ -552,6 +583,8 @@ const el = {
   faceProductLabel: document.getElementById("v2-face-product-label"),
   faceHover: document.getElementById("v2-face-hover"),
   elevFit: document.getElementById("v2-elev-fit"),
+  elevGuideline: document.getElementById("v2-elev-guideline"),
+  elevGuidelineWrap: document.getElementById("v2-elev-guideline-wrap"),
   elevInfo: document.getElementById("v2-elev-info"),
   elevInfoNote: document.getElementById("v2-elev-info-note"),
   elevInfoBar: document.getElementById("v2-elev-info-bar"),
@@ -649,6 +682,11 @@ let rateBook = null;
 // nothing open and nothing to write.
 const sync = new DocSync({ onState: drawSyncState });
 const store = new PlanStore(emptyDoc(), { sink: sync });
+const persistDoc = store.persist.bind(store);
+store.persist = () => {
+  if (pack) syncHostedSockets(store.doc, pack);
+  persistDoc();
+};
 const cloud = createCloud();
 
 // The job currently open, as the server described it. Null until sign-in.
@@ -660,6 +698,17 @@ let tool = "select";
 // and come back when Pan is pressed again or Escape is pressed.
 let panMode = false;
 let placeSkuId = null;
+// Last type picked for each ribbon function. Re-arming Walls must not fall
+// back to the first SKU in the pack.
+let placeSkuMemory = {};
+// Door types placed this session, newest first. Cleared when another job opens.
+let recentDoorIds = [];
+// "model" draws walls on top of the sheet. "sheet" draws the sheet on top,
+// so openings on the PDF stay visible. A view choice, not part of the job.
+let traceView = "model";
+// Millimetres down from the top of the wall for the elevation guideline.
+// Null until the user types one. Not stored on the job.
+let elevDropMm = null;
 let placeStatus = "planned";
 let planStatusFilter = "both";
 // Systems the user has switched off on the plan. A view choice for this
@@ -694,6 +743,18 @@ let wallDraft = null;
 // the centreline, and a face choice is kept on it as `location`. Remembered
 // for the session.
 let wallLocation = "center";
+const WALL_LOC_TITLE = {
+  draw: {
+    center: "Centreline: The line you draw is the middle of the wall.",
+    exterior: "Exterior face: The line you draw is the outside face. Draw clockwise and the wall sits inside the line. Space flips.",
+    interior: "Interior face: The line you draw is the inside face. Draw clockwise and the wall sits outside the line. Space flips.",
+  },
+  edit: {
+    center: "Centreline: shift this wall so its middle sits on the line it was drawn on.",
+    exterior: "Exterior face: shift this wall so its outside face sits on the line it was drawn on.",
+    interior: "Interior face: shift this wall so its inside face sits on the line it was drawn on.",
+  },
+};
 // Who owns the corner square where the wall being drawn meets an existing one:
 // "past", "against" or "center" (see wall-join.js). Remembered for the session.
 let wallCorner = "against";
@@ -705,8 +766,14 @@ let wallSideFlip = false;
 // flips this and the preview follows. 1 hinges at the low-t end.
 let doorHandSign = 1;
 // Click–click room/slab/roof rectangle: first click is one corner, second
-// click is the opposite. Not a press-and-hold box.
+// click is the opposite. Not a press-and-hold box. Floors and roofs sketch
+// a polygon instead (`boundaryDraft`); this remains for any rectangle draft.
 let shapeDraft = null;
+// Corners of a floor or roof outline, while Sketch is the way it is drawn.
+let boundaryDraft = null;
+// How the floor and roof tools place the next outline. Sketch is freehand.
+// Room copies a room. External walls follow the building footprint.
+let shapePlaceMode = "sketch";
 let beamStart = null;
 // Document > Lines > Model / Annotate: the first click of a line, while
 // tool === "model-line" or "annot-line". Same bare-point shape as beamStart -
@@ -877,9 +944,18 @@ let bareLayer = null;
 // join/alignment (and, when not latched, how far the pointer is from it).
 // Drawn as tracking lines; cleared when the tool is not snap-aware.
 let snapGuide = null;
+// Snap or split armed on the one selected wall. Snap picks an end, then a
+// point from the same magnets a new wall uses. Split takes a point on the wall.
+let wallEdit = null;
+// One Move command: a selected sheet, wall, or tiled area. The base point is
+// the first click; the landing point is the second, or a typed distance.
+let moveSession = null;
 // Screen boxes of labels already painted this frame, so a snap string can
 // step aside from a room or floor edge length instead of drawing through it.
 let labelOccupied = [];
+// The selected wall's length chip this frame: screen box plus the normal
+// that points from the wall toward the chip. Snap and Split sit past it.
+let selectedWallLength = null;
 // How far each wall's finish stripe and its name reach along the screen
 // normal, so the length chip can sit on the free side instead of on them.
 let wallFinishExtents = new Map();
@@ -898,6 +974,8 @@ function requestPdfLinework(pageIndex = store.doc?.underlay?.sheetPage) {
 }
 
 function pdfSnapTarget(wx, wy) {
+  // The sheet is the thing being moved, so its own lines must not pull the landing point.
+  if (tool === "move" && moveSession?.base && moveSession.kind === "underlay") return null;
   if (!snapToPdf || !pdfSnapAvailable()) return null;
   requestPdfLinework();
   return snapUnderlayWorld(store.doc.underlay, wx, wy, SNAP_PIXEL_TOL / cam.scale);
@@ -912,7 +990,8 @@ function pdfLineworkPending() {
 
 /** Draw, trace, and sheet-alignment clicks. These are the ones that must wait for the index. */
 function clickSnapsToPdf() {
-  return snapPreviewTool() || tool === "align" || tool === "calibrate" || tool === "region" || tool === "separation";
+  return snapPreviewTool() || tool === "align" || tool === "calibrate" || tool === "region" || tool === "separation"
+    || (tool === "move" && moveSession?.kind === "underlay" && !moveSession.base);
 }
 
 function applyPdfPick(wx, wy) {
@@ -1073,6 +1152,7 @@ async function boot() {
   wireToolbar();
   wireCanvas();
   wireKeyboard();
+  wireHistory();
   wireMassing();
   wireTypeDetail();
   wireCheck();
@@ -1251,9 +1331,11 @@ function applyOpenedJob({ project, drawing }) {
   store.doc = normalizeDoc(drawing.doc);
   if (!store.doc.packId) store.doc.packId = pack.id;
   store.clearSelection();
+  recentDoorIds = [];
   // A job's undo history is its own. Carrying the previous job's stack across
   // would let Ctrl+Z paste one drawing into another.
-  store.undoStack = [];
+  store.clearHistory();
+  syncHistoryPanel();
   underlaySelected = false;
 
   sync.attach({
@@ -1961,7 +2043,8 @@ async function runSignOut() {
   store.doc = emptyDoc();
   store.doc.packId = pack.id;
   store.clearSelection();
-  store.undoStack = [];
+  store.clearHistory();
+  syncHistoryPanel();
   activeSheetId = null;
   sync.attach({ transport: signedOutTransport(), doc: store.doc, revision: 0 });
   closeLibraryAfterNavigation();
@@ -2074,7 +2157,8 @@ function applyTheirDocument(theirDoc) {
   if (!store.doc.packId) store.doc.packId = pack.id;
   store.clearSelection();
   // The undo stack describes edits to a document that is no longer open.
-  store.undoStack = [];
+  store.clearHistory();
+  syncHistoryPanel();
   underlaySelected = false;
 
   // Adopted against what the server actually holds, not against the normalised
@@ -2213,6 +2297,7 @@ function activeGrid() {
  * anchored end of a stretch, or the first corner of a room/slab/roof drag.
  */
 function snapFrom() {
+  if (wallEdit?.mode === "snap" && wallEdit.fixed) return wallEdit.fixed;
   if (wallDraft) return { x: wallDraft.x1, y: wallDraft.y1 };
   if (drag?.kind === "segment-end") return { x: drag.fx, y: drag.fy };
   if (drag?.kind === "property-vertex" && drag.origin) {
@@ -2222,10 +2307,12 @@ function snapFrom() {
   if (shapeDraft?.x0 != null) return { x: shapeDraft.x0, y: shapeDraft.y0 };
   if (beamStart) return beamStart;
   if (measureDraft?.a) return measureDraft.a;
+  if (tool === "move" && moveSession?.base) return moveSession.base;
   const routeFrom = serviceRouteFrom();
   if (routeFrom) return { x: routeFrom.x, y: routeFrom.y };
   if (regionDraft?.length) return regionDraft[regionDraft.length - 1];
   if (roomDraft?.length) return roomDraft[roomDraft.length - 1];
+  if (boundaryDraft?.length) return boundaryDraft[boundaryDraft.length - 1];
   return null;
 }
 
@@ -2237,6 +2324,7 @@ function drawingLineFrom() {
   if (measureDraft?.a) return measureDraft.a;
   if (regionDraft?.length) return regionDraft[regionDraft.length - 1];
   if (roomDraft?.length) return roomDraft[roomDraft.length - 1];
+  if (boundaryDraft?.length) return boundaryDraft[boundaryDraft.length - 1];
   return null;
 }
 
@@ -2317,14 +2405,20 @@ function applySnap(wx, wy, exclude) {
   const near = align.nearest && align.dist <= GAP_MAX_M;
   originsX.push(0);
   originsY.push(0);
-  let point = applyNicePoint(wx, wy, {
+  const snapOptsPoint = {
     join: result,
     from,
     originsX,
     originsY,
     tolWorld: tol,
     minStep: NICE_MIN_STEP_M,
-  });
+  };
+  // A wall end keeps the line it was aimed along. Other tools still round
+  // each free axis, which is what a rectangle corner wants.
+  const movingWallEnd = Boolean(wallEdit?.mode === "snap" && wallEdit.end && from);
+  let point = (wallDraft && from) || movingWallEnd
+    ? snapLinearEnd(wx, wy, { ...snapOptsPoint, lines: edges })
+    : applyNicePoint(wx, wy, snapOptsPoint);
   // A route drawn beside a wall keeps its justification. "Clear" lands the pipe
   // edge the chosen distance from the face, unless a corner has already locked
   // the point. "In the wall" is stricter: the point is on a wall's centreline or
@@ -2523,12 +2617,43 @@ function segmentCategory(seg) {
   return skuById(seg?.sku)?.category || null;
 }
 
+/** A drawn wall or boundary wall can be moved onto another location line. */
+function segmentHasFaceControl(seg) {
+  const cat = segmentCategory(seg);
+  return cat === "wall" || cat === "boundarywall";
+}
+
+function sharedWallLocation(refs) {
+  let shared = null;
+  for (const ref of refs) {
+    const loc = normalizeWallLocation(objByRef(ref)?.location);
+    if (shared === null) shared = loc;
+    else if (shared !== loc) return null;
+  }
+  return shared;
+}
+
+function syncWallLocButtons(active, mode) {
+  if (!el.wallLoc) return;
+  const group = el.wallLoc.querySelector("[role='group']");
+  if (group) group.setAttribute("aria-label", mode === "edit" ? "Location line" : "Draw on");
+  const titles = WALL_LOC_TITLE[mode] || WALL_LOC_TITLE.draw;
+  for (const btn of el.wallLoc.querySelectorAll("[data-wall-loc]")) {
+    const loc = btn.dataset.wallLoc;
+    const on = loc === active;
+    btn.classList.toggle("active", on);
+    btn.setAttribute("aria-pressed", on ? "true" : "false");
+    if (titles[loc]) btn.title = titles[loc];
+  }
+}
+
 function snapOpts(extra = {}) {
   return {
     ...extra,
     // Finish corners align while a finish is drawn or a corner of one is
     // dragged. A wall or a floor corner does not join onto a tile.
-    finishes: tool === "region" || drag?.kind === "region-vertex" || drag?.kind === "region-edge",
+    finishes: tool === "region" || drag?.kind === "region-vertex" || drag?.kind === "region-edge"
+      || (tool === "move" && moveSession?.kind === "finishRegion"),
     // Route points are targets for the route tool only (and for a route point
     // being dragged); a wall never snaps to a pipe.
     services: tool === "service-route" || Boolean(serviceMoveIds),
@@ -2541,7 +2666,7 @@ function snapOpts(extra = {}) {
 }
 
 function currentWalls() {
-  if (pack) syncRoomBounds(store.doc, pack);
+  if (pack && syncRoomBounds(store.doc, pack)) syncHostedSockets(store.doc, pack);
   wallsCache = pack ? deriveWalls(store.doc, pack) : [];
   return wallsCache;
 }
@@ -2680,7 +2805,7 @@ function commitStationEdit(station, text) {
     if (!store.doc.sheetSet) {
       setStatusMessage("Floor-to-ceiling can only be typed once a sheet set is loaded.", "warn");
     } else {
-      store.pushUndo();
+      store.pushUndo(`Set the ceiling height of ${station.name || station.levelId} to ${String(text).trim()} mm`);
       if (!setCeilingHeight(store.doc.sheetSet, station.levelId, height)) {
         setStatusMessage("Ceiling must sit above its floor, within 20 m.", "warn");
       } else {
@@ -2692,7 +2817,7 @@ function commitStationEdit(station, text) {
     if (!check.ok) {
       setStatusMessage(check.message, "warn");
     } else {
-      store.pushUndo();
+      store.pushUndo(`Set the elevation of ${station.name || station.levelId} to ${String(text).trim()} mm`);
       store.doc.levelElevations = setLevelElevation(store.doc.levelElevations, station.levelId, metres);
       store.persist();
       setStatusMessage(check.message, "ok");
@@ -2756,7 +2881,7 @@ function commitLevelInsert() {
     setStatusMessage(check.message, "warn");
     return;
   }
-  store.pushUndo();
+  store.pushUndo(`Added level ${spec.name || ""}`.trim());
   store.doc.levels = insertLevelInto(store.doc.levels, spec);
   syncPackLevels();
   store.persist();
@@ -3124,6 +3249,7 @@ function selectStationIndex(idx, { keepSelection = false } = {}) {
     lineStart = null;
     wallDraft = null;
     shapeDraft = null;
+    boundaryDraft = null;
     drag = null;
     if (!keepSelection) store.clearSelection();
     drawRibbon();
@@ -3341,6 +3467,7 @@ function shouldHidePlanEmpty() {
 
 function draw() {
   labelOccupied = [];
+  selectedWallLength = null;
   wallFinishExtents = new Map();
   const rect = el.canvasWrap.getBoundingClientRect();
   ctx.clearRect(0, 0, rect.width, rect.height);
@@ -3349,10 +3476,11 @@ function draw() {
     return;
   }
 
-  if (underlayIsVisible()) drawUnderlay(ctx, store.doc, worldToScreen, cam.scale);
+  if (underlayIsVisible() && traceView !== "sheet") drawUnderlay(ctx, store.doc, worldToScreen, cam.scale);
   drawGrid(rect);
   drawSiteLines();
   const walls = currentWalls();
+  syncHostedSockets(store.doc, pack, walls);
   pruneInvisibleSelection();
   const levelWalls = walls.filter((w) => onActiveLevel(w) && keptByCut(w, "wall"));
 
@@ -3369,12 +3497,19 @@ function draw() {
     allow: (role) => !isolateCurrentLevel || isolateShows(activeStationKind(), role),
   });
   ctx.restore();
+  if (underlayIsVisible() && traceView === "sheet") {
+    drawUnderlay(ctx, store.doc, worldToScreen, cam.scale);
+  } else if (underlayIsVisible()) {
+    const picked = levelWalls.filter((w) => w.drawn && store.isSelected("segment", w.id));
+    if (picked.length) revealUnderlayThroughWalls(picked);
+  }
   if (attachPick) drawAttachCandidates();
   if (showDimensions) drawDimensions();
   drawSavedDimensions();
   if (tool === "measure" && measureDraft?.a) drawMeasureDraft();
 
   drawSelectionHighlights(levelWalls);
+  drawWallSplitJoints();
   const serviceRefs = refsToDraw().filter((r) => (r.kind === "serviceNode" || r.kind === "serviceEdge") && refShownOnPlan(r));
   if (serviceRefs.length) {
     drawServiceSelection(ctx, { doc: store.doc, pack, refs: serviceRefs, worldToScreen, color: COLOUR.selection, levelId: activeLevel, scale: cam.scale });
@@ -3431,6 +3566,7 @@ function draw() {
   if (shapeDraft) drawShapeDraft();
   if (beamStart) drawBeamStart();
   if (lineStart) drawLineDraft();
+  if (tool === "move" && moveSession?.base) drawMoveDraft();
   if (tool === "property" && siteDraft) drawPropertyDraft();
   if (tool === "region" && regionFinish) drawFinishHost();
   if (tool === "select") {
@@ -3440,6 +3576,7 @@ function draw() {
     drawShapeEdgeLengths();
   }
   if (tool === "room" && roomDraft?.length) drawPolyDraft(roomDraft, "#b2451e");
+  if ((tool === "slab" || tool === "roof") && boundaryDraft?.length) drawPolyDraft(boundaryDraft, tool === "roof" ? "#6e6458" : "#8a5a32");
   if (tool === "region" && regionDraft?.length) drawPolyDraft(regionDraft, "#8a7d6c");
   if (tool === "sg-ref" && sgPick) drawSgPick();
   if (tool === "camera" && cameraDraft?.a) drawCameraDraft();
@@ -3450,6 +3587,7 @@ function draw() {
   drawFloorPlanMark();
   drawLocateFlash();
   drawFacePlanCue();
+  drawWallEditPreview();
   drawSnapGuide(rect);
   drawEndpointHandles();
   drawPropertyChrome();
@@ -3751,12 +3889,14 @@ function render() {
   const spaceKey = spaceNow.kind === "enclosed"
     ? `e${spaceNow.occupied ? 1 : 0}:${Number(spaceNow.area).toFixed(1)}`
     : spaceNow.kind;
-  const hintKey = `${tool}|${activeFunction || ""}|${store.selected.length}|${store.primary?.kind || ""}|${store.primary?.id || ""}|${panMode ? 1 : 0}|${wallDraft ? 1 : 0}|${spaceKey}`;
+  const hintKey = `${tool}|${activeFunction || ""}|${store.selected.length}|${store.primary?.kind || ""}|${store.primary?.id || ""}|${panMode ? 1 : 0}|${wallDraft ? 1 : 0}|${moveSession?.base ? 1 : 0}|${moveSession?.stopped ? 1 : 0}|${spaceKey}`;
   if (hintKey !== lastPlanHintKey) {
     lastPlanHintKey = hintKey;
     updateRibbonHint();
   }
   placeFloorEdgeMode();
+  placeWallEdit();
+  syncHistoryPanel();
 }
 
 let lastPlanHintKey = "";
@@ -3807,7 +3947,7 @@ function selectedDoors() {
 function flipDoors(which) {
   const doors = selectedDoors();
   if (!doors) return false;
-  store.pushUndo();
+  store.pushUndo(historyDid(which === "hinge" ? "Flipped the hinge of" : "Flipped the swing of"));
   for (const opening of doors) {
     if (which === "hinge") opening.hand = opening.hand === -1 ? 1 : -1;
     else opening.swing = -(opening.swing || 1);
@@ -4467,8 +4607,10 @@ function drawWall(wall, { marker = false } = {}) {
   ctx.save();
   if (marker) {
     drawAboveMarker(ax, ay, bx, by);
+  } else if (wall.drawn) {
+    strokeWallBody(ax, ay, bx, by, wall.status, Math.max(2, wall.thickness * cam.scale));
   } else {
-    ctx.strokeStyle = wall.drawn ? statusStroke(wall.status) : COLOUR.wall;
+    ctx.strokeStyle = COLOUR.wall;
     ctx.lineWidth = Math.max(2, wall.thickness * cam.scale);
     ctx.lineCap = "butt";
     ctx.beginPath();
@@ -4476,6 +4618,45 @@ function drawWall(wall, { marker = false } = {}) {
     ctx.lineTo(bx, by);
     ctx.stroke();
   }
+  ctx.restore();
+}
+
+/** New work is red. Existing work is white, edged so it stays visible on the paper.
+ *  Any other status keeps the shared colour, so doors and slabs are unchanged. */
+function strokeWallBody(ax, ay, bx, by, status, width) {
+  const colour = wallPlanColour(status);
+  ctx.lineCap = "butt";
+  ctx.beginPath();
+  ctx.moveTo(ax, ay);
+  ctx.lineTo(bx, by);
+  if (colour?.edge) {
+    ctx.strokeStyle = colour.edge;
+    ctx.lineWidth = width + 2;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(ax, ay);
+    ctx.lineTo(bx, by);
+  }
+  ctx.strokeStyle = colour?.stroke || statusStroke(status);
+  ctx.lineWidth = width;
+  ctx.stroke();
+}
+
+/** Redraw the sheet inside selected walls so PDF openings are not covered. */
+function revealUnderlayThroughWalls(walls) {
+  ctx.save();
+  ctx.beginPath();
+  for (const wall of walls) {
+    const poly = wallFootprint(wall);
+    poly.forEach((p, i) => {
+      const [sx, sy] = worldToScreen(p.x, p.y);
+      if (i === 0) ctx.moveTo(sx, sy);
+      else ctx.lineTo(sx, sy);
+    });
+    ctx.closePath();
+  }
+  ctx.clip();
+  drawUnderlay(ctx, store.doc, worldToScreen, cam.scale);
   ctx.restore();
 }
 
@@ -5020,7 +5201,10 @@ function drawSelectionHighlights(walls) {
         strokeWorldLine(f.x1, f.y1, f.x2, f.y2);
         ctx.setLineDash([]);
       }
-      drawLengthLabel(obj.x1, obj.y1, obj.x2, obj.y2, ref.kind === "segment" ? wallLengthPlace(obj) : null);
+      const paintedLength = drawLengthLabel(obj.x1, obj.y1, obj.x2, obj.y2, ref.kind === "segment" ? wallLengthPlace(obj) : null);
+      if (paintedLength && ref.kind === "segment" && store.selected.length === 1 && store.selected[0].id === obj.id) {
+        selectedWallLength = paintedLength;
+      }
     } else if (ref.kind === "item") {
       const sku = skuById(obj.sku);
       if (sku) {
@@ -5332,7 +5516,8 @@ function drawWallDraft() {
     const from = move.end === 2 ? { x: move.seg.x2, y: move.seg.y2 } : { x: move.seg.x1, y: move.seg.y1 };
     if (segmentLength(from.x, from.y, move.to.x, move.to.y) < 0.005) continue;
     ctx.save();
-    ctx.strokeStyle = statusStroke(objectStatus(move.seg));
+    const moved = wallPlanColour(objectStatus(move.seg));
+    ctx.strokeStyle = moved?.stroke || statusStroke(objectStatus(move.seg));
     ctx.globalAlpha = 0.45;
     ctx.lineWidth = Math.max(2, segmentThickness(move.seg) * cam.scale);
     ctx.lineCap = "butt";
@@ -5343,7 +5528,8 @@ function drawWallDraft() {
     const [cx1, cy1] = worldToScreen(center.x1, center.y1);
     const [cx2, cy2] = worldToScreen(center.x2, center.y2);
     ctx.save();
-    ctx.strokeStyle = statusStroke(placementStatus());
+    const draftColour = wallPlanColour(placementStatus());
+    ctx.strokeStyle = draftColour?.stroke || statusStroke(placementStatus());
     ctx.globalAlpha = 0.45;
     ctx.lineWidth = Math.max(2, thickness * cam.scale);
     ctx.lineCap = "butt";
@@ -5429,12 +5615,12 @@ function wallLengthPlace(wall) {
 
 function drawLengthLabel(x1, y1, x2, y2, place = null) {
   const len = segmentLength(x1, y1, x2, y2);
-  if (len < 0.05) return;
+  if (len < 0.05) return null;
   const [ax, ay] = worldToScreen(x1, y1);
   const [bx, by] = worldToScreen(x2, y2);
   const pad = 18;
   const clipped = clipSegToRect(ax, ay, bx, by, pad, pad, el.canvasWrap.clientWidth - pad, el.canvasWrap.clientHeight - pad);
-  if (!clipped) return;
+  if (!clipped) return null;
   const sx = (clipped.x1 + clipped.x2) / 2;
   const sy = (clipped.y1 + clipped.y2) / 2;
   const label = `${formatLengthMm(len)} mm`;
@@ -5469,7 +5655,7 @@ function drawLengthLabel(x1, y1, x2, y2, place = null) {
     ctx.fillStyle = "#1a1612";
     ctx.fillText(label, box.cx, box.cy);
     ctx.restore();
-    return;
+    return { box, nx: place.normal.x, ny: place.normal.y };
   }
   ctx.textBaseline = "bottom";
   const box = { x: sx - width / 2, y: sy - 22, w: width, h: height };
@@ -5479,6 +5665,7 @@ function drawLengthLabel(x1, y1, x2, y2, place = null) {
   ctx.fillStyle = "#1a1612";
   ctx.fillText(label, sx, sy - 8);
   ctx.restore();
+  return { box, nx: 0, ny: -1 };
 }
 
 /** Axis-aligned box of a label drawn at (mx, my) after `ctx.rotate(angle)`. */
@@ -5647,32 +5834,113 @@ function soleLinearSelection() {
   return obj ? { ref, obj } : null;
 }
 
+/** Ends the user grabs. A wall's handles sit on its location line. */
+function linearEnds(obj, kind) {
+  if (kind === "segment") {
+    const line = locationLineOf(obj, segmentThickness(obj));
+    return [[line.x1, line.y1, 1], [line.x2, line.y2, 2]];
+  }
+  return [[obj.x1, obj.y1, 1], [obj.x2, obj.y2, 2]];
+}
+
 function drawEndpointHandles() {
   const sel = soleLinearSelection();
   if (!sel || drag || attachPick) return;
-  const { obj } = sel;
-  for (const [x, y] of [[obj.x1, obj.y1], [obj.x2, obj.y2]]) {
+  const { ref, obj } = sel;
+  const ends = linearEnds(obj, ref.kind);
+  const snapHere = wallEdit?.mode === "snap" && wallEdit.id === obj.id;
+  const waiting = snapHere && !wallEdit.end;
+  const nearEnd = waiting && hoverPoint ? wallEndAt(obj, hoverPoint.x, hoverPoint.y) : null;
+  for (const [x, y, end] of ends) {
     const [hx, hy] = worldToScreen(x, y);
+    const chosen = snapHere && wallEdit.end === end;
+    const hot = nearEnd === end;
+    const size = hot ? HANDLE + 4 : HANDLE;
     ctx.save();
-    ctx.fillStyle = "#f4ede1";
+    ctx.fillStyle = (chosen || waiting) ? COLOUR.selection : "#f4ede1";
     ctx.strokeStyle = COLOUR.selection;
     ctx.lineWidth = 1.6;
-    ctx.fillRect(hx - HANDLE / 2, hy - HANDLE / 2, HANDLE, HANDLE);
-    ctx.strokeRect(hx - HANDLE / 2, hy - HANDLE / 2, HANDLE, HANDLE);
+    ctx.fillRect(hx - size / 2, hy - size / 2, size, size);
+    ctx.strokeRect(hx - size / 2, hy - size / 2, size, size);
     ctx.restore();
   }
+}
+
+/** How far a split tick reaches past the wall stroke, in screen pixels. */
+function wallTickReach(seg) {
+  return Math.max(14, (segmentThickness(seg) * cam.scale) / 2 + 8);
+}
+
+/** A cream-backed tick across a wall, in screen pixels, from a unit perpendicular. */
+function strokeWallTick(sx, sy, ox, oy, reach, ink) {
+  const stroke = (style, width) => {
+    ctx.save();
+    ctx.strokeStyle = style;
+    ctx.lineWidth = width;
+    ctx.lineCap = "butt";
+    ctx.beginPath();
+    ctx.moveTo(sx - ox * reach, sy - oy * reach);
+    ctx.lineTo(sx + ox * reach, sy + oy * reach);
+    ctx.stroke();
+    ctx.restore();
+  };
+  stroke("#f4eee4", 5);
+  stroke(ink, 2.2);
+}
+
+/** The joint where two collinear pieces meet, while either piece is selected. */
+function drawWallSplitJoints() {
+  if (wallEdit?.mode === "split") return;
+  const ids = store.selected.filter((ref) => ref.kind === "segment" && refShownOnPlan(ref)).map((ref) => ref.id);
+  if (!ids.length) return;
+  for (const joint of collinearWallJoints(store.doc.segments, ids)) {
+    const seg = (store.doc.segments || []).find((item) => item.id === joint.id);
+    if (!seg || !onActiveLevel(seg)) continue;
+    const [ax, ay] = worldToScreen(seg.x1, seg.y1);
+    const [bx, by] = worldToScreen(seg.x2, seg.y2);
+    const span = Math.hypot(bx - ax, by - ay) || 1;
+    const [sx, sy] = worldToScreen(joint.x, joint.y);
+    strokeWallTick(sx, sy, -(by - ay) / span, (bx - ax) / span, wallTickReach(seg), COLOUR.selection);
+  }
+}
+
+/** The split station, or the line the chosen end will move along. */
+function drawWallEditPreview() {
+  if (!wallEdit || !snapGuide) return;
+  if (drag && drag.kind !== "wall-split") return;
+  const sel = selectedWall();
+  if (!sel || sel.obj.id !== wallEdit.id) return;
+  const seg = sel.obj;
+  ctx.save();
+  if (wallEdit.mode === "split") {
+    const [sx, sy] = worldToScreen(snapGuide.x, snapGuide.y);
+    const [ax, ay] = worldToScreen(seg.x1, seg.y1);
+    const [bx, by] = worldToScreen(seg.x2, seg.y2);
+    const span = Math.hypot(bx - ax, by - ay) || 1;
+    strokeWallTick(sx, sy, -(by - ay) / span, (bx - ax) / span, wallTickReach(seg), "#b2451e");
+  } else if (wallEdit.end) {
+    const line = locationLineOf(seg, segmentThickness(seg));
+    const fixed = wallEdit.fixed || (wallEdit.end === 1 ? { x: line.x2, y: line.y2 } : { x: line.x1, y: line.y1 });
+    const [ax, ay] = worldToScreen(fixed.x, fixed.y);
+    const [bx, by] = worldToScreen(snapGuide.x, snapGuide.y);
+    ctx.strokeStyle = "#3a5f7a";
+    ctx.setLineDash([5, 4]);
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(ax, ay);
+    ctx.lineTo(bx, by);
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 function endpointHandleHit(wx, wy) {
   const sel = soleLinearSelection();
   if (!sel) return null;
   const { ref, obj } = sel;
-  const tol = (HANDLE / 2 + 2) / cam.scale;
-  if (Math.hypot(obj.x1 - wx, obj.y1 - wy) <= tol) {
-    return { kind: "handle", id: ref.id, target: ref.kind, end: 1 };
-  }
-  if (Math.hypot(obj.x2 - wx, obj.y2 - wy) <= tol) {
-    return { kind: "handle", id: ref.id, target: ref.kind, end: 2 };
+  const tol = (HANDLE / 2 + 4) / cam.scale;
+  for (const [x, y, end] of linearEnds(obj, ref.kind)) {
+    if (Math.hypot(x - wx, y - wy) <= tol) return { kind: "handle", id: ref.id, target: ref.kind, end };
   }
   return null;
 }
@@ -5686,6 +5954,9 @@ function endpointHandleHit(wx, wy) {
 // `selectedShapeVertex` remembers which corner Delete should remove; it is
 // reset on the next click so a stale one never survives to delete the wrong thing.
 let selectedShapeVertex = null;
+// The boundary line last grabbed on a room, floor, or roof. Dragging it moves
+// that line. A corner grab clears it.
+let selectedShapeEdge = null;
 
 function shapeEditTol() {
   return (HANDLE / 2 + 2) / cam.scale;
@@ -5782,7 +6053,7 @@ function regionsOfSelection() {
 function editingFinishRegion() {
   if (!editingRegionId) return null;
   const region = regionsOfSelection().find((r) => r.id === editingRegionId) || null;
-  if (!region || tool !== "select") {
+  if (!region || (tool !== "select" && tool !== "move")) {
     editingRegionId = null;
     selectedRegionVertex = null;
     return null;
@@ -5866,19 +6137,21 @@ function regionCoversHost(region) {
   return host.every(([x, y]) => pointOnOrInRing(x, y, poly)) && poly.every(([x, y]) => pointOnOrInRing(x, y, host));
 }
 
-/** The corners to hit-test: the stored ones for a free polygon, else the outline it resolves to. */
+/** The corners to hit-test: the same order the picture draws, not the stored winding. */
 function finishRegionRing(region) {
-  if (region.shape?.kind === "poly" && !region.whole && Array.isArray(region.shape.points)) return region.shape.points;
-  return finishRegionPolygon(store.doc, region);
+  const raw = region.shape?.kind === "poly" && !region.whole && Array.isArray(region.shape.points)
+    ? region.shape.points
+    : null;
+  const drawn = finishEditRing(store.doc, region);
+  if (raw && drawn.length === raw.length && raw.every((p, i) => Math.abs(p[0] - drawn[i][0]) < 1e-9 && Math.abs(p[1] - drawn[i][1]) < 1e-9)) {
+    return raw;
+  }
+  return drawn;
 }
 
-/** Make the region a plain editable polygon (a whole-floor or rectangle region stops being one). */
+/** Make the region the polygon the picture shows, so a line index moves that line. */
 function finishRegionPoints(region) {
-  if (region.shape?.kind !== "poly" || region.whole || !Array.isArray(region.shape.points)) {
-    region.shape = polyShape(finishRegionPolygon(store.doc, region).map(([x, y]) => [x, y]));
-    delete region.whole;
-  }
-  return region.shape.points;
+  return materializeFinishRing(store.doc, region);
 }
 
 /** Line moves the edge. Corner inserts a node. Shift swaps them for this drag. */
@@ -5996,7 +6269,7 @@ function beginFinishRegionDrag(ev, wx, wy, opts = {}) {
     ? opts.vertex
     : (Number.isInteger(opts.edge) ? null : hitPolyVertexIndex(ring, wx, wy, shapeEditTol()));
   if (vi != null && vi >= 0 && vi < ring.length) {
-    store.pushUndo();
+    store.pushUndo(historyDid("Edited the floor finish of"), { pending: true });
     finishRegionPoints(region);
     selectedRegionVertex = { id: region.id, index: vi };
     return grab({ kind: "region-vertex", index: vi });
@@ -6005,7 +6278,7 @@ function beginFinishRegionDrag(ev, wx, wy, opts = {}) {
     ? opts.edge
     : hitPolyEdgeIndex(ring, wx, wy, propertyPickTol());
   if (ei != null && ei >= 0 && ei < ring.length) {
-    store.pushUndo();
+    store.pushUndo(historyDid("Edited the floor finish of"), { pending: true });
     const points = finishRegionPoints(region);
     if (floorEdgeMoves(ev)) {
       return grab({
@@ -6027,7 +6300,7 @@ function beginFinishRegionDrag(ev, wx, wy, opts = {}) {
   // Shift inside the region, off its edges, still adds the floor to the selection.
   if (ev.shiftKey) return false;
   if (pointInPoly(wx, wy, finishRegionPolygon(store.doc, region))) {
-    store.pushUndo();
+    store.pushUndo(historyDid("Edited the floor finish of"), { pending: true });
     return grab({
       kind: "region-move",
       x0: wx,
@@ -6113,7 +6386,8 @@ function dragFloorOnPicture(region, wx, wy) {
     const host = finishRegionHost(region);
     const next = translatePolyEdge(origin, i, push.nx * along, push.ny * along, host);
     const at = next[i];
-    if (Math.hypot(at[0] - a0[0], at[1] - a0[1]) * scale > 2) drag.moved = true;
+    const scaleY = elevationLayout?.scaleY || scale;
+    if (Math.hypot((at[0] - a0[0]) * scale, (at[1] - a0[1]) * scaleY) > 2) drag.moved = true;
     const landedX = a0[0] + push.nx * along;
     const landedY = a0[1] + push.ny * along;
     const guideS = Math.abs(at[0] - landedX) > 1e-4 ? null : aligned.guideS;
@@ -6127,7 +6401,8 @@ function dragFloorOnPicture(region, wx, wy) {
   const aligned = alignFloorPoint(wx, wy, face, floorSnapTargets([pt]));
   const host = finishRegionHost(region);
   const at = host.length >= 3 ? clampToPoly(aligned.x, aligned.y, host) : aligned;
-  if (Math.hypot(at.x - pt[0], at.y - pt[1]) * scale > 2) drag.moved = true;
+  const scaleY = elevationLayout?.scaleY || scale;
+  if (Math.hypot((at.x - pt[0]) * scale, (at.y - pt[1]) * scaleY) > 2) drag.moved = true;
   const guideS = Math.abs(at.x - aligned.x) > 1e-6 ? null : aligned.guideS;
   const guideZ = Math.abs(at.y - aligned.y) > 1e-6 ? null : aligned.guideZ;
   floorGuides = guideS == null && guideZ == null ? null : { s: guideS, z: guideZ };
@@ -6315,12 +6590,47 @@ function drawEditingFinishRegion() {
   }
 }
 
+/** The boundary line being edited: the one under the pointer, or the one last grabbed. */
+function outlineEdgeIndex(editable) {
+  const ring = editable.points;
+  const ref = editable.ref;
+  if (selectedShapeEdge && (selectedShapeEdge.ref.kind !== ref.kind || selectedShapeEdge.ref.id !== ref.id || selectedShapeEdge.index >= ring.length)) {
+    selectedShapeEdge = null;
+  }
+  if (drag?.kind === "shape-edge" && drag.ref?.kind === ref.kind && drag.ref?.id === ref.id) return drag.index;
+  if (!drag && hoverPoint && floorEdgeMode === "line") {
+    if (hitPolyVertexIndex(ring, hoverPoint.x, hoverPoint.y, shapeEditTol()) == null) {
+      const hit = hitPolyEdgeIndex(ring, hoverPoint.x, hoverPoint.y, propertyPickTol());
+      if (hit != null) return hit;
+    }
+  }
+  return selectedShapeEdge ? selectedShapeEdge.index : null;
+}
+
+/** Draw the one boundary line that a drag will move, so it reads as the selection. */
+function drawActiveOutlineEdge(editable) {
+  const index = outlineEdgeIndex(editable);
+  if (index == null) return;
+  const ring = editable.points;
+  const [x1, y1] = ring[index] || [];
+  const [x2, y2] = ring[(index + 1) % ring.length] || [];
+  if (![x1, y1, x2, y2].every(Number.isFinite)) return;
+  ctx.save();
+  ctx.strokeStyle = COLOUR.selection;
+  ctx.lineWidth = 4;
+  ctx.lineCap = "butt";
+  ctx.setLineDash([]);
+  strokeWorldLine(x1, y1, x2, y2);
+  ctx.restore();
+}
+
 /** Edge lengths of the floor, room or roof while its own corners are the ones showing. */
 function drawShapeEdgeLengths() {
   if (tool !== "select" || editingFinishRegion()) return;
   const editable = editableShapeRef();
   if (!editable) return;
   const ring = editable.points;
+  drawActiveOutlineEdge(editable);
   for (let i = 0; i < ring.length; i += 1) {
     const [x1, y1] = ring[i];
     const [x2, y2] = ring[(i + 1) % ring.length];
@@ -6392,7 +6702,7 @@ function beginPropertyDrag(ev, wx, wy) {
   propertySelected = true;
   underlaySelected = false;
   store.clearSelection();
-  store.pushUndo();
+  store.pushUndo("Edited property line", { pending: true });
   const origin = pts.map(([x, y]) => [x, y]);
   const vertex = hitPropertyLine(origin, wx, wy, propertyHandleTol());
   const hadDerived = Boolean(store.doc.site?.buildingLine?.derived);
@@ -6408,30 +6718,48 @@ function beginPropertyDrag(ev, wx, wy) {
   return true;
 }
 
-function setSegmentLength(seg, length) {
-  const cur = segmentLength(seg.x1, seg.y1, seg.x2, seg.y2);
-  const next = Math.max(MIN_TRACE, roundGrid(Number(length) || cur, activeGrid()));
-  if (cur < 1e-6) {
-    seg.x2 = roundGrid(seg.x1 + next, activeGrid());
-    seg.y2 = seg.y1;
-    return;
+function setSegmentLength(sel, length) {
+  const seg = sel.obj;
+  if (sel.ref.kind !== "segment") {
+    const cur = segmentLength(seg.x1, seg.y1, seg.x2, seg.y2);
+    const end = setLineLength(
+      { x: seg.x1, y: seg.y1 },
+      { x: seg.x2, y: seg.y2 },
+      Number(length) || cur,
+      (n) => roundGrid(n, activeGrid()),
+    );
+    seg.x2 = end.x;
+    seg.y2 = end.y;
+    return { ok: true, message: "End moved." };
   }
-  const s = next / cur;
-  seg.x2 = roundGrid(seg.x1 + (seg.x2 - seg.x1) * s, activeGrid());
-  seg.y2 = roundGrid(seg.y1 + (seg.y2 - seg.y1) * s, activeGrid());
+  const line = locationLineOf(seg, segmentThickness(seg));
+  const cur = segmentLength(line.x1, line.y1, line.x2, line.y2);
+  const end = setLineLength(
+    { x: line.x1, y: line.y1 },
+    { x: line.x2, y: line.y2 },
+    Number(length) || cur,
+    (n) => roundGrid(n, activeGrid()),
+  );
+  return moveWallEnd(store.doc, sel.ref, 2, end, { skuById });
 }
 
-function setSegmentHeading(seg, deg) {
-  const len = segmentLength(seg.x1, seg.y1, seg.x2, seg.y2) || MIN_TRACE;
-  const rad = (Number(deg) * Math.PI) / 180;
-  const grid = activeGrid();
-  seg.x2 = roundGrid(seg.x1 + Math.cos(rad) * len, grid);
-  seg.y2 = roundGrid(seg.y1 + Math.sin(rad) * len, grid);
+function setSegmentHeading(sel, deg) {
+  const seg = sel.obj;
+  if (sel.ref.kind !== "segment") {
+    const len = segmentLength(seg.x1, seg.y1, seg.x2, seg.y2) || MIN_TRACE;
+    const end = setLineHeading({ x: seg.x1, y: seg.y1 }, len, deg);
+    seg.x2 = end.x;
+    seg.y2 = end.y;
+    return { ok: true, message: "End moved." };
+  }
+  const line = locationLineOf(seg, segmentThickness(seg));
+  const len = segmentLength(line.x1, line.y1, line.x2, line.y2) || MIN_TRACE;
+  const end = setLineHeading({ x: line.x1, y: line.y1 }, len, deg);
+  return moveWallEnd(store.doc, sel.ref, 2, end, { skuById });
 }
 
-function applySegmentEnd(obj, end, x, y, lockAxis, origin, ref) {
-  let nx;
-  let ny;
+/** Where a dragged end should land, before the wall is written. */
+function segmentEndAim(x, y, lockAxis, origin, ref) {
   if (lockAxis && origin) {
     // Shift keeps the current heading: length along that ray prefers round
     // millimetres rather than joins, since the user has already committed to
@@ -6443,25 +6771,22 @@ function applySegmentEnd(obj, end, x, y, lockAxis, origin, ref) {
     const tol = SNAP_PIXEL_TOL / cam.scale;
     if (denom > 1e-8) {
       const t = ((x - origin.fx) * dx + (y - origin.fy) * dy) / denom;
-      const along = snapLengthFrom(
+      return snapLengthFrom(
         { x: origin.fx, y: origin.fy },
         { x: origin.fx + dx * t, y: origin.fy + dy * t },
         tol,
       );
-      nx = along.x;
-      ny = along.y;
-    } else {
-      const p = applySnap(x, y, undefined);
-      nx = p.x;
-      ny = p.y;
     }
-  } else {
-    const exclude = ref?.kind === "segment" ? { excludeSegmentIds: new Set([ref.id]) }
-      : ref?.kind === "beam" ? { excludeBeamIds: new Set([ref.id]) } : undefined;
-    const snapped = applySnap(x, y, exclude);
-    nx = snapped.x;
-    ny = snapped.y;
   }
+  const exclude = ref?.kind === "segment" ? { excludeSegmentIds: new Set([ref.id]) }
+    : ref?.kind === "beam" ? { excludeBeamIds: new Set([ref.id]) } : undefined;
+  return applySnap(x, y, exclude);
+}
+
+function applySegmentEnd(obj, end, x, y, lockAxis, origin, ref) {
+  const aim = segmentEndAim(x, y, lockAxis, origin, ref);
+  const nx = aim.x;
+  const ny = aim.y;
   const next = end === 1
     ? { x1: nx, y1: ny, x2: obj.x2, y2: obj.y2 }
     : { x1: obj.x1, y1: obj.y1, x2: nx, y2: ny };
@@ -6476,7 +6801,7 @@ function applySegmentEnd(obj, end, x, y, lockAxis, origin, ref) {
  * armed, including before the first click. Gap labels measure to one nearby
  * corner or wall face (marked with a square), never to a phantom alignment. */
 function drawSnapGuide(rect) {
-  if (!snapGuide) return;
+  if (!snapGuide || wallEdit?.mode === "split") return;
   const g = snapGuide;
   ctx.save();
   ctx.setLineDash([4, 3]);
@@ -6838,6 +7163,30 @@ function drawPolyDraft(points, colour) {
     const last = points[points.length - 1];
     drawLengthLabel(last.x, last.y, end.x, end.y);
   }
+}
+
+function drawMoveDraft() {
+  const from = moveSession?.base;
+  if (!from) return;
+  const end = { x: from.x + (moveSession.dx || 0), y: from.y + (moveSession.dy || 0) };
+  const [sx, sy] = worldToScreen(from.x, from.y);
+  ctx.save();
+  ctx.fillStyle = COLOUR.hover;
+  ctx.beginPath();
+  ctx.arc(sx, sy, 4, 0, Math.PI * 2);
+  ctx.fill();
+  if (end && Math.hypot(end.x - from.x, end.y - from.y) >= 0.05) {
+    const [ex, ey] = worldToScreen(end.x, end.y);
+    ctx.strokeStyle = COLOUR.hover;
+    ctx.lineWidth = 1.4;
+    ctx.setLineDash([6, 4]);
+    ctx.beginPath();
+    ctx.moveTo(sx, sy);
+    ctx.lineTo(ex, ey);
+    ctx.stroke();
+  }
+  ctx.restore();
+  if (end) drawLengthLabel(from.x, from.y, end.x, end.y);
 }
 
 function drawLineDraft() {
@@ -7266,6 +7615,53 @@ function inspectKindLabel(kind, sku) {
   return "";
 }
 
+const HISTORY_KIND = {
+  segment: "wall",
+  opening: "opening",
+  slab: "floor",
+  roof: "roof",
+  room: "room",
+  item: "item",
+  beam: "beam",
+  serviceNode: "route point",
+  serviceEdge: "route",
+  finishRegion: "floor finish",
+  line: "line",
+  separation: "separation",
+  region: "region",
+  dimension: "dimension",
+  revisionCloud: "revision cloud",
+};
+
+/** One history-list noun: "room Bedroom", "wall 230 mm brick", "door". */
+function historyThing(ref) {
+  if (!ref) return "object";
+  const obj = objByRef(ref);
+  const sku = obj?.sku ? skuById(obj.sku) : null;
+  const kind = (inspectKindLabel(ref.kind, sku) || HISTORY_KIND[ref.kind] || "object").toLowerCase();
+  const name = obj?.name && String(obj.name).trim();
+  if (name && name.toLowerCase() !== kind) return `${kind} ${name}`;
+  if (sku?.name && sku.name.toLowerCase() !== kind) return `${kind} ${sku.name}`;
+  return kind;
+}
+
+function historyDid(verb, refs = store.selected) {
+  return historyAction(verb, (refs || []).map((ref) => historyThing(ref)));
+}
+
+/** A draw or place, named from the type that is armed. */
+function historyPlaced(verb, fallback) {
+  const sku = placeSkuId ? skuById(placeSkuId) : null;
+  const kind = ((sku && inspectKindLabel(sku.category, sku)) || fallback || "object").toLowerCase();
+  const type = sku?.name && sku.name.toLowerCase() !== kind ? sku.name : "";
+  return historyAction(verb, [type ? `${kind} ${type}` : kind]);
+}
+
+/** Snapshot a press that may become a drag. A click that does not move leaves no row. */
+function holdUndo(label) {
+  store.pushUndo(label, { pending: true });
+}
+
 function skuDimLabel(sku) {
   const g = sku.geometry || {};
   if (g.width && g.height && (sku.category === "door" || sku.category === "window")) {
@@ -7273,6 +7669,10 @@ function skuDimLabel(sku) {
   }
   if (isStripFooting(sku) && g.width && g.depth) {
     return `${Math.round(g.width * 1000)} × ${Math.round(g.depth * 1000)} mm`;
+  }
+  if (sku.category === "wall" || sku.category === "foundation" || sku.category === "boundarywall") {
+    const label = wallThicknessLabel(sku);
+    if (label) return label;
   }
   if (g.thickness) return `${Math.round(g.thickness * 1000)} mm`;
   if (g.width) return `${Math.round(g.width * 1000)} mm`;
@@ -7395,8 +7795,15 @@ function renderPalette() {
     if (!groups.has(sku.category)) groups.set(sku.category, []);
     groups.get(sku.category).push(sku);
   }
+  const showingDoors = Boolean(effectiveFilter?.includes("door")) || groups.has("door");
+  const recent = showingDoors
+    ? recentDoorSkus(pack.skus, recentDoorIds).filter((sku) => {
+      if (!q) return true;
+      return `${sku.id} ${sku.name} ${sku.category}`.toLowerCase().includes(q);
+    })
+    : [];
   el.skuList.innerHTML = "";
-  if (!groups.size) {
+  if (!groups.size && !recent.length) {
     el.skuList.innerHTML = `<p class="hint palette-idle">No types match.</p>`;
     paletteSkuOrder = [];
     return;
@@ -7404,50 +7811,56 @@ function renderPalette() {
   // Flat, category-ordered list mirroring what's on screen right now: the
   // type detail overlay's prev/next and side rail walk this same order, so
   // "other options" means exactly what the palette is currently showing.
+  // Recently used is an extra row under that list, not a second library.
   paletteSkuOrder = [];
-  for (const [cat, skus] of groups) {
-    const wrap = document.createElement("div");
-    wrap.className = "planner-sku-group";
-    wrap.innerHTML = `<h3>${escapeHtml(CATEGORY_LABEL[cat] || cat)}</h3>`;
-    for (const sku of skus) {
-      paletteSkuOrder.push(sku);
-      const row = document.createElement("div");
-      row.className = "sku-row";
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "sku-item";
-      if (placeSkuId === sku.id) btn.classList.add("active");
-      btn.innerHTML = `<span class="sku-name">${escapeHtml(sku.name)}</span><span class="sku-meta">${escapeHtml(sku.id)} · ${escapeHtml(skuDimLabel(sku))}</span>`;
-      btn.addEventListener("click", () => onSkuClick(sku));
-      const expand = document.createElement("button");
-      expand.type = "button";
-      expand.className = "sku-expand";
-      expand.title = "Preview this type";
-      expand.setAttribute("aria-label", `Preview ${sku.name}`);
-      expand.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M1.5 12S5 5 12 5s10.5 7 10.5 7-3.5 7-10.5 7S1.5 12 1.5 12z"/><circle cx="12" cy="12" r="3"/></svg><span class="sku-expand-label">Preview</span>`;
-      // Preview is a deliberate escalation, not part of picking a type: stop
-      // the click from also bubbling into the sku-item's onSkuClick.
-      expand.addEventListener("click", (ev) => {
-        ev.stopPropagation();
-        openTypeDetail(sku);
-      });
-      row.appendChild(btn);
-      row.appendChild(expand);
-      wrap.appendChild(row);
-    }
-    el.skuList.appendChild(wrap);
-  }
+  for (const [cat, skus] of groups) appendPaletteGroup(CATEGORY_LABEL[cat] || cat, skus, true);
+  if (recent.length) appendPaletteGroup("Recently used", recent, false);
   syncTypeCurrent();
+}
+
+function appendPaletteGroup(title, skus, trackOrder) {
+  const wrap = document.createElement("div");
+  wrap.className = "planner-sku-group";
+  wrap.innerHTML = `<h3>${escapeHtml(title)}</h3>`;
+  for (const sku of skus) {
+    if (trackOrder) paletteSkuOrder.push(sku);
+    const row = document.createElement("div");
+    row.className = "sku-row";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "sku-item";
+    if (placeSkuId === sku.id) btn.classList.add("active");
+    btn.innerHTML = `<span class="sku-name">${escapeHtml(sku.name)}</span><span class="sku-meta">${escapeHtml(sku.id)} · ${escapeHtml(skuDimLabel(sku))}</span>`;
+    btn.addEventListener("click", () => onSkuClick(sku));
+    const expand = document.createElement("button");
+    expand.type = "button";
+    expand.className = "sku-expand";
+    expand.title = "Preview this type";
+    expand.setAttribute("aria-label", `Preview ${sku.name}`);
+    expand.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M1.5 12S5 5 12 5s10.5 7 10.5 7-3.5 7-10.5 7S1.5 12 1.5 12z"/><circle cx="12" cy="12" r="3"/></svg><span class="sku-expand-label">Preview</span>`;
+    expand.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      openTypeDetail(sku);
+    });
+    row.appendChild(btn);
+    row.appendChild(expand);
+    wrap.appendChild(row);
+  }
+  el.skuList.appendChild(wrap);
 }
 
 function onSkuClick(sku) {
   setTypeFlyoutOpen(false);
   holdInspectorGraph(() => {
-    if (applySkuToSelection(sku)) {
+    const armed = placingToolArmed() && (!paletteFilter || paletteFilter.includes(sku.category));
+    // A drawing tool is choosing the next thing to place. Retyping the
+    // selection is what the palette does when nothing is armed.
+    if (!armed && applySkuToSelection(sku)) {
       render();
       return;
     }
     placeSkuId = sku.id;
+    if (armed) placeSkuMemory = rememberFunctionSku(placeSkuMemory, activeFunction, sku.id);
     beamStart = null;
     lineStart = null;
     wallDraft = null;
@@ -7484,10 +7897,11 @@ function onSkuClick(sku) {
  */
 function applySkuToSelection(sku) {
   if (!store.selected.length) return false;
-  store.pushUndo();
+  const what = historyAction("the", store.selected.map((ref) => historyThing(ref))).replace(/^the /, "");
+  store.pushUndo(`Changed ${what} to ${sku.name}`);
   const result = retypeSelection(store.doc, store.selected, sku, { skuById });
   if (!result.ok) {
-    store.undoStack.pop();
+    store.dropUndo();
     return false;
   }
   store.setSelection(result.refs, store.primary);
@@ -7771,7 +8185,7 @@ function drawRibbon() {
     activeFunction,
     skuCount,
     commandState: ribbonCommandState,
-    hasSelection: () => store.selected.length > 0,
+    hasSelection: () => store.selected.length > 0 || underlaySelected,
     serviceSelected: serviceRibbonSelection,
     sheetLoaded: () => Boolean(store.doc.underlay),
     onTab: (id) => {
@@ -7824,6 +8238,14 @@ function updateRibbonHint() {
   }
   // While the attach target pick is armed the hint is the live preview of what
   // the hovered candidate would do, or why it cannot be picked.
+  if (tool === "move") {
+    setRibbonHint(!moveSession?.base
+      ? "Click the point to move from."
+      : moveSession.stopped
+        ? "The floor stops the finish here. Click to place it, or type a shorter distance. Esc cancels."
+        : "Click where that point should land, or type the distance and press Enter. Esc cancels.");
+    return;
+  }
   if (attachPick) {
     const hoverText = attachPick.hover ? attachHoverText(attachPick.hover) : null;
     setRibbonHint(hoverText ? hoverText.text : HINTS.attach, Boolean(hoverText?.warn));
@@ -7864,6 +8286,23 @@ function updateRibbonHint() {
   }
   if (tool === "room" && roomDraft?.length) {
     setRibbonHint("Click the next corner. Enter closes the room.");
+    return;
+  }
+  if ((tool === "slab" || tool === "roof") && boundaryDraft?.length) {
+    setRibbonHint("Click the next corner. Enter closes the outline.");
+    return;
+  }
+  if ((tool === "slab" || tool === "roof") && !shapeDraft) {
+    const noun = tool === "roof" ? "roof" : "floor";
+    if (shapePlaceMode === "room") {
+      setRibbonHint(`Click a room. The ${noun} takes that outline.`);
+      return;
+    }
+    if (shapePlaceMode === "footprint") {
+      setRibbonHint(`Click inside the external walls. The ${noun} follows them.`);
+      return;
+    }
+    setRibbonHint(`Click each corner. Enter closes the ${noun}. Follow external walls in the inspector to tie it to the walls.`);
     return;
   }
   if (tool === "region") {
@@ -7929,6 +8368,17 @@ function updateRibbonHint() {
       return;
     }
   }
+  if (tool === "place") {
+    const surface = socketSurface(skuById(placeSkuId));
+    if (surface === "wall") {
+      setRibbonHint("Click a wall. The plug stays on that wall.");
+      return;
+    }
+    if (surface === "floor") {
+      setRibbonHint("Click inside a floor. The point stays on that floor.");
+      return;
+    }
+  }
   const hint = activeFunction && HINTS[activeFunction];
   setRibbonHint(hint || "");
 }
@@ -7943,6 +8393,16 @@ function setDensity(next) {
 
 /** Hide/show and scale live on the ribbon, so those buttons reflect whether a sheet is loaded, visible, or currently being calibrated. */
 function ribbonCommandState(item) {
+  if (item.id === "undo") {
+    return store.canUndo()
+      ? { title: "Undo the last step" }
+      : { disabled: true, title: "Nothing to undo" };
+  }
+  if (item.id === "redo") {
+    return store.redoStack.length
+      ? { title: "Redo the last undone step" }
+      : { disabled: true, title: "Nothing to redo" };
+  }
   if (item.id === "rotate" && selectedDoor()) {
     return { label: "Flip hinge", title: "Flip which end the door hinges from" };
   }
@@ -7986,6 +8446,13 @@ function ribbonCommandState(item) {
       disabled: !attached.length,
       title: attached.length ? HINTS.detach : "Nothing selected is attached to anything.",
     };
+  }
+  if (item.id === "move") {
+    if (tool === "move") return { active: true, title: HINTS.move };
+    const target = resolveMoveTarget();
+    return target.ok
+      ? { title: HINTS.move }
+      : { disabled: true, title: target.reason };
   }
   if (item.id === "select-similar") {
     if (store.selected.length !== 1) return { disabled: true, title: "Select one wall, foundation, beam, roof, floor, door, window or item first." };
@@ -8038,6 +8505,22 @@ function ribbonCommandState(item) {
       title: can ? "Click the same point on each sheet. Lines up different floors, or two drawings of one floor. Other sheets move onto the one that stays put." : "Import a multi-page PDF and show one of its sheets first.",
     };
   }
+  if (item.id === "trace-view") {
+    const loaded = Boolean(store.doc.underlay);
+    const hidden = isUnderlayHidden(store.doc);
+    const sheet = traceView === "sheet";
+    return {
+      disabled: !loaded || hidden,
+      label: sheet ? "Sheet" : "Model",
+      title: !loaded
+        ? "Load a PDF, image or satellite view first."
+        : hidden
+          ? "Show the underlay first."
+          : sheet
+            ? "The sheet is on top of the walls. Click to show the modelled walls."
+            : "The modelled walls are on top. Click to show the sheet, including its openings.",
+    };
+  }
   const ids = new Set(["underlay-adjust", "calibrate", "underlay-toggle", "underlay-off"]);
   if (!ids.has(item.id)) return null;
   const loaded = Boolean(store.doc.underlay);
@@ -8070,6 +8553,7 @@ function onRibbonFunction(item) {
     runCommand(item.command);
     return;
   }
+  abandonMove();
   setPanMode(false);
   if (serviceRoute?.fromNodeId) finishServiceRoute({ select: false });
   serviceRoute = null;
@@ -8079,13 +8563,20 @@ function onRibbonFunction(item) {
   lastPaletteLabel = item.categories ? item.label : lastPaletteLabel;
   tool = item.tool || "select";
   if (tool !== "door") doorHandSign = 1;
-  placeSkuId = pack.skus.find((s) => (item.categories || []).includes(s.category))?.id ?? null;
+  const armed = armPlacement(
+    { placeSkuId, wallLocation, memory: placeSkuMemory },
+    item,
+    pack.skus,
+  );
+  placeSkuId = armed.placeSkuId;
+  wallLocation = armed.wallLocation;
   beamStart = null;
   lineStart = null;
   wallDraft = null;
   shapeDraft = null;
   sizeDraft = null;
   roomDraft = null;
+  boundaryDraft = null;
   regionDraft = null;
   measureDraft = null;
   showDimensions = false;
@@ -8103,15 +8594,93 @@ function onRibbonFunction(item) {
 }
 
 /** One entry point so the ribbon, the keyboard and the header buttons agree. */
+function stepHistory(dir) {
+  if (dir === "redo") store.redo();
+  else store.undo();
+  syncPackLevels();
+  drawLevelSwitcher();
+  render();
+}
+
+let historyOpen = true;
+let lastHistoryKey = "";
+
+function syncHistoryPanel() {
+  const list = document.getElementById("v2-history-list");
+  if (list) {
+    const html = historyListHtml(store.undoStack, store.redoStack);
+    if (list.dataset.mark !== html) {
+      list.innerHTML = html;
+      list.dataset.mark = html;
+      const current = list.querySelector(".is-current");
+      if (current) {
+        const top = current.offsetTop;
+        const bottom = top + current.offsetHeight;
+        if (top < list.scrollTop) list.scrollTop = top;
+        else if (bottom > list.scrollTop + list.clientHeight) list.scrollTop = bottom - list.clientHeight;
+      }
+    }
+  }
+  const canUndo = store.canUndo();
+  const canRedo = store.redoStack.length > 0;
+  for (const id of ["v2-undo", "v2-history-undo"]) {
+    const btn = document.getElementById(id);
+    if (btn) btn.disabled = !canUndo;
+  }
+  for (const id of ["v2-redo", "v2-history-redo"]) {
+    const btn = document.getElementById(id);
+    if (btn) btn.disabled = !canRedo;
+  }
+  const key = `${canUndo}|${canRedo}`;
+  if (key !== lastHistoryKey) {
+    lastHistoryKey = key;
+    drawRibbon();
+  }
+  const notice = store.takeHistoryNotice();
+  if (notice) setStatusMessage(notice);
+}
+
+function setHistoryOpen(open) {
+  historyOpen = Boolean(open);
+  try { localStorage.setItem("v2-history-open", historyOpen ? "1" : "0"); } catch { /* private mode */ }
+  const panel = document.getElementById("v2-history");
+  if (panel) panel.hidden = !historyOpen;
+  const toggle = document.getElementById("v2-history-toggle");
+  if (toggle) {
+    toggle.setAttribute("aria-pressed", historyOpen ? "true" : "false");
+    toggle.classList.toggle("active", historyOpen);
+  }
+}
+
+function wireHistory() {
+  try { historyOpen = localStorage.getItem("v2-history-open") !== "0"; } catch { historyOpen = true; }
+  setHistoryOpen(historyOpen);
+  document.getElementById("v2-history-hide")?.addEventListener("click", () => setHistoryOpen(false));
+  document.getElementById("v2-history-toggle")?.addEventListener("click", () => setHistoryOpen(!historyOpen));
+  document.getElementById("v2-redo")?.addEventListener("click", () => runCommand("redo"));
+  document.getElementById("v2-history-undo")?.addEventListener("click", () => runCommand("undo"));
+  document.getElementById("v2-history-redo")?.addEventListener("click", () => runCommand("redo"));
+}
+
 function runCommand(name) {
   setPanMode(false);
+  if (name !== "move" && name !== "undo") abandonMove();
   switch (name) {
     // Undo can restore a document with a different level stack (an inserted
     // level, or one that had not been inserted yet), so the merged pack has to
     // be rebuilt before anything redraws.
-    case "undo": store.undo(); syncPackLevels(); drawLevelSwitcher(); break;
-    case "group": store.groupSelection(); store.persist(); break;
-    case "ungroup": store.ungroupSelection(); store.persist(); break;
+    case "undo":
+      if (tool === "move" && moveSession?.base) { cancelMoveStep(); break; }
+      if (tool === "move") endMoveTool();
+      stepHistory("undo");
+      return;
+    case "redo":
+      if (moveSession?.base) abandonMove();
+      else if (tool === "move") endMoveTool();
+      stepHistory("redo");
+      return;
+    case "group": store.groupSelection(historyDid("Grouped")); store.persist(); break;
+    case "ungroup": store.ungroupSelection(historyDid("Ungrouped")); store.persist(); break;
     case "delete": deleteSelection(); break;
     case "compile": runCompile(); return;
     case "boq": runBoq(); return;
@@ -8145,6 +8714,7 @@ function runCommand(name) {
     case "underlay-adjust": startUnderlayAdjust(); return;
     case "calibrate": startCalibration(); return;
     case "underlay-toggle": toggleUnderlayVisibility(); return;
+    case "trace-view": toggleTraceView(); return;
     case "level-isolate":
       setIsolateCurrentLevel(!isolateCurrentLevel);
       return;
@@ -8165,6 +8735,7 @@ function runCommand(name) {
     case "attach": startAttachPick(); return;
     case "detach": runDetach(); return;
     case "select-similar": runSelectSimilar(); return;
+    case "move": startMove(); return;
     case "rotate":
       if (!flipDoors("hinge")) modifySelection("rotate");
       break;
@@ -8204,10 +8775,14 @@ function modifySelection(op) {
     setStatusMessage(refusal, "warn");
     return;
   }
-  store.pushUndo();
+  const verb = {
+    rotate: "Rotated", mirror: "Mirrored", copy: "Copied", align: "Aligned",
+    merge: "Merged", split: "Split", cut: "Cut", join: "Joined",
+  }[op] || "Edited";
+  store.pushUndo(historyDid(verb));
   const result = run(store.doc, store.selected, { anchorRef: store.primary });
   if (!result.ok) {
-    store.undoStack.pop();
+    store.dropUndo();
     setStatusMessage(result.message, "warn");
     return;
   }
@@ -8546,7 +9121,7 @@ function startLineTool(kind) {
 
 function commitLine(kind, a, b) {
   if (!canCommitLine(a, b)) return;
-  store.pushUndo();
+  store.pushUndo(historyPlaced("Drew", "line"));
   store.doc.lines.push({
     id: nid("ln"), kind, level: activeLevel, x1: a.x, y1: a.y, x2: b.x, y2: b.y, status: placementStatus(),
   });
@@ -8558,6 +9133,7 @@ function startSeparation() {
   sizeDraft = null;
   paletteFilter = null;
   roomDraft = null;
+  boundaryDraft = null;
   regionDraft = null;
   tool = "separation";
   activeFunction = "room-sep";
@@ -8572,7 +9148,7 @@ function startSeparation() {
 function commitSeparation(a, b) {
   if (!canCommitLine(a, b)) return;
   if (!Array.isArray(store.doc.separations)) store.doc.separations = [];
-  store.pushUndo();
+  store.pushUndo("Drew a room separation");
   store.doc.separations.push({
     id: nid("sp"), separation: true, level: activeLevel, x1: a.x, y1: a.y, x2: b.x, y2: b.y, status: placementStatus(),
   });
@@ -8583,6 +9159,7 @@ function startRegion(opts = null) {
   regionFinish = opts?.finish || null;
   regionDraft = [];
   roomDraft = null;
+  boundaryDraft = null;
   lineStart = null;
   tool = "region";
   activeFunction = "region";
@@ -8606,7 +9183,7 @@ function finishRegionDraft() {
     return;
   }
   if (!Array.isArray(store.doc.regions)) store.doc.regions = [];
-  store.pushUndo();
+  store.pushUndo("Drew region");
   const region = {
     id: nid("rg"),
     level: activeLevel,
@@ -8652,6 +9229,7 @@ function finishRoomDraft() {
     ? commitRoomRecord({ shape: polyShape(face), seed: { x: cx, y: cy }, bound: true })
     : commitRoomRecord({ shape: polyShape(points) });
   roomDraft = null;
+  boundaryDraft = null;
   store.setSelection([{ kind: "room", id: room.id }]);
   setStatusMessage("Room placed. Set its use in the inspector.", "ok");
   updateRibbonHint();
@@ -8722,7 +9300,7 @@ function finishMeasure(target) {
     return;
   }
   if (!Array.isArray(store.doc.dimensions)) store.doc.dimensions = [];
-  store.pushUndo();
+  store.pushUndo("Drew a dimension");
   store.doc.dimensions.push({
     id: nid("dim"),
     level: activeLevel,
@@ -9722,7 +10300,7 @@ const sheetUi = createSheetUi({
       return null;
     }
   },
-  pushUndo: () => store.pushUndo(),
+  pushUndo: (label) => store.pushUndo(label || "Edited sheets"),
   changed: () => {
     store.persist();
     drawRibbon();
@@ -10279,7 +10857,7 @@ function syncAlignmentGhosts() {
 }
 
 function placeAlignmentPoint(wx, wy) {
-  store.pushUndo();
+  store.pushUndo("Aligned sheets");
   const result = markAlignmentPoint(store.doc, wx, wy, visibleLevels().map((l) => l.id));
   store.persist();
   syncToolButtons();
@@ -10291,9 +10869,14 @@ function placeAlignmentPoint(wx, wy) {
       ? `Marked on ${result.page.label}. Switch to ${waiting[0].label} and click the same point there.`
       : `Marked on ${result.page.label}.`, "ok");
   } else {
-    const movedLabels = result.moved.map((i) => store.doc.sheetSet.pages.find((p) => p.index === i)?.label).filter(Boolean);
+    const labelOf = (i) => store.doc.sheetSet.pages.find((p) => p.index === i)?.label;
+    const movedLabels = result.moved.map(labelOf).filter(Boolean);
+    const followedLabels = (result.followed || []).map(labelOf).filter(Boolean);
     const beneath = movedLabels.length === 1 ? "The other sheet shows faintly beneath." : "The other sheets show faintly beneath.";
-    setStatusMessage(`Aligned: ${movedLabels.join(", ")} moved onto ${result.datum.label}. ${beneath}`, "ok");
+    const withWalls = followedLabels.length
+      ? ` Walls drawn on ${followedLabels.join(", ")} moved with that sheet.`
+      : "";
+    setStatusMessage(`Aligned: ${movedLabels.join(", ")} moved onto ${result.datum.label}. ${beneath}${withWalls}`, "ok");
   }
   render();
 }
@@ -10429,7 +11012,7 @@ function finishPropertyLine() {
     setStatusMessage("A property line needs at least 3 points.", "warn");
     return;
   }
-  store.pushUndo();
+  store.pushUndo("Drew property line");
   setPropertyLine(store.doc, siteDraft.map((p) => [p.x, p.y]));
   siteDraft = null;
   tool = "select";
@@ -10464,7 +11047,7 @@ function confirmSgReference() {
     setStatusMessage("Enter numeric real-world X and Y coordinates.", "warn");
     return;
   }
-  store.pushUndo();
+  store.pushUndo("Set coordinates");
   setSgReference(store.doc, { erfNumber, real: [x, y], plan: [sgPick.x, sgPick.y] });
   sgPick = null;
   tool = "select";
@@ -10494,7 +11077,7 @@ function runAutoBuildingLine() {
     setStatusMessage(`Could not derive a building line: ${result.reason}.`, "warn");
     return;
   }
-  store.pushUndo();
+  store.pushUndo("Set building line");
   setBuildingLine(store.doc, result.points, { derived: true });
   store.persist();
   setStatusMessage(`Building line set ${formatLengthMm(result.setback)} mm inside the property line.`, "ok");
@@ -10567,6 +11150,19 @@ async function removeUnderlay() {
   });
 }
 
+function toggleTraceView() {
+  if (!store.doc.underlay || isUnderlayHidden(store.doc)) {
+    setStatusMessage("Show a sheet first.", "warn");
+    return;
+  }
+  traceView = nextTraceView(traceView);
+  setStatusMessage(traceView === "sheet"
+    ? "Sheet on top. Openings on the PDF stay visible."
+    : "Modelled walls on top of the sheet.", "ok");
+  drawRibbon();
+  render();
+}
+
 function toggleUnderlayVisibility() {
   if (!store.doc.underlay) {
     setStatusMessage("Load an underlay first.", "warn");
@@ -10606,6 +11202,278 @@ const ATTACH_HOVER_REASON = {
 
 function attachRefKey(ref) {
   return `${ref.kind}:${ref.id}`;
+}
+
+/**
+ * What Move can act on right now. A tiled area wins over the floor it sits on.
+ * The sheet wins when it is the selection. Otherwise one wall.
+ */
+function resolveMoveTarget() {
+  const region = editingFinishRegion();
+  if (region) {
+    if (regionCoversHost(region)) {
+      return { ok: false, reason: "That finish covers the whole floor. Select a tiled area inside the floor, one wall, or the sheet." };
+    }
+    return { ok: true, kind: "finishRegion", region };
+  }
+  if (underlaySelected) {
+    if (!store.doc.underlay) return { ok: false, reason: "Load a sheet first." };
+    if (isUnderlayHidden(store.doc)) return { ok: false, reason: "Show the sheet first." };
+    if (store.doc.underlay.pinned) return { ok: false, reason: "This sheet is pinned. Unpin it in the bar above the plan to move it." };
+    return { ok: true, kind: "underlay" };
+  }
+  if (store.selected.length === 1 && store.primary?.kind === "segment") {
+    return { ok: true, kind: "segment", ref: { kind: "segment", id: store.primary.id } };
+  }
+  return { ok: false, reason: "Select one wall, one tiled area, or the sheet, then Move." };
+}
+
+function moveSnapExclude() {
+  if (moveSession?.kind === "segment") return { excludeSegmentIds: new Set([moveSession.ref.id]) };
+  if (moveSession?.kind === "finishRegion") {
+    return { activeShape: { kind: "finish", id: moveSession.ref.id, all: true, x: 0, y: 0 } };
+  }
+  return {};
+}
+
+/** Where the base point should land: a snap, or a typed distance along that aim. */
+function moveDestination(wx, wy) {
+  const p = applySnap(wx, wy, moveSnapExclude());
+  if (!moveSession?.base || !sizeDraft?.lockW) return p;
+  const len = parseLengthInput(sizeDraft.typedW, Math.hypot(p.x - moveSession.base.x, p.y - moveSession.base.y) || 1);
+  const end = setLineLength(moveSession.base, p, len, (n) => roundGrid(n, activeGrid()));
+  if (snapGuide) {
+    snapGuide.x = end.x;
+    snapGuide.y = end.y;
+    snapGuide.exactJoin = false;
+    snapGuide.snapped = true;
+  }
+  return end;
+}
+
+function restoreMoveOrigin() {
+  const session = moveSession;
+  if (!session) return;
+  if (session.kind === "segment") {
+    store.applyMoveSnapshot([{ ref: session.ref, ...session.origin }], 0, 0, null);
+  } else if (session.kind === "underlay") {
+    moveUnderlayTo(store.doc, session.origin.x, session.origin.y);
+  } else if (session.kind === "finishRegion") {
+    const region = (store.doc.finishRegions || []).find((r) => r.id === session.ref.id);
+    if (region) {
+      region.shape = structuredClone(session.origin.shape);
+      if (session.origin.whole) region.whole = true;
+      else delete region.whole;
+      if (session.origin.seed) region.seed = { x: session.origin.seed.x, y: session.origin.seed.y };
+    }
+  }
+}
+
+function applyMovePreview(wx, wy) {
+  if (!moveSession?.base) return;
+  const dest = moveDestination(wx, wy);
+  let dx = dest.x - moveSession.base.x;
+  let dy = dest.y - moveSession.base.y;
+  moveSession.stopped = false;
+  if (moveSession.kind === "finishRegion") {
+    const clamped = clampDeltaInside(moveSession.origin.points, dx, dy, moveSession.host);
+    dx = clamped.dx;
+    dy = clamped.dy;
+    moveSession.stopped = clamped.stopped;
+    const region = (store.doc.finishRegions || []).find((r) => r.id === moveSession.ref.id);
+    if (region) {
+      region.shape = {
+        kind: "poly",
+        points: moveSession.origin.points.map(([x, y]) => [x + dx, y + dy]),
+      };
+      delete region.whole;
+      if (moveSession.origin.seed) {
+        region.seed = { x: moveSession.origin.seed.x + dx, y: moveSession.origin.seed.y + dy };
+      }
+    }
+  } else if (moveSession.kind === "underlay") {
+    moveUnderlayTo(store.doc, moveSession.origin.x + dx, moveSession.origin.y + dy);
+  } else {
+    store.applyMoveSnapshot([{ ref: moveSession.ref, ...moveSession.origin }], dx, dy, null);
+  }
+  moveSession.dx = dx;
+  moveSession.dy = dy;
+}
+
+function endMoveTool() {
+  moveSession = null;
+  sizeDraft = null;
+  snapGuide = null;
+  if (tool === "move") tool = "select";
+  if (activeFunction === "move") activeFunction = null;
+  setDistanceField(false);
+  syncToolButtons();
+  drawRibbon();
+}
+
+/** Drop a from-point that has not been placed, and put the object back. */
+function cancelMoveStep() {
+  if (!moveSession?.base) {
+    endMoveTool();
+    setStatusMessage("Move cancelled.", "ok");
+    render();
+    return;
+  }
+  restoreMoveOrigin();
+  store.dropUndo();
+  moveSession.base = null;
+  moveSession.dx = 0;
+  moveSession.dy = 0;
+  moveSession.stopped = false;
+  sizeDraft = null;
+  snapGuide = null;
+  setStatusMessage("Click the point to move from.", "ok");
+  render();
+}
+
+/** Leave Move. A preview that was not placed is put back and its undo entry dropped. */
+function abandonMove() {
+  if (!moveSession) return;
+  if (moveSession.base) {
+    restoreMoveOrigin();
+    store.dropUndo();
+  }
+  endMoveTool();
+}
+
+function startMove() {
+  if (tool === "move") {
+    abandonMove();
+    setStatusMessage("Move cancelled.", "ok");
+    render();
+    return;
+  }
+  const target = resolveMoveTarget();
+  if (!target.ok) {
+    setStatusMessage(target.reason, "warn");
+    return;
+  }
+  wallEdit = null;
+  wallDraft = null;
+  shapeDraft = null;
+  beamStart = null;
+  lineStart = null;
+  sizeDraft = null;
+  snapGuide = null;
+  if (target.kind === "segment") {
+    const obj = objByRef(target.ref);
+    if (!obj) return;
+    moveSession = {
+      kind: "segment",
+      ref: target.ref,
+      origin: { x1: obj.x1, y1: obj.y1, x2: obj.x2, y2: obj.y2 },
+      base: null,
+      dx: 0,
+      dy: 0,
+      stopped: false,
+    };
+  } else if (target.kind === "underlay") {
+    moveSession = {
+      kind: "underlay",
+      ref: null,
+      origin: { x: store.doc.underlay.x, y: store.doc.underlay.y },
+      base: null,
+      dx: 0,
+      dy: 0,
+      stopped: false,
+    };
+  } else {
+    const region = target.region;
+    moveSession = {
+      kind: "finishRegion",
+      ref: { kind: "finishRegion", id: region.id },
+      origin: {
+        shape: structuredClone(region.shape),
+        whole: Boolean(region.whole),
+        points: finishRegionPolygon(store.doc, region).map(([x, y]) => [x, y]),
+        seed: region.seed ? { x: region.seed.x, y: region.seed.y } : null,
+      },
+      host: finishRegionHost(region).map(([x, y]) => [x, y]),
+      base: null,
+      dx: 0,
+      dy: 0,
+      stopped: false,
+    };
+  }
+  tool = "move";
+  activeFunction = "move";
+  syncToolButtons();
+  drawRibbon();
+  setStatusMessage("Click the point to move from. The next click is where it lands.", "ok");
+  render();
+}
+
+function onMoveClick(wx, wy) {
+  if (!moveSession) return;
+  if (!moveSession.base) {
+    const p = applySnap(wx, wy);
+    moveSession.base = { x: p.x, y: p.y };
+    moveSession.dx = 0;
+    moveSession.dy = 0;
+    store.pushUndo(historyDid("Moved"));
+    setStatusMessage("Click where that point should land, or type the distance. Enter places it.", "ok");
+    render();
+    return;
+  }
+  applyMovePreview(wx, wy);
+  finishMove();
+}
+
+function finishMove() {
+  if (!moveSession?.base) return;
+  const dist = Math.hypot(moveSession.dx || 0, moveSession.dy || 0);
+  if (dist < 1e-4) {
+    restoreMoveOrigin();
+    store.dropUndo();
+    const stopped = moveSession.stopped;
+    moveSession.base = null;
+    moveSession.dx = 0;
+    moveSession.dy = 0;
+    moveSession.stopped = false;
+    sizeDraft = null;
+    snapGuide = null;
+    setStatusMessage(stopped
+      ? "The floor stops that move. Click the point to move from."
+      : "Click the point to move from.", stopped ? "warn" : "ok");
+    render();
+    return;
+  }
+  const stopped = moveSession.stopped;
+  const kind = moveSession.kind;
+  if (pack) syncHostedSockets(store.doc, pack);
+  if (kind === "segment") rehomeConnectedNodes(store.doc, pack);
+  store.persist();
+  endMoveTool();
+  setStatusMessage(stopped
+    ? "Moved. The floor stopped it on the edge."
+    : kind === "underlay" ? "Sheet moved." : kind === "segment" ? "Wall moved." : "Tiled area moved.", "ok");
+  render();
+}
+
+function moveOffsetLength() {
+  if (!moveSession?.base) return 0;
+  return Math.hypot(moveSession.dx || 0, moveSession.dy || 0);
+}
+
+function setDistanceField(on) {
+  const wrap = el.ctxLenWrap;
+  if (!wrap?.firstChild || wrap.firstChild.nodeType !== 3) return;
+  if (wrap.dataset.lenLabel == null) wrap.dataset.lenLabel = wrap.firstChild.textContent;
+  wrap.firstChild.textContent = on ? "Distance " : wrap.dataset.lenLabel;
+}
+
+function syncMoveDistanceField() {
+  setDistanceField(true);
+  if (!el.ctxLen) return;
+  const len = moveOffsetLength();
+  if (document.activeElement !== el.ctxLen) {
+    el.ctxLen.value = sizeDraft?.lockW ? sizeDraft.typedW : (len < 0.05 ? "" : formatLengthMm(len));
+  }
 }
 
 /**
@@ -10733,10 +11601,10 @@ function proposeAttach(targetRef) {
 
 /** Second half: apply exactly what the summary above described. */
 function commitAttach(targetRef) {
-  store.pushUndo();
+  store.pushUndo(historyDid("Attached the base of"));
   const result = attachSelection(store.doc, attachPick.refs, { pack, targetRef, commit: true });
   if (!result.ok) {
-    store.undoStack.pop();
+    store.dropUndo();
     setStatusMessage(result.message, "warn");
     return;
   }
@@ -10746,10 +11614,10 @@ function commitAttach(targetRef) {
 }
 
 function runDetach() {
-  store.pushUndo();
+  store.pushUndo(historyDid("Detached the base of"));
   const result = detachSelection(store.doc, store.selected, { pack });
   if (!result.ok) {
-    store.undoStack.pop();
+    store.dropUndo();
     setStatusMessage(result.message, "warn");
     return;
   }
@@ -11000,7 +11868,7 @@ const REVERTIBLE_DRAGS = new Set(["move", "segment-end", "shape-vertex", "shape-
  */
 function abortClickDraft() {
   if (!hasClickDraft({
-    wallDraft, shapeDraft, beamStart, lineStart, siteDraft, roomDraft, regionDraft, cameraDraft, sectionDraft, calloutDraft, revisionCloudDraft, measureDraft, calibration,
+    wallDraft, shapeDraft, beamStart, lineStart, siteDraft, roomDraft, boundaryDraft, regionDraft, cameraDraft, sectionDraft, calloutDraft, revisionCloudDraft, measureDraft, calibration,
     serviceRoute, serviceConnect,
   })) return false;
   if (serviceRoute?.fromNodeId) finishServiceRoute();
@@ -11011,6 +11879,7 @@ function abortClickDraft() {
   else if (lineStart) lineStart = null;
   else if (siteDraft?.length) siteDraft.pop();
   else if (roomDraft?.length) roomDraft.pop();
+  else if (boundaryDraft?.length) boundaryDraft.pop();
   else if (regionDraft?.length) regionDraft.pop();
   else if (cameraDraft?.a) cameraDraft = { a: null };
   else if (sectionDraft?.a) sectionDraft = { a: null };
@@ -11031,6 +11900,25 @@ function abortClickDraft() {
 function cancelDrawing() {
   // A click waiting on the PDF index must not place a point after Escape.
   pdfSnapClickGate += 1;
+  if (tool === "move") {
+    cancelMoveStep();
+    return;
+  }
+  if (wallEdit) {
+    if (drag?.kind === "wall-split") drag = null;
+    if (wallEdit.mode === "snap" && wallEdit.end) {
+      wallEdit.end = null;
+      wallEdit.fixed = null;
+      snapGuide = null;
+      setStatusMessage("Click a highlighted end. Esc cancels.", "ok");
+    } else {
+      wallEdit = null;
+      snapGuide = null;
+      setStatusMessage("Wall edit cancelled.", "ok");
+    }
+    render();
+    return;
+  }
   if (REVERTIBLE_DRAGS.has(drag?.kind)) {
     // undo() clears the selection; the user only cancelled a move, so put the
     // same objects back under the pointer.
@@ -11085,6 +11973,7 @@ function cancelDrawing() {
   calibration = null;
   siteDraft = null;
   roomDraft = null;
+  boundaryDraft = null;
   regionDraft = null;
   sgPick = null;
   attachPick = null;
@@ -11136,6 +12025,7 @@ function wireToolbar() {
       sizeDraft = null;
       siteDraft = null;
       roomDraft = null;
+  boundaryDraft = null;
       regionDraft = null;
       sgPick = null;
       attachPick = null;
@@ -11257,6 +12147,10 @@ function refreshLiveSnap() {
     shapeDraft.rect = rectFromDrag(shapeDraft.x0, shapeDraft.y0, p.x, p.y);
     return;
   }
+  if (wallEdit && tool === "select") {
+    previewWallEdit(hoverPoint.x, hoverPoint.y);
+    return;
+  }
   if (snapPreviewTool() || beamStart || lineStart) applySnap(hoverPoint.x, hoverPoint.y);
 }
 
@@ -11300,22 +12194,44 @@ function onPointerDown(ev) {
   const [wx, wy] = pointerWorld(ev);
   hoverPoint = { x: wx, y: wy };
 
+  if (tool === "move" && ev.button === 0 && moveSession) {
+    onMoveClick(wx, wy);
+    return;
+  }
+
+  if (tool === "select" && wallEdit?.mode === "split" && !attachPick && !ev.shiftKey && ev.button === 0) {
+    const sel = selectedWall();
+    if (sel && wallEdit.id === sel.obj.id) {
+      drag = { kind: "wall-split", id: sel.obj.id };
+      try { el.canvas.setPointerCapture(ev.pointerId); } catch { /* capture can fail if the pointer already ended */ }
+      previewWallEdit(wx, wy);
+      render();
+      return;
+    }
+  }
+
+  if (tool === "select" && wallEdit && !attachPick && !ev.shiftKey && handleWallEditClick(wx, wy)) return;
+
   // Endpoint handles are the selection's own; while a target pick or draw
   // tool is armed the click belongs to that tool, not to stretching a wall.
   const handle = (attachPick || tool !== "select") ? null : endpointHandleHit(wx, wy);
   if (handle && !ev.shiftKey) {
     const obj = objByRef({ kind: handle.target, id: handle.id });
     if (obj) {
-      store.pushUndo();
+      store.pushUndo(historyDid("Moved an end of"), { pending: true });
+      const ends = linearEnds(obj, handle.target);
+      const moving = ends.find((row) => row[2] === handle.end);
+      const fixed = ends.find((row) => row[2] !== handle.end);
       drag = {
         kind: "segment-end",
         id: handle.id,
         target: handle.target,
         end: handle.end,
-        fx: handle.end === 1 ? obj.x2 : obj.x1,
-        fy: handle.end === 1 ? obj.y2 : obj.y1,
-        mx: handle.end === 1 ? obj.x1 : obj.x2,
-        my: handle.end === 1 ? obj.y1 : obj.y2,
+        fx: fixed[0],
+        fy: fixed[1],
+        mx: moving[0],
+        my: moving[1],
+        before: handle.target === "segment" ? wallEndSnapshot() : null,
       };
       el.canvas.setPointerCapture(ev.pointerId);
       render();
@@ -11351,7 +12267,8 @@ function onPointerDown(ev) {
       const ring = editable.points;
       const vi = hitPolyVertexIndex(ring, wx, wy, shapeEditTol());
       if (vi != null) {
-        store.pushUndo();
+        selectedShapeEdge = null;
+        store.pushUndo(historyDid("Edited the outline of"), { pending: true });
         // A rectangle has no stored corner yet. Remember it for Delete only
         // once the drag turns the shape into a polygon.
         if (editable.obj.shape?.kind === "poly") selectedShapeVertex = { ref: editable.ref, index: vi };
@@ -11371,10 +12288,12 @@ function onPointerDown(ev) {
       // A door or window sits on this edge. The click belongs to the opening,
       // so the room edge is not reshaped out from under it.
       if (ei != null && !openingAt(wx, wy)) {
-        store.pushUndo();
+        store.pushUndo(historyDid("Edited the outline of"), { pending: true });
         const finishSnap = finishShapeSnapshot(editable.ref);
         let started = false;
         if (floorEdgeMoves(ev)) {
+          selectedShapeVertex = null;
+          selectedShapeEdge = { ref: editable.ref, index: ei };
           drag = {
             kind: "shape-edge",
             ref: editable.ref,
@@ -11388,10 +12307,12 @@ function onPointerDown(ev) {
           started = true;
         } else {
           const points = materializeShapePoly(editable);
-          if (!points) store.undoStack.pop();
+          if (!points) store.dropUndo();
           else {
             const insertAt = ei + 1;
+            clearShapeLink(editable.obj);
             points.splice(insertAt, 0, pointOnRingEdge(points, ei, wx, wy));
+            selectedShapeEdge = null;
             selectedShapeVertex = { ref: editable.ref, index: insertAt };
             drag = {
               kind: "shape-vertex",
@@ -11420,7 +12341,7 @@ function onPointerDown(ev) {
   if (underlayHandlesActive()) {
     const uHandle = underlayHandleHit(wx, wy);
     if (uHandle) {
-      store.pushUndo();
+      store.pushUndo("Adjusted sheet", { pending: true });
       if (uHandle.kind === "underlay-scale") {
         const corners = underlayCorners(store.doc);
         const draggedIndex = uHandle.corner;
@@ -11466,7 +12387,7 @@ function onPointerDown(ev) {
       promptCalibrationDistance();
       return;
     } else if (hitUnderlay(wx, wy) && !store.doc.underlay.pinned) {
-      store.pushUndo();
+      store.pushUndo("Adjusted sheet", { pending: true });
       drag = {
         kind: "underlay-move",
         x0: wx,
@@ -11634,7 +12555,19 @@ function onPointerDown(ev) {
   }
   if (tool === "slab" || tool === "roof") {
     underlaySelected = false;
-    clickShapeCorner(wx, wy);
+    if (shapePlaceMode === "room") {
+      if (!placeOutlineFromRoom(wx, wy)) {
+        setStatusMessage(tool === "roof" ? "Click a room to put the roof on it." : "Click a room to put the floor on it.", "warn");
+      }
+      return;
+    }
+    if (shapePlaceMode === "footprint") {
+      if (!placeOutlineFromFootprint(wx, wy)) {
+        setStatusMessage("Click inside the external walls.", "warn");
+      }
+      return;
+    }
+    clickBoundaryCorner(wx, wy);
     return;
   }
   if (tool === "wall") {
@@ -11691,13 +12624,14 @@ function onPointerDown(ev) {
   // node can be dragged straight away.
   const ghost = tool === "select" && !ev.shiftKey ? serviceGhost() : null;
   if (ghost && commitServiceGhost(ghost)) {
-    store.pushUndo(); // dropped again below if the pointer never moves
+    store.pushUndo(historyDid("Moved"), { pending: true }); // dropped again below if the pointer never moves
     drag = { kind: "move", snaps: store.snapshotMoveTargets(store.selected), x0: wx, y0: wy, moved: false };
     el.canvas.setPointerCapture(ev.pointerId);
     return;
   }
 
   const hit = hitTest(wx, wy);
+  selectedShapeEdge = null;
   if (hit) {
     // The floor outline is editable only while Floor is the selection. A press
     // on that floor, while a finish is selected, selects Floor and does not
@@ -11718,10 +12652,18 @@ function onPointerDown(ev) {
     if (clearFinishPick() && hit.kind === "segment") {
       setStatusMessage("Wall selected. Delete asks before the wall is removed.", "ok");
     }
-    store.pushUndo();
+    store.pushUndo(historyDid("Moved"), { pending: true });
     const slideId = hit.kind === "opening" && store.selected.every((r) => r.kind === "opening") ? hit.id : null;
+    const socketItem = hit.kind === "item" ? (store.doc.items || []).find((i) => i.id === hit.id) : null;
+    const slideSocket = socketItem?.host === "wall"
+      && store.selected.length === 1
+      && store.selected[0].kind === "item"
+      && store.selected[0].id === socketItem.id;
     if (slideId) {
       drag = { kind: "opening", id: slideId, x0: wx, y0: wy, moved: false };
+      el.canvas.setPointerCapture(ev.pointerId);
+    } else if (slideSocket) {
+      drag = { kind: "socket", id: socketItem.id, x0: wx, y0: wy, moved: false };
       el.canvas.setPointerCapture(ev.pointerId);
     } else {
       drag = { kind: "move", snaps: store.snapshotMoveTargets(store.selected), x0: wx, y0: wy, moved: false };
@@ -11732,7 +12674,7 @@ function onPointerDown(ev) {
       render();
       return;
     }
-    store.pushUndo();
+    store.pushUndo("Adjusted sheet", { pending: true });
     drag = {
       kind: "underlay-move",
       x0: wx,
@@ -11820,7 +12762,7 @@ function clickServicePoint(wx, wy) {
   if (serviceRoute && !serviceRouteFrom()) serviceRoute = null; // undone or deleted under us
   const tol = 10 / cam.scale;
 
-  store.pushUndo();
+  store.pushUndo("Drew a route");
   const undoDepth = store.undoStack.length;
   let networkId = serviceRoute?.networkId || null;
   if (!networkId) {
@@ -11914,7 +12856,7 @@ function leaveRouteForPlanClick(ev, wx, wy) {
   underlaySelected = false;
   propertySelected = false;
   store.selectOne(under);
-  store.pushUndo();
+  store.pushUndo(historyDid("Moved"), { pending: true });
   drag = { kind: "move", snaps: store.snapshotMoveTargets(store.selected), x0: wx, y0: wy, moved: false };
   el.canvas.setPointerCapture(ev.pointerId);
   render();
@@ -12039,7 +12981,7 @@ function beginRouteDrag(ev, wx, wy) {
   if (onSelected && !under) {
     const ghost = serviceGhost({ x: wx, y: wy });
     if (ghost && commitServiceGhost(ghost)) {
-      store.pushUndo(); // dropped again below if the pointer never moves
+      store.pushUndo(historyDid("Moved"), { pending: true }); // dropped again below if the pointer never moves
       drag = { kind: "move", snaps: store.snapshotMoveTargets(store.selected), x0: wx, y0: wy, moved: false };
       el.canvas.setPointerCapture(ev.pointerId);
       return true;
@@ -12049,7 +12991,7 @@ function beginRouteDrag(ev, wx, wy) {
   if (underlaySelected) drawRibbon();
   underlaySelected = false;
   propertySelected = false;
-  store.pushUndo();
+  store.pushUndo(historyDid("Moved"), { pending: true });
   drag = {
     kind: "move",
     snaps: store.snapshotMoveTargets(store.selected),
@@ -12065,7 +13007,7 @@ function beginRouteDrag(ev, wx, wy) {
 
 /** Turn a ghost into a real, selected node. */
 function commitServiceGhost(ghost) {
-  store.pushUndo();
+  store.pushUndo(historyDid("Added a node on"));
   const res = splitServiceEdge(store.doc, pack, ghost.edgeId, { x: ghost.x, y: ghost.y });
   if (!res.ok) {
     store.undo();
@@ -12119,7 +13061,7 @@ function clickServiceConnect(wx, wy) {
     setStatusMessage("Click a placed component on this level.", "warn");
     return;
   }
-  store.pushUndo();
+  store.pushUndo(historyDid("Connected"));
   const res = connectNode(store.doc, pack, serviceConnect.nodeId, item.id);
   if (!res.ok) {
     store.undo();
@@ -12177,6 +13119,89 @@ function finishWallSegment() {
   sizeDraft = { lockW: false, lockH: false, typedW: "", typedH: "", axis: "w" };
   wallDraft = { ...chainStart(end), chained: true };
   snapGuide = null;
+  updateRibbonHint();
+  render();
+}
+
+function outlineNoun() {
+  return tool === "roof" ? "roof" : "floor";
+}
+
+function placeOutlineFromRoom(wx, wy) {
+  const rooms = (store.doc.rooms || []).filter((room) => onActiveLevel(room) && planObjectVisible(room));
+  let room = null;
+  for (let i = rooms.length - 1; i >= 0; i -= 1) {
+    if (pointInPoly(wx, wy, roomPolygon(rooms[i]))) {
+      room = rooms[i];
+      break;
+    }
+  }
+  if (!room) return false;
+  const poly = roomPolygon(room);
+  if (poly.length < 3) return false;
+  const linked = room.bound === true && room.seed;
+  const row = commitLinkedOutline(tool, {
+    shape: polyShape(poly.map((p) => [p[0], p[1]])),
+    bound: Boolean(linked),
+    link: linked ? "room" : null,
+    seed: linked ? { x: room.seed.x, y: room.seed.y } : null,
+  });
+  if (!row) return false;
+  setStatusMessage(linked
+    ? `The ${outlineNoun()} follows this room.`
+    : `The ${outlineNoun()} copies this room.`, "ok");
+  render();
+  return true;
+}
+
+function placeOutlineFromFootprint(wx, wy) {
+  const face = footprintFace(store.doc, pack, activeLevel, wx, wy);
+  if (!face || face.length < 3) return false;
+  const row = commitLinkedOutline(tool, {
+    shape: polyShape(face),
+    bound: true,
+    link: "footprint",
+    seed: { x: wx, y: wy },
+  });
+  if (!row) return false;
+  setStatusMessage(`The ${outlineNoun()} follows the external walls.`, "ok");
+  render();
+  return true;
+}
+
+function clickBoundaryCorner(wx, wy) {
+  const p = applySnap(wx, wy);
+  if (!boundaryDraft?.length) {
+    boundaryDraft = [p];
+    setStatusMessage("Point 1 placed. Keep clicking each corner. Enter closes the outline.", "ok");
+    updateRibbonHint();
+    render();
+    return;
+  }
+  const first = boundaryDraft[0];
+  if (boundaryDraft.length >= 3 && Math.hypot(p.x - first.x, p.y - first.y) < 0.3) {
+    finishBoundaryDraft();
+    return;
+  }
+  boundaryDraft.push(p);
+  setStatusMessage(`Point ${boundaryDraft.length} placed. Enter closes the outline.`, "ok");
+  render();
+}
+
+function finishBoundaryDraft() {
+  if (!boundaryDraft || boundaryDraft.length < 3) {
+    setStatusMessage("An outline needs at least three corners.", "warn");
+    return;
+  }
+  const points = boundaryDraft.map((p) => [p.x, p.y]);
+  boundaryDraft = null;
+  const row = commitLinkedOutline(tool, { shape: polyShape(points) });
+  if (!row) return;
+  const [cx, cy] = points.reduce((s, p) => [s[0] + p[0], s[1] + p[1]], [0, 0]).map((n) => n / points.length);
+  const canFollow = Boolean(footprintFace(store.doc, pack, activeLevel, cx, cy));
+  setStatusMessage(canFollow
+    ? `${outlineNoun() === "roof" ? "Roof" : "Floor"} placed. Follow external walls in the inspector to tie it to the walls.`
+    : `${outlineNoun() === "roof" ? "Roof" : "Floor"} placed.`, "ok");
   updateRibbonHint();
   render();
 }
@@ -12285,6 +13310,265 @@ function placeFloorEdgeMode() {
   node.style.top = `${Math.round(Math.max(minTop, Math.min(top, maxTop)))}px`;
 }
 
+/** The one selected wall, which is the only thing Snap and Split act on. */
+function selectedWall() {
+  if (store.selected.length !== 1) return null;
+  const ref = store.selected[0];
+  if (ref.kind !== "segment") return null;
+  const obj = objByRef(ref);
+  return obj ? { ref, obj } : null;
+}
+
+/** Snap and Split, just off the selected wall, past the length on the same side. */
+function placeWallEdit() {
+  const node = el.wallEdit;
+  if (!node) return;
+  const sel = tool === "select" && !attachPick && !drag ? selectedWall() : null;
+  if (wallEdit && (!sel || wallEdit.id !== sel.obj.id)) {
+    wallEdit = null;
+    snapGuide = null;
+  }
+  setHidden(node, !sel);
+  if (!sel) return;
+  node.querySelectorAll("[data-wall-edit]").forEach((button) => {
+    const on = wallEdit?.mode === button.dataset.wallEdit;
+    button.classList.toggle("active", on);
+    button.setAttribute("aria-pressed", String(on));
+  });
+  const [mx, my] = worldToScreen((sel.obj.x1 + sel.obj.x2) / 2, (sel.obj.y1 + sel.obj.y2) / 2);
+  const place = wallLengthPlace(sel.obj);
+  const width = node.offsetWidth || 128;
+  const height = node.offsetHeight || 44;
+  const chip = selectedWallLength;
+  let left = mx - width / 2;
+  let top = my - height - 12;
+  if (chip) {
+    const { box, nx, ny } = chip;
+    const corners = [
+      [box.x, box.y],
+      [box.x + box.w, box.y],
+      [box.x, box.y + box.h],
+      [box.x + box.w, box.y + box.h],
+    ];
+    let far = 0;
+    for (const [x, y] of corners) far = Math.max(far, (x - mx) * nx + (y - my) * ny);
+    const menuExtent = Math.abs(nx) * width / 2 + Math.abs(ny) * height / 2;
+    const dist = far + 8 + menuExtent;
+    left = mx + nx * dist - width / 2;
+    top = my + ny * dist - height / 2;
+  } else if (place?.normal) {
+    const dist = place.near + height / 2 + 8;
+    left = mx + place.normal.x * dist - width / 2;
+    top = my + place.normal.y * dist - height / 2;
+  }
+  const minLeft = 8;
+  const maxLeft = el.canvasWrap.clientWidth - width - 8;
+  const minTop = 8;
+  const maxTop = el.canvasWrap.clientHeight - height - 8;
+  node.style.left = `${Math.round(Math.max(minLeft, Math.min((el.canvas?.offsetLeft || 0) + left, maxLeft)))}px`;
+  node.style.top = `${Math.round(Math.max(minTop, Math.min((el.canvas?.offsetTop || 0) + top, maxTop)))}px`;
+}
+
+function pointOnSegment(seg, x, y) {
+  const dx = seg.x2 - seg.x1;
+  const dy = seg.y2 - seg.y1;
+  const len2 = dx * dx + dy * dy;
+  const len = Math.sqrt(len2);
+  if (len < 1e-9) return null;
+  const t = ((x - seg.x1) * dx + (y - seg.y1) * dy) / len2;
+  const clamped = Math.min(1, Math.max(0, t));
+  const px = seg.x1 + dx * clamped;
+  const py = seg.y1 + dy * clamped;
+  const qx = seg.x1 + dx * t;
+  const qy = seg.y1 + dy * t;
+  return { x: px, y: py, along: clamped * len, off: Math.hypot(x - qx, y - qy) };
+}
+
+/**
+ * Split station, always on this wall. The pointer may sit beside the wall;
+ * only the distance along it moves the tick. A join that lands on the wall,
+ * or a round length, can catch the tick when it is already close.
+ */
+function snapSplitPoint(seg, wx, wy) {
+  const dx = seg.x2 - seg.x1;
+  const dy = seg.y2 - seg.y1;
+  const len = Math.hypot(dx, dy);
+  const hit = pointOnSegment(seg, wx, wy);
+  if (!hit || len < 1e-9) return null;
+  const tol = SNAP_PIXEL_TOL / cam.scale;
+  const margin = Math.min(MIN_WALL_SPLIT_M, len / 2);
+  let along = Math.min(len - margin, Math.max(margin, hit.along));
+  let caught = false;
+  const targets = collectSnapTargets(store.doc, snapOpts({ excludeSegmentIds: new Set([seg.id]) }));
+  let best = null;
+  for (const target of targets) {
+    const on = pointOnSegment(seg, target.x, target.y);
+    if (!on || on.off > tol) continue;
+    if (on.along < margin || len - on.along < margin) continue;
+    const dist = Math.abs(on.along - hit.along);
+    if (dist > tol) continue;
+    if (!best || dist < best.dist) best = { dist, along: on.along };
+  }
+  if (best) {
+    along = best.along;
+    caught = true;
+  } else {
+    const at = { x: seg.x1 + (dx / len) * along, y: seg.y1 + (dy / len) * along };
+    const nice = snapLengthFrom({ x: seg.x1, y: seg.y1 }, at, tol);
+    const landed = pointOnSegment(seg, nice.x, nice.y);
+    if (landed) along = Math.min(len - margin, Math.max(margin, landed.along));
+  }
+  const point = { x: seg.x1 + (dx / len) * along, y: seg.y1 + (dy / len) * along };
+  snapGuide = { x: point.x, y: point.y, snapped: caught, snapX: false, snapY: false, exactJoin: false };
+  return point;
+}
+
+function snapWallEndPoint(seg, wx, wy) {
+  const line = locationLineOf(seg, segmentThickness(seg));
+  wallEdit.fixed = wallEdit.end === 1
+    ? { x: line.x2, y: line.y2 }
+    : { x: line.x1, y: line.y1 };
+  return applySnap(wx, wy, { excludeSegmentIds: new Set([seg.id]) });
+}
+
+function wallEndAt(seg, wx, wy) {
+  const tol = Math.max(wallHitTol(skuById(seg.sku)), 0.28);
+  let best = null;
+  for (const [x, y, end] of linearEnds(seg, "segment")) {
+    const dist = Math.hypot(x - wx, y - wy);
+    if (dist <= tol && (!best || dist < best.dist)) best = { dist, end };
+  }
+  return best ? best.end : null;
+}
+
+/** Screen distance at which Snap takes the nearer end without a click on it. */
+const SNAP_END_PICK_PX = 48;
+
+/** The end within a short reach of the pointer, or null when the pointer is between them. */
+function nearestSnapEnd(seg, wx, wy) {
+  if (!seg || !Number.isFinite(wx) || !Number.isFinite(wy)) return null;
+  const tol = SNAP_END_PICK_PX / cam.scale;
+  let best = null;
+  for (const [x, y, end] of linearEnds(seg, "segment")) {
+    const dist = Math.hypot(x - wx, y - wy);
+    if (dist <= tol && (!best || dist < best.dist)) best = { dist, end };
+  }
+  return best ? best.end : null;
+}
+
+/** While Snap is waiting, a pointer already near an end chooses that end. */
+function takeNearbySnapEnd(seg, wx, wy) {
+  if (wallEdit?.mode !== "snap" || wallEdit.end) return false;
+  const end = nearestSnapEnd(seg, wx, wy);
+  if (!end) return false;
+  wallEdit.end = end;
+  setStatusMessage("Click where this end should meet. Esc cancels.", "ok");
+  return true;
+}
+
+function wallEndSnapshot() {
+  return {
+    segments: structuredClone(store.doc.segments || []),
+    openings: structuredClone(store.doc.openings || []),
+    finishRuns: structuredClone(store.doc.finishRuns || []),
+  };
+}
+
+function restoreWallEndSnapshot(snap) {
+  if (!snap) return;
+  store.doc.segments = structuredClone(snap.segments);
+  store.doc.openings = structuredClone(snap.openings);
+  store.doc.finishRuns = structuredClone(snap.finishRuns);
+}
+
+/** Drag writes from the wall as it was when the drag started, so a door does not drift. */
+function applyDraggedWallEnd(drag, wx, wy, shiftKey) {
+  restoreWallEndSnapshot(drag.before);
+  const point = segmentEndAim(wx, wy, shiftKey, drag, { kind: "segment", id: drag.id });
+  const result = moveWallEnd(store.doc, { kind: "segment", id: drag.id }, drag.end, point, { skuById });
+  if (!result.ok) {
+    restoreWallEndSnapshot(drag.lastGood || drag.before);
+    drag.refused = result.message;
+    return;
+  }
+  drag.refused = null;
+  drag.moved = true;
+  drag.lastGood = wallEndSnapshot();
+}
+
+function previewWallEdit(wx, wy) {
+  const sel = selectedWall();
+  if (!sel || sel.obj.id !== wallEdit?.id) {
+    snapGuide = null;
+    return;
+  }
+  if (wallEdit.mode === "split") snapSplitPoint(sel.obj, wx, wy);
+  else {
+    if (!wallEdit.end) takeNearbySnapEnd(sel.obj, wx, wy);
+    if (wallEdit.end) snapWallEndPoint(sel.obj, wx, wy);
+    else snapGuide = null;
+  }
+}
+
+function commitWallEnd(seg, end, point) {
+  store.pushUndo(historyDid("Moved an end of"));
+  const result = moveWallEnd(store.doc, { kind: "segment", id: seg.id }, end, point, { skuById });
+  if (!result.ok) {
+    store.dropUndo();
+    setStatusMessage(result.message, "warn");
+    return;
+  }
+  store.persist();
+  wallEdit = null;
+  snapGuide = null;
+  setStatusMessage(result.message, "ok");
+}
+
+function commitWallSplit(seg, point) {
+  store.pushUndo(historyDid("Split"));
+  const result = splitWallAt(store.doc, { kind: "segment", id: seg.id }, point, { skuById });
+  if (!result.ok) {
+    store.dropUndo();
+    setStatusMessage(result.message, "warn");
+    return;
+  }
+  store.setSelection(result.refs, result.refs[0]);
+  store.persist();
+  wallEdit = null;
+  snapGuide = null;
+  setStatusMessage(result.message, "ok");
+}
+
+/** True when this click belongs to the armed Snap or Split, not to selection. */
+function handleWallEditClick(wx, wy) {
+  const sel = selectedWall();
+  if (!sel || sel.obj.id !== wallEdit?.id) return false;
+  if (wallEdit.mode === "split") return false;
+  const end = wallEndAt(sel.obj, wx, wy);
+  if (!wallEdit.end) {
+    if (!end) {
+      setStatusMessage("Click a highlighted end.", "warn");
+      return true;
+    }
+    wallEdit.end = end;
+    setStatusMessage("Click where this end should meet. Esc cancels.", "ok");
+    previewWallEdit(wx, wy);
+    render();
+    return true;
+  }
+  if (end && end !== wallEdit.end) {
+    wallEdit.end = end;
+    setStatusMessage("Click where this end should meet. Esc cancels.", "ok");
+    previewWallEdit(wx, wy);
+    render();
+    return true;
+  }
+  if (end === wallEdit.end) return true;
+  commitWallEnd(sel.obj, wallEdit.end, snapWallEndPoint(sel.obj, wx, wy));
+  render();
+  return true;
+}
+
 /** Select-tool cursor. A crosshair window-selects on empty space. The pointer
  *  appears over an unselected object a click will pick (the same objects that
  *  draw a hover highlight). The move cursor appears only once that object is
@@ -12323,6 +13607,21 @@ function onPointerMove(ev) {
   }
   const [wx, wy] = pointerWorld(ev);
   hoverPoint = { x: wx, y: wy };
+
+  if (tool === "move" && moveSession && drag?.kind !== "pan") {
+    el.canvas.style.cursor = "crosshair";
+    if (moveSession.base) applyMovePreview(wx, wy);
+    else applySnap(wx, wy);
+    render();
+    return;
+  }
+
+  if (drag?.kind === "wall-split") {
+    previewWallEdit(wx, wy);
+    el.canvas.style.cursor = "crosshair";
+    render();
+    return;
+  }
 
   if (drag?.kind === "underlay-move") {
     const dx = wx - drag.x0;
@@ -12430,6 +13729,17 @@ function onPointerMove(ev) {
     render();
     return;
   }
+  if (drag?.kind === "socket") {
+    el.canvas.style.cursor = "grabbing";
+    if (Math.hypot(wx - drag.x0, wy - drag.y0) * cam.scale > 3) {
+      drag.moved = true;
+      const item = (store.doc.items || []).find((i) => i.id === drag.id);
+      const wall = item && currentWalls().find((w) => w.drawn && w.id === item.wallId);
+      if (item && wall) slideWallSocket(item, wall, skuById(item.sku), wx, wy);
+    }
+    render();
+    return;
+  }
   if (drag?.kind === "move") {
     let dx = wx - drag.x0;
     let dy = wy - drag.y0;
@@ -12502,8 +13812,11 @@ function onPointerMove(ev) {
     return;
   }
   if (drag?.kind === "segment-end") {
-    const obj = objByRef({ kind: drag.target, id: drag.id });
-    if (obj) applySegmentEnd(obj, drag.end, wx, wy, ev.shiftKey, drag, { kind: drag.target, id: drag.id });
+    if (drag.target === "segment") applyDraggedWallEnd(drag, wx, wy, ev.shiftKey);
+    else {
+      const obj = objByRef({ kind: drag.target, id: drag.id });
+      if (obj) applySegmentEnd(obj, drag.end, wx, wy, ev.shiftKey, drag, { kind: drag.target, id: drag.id });
+    }
     render();
     return;
   }
@@ -12529,6 +13842,7 @@ function onPointerMove(ev) {
       if (Math.hypot(at[0] - a0[0], at[1] - a0[1]) * cam.scale > 2) drag.moved = true;
       if (drag.moved) {
         if (snapGuide && (Math.abs(at[0] - p.x) > 1e-6 || Math.abs(at[1] - p.y) > 1e-6)) snapGuide = null;
+        clearShapeLink(obj);
         obj.shape = polyShape(next);
         applyFinishShapeSnapshot(drag.finishSnap);
       } else snapGuide = null;
@@ -12548,6 +13862,7 @@ function onPointerMove(ev) {
       });
       if (Math.hypot(p.x - pt[0], p.y - pt[1]) * cam.scale > 2) drag.moved = true;
       if (drag.moved) {
+        clearShapeLink(obj);
         if (obj.shape?.kind !== "poly" || !Array.isArray(obj.shape.points)) {
           obj.shape = polyShape((drag.origin || []).map(([x, y]) => [x, y]));
         }
@@ -12613,6 +13928,14 @@ function onPointerMove(ev) {
     render();
     return;
   }
+  if (!drag && wallEdit && tool === "select") {
+    previewWallEdit(wx, wy);
+    const sel = selectedWall();
+    const onEnd = sel && wallEdit.mode === "snap" && wallEndAt(sel.obj, wx, wy);
+    el.canvas.style.cursor = onEnd ? "pointer" : "crosshair";
+    render();
+    return;
+  }
   if (!drag && roomClickPlaces()) snapGuide = null;
   else if (!drag && (snapPreviewTool() || beamStart || lineStart || wallDraft || shapeDraft)) applySnap(wx, wy);
   else if (!drag) snapGuide = null;
@@ -12631,13 +13954,34 @@ function rectFromDrag(x0, y0, wx, wy) {
   });
 }
 
+/** A press counts as a history step only once the pointer has changed the drawing. */
+function gestureBecomesStep(live) {
+  if (!live) return false;
+  if (live.kind === "move" || live.kind === "opening" || live.kind === "socket") return Boolean(live.moved);
+  if (live.kind === "underlay-move" || live.kind === "underlay-scale" || live.kind === "underlay-rotate") return Boolean(live.moved);
+  if (live.kind === "segment-end") return live.target !== "segment" || Boolean(live.moved);
+  if (live.kind === "shape-vertex" || live.kind === "shape-edge") return Boolean(live.moved || live.inserted);
+  if (live.kind === "region-vertex" || live.kind === "region-edge" || live.kind === "region-move") return Boolean(live.moved || live.inserted);
+  if (live.kind === "property-vertex" || live.kind === "property-move") return Boolean(live.moved);
+  return false;
+}
+
 function onPointerUp(ev) {
   if (drag?.kind === "pan") {
     drag = null;
     el.canvas.style.cursor = panMode ? "grab" : "crosshair";
     return;
   }
+  if (drag?.kind === "wall-split") {
+    const sel = selectedWall();
+    const point = snapGuide ? { x: snapGuide.x, y: snapGuide.y } : null;
+    drag = null;
+    if (sel && wallEdit?.mode === "split" && wallEdit.id === sel.obj.id && point) commitWallSplit(sel.obj, point);
+    render();
+    return;
+  }
   if (!drag) return;
+  if (gestureBecomesStep(drag)) store.commitPending();
 
   if (drag.kind === "marquee") {
     const box = marqueeBox(drag.x0, drag.y0, drag.x1, drag.y1);
@@ -12653,41 +13997,51 @@ function onPointerUp(ev) {
       // No-op click: drop the speculative undo entry. Put the document back
       // first, so a sub-threshold nudge cannot stay behind when the click is
       // really selecting the wall or annotation under the route.
-      const prev = store.undoStack.pop();
       if (drag.switchTo) {
-        if (prev) store.doc = prev;
+        store.dropUndo({ restore: true, pendingOnly: true });
         underlaySelected = false;
         propertySelected = false;
         store.selectOne(drag.switchTo);
+      } else {
+        store.dropUndo({ pendingOnly: true });
       }
-    } else settleServicesAfterMove(drag.snaps);
-  } else if (drag.kind === "opening") {
-    if (!drag.moved) store.undoStack.pop();
+    } else {
+      if (pack) syncHostedSockets(store.doc, pack);
+      settleServicesAfterMove(drag.snaps);
+    }
+  } else if (drag.kind === "opening" || drag.kind === "socket") {
+    if (!drag.moved) store.dropUndo({ pendingOnly: true });
+    else if (drag.kind === "socket") rehomeConnectedNodes(store.doc, pack);
   } else if (drag.kind === "underlay-move" || drag.kind === "underlay-scale" || drag.kind === "underlay-rotate") {
-    if (!drag.moved) store.undoStack.pop(); // no-op click: drop the speculative undo entry
+    if (!drag.moved) store.dropUndo({ pendingOnly: true }); // no-op click: drop the speculative undo entry
   } else if (drag.kind === "segment-end") {
-    store.persist();
+    if (drag.target === "segment" && !drag.moved) {
+      store.dropUndo({ pendingOnly: true });
+      if (drag.refused) setStatusMessage(drag.refused, "warn");
+    } else store.persist();
   } else if (drag.kind === "shape-vertex" || drag.kind === "shape-edge") {
     if (!drag.moved && !drag.inserted) {
-      store.undoStack.pop();
+      store.dropUndo({ pendingOnly: true });
       const obj = objByRef(drag.ref);
       if (!obj?.shape?.points) selectedShapeVertex = null;
+      if (drag.kind === "shape-edge") {
+        setStatusMessage("This edge is selected. Drag it to move the line. The other corners stay.", "ok");
+      }
     } else if (drag.inserted) setStatusMessage("Corner added. Drag it, or click another edge. Delete removes the selected corner.", "ok");
-    else if (drag.kind === "shape-edge") setStatusMessage("Line moved.", "ok");
+    else if (drag.kind === "shape-edge") setStatusMessage("Line moved. The other corners stayed.", "ok");
   } else if (drag.kind === "region-vertex" || drag.kind === "region-edge" || drag.kind === "region-move") {
     // A press that moved nothing leaves no undo step, unless it added a corner.
     // Put the document back: selecting a corner of a whole-floor finish must
     // not turn it into a free polygon before it is dragged.
     if (!drag.moved && !drag.inserted) {
-      const prev = store.undoStack.pop();
-      if (prev) store.doc = prev;
+      store.dropUndo({ restore: true, pendingOnly: true });
       const region = (store.doc.finishRegions || []).find((r) => r.id === drag.id);
       if (drag.kind === "region-vertex" && region) announceFloorFinish(region, { corner: true });
       else if (region) announceFloorFinish(region);
     } else if (drag.inserted) setStatusMessage("Corner added. Drag it, or click another edge. Delete removes the selected corner.", "ok");
     else if (drag.kind === "region-edge") setStatusMessage("Line moved.", "ok");
   } else if (drag.kind === "property-vertex" || drag.kind === "property-move") {
-    if (!drag.moved) store.undoStack.pop();
+    if (!drag.moved) store.dropUndo({ pendingOnly: true });
     else if (drag.hadDerived) {
       setStatusMessage("Property line updated. Run Building line again — the old setback was cleared.", "ok");
     }
@@ -12808,6 +14162,8 @@ function elevationWallDeletePrompt() {
   if (finishes) parts.push(finishes === 1 ? "1 finish" : `${finishes} finishes`);
   if (windows) parts.push(windows === 1 ? "1 window" : `${windows} windows`);
   if (doors) parts.push(doors === 1 ? "1 door" : `${doors} doors`);
+  const plugs = (store.doc.items || []).filter((item) => item.host === "wall" && segments.some((s) => s.id === item.wallId)).length;
+  if (plugs) parts.push(plugs === 1 ? "1 plug" : `${plugs} plugs`);
   const many = segments.length > 1;
   const lead = many ? `These ${segments.length} walls will be deleted.` : "The wall will be deleted.";
   const extra = parts.length ? ` ${joinWords(parts)} on ${many ? "them" : "it"} will be deleted too.` : "";
@@ -12858,7 +14214,7 @@ function deleteElevCorner() {
   const points = ring.map(([s, z]) => ({ s, z }));
   points.splice(selectedElevVertex, 1);
   selectedElevVertex = null;
-  store.pushUndo();
+  store.pushUndo(historyDid("Removed a corner of"));
   applyOutlinePoints(store.doc, pack, elevationFace, band.id, points, wallsCache);
   store.persist();
   finishKey = "";
@@ -12898,7 +14254,7 @@ function deleteSelection() {
         return;
       }
       selectedRegionVertex = null;
-      store.pushUndo();
+      store.pushUndo(historyDid("Removed a corner of"));
       const points = finishRegionPoints(editing);
       points.splice(vref.index, 1);
       store.persist();
@@ -12929,7 +14285,8 @@ function deleteSelection() {
         setStatusMessage("A shape needs at least three corners.", "warn");
         return;
       }
-      store.pushUndo();
+      store.pushUndo(historyDid("Removed a corner of"));
+      clearShapeLink(obj);
       pts.splice(vref.index, 1);
       store.persist();
       setStatusMessage("Corner removed.", "ok");
@@ -12938,7 +14295,7 @@ function deleteSelection() {
     }
   }
   if (propertySelected && !store.selected.length) {
-    store.pushUndo();
+    store.pushUndo("Cleared the property line");
     setPropertyLine(store.doc, null);
     propertySelected = false;
     store.persist();
@@ -12965,7 +14322,7 @@ function deleteSelection() {
 
 function commitSelectionDelete() {
   if (!store.selected.length) return;
-  store.pushUndo();
+  store.pushUndo(historyDid("Deleted"));
   const isService = (ref) => ref.kind === "serviceNode" || ref.kind === "serviceEdge";
   // Services clean up after themselves (a deleted point takes its runs, an
   // emptied network goes), which a bare splice would leave dangling.
@@ -13013,6 +14370,13 @@ function commitSelectionDelete() {
     const goneOpenings = new Set(hosted.openingIds);
     store.doc.openings = (store.doc.openings || []).filter((o) => !goneOpenings.has(o.id));
   }
+  const deletedSlabs = store.selected.filter((r) => !isService(r) && r.kind === "slab").map((r) => r.id);
+  const goneSockets = new Set();
+  for (const item of store.doc.items || []) {
+    if (item.host === "wall" && deletedSegments.includes(item.wallId)) goneSockets.add(item.id);
+    if (item.host === "slab" && deletedSlabs.includes(item.slabId)) goneSockets.add(item.id);
+  }
+  if (goneSockets.size) store.doc.items = store.doc.items.filter((item) => !goneSockets.has(item.id));
   if (elevationFace && deletedSegments.includes(elevationFace.wallId)) {
     elevFinishDraft = null;
     if (previewCallout) previewCallout = null;
@@ -13044,6 +14408,11 @@ function wireKeyboard() {
   });
   window.addEventListener("keydown", (ev) => {
     if (ev.key === "Shift") syncElevEdgeCursors(true);
+    if (ev.key === "F6") {
+      ev.preventDefault();
+      setHistoryOpen(!historyOpen);
+      return;
+    }
     const tag = document.activeElement?.tagName;
     const typing = tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA";
 
@@ -13190,6 +14559,9 @@ function wireKeyboard() {
       }
       updateRibbonHint();
       render();
+    } else if (ev.key === "Enter" && tool === "move" && moveSession?.base) {
+      ev.preventDefault();
+      finishMove();
     } else if (ev.key === "Enter" && wallDraft) {
       ev.preventDefault();
       finishWallSegment();
@@ -13204,6 +14576,9 @@ function wireKeyboard() {
     } else if (ev.key === "Enter" && (currentUnderlayMode() === "align" || currentUnderlayMode() === "adjust") && !el.modeDone.disabled) {
       ev.preventDefault();
       doneUnderlayMode();
+    } else if (ev.key === "Enter" && (tool === "slab" || tool === "roof") && boundaryDraft?.length >= 3) {
+      ev.preventDefault();
+      finishBoundaryDraft();
     } else if (ev.key === "Enter" && tool === "room" && roomDraft?.length >= 3) {
       ev.preventDefault();
       finishRoomDraft();
@@ -13215,28 +14590,33 @@ function wireKeyboard() {
       render();
     } else if ((ev.key === "Delete" || ev.key === "Backspace") && underlaySelected) {
       removeUnderlay();
+    } else if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "y") {
+      ev.preventDefault();
+      runCommand("redo");
+    } else if ((ev.ctrlKey || ev.metaKey) && ev.shiftKey && ev.key.toLowerCase() === "z") {
+      ev.preventDefault();
+      runCommand("redo");
     } else if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "z") {
       ev.preventDefault();
-      store.undo();
-      render();
+      runCommand("undo");
     } else if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "a") {
       ev.preventDefault();
       store.selectAll();
       render();
     } else if ((ev.ctrlKey || ev.metaKey) && ev.shiftKey && ev.key.toLowerCase() === "g") {
       ev.preventDefault();
-      store.ungroupSelection();
+      store.ungroupSelection(historyDid("Ungrouped"));
       store.persist();
       render();
     } else if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "g") {
       ev.preventDefault();
-      store.groupSelection();
+      store.groupSelection(historyDid("Grouped"));
       store.persist();
       render();
     } else if (ev.key.toLowerCase() === "r" && store.primary?.kind === "item") {
       const obj = objByRef(store.primary);
       if (obj) {
-        store.pushUndo();
+        store.pushUndo(historyDid("Rotated"));
         obj.rotation = ((obj.rotation || 0) + 90) % 360;
         store.persist();
         render();
@@ -13265,7 +14645,7 @@ function commitRoomRecord({ shape, seed = null, bound = false }) {
     seed,
     shape,
   };
-  store.pushUndo();
+  store.pushUndo("Drew a room");
   store.doc.rooms.push(room);
   store.persist();
   return room;
@@ -13276,9 +14656,42 @@ function commitRoom(rect) {
   return Boolean(commitRoomRecord({ shape: rectShape(rect.x, rect.y, rect.w, rect.h) }));
 }
 
+function commitLinkedOutline(kind, { shape, bound = false, link = null, seed = null }) {
+  if (!placeSkuId) placeSkuId = defaultSkuFor(kind);
+  if (!shape) return null;
+  store.pushUndo(historyPlaced("Drew", kind === "roof" ? "roof" : "floor"));
+  const row = {
+    id: nid(kind === "roof" ? "rf" : "sl"),
+    sku: placeSkuId,
+    level: activeLevel,
+    status: placementStatus(),
+    bound: bound === true,
+    link: link === "room" || link === "footprint" ? link : null,
+    seed: seed && Number.isFinite(seed.x) && Number.isFinite(seed.y) ? { x: seed.x, y: seed.y } : null,
+    shape,
+  };
+  if (!row.bound || !row.seed) {
+    row.bound = false;
+    row.link = null;
+    row.seed = null;
+  }
+  if (kind === "roof") {
+    row.form = "gable";
+    row.pitch = DEFAULT_ROOF_PITCH;
+    row.ridge = "long";
+    store.doc.roofs.push(row);
+    store.selectOne({ kind: "roof", id: row.id });
+  } else {
+    store.doc.slabs.push(row);
+    store.selectOne({ kind: "slab", id: row.id });
+  }
+  store.persist();
+  return row;
+}
+
 function commitSlab(rect) {
   if (!canCommitRect(rect, "slab-new")) return false;
-  store.pushUndo();
+  store.pushUndo(historyPlaced("Drew", "floor"));
   store.doc.slabs.push({
     id: nid("sl"),
     sku: placeSkuId,
@@ -13292,7 +14705,7 @@ function commitSlab(rect) {
 
 function commitRoof(rect) {
   if (!canCommitRect(rect, "roof-new")) return false;
-  store.pushUndo();
+  store.pushUndo(historyPlaced("Drew", "roof"));
   store.doc.roofs.push({
     id: nid("rf"),
     sku: placeSkuId,
@@ -13315,7 +14728,7 @@ function commitWall(a, b) {
   const plan = wallJoinPlan(a, b, thickness, centerlineFromLocation(a, b, thickness, location));
   const line = plan.center;
   if (lineLength({ x: line.x1, y: line.y1 }, { x: line.x2, y: line.y2 }) < MIN_TRACE) return false;
-  store.pushUndo();
+  store.pushUndo(historyPlaced("Drew", "wall"));
   for (const move of plan.moves) {
     if (move.end === 2) {
       move.seg.x2 = move.to.x;
@@ -13342,7 +14755,7 @@ function commitWall(a, b) {
 
 function commitBeam(a, b) {
   if (!canCommitLine(a, b)) return;
-  store.pushUndo();
+  store.pushUndo(historyPlaced("Drew", "beam"));
   store.doc.beams.push({ id: nid("b"), sku: placeSkuId, level: activeLevel, x1: a.x, y1: a.y, x2: b.x, y2: b.y, status: placementStatus() });
   store.persist();
 }
@@ -13351,26 +14764,93 @@ function placeOpening(wx, wy) {
   const walls = currentWalls().filter(onActiveLevel);
   const draft = openingDraftAt(store.doc, pack, walls, placeSkuId, wx, wy, doorHandSign);
   if (!draft) return;
-  store.pushUndo();
+  store.pushUndo(historyPlaced("Placed", "opening"));
   const id = nid("o");
   store.doc.openings.push({ id, status: placementStatus(), ...draft });
   store.selectOne({ kind: "opening", id });
-  const door = skuById(draft.sku)?.category === "door";
-  tool = "select";
-  activeFunction = null;
-  doorHandSign = 1;
-  syncToolButtons();
-  drawRibbon();
+  const door = openingStaysArmed(skuById(draft.sku)?.category);
+  if (door) {
+    recentDoorIds = noteRecentDoor(recentDoorIds, draft.sku);
+    placeSkuMemory = rememberFunctionSku(placeSkuMemory, activeFunction, draft.sku);
+  } else {
+    tool = "select";
+    activeFunction = null;
+    doorHandSign = 1;
+    syncToolButtons();
+    drawRibbon();
+  }
   updateRibbonHint();
   store.persist();
   setStatusMessage(door
-    ? "Door placed. Drag it along the wall to move it. Drag to the other side to flip the swing. Space flips the hinge."
+    ? "Door placed. Click the wall to place another of the same type. Esc stops."
     : "Window placed. Drag it along the wall to move it. Press Delete to remove it.", "ok");
+  renderPalette();
   render();
 }
 
 function placeItem(wx, wy) {
-  store.pushUndo();
+  const sku = skuById(placeSkuId);
+  const surface = socketSurface(sku);
+  if (surface === "wall") {
+    const walls = currentWalls().filter(onActiveLevel);
+    const preferId = store.selected.length === 1 && store.primary?.kind === "segment" ? store.primary.id : null;
+    const draft = wallSocketDraft(walls, sku, wx, wy, { preferId });
+    if (!draft) {
+      setStatusMessage("Click a wall. A plug cannot sit off the wall.", "warn");
+      render();
+      return;
+    }
+    store.pushUndo(historyPlaced("Placed", "item"));
+    const id = nid("i");
+    store.doc.items.push({
+      id,
+      sku: placeSkuId,
+      level: activeLevel,
+      status: placementStatus(),
+      host: "wall",
+      wallId: draft.wallId,
+      t: draft.t,
+      side: draft.side,
+      x: draft.x,
+      y: draft.y,
+      rotation: draft.rotation,
+    });
+    store.selectOne({ kind: "item", id });
+    store.persist();
+    setStatusMessage("Plug placed. It stays on this wall.", "ok");
+    render();
+    return;
+  }
+  if (surface === "floor") {
+    const snapped = applySnap(wx, wy);
+    const preferId = store.selected.length === 1 && store.primary?.kind === "slab" ? store.primary.id : null;
+    const draft = floorSocketDraft(store.doc, sku, snapped.x, snapped.y, { preferId, level: activeLevel })
+      || floorSocketDraft(store.doc, sku, wx, wy, { preferId, level: activeLevel });
+    if (!draft) {
+      setStatusMessage("Click inside a floor. This point cannot sit off the floor.", "warn");
+      render();
+      return;
+    }
+    store.pushUndo(historyPlaced("Placed", "item"));
+    const id = nid("i");
+    store.doc.items.push({
+      id,
+      sku: placeSkuId,
+      level: activeLevel,
+      status: placementStatus(),
+      host: "slab",
+      slabId: draft.slabId,
+      x: draft.x,
+      y: draft.y,
+      rotation: draft.rotation,
+    });
+    store.selectOne({ kind: "item", id });
+    store.persist();
+    setStatusMessage("Placed on the floor. It stays inside this floor.", "ok");
+    render();
+    return;
+  }
+  store.pushUndo(historyPlaced("Placed", "item"));
   const p = applySnap(wx, wy);
   store.doc.items.push({
     id: nid("i"),
@@ -13442,7 +14922,7 @@ function setSeparationDraftHeading(deg) {
   if (!lineStart) return;
   const cur = separationDraftLength() || MIN_TRACE;
   const len = sizeDraft?.lockW ? parseLengthInput(sizeDraft.typedW, cur) : cur;
-  const end = setLineHeading(lineStart, len, deg, (n) => roundGrid(n, activeGrid()));
+  const end = setLineHeading(lineStart, len, deg);
   if (snapGuide) {
     snapGuide.x = end.x;
     snapGuide.y = end.y;
@@ -13476,12 +14956,10 @@ function setWallDraftLength(length) {
 
 function setWallDraftHeading(deg) {
   if (!wallDraft) return;
-  const grid = activeGrid();
   const end = setLineHeading(
     { x: wallDraft.x1, y: wallDraft.y1 },
     wallDraftLength() || MIN_TRACE,
     deg,
-    (n) => roundGrid(n, grid),
   );
   wallDraft.x2 = end.x;
   wallDraft.y2 = end.y;
@@ -13514,13 +14992,15 @@ function syncSizeHud() {
 }
 
 function handleSizeTyping(ev) {
+  const moving = tool === "move" && moveSession?.base;
   const sepDraft = tool === "separation" && lineStart;
-  if (!wallDraft && !shapeDraft && !sepDraft) return false;
+  if (!wallDraft && !shapeDraft && !sepDraft && !moving) return false;
   if (ev.target !== el.hudW && ev.target !== el.hudH && ev.target !== el.ctxLen && ev.target !== el.ctxAng) return false;
   if (!sizeDraft) sizeDraft = { lockW: false, lockH: false, typedW: "", typedH: "", axis: "w" };
   if (ev.key === "Enter") {
     ev.preventDefault();
-    if (wallDraft) finishWallSegment();
+    if (moving) finishMove();
+    else if (wallDraft) finishWallSegment();
     else if (sepDraft) finishSeparationDraft();
     else if (shapeDraft?.rect) finishShapeRect();
     return true;
@@ -13535,8 +15015,9 @@ function handleSizeTyping(ev) {
 
 function handleDraftNumericShortcut(ev) {
   if (ev.ctrlKey || ev.metaKey || ev.altKey) return false;
+  const moving = tool === "move" && moveSession?.base;
   const sepDraft = tool === "separation" && lineStart;
-  if (!wallDraft && !shapeDraft && !sepDraft) return false;
+  if (!wallDraft && !shapeDraft && !sepDraft && !moving) return false;
   if (ev.key.length !== 1 || !/[0-9.,]/.test(ev.key)) return false;
   const tag = document.activeElement?.tagName;
   if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return false;
@@ -13544,10 +15025,13 @@ function handleDraftNumericShortcut(ev) {
   if (!sizeDraft) sizeDraft = { lockW: false, lockH: false, typedW: "", typedH: "", axis: "w" };
   sizeDraft.lockW = true;
   sizeDraft.typedW = ev.key === "," ? "." : ev.key;
-  if (wallDraft) setWallDraftLength(parseLengthInput(sizeDraft.typedW, wallDraftLength() || 1));
+  if (moving) {
+    const at = hoverPoint || moveSession.base;
+    applyMovePreview(at.x, at.y);
+  } else if (wallDraft) setWallDraftLength(parseLengthInput(sizeDraft.typedW, wallDraftLength() || 1));
   else if (sepDraft) setSeparationDraftLength(parseLengthInput(sizeDraft.typedW, separationDraftLength() || 1));
   render();
-  (wallDraft || sepDraft ? el.ctxLen : el.hudW)?.focus();
+  (moving || wallDraft || sepDraft ? el.ctxLen : el.hudW)?.focus();
   return true;
 }
 
@@ -13838,7 +15322,8 @@ el.ctxWallH?.addEventListener("change", (e) => {
   const seg = soleOf("segment");
   const room = soleOf("room");
   if (seg) {
-    store.pushUndo();
+    const mm = String(e.target.value).trim();
+    store.pushUndo(value === null ? historyDid("Cleared the height of") : `${historyDid("Set the height of")} to ${mm} mm`);
     if (value === null) {
       seg.height = null;
       seg.top = defaultWallTop(pack.levels, effectiveLevel(seg, pack), skuDrawnHeight(skuById(seg.sku)));
@@ -13847,7 +15332,8 @@ el.ctxWallH?.addEventListener("change", (e) => {
       seg.top = null;
     }
   } else if (room) {
-    store.pushUndo();
+    const mm = String(e.target.value).trim();
+    store.pushUndo(value === null ? historyDid("Cleared the height of") : `${historyDid("Set the height of")} to ${mm} mm`);
     room.wallHeight = value;
   } else {
     return;
@@ -13863,7 +15349,7 @@ function setOpeningSize(field, raw, { allowZero = false } = {}) {
   const g = skuById(opening.sku)?.geometry || {};
   // Typing the type's own value is the same as having no override.
   const typeValue = g[field];
-  store.pushUndo();
+  store.pushUndo(`Set the ${field} of ${historyThing(store.primary)} to ${String(raw).trim()} mm`);
   opening[field] = value === null || (Number.isFinite(typeValue) && Math.abs(typeValue - value) < 0.0005) ? null : value;
   store.persist();
   render();
@@ -13889,7 +15375,7 @@ el.ctxConvert?.addEventListener("click", () => {
   const pieces = currentWalls().filter((w) => !w.drawn && w.roomIds?.includes(room.id));
   const segs = pieces.map((w) => drawnSegmentFromWall(w, pack)).filter(Boolean);
   if (!segs.length) return;
-  store.pushUndo();
+  store.pushUndo(historyDid("Converted the walls of"));
   store.doc.segments.push(...segs);
   store.persist();
   render();
@@ -13901,10 +15387,78 @@ el.ctxShapePoly?.addEventListener("click", () => {
   if (!obj || !["room", "slab", "roof"].includes(kind) || obj.shape?.kind !== "rect") return;
   const next = shapeAsPoly(obj.shape);
   if (!next) return;
-  store.pushUndo();
+  store.pushUndo(historyDid("Edited the outline of"));
   obj.shape = next;
   store.persist();
   setStatusMessage("Now a polygon. Drag a corner to move it. Corner adds a point on an edge; Line moves the edge.", "ok");
+  render();
+});
+
+function interiorPoint(poly) {
+  if (!poly || poly.length < 3) return null;
+  let cx = 0;
+  let cy = 0;
+  for (const p of poly) {
+    cx += p[0];
+    cy += p[1];
+  }
+  cx /= poly.length;
+  cy /= poly.length;
+  if (pointInPoly(cx, cy, poly)) return { x: cx, y: cy };
+  for (let i = 0; i < poly.length; i += 1) {
+    const a = poly[i];
+    const b = poly[(i + 1) % poly.length];
+    const c = poly[(i + 2) % poly.length];
+    const x = (a[0] + b[0] + c[0]) / 3;
+    const y = (a[1] + b[1] + c[1]) / 3;
+    if (pointInPoly(x, y, poly)) return { x, y };
+  }
+  return null;
+}
+
+function followExternalWalls() {
+  const ref = store.primary;
+  const obj = ref && (ref.kind === "slab" || ref.kind === "roof") ? objByRef(ref) : null;
+  if (!obj || !pack) return;
+  const seed = interiorPoint(shapePolygon(obj.shape));
+  const face = seed && footprintFace(store.doc, pack, effectiveLevel(obj, pack), seed.x, seed.y);
+  if (!face) {
+    setStatusMessage("These walls do not close around this outline.", "warn");
+    render();
+    return;
+  }
+  store.pushUndo(historyDid("Set to follow the external walls for"));
+  obj.bound = true;
+  obj.link = "footprint";
+  obj.seed = seed;
+  obj.shape = polyShape(face);
+  store.persist();
+  setStatusMessage(ref.kind === "roof" ? "The roof follows the external walls." : "The floor follows the external walls.", "ok");
+  render();
+}
+
+function stopFollowingWalls() {
+  const ref = store.primary;
+  const obj = ref && (ref.kind === "slab" || ref.kind === "roof") ? objByRef(ref) : null;
+  if (!obj?.bound) return;
+  store.pushUndo(historyDid("Stopped following the walls on"));
+  clearShapeLink(obj);
+  store.persist();
+  setStatusMessage("The link is dropped. Drag a corner or an edge to edit the boundary.", "ok");
+  render();
+}
+
+el.ctxFollow?.addEventListener("click", () => {
+  if (el.ctxFollow.dataset.follow === "stop") stopFollowingWalls();
+  else followExternalWalls();
+});
+
+el.shapeLink?.addEventListener("click", (ev) => {
+  const mode = ev.target.closest?.("[data-shape-link]")?.dataset.shapeLink;
+  if (mode !== "sketch" && mode !== "room" && mode !== "footprint") return;
+  shapePlaceMode = mode;
+  boundaryDraft = null;
+  updateRibbonHint();
   render();
 });
 
@@ -13912,7 +15466,7 @@ el.ctxTop?.addEventListener("change", (e) => {
   if (store.selected.length !== 1 || store.primary?.kind !== "segment") return;
   const seg = objByRef(store.primary);
   if (!seg) return;
-  store.pushUndo();
+  store.pushUndo(historyDid("Set the top of"));
   seg.top = e.target.value === "level-above" ? "level-above" : null;
   if (seg.top === "level-above") seg.height = null;
   store.persist();
@@ -14083,13 +15637,16 @@ function closeOpenFace() {
   render();
 }
 
-/** The open face is editing the wall, not a finish or an opening. The plan selection stays. */
+/** The open face is editing the wall, not a finish or an opening. */
 function selectFaceWall() {
   faceAddPending = null;
   selectedBandId = null;
   selectedElevVertex = null;
   dropElevGapHold();
   faceWallSelected = true;
+  // The height fields read the wall. An opening's plan selection would keep
+  // the door's millimetres in the inspector instead.
+  focusElevationWall();
   setStatusMessage("The wall is selected. Drag the top, or type the height.", "ok");
   render();
 }
@@ -14365,6 +15922,7 @@ function syncWallFaceChrome(show) {
     applyElevDockHeight(Number.isFinite(stored) && stored > 0 ? stored : parentH * ELEV_DOCK_RATIO);
   }
   if (!show && was && dock) {
+    releasePlanPeek(undefined, { restore: false });
     const remembered = Number(window.localStorage.getItem(PROFILE_HEIGHT_KEY));
     dock.style.height = Number.isFinite(remembered) && remembered > 0 ? `${Math.round(remembered)}px` : "";
     fitServiceProfileHeight();
@@ -14441,10 +15999,21 @@ function syncFaceEditor() {
     if (el.faceWhich) el.faceWhich.textContent = opening.name || kind;
     if (el.faceMeta) el.faceMeta.textContent = `${kind} · ${Math.round(opening.width * 1000)} × ${Math.round(opening.height * 1000)}`;
     if (el.faceSwatch) el.faceSwatch.style.background = "#fffdf8";
+    setHidden(el.faceBill, true);
     return;
   }
   const kicker = document.getElementById("v2-face-place-kicker");
   if (kicker) kicker.textContent = pending ? "Place this finish" : "Reshape";
+  const billCategory = pending ? (el.faceType?.value || "") : band?.category;
+  const typedName = String(el.faceProduct?.value || "").trim();
+  const billProduct = pending
+    ? (store.doc.finishProducts || []).find((p) => p.category === billCategory && (p.name === typedName || p.code === typedName)) || null
+    : product;
+  const billNote = billCategory === "paint" ? finishBillNote(billCategory, billProduct) : null;
+  if (el.faceBill) {
+    el.faceBill.textContent = billNote ? billNote.text : "";
+    setHidden(el.faceBill, !billNote);
+  }
   if (pending) {
     if (el.faceWhich) el.faceWhich.textContent = "New finish";
     if (el.faceMeta) el.faceMeta.textContent = "Choose where it goes. Nothing is added until then. Colour and exact millimetres come after.";
@@ -14504,6 +16073,7 @@ function syncFoundationEditor(model) {
   setHidden(el.faceTypeLabel, false);
   setHidden(el.faceProductLabel, true);
   setHidden(el.faceColourRow, true);
+  setHidden(el.faceBill, true);
   setHidden(el.faceUp, true);
   setHidden(el.faceAlong, true);
   document.querySelectorAll("[data-face-place]").forEach((btn) => { btn.hidden = true; });
@@ -14684,8 +16254,7 @@ function commitFloorGap() {
   const dragging = Boolean(drag && (drag.kind === "region-vertex" || drag.kind === "region-edge") && drag.id === live.id);
   const unused = dragging && !drag.moved;
   if (unused) {
-    const prev = store.undoStack.pop();
-    if (prev) store.doc = prev;
+    store.dropUndo({ restore: true, pendingOnly: true });
   }
   drag = null;
   floorGuides = null;
@@ -15002,8 +16571,7 @@ function endRegionDrag() {
   if (drag?.kind === "region-vertex" || drag?.kind === "region-edge" || drag?.kind === "region-move") {
     const onPicture = Boolean(floorHostNow());
     if (!drag.moved && !drag.inserted) {
-      const prev = store.undoStack.pop();
-      if (prev) store.doc = prev;
+      store.dropUndo({ restore: true, pendingOnly: true });
       const region = (store.doc.finishRegions || []).find((r) => r.id === drag.id);
       if (onPicture && (drag.kind === "region-vertex" || drag.kind === "region-edge") && region) {
         floorHeld = { kind: drag.kind === "region-edge" ? "edge" : "vertex", id: drag.id, index: drag.index };
@@ -15098,24 +16666,34 @@ function onFloorPicturePointerDown(ev) {
   selectFloorHost();
 }
 
+const FLOOR_FLASH_MS = 1440;
+
 function showFloorOnPlan() {
   if (!floorHostNow()) return;
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  floorFlash = { start: performance.now(), reduced };
   const live = document.getElementById("v2-face-flash-live");
   if (live) live.textContent = `${reduced ? "Showing" : "Flashing"} this floor on the plan.`;
+  if (reduced) {
+    releasePlanPeek();
+    floorFlash = { start: performance.now(), reduced: true };
+    render();
+    return;
+  }
+  const gen = beginPlanPeek();
+  floorFlash = { start: performance.now(), reduced: false, gen };
+  resizeCanvas();
   const tick = () => {
-    if (!floorFlash) return;
-    if (performance.now() - floorFlash.start > 1440) {
+    if (!floorFlash || floorFlash.gen !== gen) return;
+    if (performance.now() - floorFlash.start > FLOOR_FLASH_MS) {
       floorFlash = null;
+      releasePlanPeek(gen);
       render();
       return;
     }
     render();
     requestAnimationFrame(tick);
   };
-  render();
-  if (!reduced) requestAnimationFrame(tick);
+  requestAnimationFrame(tick);
 }
 
 function frameFloorMarker(poly) {
@@ -15402,7 +16980,10 @@ function syncFloorPictureDock() {
   el.elevBody?.classList.toggle("is-drawing", Boolean(floorDraft));
   const guides = floorDraft || drag ? floorGuides : null;
   const locate = floorLocateNow();
-  const key = `${w}x${h}|${elevationView.zoom}|${elevationView.panX}|${elevationView.panY}|${selected?.id || ""}|${elevEdgeMode}|${JSON.stringify(viewModels)}|${JSON.stringify(floorDraft)}|${floorAddPending ? "add" : ""}|${JSON.stringify(guides)}|${JSON.stringify(locate)}`;
+  // The outline has to be in the key. A drawn finish keeps its corners when
+  // the floor grows, so the sample would stay on the old frame and only
+  // shift when a shrink clips those corners.
+  const key = `${w}x${h}|${elevationView.zoom}|${elevationView.panX}|${elevationView.panY}|${JSON.stringify(poly)}|${selected?.id || ""}|${elevEdgeMode}|${JSON.stringify(viewModels)}|${JSON.stringify(floorDraft)}|${floorAddPending ? "add" : ""}|${JSON.stringify(guides)}|${JSON.stringify(locate)}`;
   if (key !== elevationKey && w > 40 && h > 40) {
     elevationKey = key;
     const drawn = floorPictureSvg({
@@ -15451,6 +17032,7 @@ function syncElevationDock() {
   const show = Boolean(elevationOpen && face && !serviceDockActive());
   if (elevationOpen && !show && !serviceDockActive()) elevationOpen = false;
   if (leavingFloor && !show && dock) {
+    releasePlanPeek(undefined, { restore: false });
     const remembered = Number(window.localStorage.getItem(PROFILE_HEIGHT_KEY));
     dock.style.height = Number.isFinite(remembered) && remembered > 0 ? `${Math.round(remembered)}px` : "";
     fitServiceProfileHeight();
@@ -15465,6 +17047,7 @@ function syncElevationDock() {
     resetElevationView();
     setHidden(el.elevBody, true);
     setHidden(el.elevFit, true);
+    setHidden(el.elevGuidelineWrap, true);
     setHidden(el.elevInfo, true);
     closeElevInfo();
     syncElevHints(false);
@@ -15494,6 +17077,8 @@ function syncElevationDock() {
   setHidden(document.getElementById("v2-profile-select-all"), true);
   setHidden(el.elevFlash, false);
   setHidden(el.elevFit, false);
+  setHidden(el.elevGuidelineWrap, false);
+  if (el.elevGuideline && document.activeElement !== el.elevGuideline && elevDropMm == null) el.elevGuideline.value = "";
   setHidden(el.elevInfo, false);
   if (el.elevFit) el.elevFit.disabled = elevationViewFitted();
   setHidden(el.elevBody, false);
@@ -15527,7 +17112,8 @@ function syncElevationDock() {
   const guides = elevationGuides();
   const locate = elevationLocate(model);
   const pickingFoundation = Boolean(pendingFoundationSku(face));
-  const key = `${w}x${h}|${elevationView.zoom}|${elevationView.panX}|${elevationView.panY}|${selectedId}|${selectedBandId}|${selectedElevVertex}|${faceWallSelected ? "wall" : ""}|${lineMode ? "line" : "corner"}|${pickingFoundation ? "found" : ""}|${JSON.stringify(model)}|${JSON.stringify(draft)}|${JSON.stringify(guides)}|${JSON.stringify(locate)}`;
+  const dropGuide = dropGuideZ(model.height, elevDropMm);
+  const key = `${w}x${h}|${elevationView.zoom}|${elevationView.panX}|${elevationView.panY}|${selectedId}|${selectedBandId}|${selectedElevVertex}|${faceWallSelected ? "wall" : ""}|${lineMode ? "line" : "corner"}|${pickingFoundation ? "found" : ""}|drop:${dropGuide}|${JSON.stringify(model)}|${JSON.stringify(draft)}|${JSON.stringify(guides)}|${JSON.stringify(locate)}`;
   if (key === elevationKey) {
     placeElevEdgeMode(model);
     syncElevHints(true);
@@ -15548,6 +17134,7 @@ function syncElevationDock() {
     locate,
     wallSelected: faceWallSelected,
     foundationPicking: pickingFoundation,
+    dropGuide,
   });
   elevationLayout = { scale: drawn.scale, scaleX: drawn.scaleX, scaleY: drawn.scaleY, originX: drawn.originX, originY: drawn.originY, fit: drawn.fit };
   el.elevBody.innerHTML = drawn.svg;
@@ -15927,7 +17514,7 @@ function elevationGapKey(ev) {
  *  corner on that axis. */
 function elevAlign(rawS, rawZ, model, points, skipIndex = -1, skipOpening = null) {
   const sTargets = [0, model.length];
-  const zTargets = [0, model.height];
+  const zTargets = includeDropGuide([0, model.height], dropGuideZ(model.height, elevDropMm));
   const skip = new Set(Array.isArray(skipIndex) ? skipIndex : [skipIndex]);
   points.forEach((p, i) => {
     if (skip.has(i)) return;
@@ -16373,7 +17960,7 @@ function elevOtherCorners(model, band) {
  *  `skipOpeningId` is the opening being dragged, whose own edges are not targets. */
 function elevAlignTargets(model, corners, skipOpeningId = null) {
   const sTargets = [0, model.length];
-  const zTargets = [0, model.height];
+  const zTargets = includeDropGuide([0, model.height], dropGuideZ(model.height, elevDropMm));
   for (const p of corners) {
     sTargets.push(p.s);
     zTargets.push(p.z);
@@ -16625,7 +18212,7 @@ function endElevationDrag(commit) {
   }
   if (d.part === "outline") {
     if (commit && (d.moved || d.inserted)) {
-      store.pushUndo();
+      store.pushUndo(historyDid("Edited the finish of"));
       const stayedRect = !d.inserted && !d.originOutline && axisAlignedOutline(d.points);
       if (stayedRect) applyBandEdit(store.doc, pack, d.face, d.bandId, stayedRect, wallsCache);
       else applyOutlinePoints(store.doc, pack, d.face, d.bandId, d.points, wallsCache);
@@ -16644,7 +18231,7 @@ function endElevationDrag(commit) {
   }
   if (commit && d.moved) {
     // One drag is one undo step.
-    store.pushUndo();
+    store.pushUndo(historyDid("Set the height of"));
     const applied = applyElevationDrag(store.doc, d.face, d);
     if (d.part === "wall-top" && applied?.wallId && applied.wallId !== d.face.wallId) {
       elevationFace = { ...d.face, wallId: applied.wallId };
@@ -16710,6 +18297,16 @@ function onElevationWheel(ev) {
 
 el.elevBody?.addEventListener("wheel", onElevationWheel, { passive: false });
 
+el.elevGuideline?.addEventListener("input", () => {
+  const raw = el.elevGuideline.value.trim().replace(",", ".");
+  if (!raw) elevDropMm = null;
+  else {
+    const n = Number(raw);
+    elevDropMm = Number.isFinite(n) ? n : null;
+  }
+  render();
+});
+
 el.elevFit?.addEventListener("click", () => {
   elevationView = { zoom: 1, panX: 0, panY: 0 };
   render();
@@ -16768,7 +18365,7 @@ el.ctxFloor?.addEventListener("click", (ev) => {
   const host = objByRef(picked.host);
   if (!host || (picked.host.kind === "slab" && skuById(host.sku)?.category === "ceiling")) return;
   tool = "select";
-  openFloorPicture(host);
+  openFloorPicture(picked.host);
   const regionId = ev.target.closest?.("[data-floor-fill]")?.dataset.floorFill || null;
   floorAddPending = null;
   floorDraft = null;
@@ -16889,9 +18486,11 @@ function placeFaceCorners(face) {
 }
 
 /**
- * Show the open face on the plan: corners lock onto the ends, the side
- * flashes, then both stay as a quiet mark until the elevation closes.
- * Flip face runs this again so the swap is the thing you see.
+ * Show the open face on the plan: the elevation drops to its title row so the
+ * plan can grow, corners lock onto the ends, the side flashes, then the
+ * elevation returns and both marks stay until it closes. Flip face runs this
+ * again so the swap is the thing you see. Reduced motion skips the shrink
+ * and the blink.
  */
 function showFaceOnPlan() {
   const face = elevationFace;
@@ -16903,7 +18502,6 @@ function showFaceOnPlan() {
     activeLevel = line.levelId;
     drawLevelSwitcher();
   }
-  frameFaceForCue(line);
   const sideName = faceSideTitle(face) || "This side";
   const phrase = sideName.charAt(0).toLowerCase() + sideName.slice(1);
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -16912,23 +18510,34 @@ function showFaceOnPlan() {
   if (locateFlash?.faceCue) clearLocateFlash();
   const cue = { wallId, side };
   if (reduced) {
+    releasePlanPeek();
     facePlanCue = cue;
+    frameFaceForCue(line);
     render();
     return;
   }
+  const gen = beginPlanPeek();
   facePlanCue = null;
-  startLocateFlash([line.a, line.b], line.levelId, {
+  resizeCanvas();
+  const liveLine = liveFaceLine(wallId, side);
+  if (!elevationOpen || !liveLine) {
+    releasePlanPeek(gen);
+    return;
+  }
+  frameFaceForCue(liveLine);
+  startLocateFlash([liveLine.a, liveLine.b], liveLine.levelId, {
     pulses: 2,
     ms: FACE_CUE_PULSE_MS,
     introMs: FACE_CUE_INTRO_MS,
     segment: true,
     corners: true,
-    nx: line.nx,
-    ny: line.ny,
+    nx: liveLine.nx,
+    ny: liveLine.ny,
     faceCue: true,
     wallId,
     side,
     onDone: () => {
+      releasePlanPeek(gen);
       if (!elevationOpen || !elevationFace) return;
       if (elevationFace.wallId !== wallId || (elevationFace.side === -1 ? -1 : 1) !== side) return;
       facePlanCue = cue;
@@ -17066,7 +18675,7 @@ function addFoundationFromFace() {
   const face = selectedElevationFace() || elevationFace;
   const skuId = pendingFoundationSku(face);
   if (!face || !skuId) return;
-  store.pushUndo();
+  store.pushUndo(historyDid("Added a foundation under"));
   const added = addFoundationUnderWall(store.doc, pack, face, wallsCache, skuId);
   if (!added) return;
   foundationPick = null;
@@ -17090,6 +18699,7 @@ document.getElementById("v2-face-add")?.addEventListener("click", () => {
   render();
   if (el.faceType) el.faceType.value = "paint";
   if (el.faceSwatch) el.faceSwatch.style.background = finishSwatch("paint");
+  render();
   el.faceProduct?.focus();
 });
 
@@ -17251,7 +18861,7 @@ el.ctxOOffset?.addEventListener("change", (e) => {
   const value = typedMm(e.target.value, { allowZero: true });
   const face = selectedElevationFace();
   if (!opening || !face || value === undefined || value === null) { render(); return; }
-  store.pushUndo();
+  store.pushUndo(historyDid("Moved"));
   applyOpeningEdit(store.doc, pack, face, opening.id, { left: value }, wallsCache);
   store.persist();
   render();
@@ -17290,7 +18900,7 @@ function syncElevationPreview() {
   const key = `${w}|${selectedOpeningId()}|${selectedBandId}|${JSON.stringify(model)}|${JSON.stringify(draft)}|${JSON.stringify(locate)}`;
   if (key === elevPreviewKey) return;
   elevPreviewKey = key;
-  const drawn = elevationSvg(model, { width: w, height: 130, selectedId: selectedOpeningId(), selectedBandId, draft, guides: elevationGuides(), locate });
+  const drawn = elevationSvg(model, { width: w, height: 130, selectedId: selectedOpeningId(), selectedBandId, draft, guides: elevationGuides(), locate, dropGuide: dropGuideZ(model.height, elevDropMm) });
   elevPreviewLayout = { scale: drawn.scale, scaleX: drawn.scaleX, scaleY: drawn.scaleY, originX: drawn.originX, originY: drawn.originY };
   el.ctxElev.innerHTML = drawn.svg;
 }
@@ -17351,6 +18961,7 @@ function faceIdentity(model) {
 function syncFinishPanel(room, slab) {
   const host = el.ctxFinish;
   if (!host) return;
+  parkFaceInspectorFields();
   const model = room || slab ? null : finishFaceModel();
   if (!room && !slab && !model) {
     setHidden(host, true);
@@ -17417,12 +19028,14 @@ function syncFinishPanel(room, slab) {
   if (html !== finishKey) {
     // A cleared key means the finish was just saved, so the panel has to catch up.
     // Otherwise leave an input alone while someone is still typing in it.
+    // Size fields were parked above, so rewriting the list does not destroy them.
     const typing = host.contains(document.activeElement) && document.activeElement?.matches?.("input");
     if (!(typing && finishKey)) {
       finishKey = html;
       host.innerHTML = html;
     }
   }
+  mountFaceInspectorFields();
   if (editingId !== finishScrolledId) {
     finishScrolledId = editingId || null;
     if (editingId) host.querySelector(`[data-fin-region="${editingId}"]`)?.scrollIntoView({ block: "nearest" });
@@ -17463,7 +19076,7 @@ function ensureFinishProduct(doc, category, name) {
 }
 
 function finishCommit(mutate) {
-  store.pushUndo();
+  store.pushUndo(historyDid("Edited the finish of"));
   mutate();
   store.persist();
   finishKey = "";
@@ -17486,7 +19099,10 @@ function finishFloorRegionDraft() {
   const target = regionFinish;
   const poly = regionDraft.map((p) => [p.x, p.y]);
   const room = roomHoldingPoly(poly);
-  store.pushUndo();
+  const finishName = FINISH_CATEGORIES[target?.category]?.label || target?.category || "floor finish";
+  const product = target?.productName ? ` ${target.productName}` : "";
+  const where = room?.name ? ` in room ${room.name}` : "";
+  store.pushUndo(`Drew ${finishName}${product}${where}`);
   const productId = target.productName ? ensureFinishProduct(store.doc, target.category, target.productName) : (target.productId || null);
   createFinishRegion(store.doc, {
     level: activeLevel,
@@ -17611,6 +19227,16 @@ function syncAddFinishPreview() {
         : "";
     hint.hidden = !text;
     hint.textContent = text;
+  }
+  const bill = form.querySelector("[data-fin-bill]");
+  if (bill) {
+    const name = String(form.querySelector("[data-fin='new-band-product']")?.value || "").trim();
+    const product = name
+      ? (store.doc.finishProducts || []).find((p) => p.category === state.category && (p.name === name || p.code === name))
+      : null;
+    const note = state.category === "paint" ? finishBillNote(state.category, product || null) : null;
+    bill.hidden = !note;
+    bill.textContent = note ? note.text : "";
   }
   const err = form.querySelector("[data-fin-form-error]");
   if (err && !err.hidden && state.draft) {
@@ -17844,7 +19470,7 @@ function openSelectedFloor() {
   const host = objByRef(picked.host);
   if (!host || (picked.host.kind === "slab" && skuById(host.sku)?.category === "ceiling")) return false;
   tool = "select";
-  openFloorPicture(host);
+  openFloorPicture(picked.host);
   return true;
 }
 
@@ -18572,6 +20198,60 @@ function dockHeightStorageKey() {
     : PROFILE_HEIGHT_KEY;
 }
 
+/** Title row only: padding above the buttons, the buttons, and the dock's own bottom padding. */
+function elevDockStripHeight(dock) {
+  const head = dock.querySelector(".svc-profile-head");
+  if (!head) return 48;
+  const padBottom = parseFloat(getComputedStyle(dock).paddingBottom) || 0;
+  const top = dock.getBoundingClientRect().top;
+  const bottom = head.getBoundingClientRect().bottom;
+  return Math.max(40, Math.round(bottom - top + padBottom));
+}
+
+// Show on plan drops the elevation or floor strip to its title row for the
+// flash, then puts the previous height back. The saved height is never written
+// to localStorage. A second click keeps that saved height and only restarts
+// the timer. `gen` ignores a restore from the flash that this click replaced.
+let planPeek = null;
+let planPeekTimer = 0;
+let planPeekGen = 0;
+
+function beginPlanPeek() {
+  planPeekGen += 1;
+  const gen = planPeekGen;
+  const dock = el.serviceProfileDock;
+  if (!dock || dock.hidden) return gen;
+  if (!planPeek) {
+    planPeek = {
+      height: Math.round(dock.getBoundingClientRect().height),
+      strip: elevDockStripHeight(dock),
+      gen,
+    };
+  } else {
+    planPeek.gen = gen;
+  }
+  dock.classList.add("is-plan-peek");
+  dock.style.height = `${planPeek.strip}px`;
+  clearTimeout(planPeekTimer);
+  planPeekTimer = window.setTimeout(() => releasePlanPeek(gen), Math.max(FLOOR_FLASH_MS, FACE_CUE_INTRO_MS + FACE_CUE_PULSE_MS) + 80);
+  return gen;
+}
+
+function releasePlanPeek(gen, { restore = true } = {}) {
+  if (!planPeek) return;
+  if (gen != null && planPeek.gen !== gen) return;
+  const height = planPeek.height;
+  planPeek = null;
+  clearTimeout(planPeekTimer);
+  planPeekTimer = 0;
+  const dock = el.serviceProfileDock;
+  if (!dock) return;
+  dock.classList.remove("is-plan-peek");
+  if (!restore) return;
+  const column = dock.parentElement?.classList;
+  if (column?.contains("is-wall-face") || column?.contains("is-floor-face")) applyElevDockHeight(height);
+}
+
 /** Pixel height for the wall elevation: half the column, never above 75%,
  *  and at least 260px when the column is tall enough for that floor. */
 function applyElevDockHeight(px) {
@@ -18599,6 +20279,15 @@ function applyElevDockHeight(px) {
 function fitServiceProfileHeight(px) {
   const dock = el.serviceProfileDock;
   if (!dock) return 0;
+  if (planPeek) {
+    const face = dock.parentElement?.classList;
+    if (face?.contains("is-wall-face") || face?.contains("is-floor-face")) {
+      dock.classList.add("is-plan-peek");
+      if (dock.style.height !== `${planPeek.strip}px`) dock.style.height = `${planPeek.strip}px`;
+      return planPeek.strip;
+    }
+    releasePlanPeek(undefined, { restore: false });
+  }
   const faceStrip = dock.parentElement?.classList;
   if (faceStrip?.contains("is-wall-face") || faceStrip?.contains("is-floor-face")) return applyElevDockHeight(px);
   let h = px;
@@ -18623,6 +20312,7 @@ function bindServiceProfileResize() {
   const remembered = Number(window.localStorage.getItem(PROFILE_HEIGHT_KEY));
   if (Number.isFinite(remembered) && remembered > 0) dock.style.height = `${Math.round(remembered)}px`;
   const apply = (px, { store = false } = {}) => {
+    if (planPeek) releasePlanPeek();
     const h = fitServiceProfileHeight(px);
     if (store && h > 0) window.localStorage.setItem(dockHeightStorageKey(), String(h));
     if (frame) return;
@@ -18633,6 +20323,7 @@ function bindServiceProfileResize() {
   };
   handle.addEventListener("pointerdown", (e) => {
     if (e.button !== 0) return;
+    if (planPeek) releasePlanPeek();
     e.preventDefault();
     handle.classList.add("is-dragging");
     handle.setPointerCapture(e.pointerId);
@@ -18652,6 +20343,8 @@ function bindServiceProfileResize() {
     handle.addEventListener("pointercancel", onUp);
   });
   handle.addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+    if (planPeek) releasePlanPeek();
     const h = dock.getBoundingClientRect().height || parseFloat(dock.style.height) || 190;
     if (e.key === "ArrowUp") apply(h + 24, { store: true });
     else if (e.key === "ArrowDown") apply(h - 24, { store: true });
@@ -18682,10 +20375,10 @@ function syncServiceDock() {
 function mutateServices(fn) {
   const sel = store.selected.slice();
   const primary = store.primary;
-  store.pushUndo();
+  store.pushUndo(historyDid("Edited"));
   const res = fn();
   if (res && res.ok === false) {
-    store.undo();
+    store.dropUndo({ restore: true });
     store.setSelection(sel, primary);
     setStatusMessage(res.message, "warn");
   } else {
@@ -18832,6 +20525,53 @@ function restoreFold(node) {
   if (mark && mark.nextSibling !== node) mark.after(node);
 }
 
+function faceOpeningFieldNodes() {
+  return [el.ctxSillWrap, el.ctxOWidthWrap, el.ctxOHeightWrap, el.ctxOOffsetWrap, el.ctxOSizeNote].filter(Boolean);
+}
+
+function faceWallFieldNodes() {
+  return [el.ctxTopWrap, el.ctxWallHWrap, el.ctxAttachWrap].filter(Boolean);
+}
+
+/** Put the moved size fields back where the markup left them, before the finish list is rewritten. */
+function parkFaceInspectorFields() {
+  for (const node of [...faceOpeningFieldNodes(), ...faceWallFieldNodes()]) {
+    pinFoldHome(node);
+    restoreFold(node);
+  }
+}
+
+/**
+ * While the face is open, the header stays the wall. Width, height, offset
+ * and sill sit under the opening row. Wall height and its settings sit under
+ * the wall row. The block above the list does not change as the row changes.
+ */
+function mountFaceInspectorFields() {
+  if (!el.dockContext?.classList.contains("is-face-open")) return;
+  const host = el.ctxFinish;
+  if (!host) return;
+  if (faceWallSelected && store.primary?.kind === "segment") {
+    const slot = host.querySelector('[data-fin-fields="wall"]');
+    if (slot) slot.append(...faceWallFieldNodes());
+    return;
+  }
+  const openingId = selectedOpeningId();
+  if (!openingId) return;
+  const slot = host.querySelector(`[data-for-opening="${CSS.escape(openingId)}"]`);
+  if (slot) slot.append(...faceOpeningFieldNodes());
+}
+
+/** The open face reports the wall, even while a door, window, or finish on it is picked. */
+function pinFaceInspectorChrome() {
+  setHidden(el.inspectBack, true);
+  const face = selectedElevationFace();
+  const wall = face && wallsCache.find((w) => w.id === face.wallId);
+  const seg = wall && (store.doc.segments || []).find((s) => s.id === wall.id);
+  const sku = skuById(seg?.sku || wall?.sku);
+  if (el.paletteTitle) el.paletteTitle.textContent = inspectKindLabel("segment", sku) || "Wall";
+  syncInspectKicker(seg?.name || seg?.id || wall?.name || sku?.name || "This wall");
+}
+
 function setWallMoreTitle(text) {
   const summary = el.ctxWallMore?.querySelector("summary");
   if (summary && summary.textContent !== text) summary.textContent = text;
@@ -18867,10 +20607,38 @@ function syncWallSettingsFold(kind) {
   setHidden(details, true);
 }
 
+function syncShapeLinkControl() {
+  const placing = (tool === "slab" || tool === "roof") && !serviceDockActive();
+  setHidden(el.shapeLink, !placing);
+  if (!el.shapeLink) return;
+  for (const btn of el.shapeLink.querySelectorAll("[data-shape-link]")) {
+    const on = btn.dataset.shapeLink === shapePlaceMode;
+    btn.classList.toggle("active", on);
+    btn.setAttribute("aria-pressed", on ? "true" : "false");
+  }
+}
+
+function syncFollowControl(obj) {
+  const linked = Boolean(obj?.bound && (obj.link === "footprint" || obj.link === "room"));
+  setHidden(el.ctxFollow, !obj);
+  setHidden(el.ctxFollowNote, !linked);
+  if (!obj || !el.ctxFollow) return;
+  el.ctxFollow.textContent = linked ? "Stop following walls" : "Follow external walls";
+  el.ctxFollow.dataset.follow = linked ? "stop" : "walls";
+  if (linked && el.ctxFollowNote) {
+    el.ctxFollowNote.textContent = obj.link === "footprint"
+      ? "Follows the external walls. Stop following, or drag a corner, to edit the boundary yourself."
+      : "Follows the room. Stop following, or drag a corner, to edit the boundary yourself.";
+  }
+}
+
 function syncPlanContext() {
   syncPlanFilterButtons();
   syncServiceProfileDock();
   if (serviceDockActive()) {
+    setHidden(el.shapeLink, true);
+    setHidden(el.ctxFollow, true);
+    setHidden(el.ctxFollowNote, true);
     if (el.dockContext) {
       el.dockContext.dataset.state = "edit";
       el.dockContext.classList.remove("is-face-open");
@@ -18971,19 +20739,20 @@ function syncPlanContext() {
   } else {
     syncInspectKicker("");
   }
+  if (faceEditing) pinFaceInspectorChrome();
 
+  const placingShape = tool === "slab" || tool === "roof";
   const placingWall = tool === "wall";
   const placingSep = tool === "separation" && Boolean(lineStart);
-  setHidden(el.planOptions, !showGeom && !placingWall && !placingSep);
-  setHidden(el.wallLoc, !placingWall);
-  if (placingWall && el.wallLoc) {
-    for (const btn of el.wallLoc.querySelectorAll("[data-wall-loc]")) {
-      const on = btn.dataset.wallLoc === wallLocation;
-      btn.classList.toggle("active", on);
-      btn.setAttribute("aria-pressed", on ? "true" : "false");
-    }
-  }
-  setHidden(el.wallOpts, !placingWall);
+  const moving = tool === "move" && Boolean(moveSession?.base);
+  const faceWalls = draft ? [] : refs.filter((r) => r.kind === "segment" && segmentHasFaceControl(objByRef(r)));
+  const editingFace = !placingWall && faceWalls.length > 0;
+  setHidden(el.planOptions, !showGeom && !placingWall && !placingSep && !editingFace && !moving && !placingShape);
+  syncShapeLinkControl();
+  setHidden(el.wallOpts, !(placingWall || editingFace) || moving);
+  if (!moving) setDistanceField(false);
+  setHidden(el.wallLoc, !(placingWall || editingFace));
+  if (placingWall || editingFace) syncWallLocButtons(placingWall ? wallLocation : sharedWallLocation(faceWalls), placingWall ? "draw" : "edit");
   // Corner only matters where a wall meets another wall's end.
   setHidden(el.wallCorner, !(placingWall && wallCornerRelevant()));
   positionWallOpts();
@@ -19013,42 +20782,60 @@ function syncPlanContext() {
     syncSeparationSizeFields();
   }
 
-  if (!showInspect && !showGeom && !creating && !editingProperty) {
+  if (moving) {
+    setHidden(el.ctxLenWrap, false);
+    setHidden(el.ctxAngWrap, true);
+    setHidden(el.ctxWWrap, true);
+    setHidden(el.ctxHWrap, true);
+    syncMoveDistanceField();
+  }
+
+  if (!moving && !showInspect && !showGeom && !creating && !editingProperty) {
     planContextKey = "";
     setHidden(el.ctxElevWrap, true);
     setHidden(el.ctxFloor, true);
     floorCardKey = "";
     setHidden(el.ctxOOffsetWrap, true);
     setHidden(el.ctxFinish, true);
+    setHidden(el.ctxFollow, true);
+    setHidden(el.ctxFollowNote, true);
+    if (editingFace) {
+      setHidden(el.ctxLenWrap, true);
+      setHidden(el.ctxAngWrap, true);
+      setHidden(el.ctxWWrap, true);
+      setHidden(el.ctxHWrap, true);
+    }
     return;
   }
 
   setHidden(el.ctxNameWrap, !room);
   setHidden(el.ctxUseWrap, !room);
   setHidden(el.ctxRegionWrap, !region);
-  setHidden(el.ctxLenWrap, !(linear || placingSep));
-  setHidden(el.ctxAngWrap, !(linear || placingSep));
-  setHidden(el.ctxWWrap, !(rect || linear));
-  setHidden(el.ctxHWrap, !(rect || linear));
+  setHidden(el.ctxLenWrap, !(linear || placingSep || moving));
+  setHidden(el.ctxAngWrap, !((linear || placingSep) && !moving));
+  setHidden(el.ctxWWrap, !(rect || linear) || moving);
+  setHidden(el.ctxHWrap, !(rect || linear) || moving);
   if (el.ctxW) el.ctxW.readOnly = linear;
   if (el.ctxH) el.ctxH.readOnly = linear;
   if (el.ctxWWrap) el.ctxWWrap.classList.toggle("readonly", linear);
   if (el.ctxHWrap) el.ctxHWrap.classList.toggle("readonly", linear);
   setHidden(el.ctxShapePoly, !rect);
   setHidden(el.ctxShapePolyHint, !shapePoly);
+  syncFollowControl((slab || roof) ? obj : null);
   setHidden(el.ctxFormWrap, !roof);
   const pitched = Boolean(roof && obj && obj.form !== "flat");
   setHidden(el.ctxPitchWrap, !pitched);
   setHidden(el.ctxRidgeWrap, !pitched);
   setHidden(el.ctxTypeWrap, true);
   syncInspectStatus((showInspect || creating) && !multi && !faceEditing ? obj : null, draft || creating);
-  const attachable = Boolean(obj && ATTACHABLE_KINDS.has(ref.kind));
+  const attachable = Boolean(obj && ref && ATTACHABLE_KINDS.has(ref.kind));
   setHidden(el.ctxAttachWrap, !attachable);
   if (attachable && el.ctxAttach) el.ctxAttach.textContent = attachStateText(obj);
   syncObjectLevel(obj && ref.kind !== "opening" && !faceEditing ? obj : null);
   syncWallTop(obj && ref.kind === "segment" && !draft ? obj : null);
   syncHeightFields(obj && !draft ? obj : null, ref?.kind);
   syncWallSettingsFold(draft ? "segment" : ref?.kind);
+  if (faceEditing) setHidden(el.ctxWallMore, true);
   syncElevationPreview();
   syncFloorCard(Boolean((room || floorSlab) && obj && !floorHostNow()), obj, room ? "room" : "slab");
   syncFinishPanel(room && !draft ? obj : null, floorSlab && !draft ? obj : null);
@@ -19072,6 +20859,12 @@ function syncPlanContext() {
   } else if ((room || floorSlab) && obj) {
     syncInspectKicker(`${room ? "Room" : "Slab"} · ${obj.name || "This floor"}`);
   }
+  if (moving) {
+    setHidden(el.planOptions, false);
+    setHidden(el.ctxLenWrap, false);
+    setHidden(el.ctxAngWrap, true);
+    syncMoveDistanceField();
+  }
   setHidden(el.ctxRemove, !room || floorEditing);
 
   const skuId = draft ? placeSkuId : obj?.sku;
@@ -19086,7 +20879,9 @@ function syncPlanContext() {
     planContextKey = "";
   }
 
-  if (linear) {
+  if (moving) {
+    syncMoveDistanceField();
+  } else if (linear) {
     const x1 = draft ? wallDraft.x1 : obj.x1;
     const y1 = draft ? wallDraft.y1 : obj.y1;
     const x2 = draft ? (wallDraft.x2 ?? wallDraft.x1) : obj.x2;
@@ -19122,6 +20917,15 @@ function syncPlanContext() {
 }
 
 el.ctxLen?.addEventListener("input", (ev) => {
+  if (tool === "move" && moveSession?.base) {
+    if (!sizeDraft) sizeDraft = { lockW: false, lockH: false, typedW: "", typedH: "", axis: "w" };
+    sizeDraft.lockW = true;
+    sizeDraft.typedW = ev.target.value;
+    const at = hoverPoint || snapGuide || moveSession.base;
+    applyMovePreview(at.x, at.y);
+    render();
+    return;
+  }
   if (wallDraft || (tool === "separation" && lineStart)) {
     if (!sizeDraft) sizeDraft = { lockW: false, lockH: false, typedW: "", typedH: "", axis: "w" };
     sizeDraft.lockW = true;
@@ -19133,21 +20937,43 @@ el.ctxLen?.addEventListener("input", (ev) => {
 });
 
 el.ctxLen?.addEventListener("change", (ev) => {
-  if (wallDraft) return;
+  if (wallDraft || tool === "move") return;
   const sel = soleLinearSelection();
   if (!sel) return;
-  store.pushUndo();
-  setSegmentLength(sel.obj, parseLengthInput(ev.target.value, segmentLength(sel.obj.x1, sel.obj.y1, sel.obj.x2, sel.obj.y2)));
+  store.pushUndo(historyDid("Set the length of"));
+  const result = setSegmentLength(sel, parseLengthInput(ev.target.value, segmentLength(sel.obj.x1, sel.obj.y1, sel.obj.x2, sel.obj.y2)));
+  if (!result.ok) {
+    store.dropUndo();
+    setStatusMessage(result.message, "warn");
+    render();
+    return;
+  }
   store.persist();
   render();
 });
 
 el.wallLoc?.addEventListener("click", (ev) => {
   const btn = ev.target.closest("[data-wall-loc]");
-  if (!btn || tool !== "wall") return;
-  wallLocation = normalizeWallLocation(btn.dataset.wallLoc);
-  wallSideFlip = false;
-  updateRibbonHint();
+  if (!btn) return;
+  const loc = normalizeWallLocation(btn.dataset.wallLoc);
+  if (tool === "wall") {
+    wallLocation = loc;
+    wallSideFlip = false;
+    updateRibbonHint();
+    render();
+    return;
+  }
+  const refs = store.selected.filter((r) => r.kind === "segment" && segmentHasFaceControl(objByRef(r)));
+  if (!refs.length) return;
+  store.pushUndo(historyDid("Set the face of"));
+  const result = realignWallFaces(store.doc, refs, loc, { skuById });
+  if (!result.ok || !result.changed) {
+    store.dropUndo();
+    if (!result.ok) setStatusMessage(result.message, "warn");
+    return;
+  }
+  store.persist();
+  setStatusMessage(result.message, "ok");
   render();
 });
 
@@ -19155,6 +20981,35 @@ el.wallCorner?.addEventListener("click", (ev) => {
   const btn = ev.target.closest("[data-wall-corner]");
   if (!btn || tool !== "wall") return;
   wallCorner = btn.dataset.wallCorner;
+  render();
+});
+
+el.wallEdit?.addEventListener("click", (ev) => {
+  const button = ev.target.closest("[data-wall-edit]");
+  if (!button) return;
+  const sel = selectedWall();
+  if (!sel) return;
+  const mode = button.dataset.wallEdit;
+  if (wallEdit?.id === sel.obj.id && wallEdit.mode === mode) {
+    wallEdit = null;
+    snapGuide = null;
+    setStatusMessage(mode === "split" ? "Split cancelled." : "Snap cancelled.", "ok");
+  } else {
+    wallEdit = { id: sel.obj.id, mode, end: null, fixed: null };
+    snapGuide = null;
+    if (mode === "snap") {
+      const [wx, wy] = pointerWorld(ev);
+      takeNearbySnapEnd(sel.obj, wx, wy);
+    }
+    if (!wallEdit?.end) {
+      setStatusMessage(
+        mode === "split"
+          ? "Drag along this wall. Release to split. Esc cancels."
+          : "Click a highlighted end. Esc cancels.",
+        "ok",
+      );
+    }
+  }
   render();
 });
 
@@ -19184,9 +21039,15 @@ el.ctxAng?.addEventListener("change", (ev) => {
   }
   const sel = soleLinearSelection();
   if (!sel) return;
-  store.pushUndo();
+  store.pushUndo(historyDid("Set the angle of"));
   const cur = headingDeg(sel.obj.x1, sel.obj.y1, sel.obj.x2, sel.obj.y2);
-  setSegmentHeading(sel.obj, parseDegrees(ev.target.value, cur));
+  const result = setSegmentHeading(sel, parseDegrees(ev.target.value, cur));
+  if (!result.ok) {
+    store.dropUndo();
+    setStatusMessage(result.message, "warn");
+    render();
+    return;
+  }
   store.persist();
   render();
 });
@@ -19194,8 +21055,11 @@ el.ctxAng?.addEventListener("change", (ev) => {
 el.ctxType?.addEventListener("change", () => {
   const sku = skuById(el.ctxType.value);
   if (!sku) return;
-  if (wallDraft) {
+  if (tool === "wall") {
     placeSkuId = sku.id;
+    placeSkuMemory = rememberFunctionSku(placeSkuMemory, activeFunction, sku.id);
+  }
+  if (wallDraft) {
     renderPalette();
     render();
     return;
@@ -19215,7 +21079,8 @@ el.ctxStatusWrap?.addEventListener("change", (e) => {
     return;
   }
   if (!store.selected.length) return;
-  store.pushUndo();
+  const nextStatus = next === "existing" ? "existing" : "proposed";
+  store.pushUndo(historyDid(`Marked as ${nextStatus}`));
   for (const ref of store.selected) {
     const obj = objByRef(ref);
     if (obj) obj.status = next;
@@ -19234,8 +21099,9 @@ function soleOf(kind) {
 el.ctxName?.addEventListener("change", (e) => {
   const room = soleOf("room");
   if (!room) return;
-  store.pushUndo();
-  room.name = e.target.value.trim() || "Room";
+  const nextName = e.target.value.trim() || "Room";
+  store.pushUndo(`Renamed ${historyThing(store.primary)} to ${nextName}`);
+  room.name = nextName;
   store.persist();
   render();
 });
@@ -19243,7 +21109,7 @@ el.ctxName?.addEventListener("change", (e) => {
 el.ctxUse?.addEventListener("change", (e) => {
   const room = soleOf("room");
   if (!room) return;
-  store.pushUndo();
+  store.pushUndo(`Set the use of ${historyThing(store.primary)} to ${e.target.value || "not set"}`);
   room.use = e.target.value;
   store.persist();
   render();
@@ -19252,7 +21118,7 @@ el.ctxUse?.addEventListener("change", (e) => {
 el.ctxRegion?.addEventListener("change", (e) => {
   const region = soleOf("region");
   if (!region) return;
-  store.pushUndo();
+  store.pushUndo(`Set the region of ${historyThing(store.primary)} to ${e.target.value || "not set"}`);
   region.convention = e.target.value || null;
   store.persist();
   render();
@@ -19261,9 +21127,8 @@ el.ctxRegion?.addEventListener("change", (e) => {
 el.ctxW?.addEventListener("change", (e) => {
   const obj = soleOf("room") || soleOf("slab") || soleOf("roof");
   if (!obj?.shape || obj.shape.kind !== "rect") return;
-  store.pushUndo();
-  obj.bound = false;
-  obj.seed = null;
+  store.pushUndo(historyDid("Set the width of"));
+  clearShapeLink(obj);
   obj.shape.w = parseLengthInput(e.target.value, obj.shape.w);
   store.persist();
   render();
@@ -19272,9 +21137,8 @@ el.ctxW?.addEventListener("change", (e) => {
 el.ctxH?.addEventListener("change", (e) => {
   const obj = soleOf("room") || soleOf("slab") || soleOf("roof");
   if (!obj?.shape || obj.shape.kind !== "rect") return;
-  store.pushUndo();
-  obj.bound = false;
-  obj.seed = null;
+  store.pushUndo(historyDid("Set the depth of"));
+  clearShapeLink(obj);
   obj.shape.h = parseLengthInput(e.target.value, obj.shape.h);
   store.persist();
   render();
@@ -19283,7 +21147,7 @@ el.ctxH?.addEventListener("change", (e) => {
 el.ctxForm?.addEventListener("change", (e) => {
   const roof = soleOf("roof");
   if (!roof) return;
-  store.pushUndo();
+  store.pushUndo(`Set the form of ${historyThing(store.primary)} to ${e.target.value || "not set"}`);
   roof.form = e.target.value;
   store.persist();
   render();
@@ -19292,7 +21156,7 @@ el.ctxForm?.addEventListener("change", (e) => {
 el.ctxPitch?.addEventListener("change", (e) => {
   const roof = soleOf("roof");
   if (!roof) return;
-  store.pushUndo();
+  store.pushUndo(`Set the pitch of ${historyThing(store.primary)} to ${e.target.value || "not set"}`);
   roof.pitch = Number(e.target.value) || DEFAULT_ROOF_PITCH;
   store.persist();
   render();
@@ -19301,7 +21165,7 @@ el.ctxPitch?.addEventListener("change", (e) => {
 el.ctxRidge?.addEventListener("change", (e) => {
   const roof = soleOf("roof");
   if (!roof) return;
-  store.pushUndo();
+  store.pushUndo(`Set the ridge of ${historyThing(store.primary)} to ${e.target.value === "short" ? "short" : "long"}`);
   roof.ridge = e.target.value === "short" ? "short" : "long";
   store.persist();
   render();
@@ -19324,7 +21188,8 @@ el.ctxOLevel?.addEventListener("change", (e) => {
   if (!station?.levelId) return;
   const newLevel = station.levelId;
   if (newLevel !== obj.level) {
-    store.pushUndo();
+    const levelName = station.name || station.levelId;
+    store.pushUndo(`Moved ${historyThing(store.primary)} to ${levelName}`);
     // Before the host moves: a finish with no slab id is found by sitting on
     // the slab, and that match requires the level they still share.
     carryFinishRegionsToLevel(store.doc, store.primary, newLevel);
@@ -19362,7 +21227,7 @@ el.underlayOpacity?.addEventListener("change", () => {
 
 el.underlayRotation?.addEventListener("change", (ev) => {
   if (!store.doc.underlay || store.doc.underlay.pinned) return;
-  store.pushUndo();
+  store.pushUndo(`Rotated the sheet to ${String(ev.target.value).trim()}°`);
   setUnderlayRotation(store.doc, parseDegrees(ev.target.value, store.doc.underlay.rotation || 0));
   store.persist();
   render();
@@ -19370,14 +21235,14 @@ el.underlayRotation?.addEventListener("change", (ev) => {
 
 el.underlayRotateCcw?.addEventListener("click", () => {
   if (!store.doc.underlay || store.doc.underlay.pinned) return;
-  store.pushUndo();
+  store.pushUndo("Rotated the sheet 90° anticlockwise");
   rotateUnderlayBy(store.doc, -90);
   store.persist();
   render();
 });
 el.underlayRotateCw?.addEventListener("click", () => {
   if (!store.doc.underlay || store.doc.underlay.pinned) return;
-  store.pushUndo();
+  store.pushUndo("Rotated the sheet 90° clockwise");
   rotateUnderlayBy(store.doc, 90);
   store.persist();
   render();
@@ -19401,7 +21266,7 @@ el.calibrateRestart?.addEventListener("click", () => {
 el.underlayPin?.addEventListener("click", () => {
   const u = store.doc.underlay;
   if (!u) return;
-  store.pushUndo();
+  store.pushUndo(u.pinned ? "Unpinned the sheet" : "Pinned the sheet");
   setUnderlayPinned(store.doc, !u.pinned);
   store.persist();
   render();

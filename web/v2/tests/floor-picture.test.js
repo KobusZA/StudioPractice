@@ -142,6 +142,35 @@ test("zoom stays on the floor when the room is far from the plan origin", () => 
   assert.ok(right > 16 && left < 640 - 16, "part of the floor stays in the picture");
 });
 
+test("growing the floor shifts the sample the opposite way from shrinking it", () => {
+  const inner = [[2, 1], [4, 1], [4, 3], [2, 3]];
+  const picture = (host) => floorPictureSvg({
+    width: 640,
+    height: 280,
+    host,
+    regions: [{ id: "tile", category: "floorTile", label: "Floor tile", fill: "#6a8fbf", poly: inner, areaText: "4 m²" }],
+  });
+  const screenX = (drawn, x) => drawn.originX + (x - drawn.minX) * drawn.scaleX;
+  const base = picture([[0, 0], [6, 0], [6, 4], [0, 4]]);
+  const smaller = picture([[0, 0], [5, 0], [5, 4], [0, 4]]);
+  const bigger = picture([[0, 0], [8, 0], [8, 4], [0, 4]]);
+  const at = screenX(base, 3);
+  assert.ok(screenX(smaller, 3) > at + 1, "a smaller floor moves the sample sideways");
+  assert.ok(screenX(bigger, 3) < at - 1, "a bigger floor moves it the other way");
+});
+
+test("the open picture redraws when the floor outline changes and the finishes do not", () => {
+  const src = readFileSync(new URL("../ui.js", import.meta.url), "utf8");
+  const start = src.indexOf("function syncFloorPictureDock()");
+  const end = src.indexOf("function syncElevationDock()");
+  assert.ok(start >= 0 && end > start);
+  const body = src.slice(start, end);
+  const keyAt = body.indexOf("const key = `");
+  assert.ok(keyAt >= 0);
+  const key = body.slice(keyAt, body.indexOf("`;", keyAt));
+  assert.match(key, /JSON\.stringify\(poly\)/);
+});
+
 test("Floor finishes opens the picture and does not open the floor-type palette", () => {
   const src = readFileSync(new URL("../ui.js", import.meta.url), "utf8");
   const start = src.indexOf("function openFloorFinishes()");
@@ -215,7 +244,7 @@ test("the floor list stays while the strip is closed, and a finish on the card o
   assert.match(html, /Open floor/);
   const src = readFileSync(new URL("../ui.js", import.meta.url), "utf8");
   const click = src.slice(src.indexOf("el.ctxFloor?.addEventListener(\"click\""), src.indexOf("el.elevInfoDismiss"));
-  assert.match(click, /openFloorPicture\(/);
+  assert.match(click, /openFloorPicture\(picked\.host\)/);
   assert.match(click, /data-floor-fill/);
   assert.match(click, /editingRegionId = regionId/);
   const panel = src.slice(src.indexOf("function syncFinishPanel"), src.indexOf("function finishField"));
@@ -226,6 +255,8 @@ test("the floor list stays while the strip is closed, and a finish on the card o
   assert.match(card, /preview:\s*true/);
   assert.match(src, /function setHoverFloor/);
   assert.match(src, /function markHotFloor/);
+  const openSelected = src.slice(src.indexOf("function openSelectedFloor"), src.indexOf("function openSelectedFloor") + 500);
+  assert.match(openSelected, /openFloorPicture\(picked\.host\)/);
   const move = src.slice(src.indexOf("function onElevationPointerMove"), src.indexOf("function onElevationPointerMove") + 1800);
   assert.match(move, /floorFinishesAt/);
   assert.match(move, /floorFinishLabel/);

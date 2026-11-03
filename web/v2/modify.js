@@ -18,7 +18,7 @@ import {
   objectLabel,
   resolvedBase,
 } from "./compile.js";
-import { mirroredWallLocation, rethickenAboutLocation } from "./click-draw.js?v=20261022-wall-loc";
+import { MIN_TRACE, centerlineFromLocation, locationLineOf, mirroredWallLocation, normalizeWallLocation, realignAboutLocation, rethickenAboutLocation } from "./click-draw.js?v=20261103-bos10";
 import { bbox, roundGrid } from "./geom.js";
 import {
   ATTACHABLE_KINDS,
@@ -36,7 +36,9 @@ import {
   uniqueRefs,
 } from "./model.js";
 import { finishId } from "./finish-data.js";
-import { drawnWallThickness } from "./walls.js";
+import { reanchorRun } from "./finish-model.js";
+import { CORNER_JOIN_TOL, drawnWallThickness } from "./walls.js";
+import { rehostSocketsAfterSplit, transformFloorSockets, translateFloorSockets } from "./socket-host.js";
 
 const SHAPED = new Set(["room", "slab", "roof", "region"]);
 // Every endpoint-geometry kind: rotate/mirror/copy/align/split/cut/join all
@@ -124,8 +126,10 @@ export function rotateSelection(doc, refs, { degrees = 90 } = {}) {
   for (const region of hostedFinishRegionsOf(doc, rows.map((r) => r.ref))) {
     region.shape = rotateShape(region.shape, turn);
   }
+  const turnedSockets = transformFloorSockets(doc, rows.map((r) => r.ref), turn, turns);
 
   for (const { ref, obj } of rows) {
+    if (ref.kind === "item" && turnedSockets.has(obj.id)) continue;
     if (SHAPED.has(ref.kind)) {
       obj.shape = rotateShape(obj.shape, turn);
       if (obj.seed) [obj.seed.x, obj.seed.y] = turn(obj.seed.x, obj.seed.y);
@@ -198,8 +202,10 @@ export function mirrorSelection(doc, refs, { axis = "v" } = {}) {
   for (const region of hostedFinishRegionsOf(doc, rows.map((r) => r.ref))) {
     region.shape = rotateShape(region.shape, flip);
   }
+  const flippedSockets = transformFloorSockets(doc, rows.map((r) => r.ref), flip, 0);
 
   for (const { ref, obj } of rows) {
+    if (ref.kind === "item" && flippedSockets.has(obj.id)) continue;
     if (SHAPED.has(ref.kind)) {
       obj.shape = rotateShape(obj.shape, flip); // corner mapping is the same job
       if (obj.seed) [obj.seed.x, obj.seed.y] = flip(obj.seed.x, obj.seed.y);
@@ -299,8 +305,10 @@ export function alignSelection(doc, refs, { edge = "left", anchorRef = null } = 
   if (!anchorBox) return fail("The anchor object has no geometry.");
 
   let moved = 0;
+  const movingSlabIds = new Set(rows.filter((r) => r !== anchor && r.ref.kind === "slab").map((r) => r.obj.id));
   for (const row of rows) {
     if (row === anchor) continue;
+    if (row.ref.kind === "item" && row.obj.host === "slab" && movingSlabIds.has(row.obj.slabId)) continue;
     const box = selectionBounds(doc, [row.ref]);
     if (!box) continue;
     let dx = 0;
@@ -322,6 +330,7 @@ function translateObject(ref, obj, dx, dy, doc = null) {
     const hosted = doc ? hostedFinishRegions(doc, ref) : [];
     obj.shape = translateAny(obj.shape, dx, dy);
     for (const region of hosted) region.shape = translateAny(region.shape, dx, dy);
+    if (ref.kind === "slab") translateFloorSockets(doc, obj.id, dx, dy);
   }
   else if (ENDPOINTED.has(ref.kind)) {
     obj.x1 = obj.x1 + dx;
@@ -430,10 +439,200 @@ export function cutSelection(doc, refs) {
   return done("Cut in two at the midpoint.", [ref, { kind: ref.kind, id: tail.id }]);
 }
 
+export const MIN_WALL_SPLIT_M = 0.05;
+
+/**
+ * Break one wall at a chosen point on its centreline. The head keeps its id.
+ * An opening stays on the piece that holds its centre, with `t` rewritten for
+ * that piece. A finish stays on the piece it covered; one that crosses the cut
+ * is divided, and a whole-face finish is a whole face of both pieces.
+ */
+export function splitWallAt(doc, ref, point, { skuById = () => null } = {}) {
+  if (!ref || ref.kind !== "segment") return fail("Select a wall to split.");
+  const obj = objectByRef(doc, ref);
+  if (!obj) return fail("Select a wall to split.");
+  if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return fail("Click on the wall to split it.");
+
+  const dx = obj.x2 - obj.x1;
+  const dy = obj.y2 - obj.y1;
+  const len = Math.hypot(dx, dy);
+  if (len < MIN_WALL_SPLIT_M * 2) return fail("Too small to split.");
+  const along = metresAlong(obj, point.x, point.y);
+  const onWall = pointAlong(obj, along);
+  if (Math.hypot(onWall.x - point.x, onWall.y - point.y) > MIN_WALL_SPLIT_M) return fail("Click on the wall to split it.");
+  const cut = Math.round(along * 1000) / 1000;
+  if (cut < MIN_WALL_SPLIT_M || len - cut < MIN_WALL_SPLIT_M) return fail("Too close to an end to split.");
+
+  const cutPt = pointAlong(obj, cut);
+  const tail = structuredClone(obj);
+  tail.id = nid(ref.kind[0]);
+  tail.x1 = cutPt.x;
+  tail.y1 = cutPt.y;
+  obj.x2 = cutPt.x;
+  obj.y2 = cutPt.y;
+  if (Number.isFinite(obj.length)) obj.length = cut;
+  if (Number.isFinite(tail.length)) tail.length = len - cut;
+  collectionFor(doc, ref.kind).push(tail);
+
+  rehostSplitWall(doc, obj, tail, cut, len, skuById);
+  rehostSocketsAfterSplit(doc, obj.id, tail.id, cut, len);
+  return done("Split into two.", [ref, { kind: ref.kind, id: tail.id }]);
+}
+
+function clipOutline(outline, start, end, shift) {
+  const pts = (outline || []).filter((p) => Array.isArray(p) && Number.isFinite(Number(p[0])) && Number.isFinite(Number(p[1])));
+  if (pts.length < 3) return null;
+  const inside = (s) => s >= start - 1e-6 && s <= end + 1e-6;
+  const out = [];
+  const push = (s, z) => {
+    const ls = s - shift;
+    const last = out[out.length - 1];
+    if (last && Math.abs(last[0] - ls) < 1e-4 && Math.abs(last[1] - z) < 1e-4) return;
+    out.push([ls, z]);
+  };
+  for (let i = 0; i < pts.length; i += 1) {
+    const prev = pts[(i + pts.length - 1) % pts.length];
+    const cur = pts[i];
+    const ps = Number(prev[0]);
+    const pz = Number(prev[1]);
+    const s = Number(cur[0]);
+    const z = Number(cur[1]);
+    if (Math.abs(s - ps) > 1e-12) {
+      const hits = [];
+      for (const bound of [start, end]) {
+        const u = (bound - ps) / (s - ps);
+        if (u > 1e-6 && u < 1 - 1e-6) hits.push({ u, s: bound, z: pz + (z - pz) * u });
+      }
+      hits.sort((a, b) => a.u - b.u);
+      for (const hit of hits) push(hit.s, hit.z);
+    }
+    if (inside(s)) push(s, z);
+  }
+  return out.length >= 3 ? out : null;
+}
+
+function pieceSpan(a, b, start, end) {
+  const lo = Math.max(Math.min(a, b), start);
+  const hi = Math.min(Math.max(a, b), end);
+  return hi - lo > 1e-4 ? [lo, hi] : null;
+}
+
+function assignFinishPiece(run, seg, start, span, skuById) {
+  const [lo, hi] = span;
+  run.wallId = seg.id;
+  run.a = lo - start;
+  run.b = hi - start;
+  if (Array.isArray(run.outline)) {
+    const clipped = clipOutline(run.outline, lo, hi, start);
+    if (clipped) run.outline = clipped;
+    else delete run.outline;
+  }
+  reanchorRun(run, hostedWall(seg, skuById));
+}
+
+function rehostSplitWall(doc, head, tail, cut, len, skuById) {
+  for (const opening of doc.openings || []) {
+    if (opening.wallId !== head.id || !Number.isFinite(Number(opening.t))) continue;
+    const station = Math.min(1, Math.max(0, Number(opening.t))) * len;
+    if (station <= cut) opening.t = station / cut;
+    else {
+      opening.wallId = tail.id;
+      opening.t = (station - cut) / (len - cut);
+    }
+  }
+
+  const extra = [];
+  for (const run of [...(doc.finishRuns || [])]) {
+    if (run.wallId !== head.id) continue;
+    const whole = run.a == null || run.b == null;
+    if (whole) {
+      const copy = structuredClone(run);
+      copy.id = finishId("fx");
+      copy.wallId = tail.id;
+      if (Array.isArray(copy.outline)) {
+        const clipped = clipOutline(copy.outline, cut, len, cut);
+        if (clipped) copy.outline = clipped;
+        else delete copy.outline;
+      }
+      if (Array.isArray(run.outline)) {
+        const clipped = clipOutline(run.outline, 0, cut, 0);
+        if (clipped) run.outline = clipped;
+        else delete run.outline;
+      }
+      reanchorRun(run, hostedWall(head, skuById));
+      reanchorRun(copy, hostedWall(tail, skuById));
+      extra.push(copy);
+      continue;
+    }
+    const headSpan = pieceSpan(run.a, run.b, 0, cut);
+    const tailSpan = pieceSpan(run.a, run.b, cut, len);
+    if (headSpan && tailSpan) {
+      const copy = structuredClone(run);
+      copy.id = finishId("fx");
+      assignFinishPiece(copy, tail, cut, tailSpan, skuById);
+      assignFinishPiece(run, head, 0, headSpan, skuById);
+      extra.push(copy);
+    } else if (tailSpan) assignFinishPiece(run, tail, cut, tailSpan, skuById);
+    else if (headSpan) assignFinishPiece(run, head, 0, headSpan, skuById);
+  }
+  if (extra.length) {
+    if (!Array.isArray(doc.finishRuns)) doc.finishRuns = [];
+    doc.finishRuns.push(...extra);
+  }
+}
+
 // --- join ------------------------------------------------------------------
 
 const JOIN_TOL = 0.05;
 const COLLINEAR_TOL = 1e-3;
+
+/**
+ * Where a selected wall meets another end to end on the same line.
+ * A corner is not one: the two runs have to be collinear. One point per pair,
+ * so selecting both pieces still marks the joint once.
+ */
+export function collinearWallJoints(segments, selectedIds, tol = JOIN_TOL) {
+  const ids = selectedIds instanceof Set ? selectedIds : new Set(selectedIds || []);
+  const list = (segments || []).filter((seg) => seg && Number.isFinite(seg.x1));
+  const out = [];
+  const seen = new Set();
+  for (const a of list) {
+    if (!ids.has(a.id)) continue;
+    for (const b of list) {
+      if (!b || b === a || b.id === a.id) continue;
+      const key = a.id < b.id ? `${a.id}|${b.id}` : `${b.id}|${a.id}`;
+      if (seen.has(key)) continue;
+      if (!sameLevel(a, b) || !runsCollinear(a, b)) continue;
+      const point = sharedEndpoint(a, b, tol);
+      if (!point) continue;
+      seen.add(key);
+      out.push({ ...point, id: a.id });
+    }
+  }
+  return out;
+}
+
+function sharedEndpoint(a, b, tol) {
+  const ends = [[a.x1, a.y1], [a.x2, a.y2]];
+  const other = [[b.x1, b.y1], [b.x2, b.y2]];
+  for (const [ax, ay] of ends) {
+    for (const [bx, by] of other) {
+      if (endsMeet(ax, ay, bx, by, tol)) return { x: (ax + bx) / 2, y: (ay + by) / 2 };
+    }
+  }
+  return null;
+}
+
+function runsCollinear(a, b) {
+  const ax = a.x2 - a.x1;
+  const ay = a.y2 - a.y1;
+  const bx = b.x2 - b.x1;
+  const by = b.y2 - b.y1;
+  const lenA = Math.hypot(ax, ay);
+  const lenB = Math.hypot(bx, by);
+  if (lenA < 1e-9 || lenB < 1e-9) return false;
+  return Math.abs(ax * by - ay * bx) / (lenA * lenB) <= COLLINEAR_TOL;
+}
 
 /** Weld two collinear walls or beams that meet end to end back into one. */
 export function joinSelection(doc, refs) {
@@ -537,6 +736,309 @@ export function retypeSelection(doc, refs, sku, { skuById = () => null } = {}) {
     refs: retyped.map((row) => row.ref),
     skipped: skipped.map((row) => row.ref),
   };
+}
+
+// --- location line ---------------------------------------------------------
+
+const FACE_CATEGORIES = new Set(["wall", "boundarywall"]);
+const FACE_WORD = { center: "centreline", exterior: "exterior face", interior: "interior face" };
+
+function faceThickness(obj, skuById) {
+  const sku = skuById(obj?.sku);
+  if (!sku || !FACE_CATEGORIES.has(sku.category)) return 0;
+  return drawnWallThickness(sku);
+}
+
+function endsOf(seg) {
+  return { x1: seg.x1, y1: seg.y1, x2: seg.x2, y2: seg.y2 };
+}
+
+function sameLevel(a, b) {
+  return (a?.level ?? null) === (b?.level ?? null);
+}
+
+function endsMeet(ax, ay, bx, by, tol) {
+  return Math.hypot(ax - bx, ay - by) <= tol;
+}
+
+function pointAlong(seg, metres) {
+  const len = Math.hypot(seg.x2 - seg.x1, seg.y2 - seg.y1) || 1;
+  return {
+    x: seg.x1 + ((seg.x2 - seg.x1) / len) * metres,
+    y: seg.y1 + ((seg.y2 - seg.y1) / len) * metres,
+  };
+}
+
+function metresAlong(seg, x, y) {
+  const len = Math.hypot(seg.x2 - seg.x1, seg.y2 - seg.y1);
+  if (len < 1e-9) return 0;
+  const t = ((x - seg.x1) * (seg.x2 - seg.x1) + (y - seg.y1) * (seg.y2 - seg.y1)) / (len * len);
+  return Math.min(len, Math.max(0, t)) * len;
+}
+
+function fractionAlong(seg, x, y) {
+  const len2 = (seg.x2 - seg.x1) ** 2 + (seg.y2 - seg.y1) ** 2;
+  if (len2 < 1e-18) return 0;
+  const t = ((x - seg.x1) * (seg.x2 - seg.x1) + (y - seg.y1) * (seg.y2 - seg.y1)) / len2;
+  return Math.min(1, Math.max(0, t));
+}
+
+function hostedWall(seg, skuById) {
+  return {
+    ...seg,
+    length: Math.hypot(seg.x2 - seg.x1, seg.y2 - seg.y1),
+    thickness: drawnWallThickness(skuById(seg.sku)),
+  };
+}
+
+/** A finish measured in metres from the wall's first end keeps that point in the plan. */
+function keepFinishPoint(run, oldSeg, seg) {
+  if (run.a == null || run.b == null) return;
+  const p1 = pointAlong(oldSeg, run.a);
+  const p2 = pointAlong(oldSeg, run.b);
+  run.a = metresAlong(seg, p1.x, p1.y);
+  run.b = metresAlong(seg, p2.x, p2.y);
+  if (run.a > run.b) [run.a, run.b] = [run.b, run.a];
+  if (Array.isArray(run.outline)) {
+    run.outline = run.outline.map(([s, z]) => [metresAlong(seg, pointAlong(oldSeg, s).x, pointAlong(oldSeg, s).y), z]);
+  }
+}
+
+/**
+ * Switch selected walls onto a location line. Each wall keeps the line it was
+ * drawn on and the body shifts onto the chosen face or centreline. Another
+ * segment that shared an endpoint moves that endpoint with it, so the corner
+ * stays closed. Openings and finishes on the moved wall keep their station.
+ * On a neighbour whose end moved, they keep their point in the plan.
+ */
+export function realignWallFaces(doc, refs, newLocation, { skuById = () => null, tol = CORNER_JOIN_TOL } = {}) {
+  const loc = normalizeWallLocation(newLocation);
+  const rows = resolve(doc, refs).filter((row) => row.ref.kind === "segment" && faceThickness(row.obj, skuById) > 0);
+  if (!rows.length) return fail("Select a wall to change its face.");
+
+  const moves = [];
+  for (const row of rows) {
+    if (normalizeWallLocation(row.obj.location) === loc) continue;
+    const thickness = faceThickness(row.obj, skuById);
+    const old = endsOf(row.obj);
+    const shifted = realignAboutLocation(row.obj, thickness, loc);
+    if (!shifted) continue;
+    moves.push({ obj: row.obj, ref: row.ref, old, thickness });
+  }
+  if (!moves.length) return { ok: true, changed: false, message: "Already on that line.", refs: [] };
+
+  const movedIds = new Set(moves.map((move) => move.obj.id));
+  const joined = new Map();
+  const claimed = new Set();
+  for (const move of moves) {
+    const next = endsOf(move.obj);
+    for (const other of doc.segments || []) {
+      if (!other || movedIds.has(other.id) || !sameLevel(other, move.obj)) continue;
+      for (const end of [1, 2]) {
+        const ox = end === 1 ? other.x1 : other.x2;
+        const oy = end === 1 ? other.y1 : other.y2;
+        let nx = null;
+        let ny = null;
+        if (endsMeet(ox, oy, move.old.x1, move.old.y1, tol)) { nx = next.x1; ny = next.y1; }
+        else if (endsMeet(ox, oy, move.old.x2, move.old.y2, tol)) { nx = next.x2; ny = next.y2; }
+        if (nx === null) continue;
+        const key = `${other.id}:${end}`;
+        if (claimed.has(key)) continue;
+        claimed.add(key);
+        if (!joined.has(other.id)) joined.set(other.id, { seg: other, old: endsOf(other), ends: [] });
+        joined.get(other.id).ends.push({ end, x: nx, y: ny });
+      }
+    }
+  }
+  for (const { seg, ends } of joined.values()) {
+    for (const end of ends) {
+      if (end.end === 1) { seg.x1 = end.x; seg.y1 = end.y; }
+      else { seg.x2 = end.x; seg.y2 = end.y; }
+    }
+    if (Number.isFinite(seg.length)) seg.length = Math.hypot(seg.x2 - seg.x1, seg.y2 - seg.y1);
+  }
+
+  for (const move of moves) {
+    for (const run of doc.finishRuns || []) {
+      if (run.wallId === move.obj.id) reanchorRun(run, hostedWall(move.obj, skuById));
+    }
+  }
+  for (const { seg, old } of joined.values()) {
+    for (const run of doc.finishRuns || []) {
+      if (run.wallId !== seg.id) continue;
+      keepFinishPoint(run, old, seg);
+      reanchorRun(run, hostedWall(seg, skuById));
+    }
+    for (const opening of doc.openings || []) {
+      if (opening.wallId !== seg.id || !Number.isFinite(Number(opening.t))) continue;
+      const px = old.x1 + (old.x2 - old.x1) * Number(opening.t);
+      const py = old.y1 + (old.y2 - old.y1) * Number(opening.t);
+      opening.t = fractionAlong(seg, px, py);
+    }
+  }
+
+  const word = FACE_WORD[loc];
+  const message = moves.length === 1
+    ? `Wall moved onto the ${word}.`
+    : `Moved ${moves.length} walls onto the ${word}.`;
+  return { ok: true, changed: true, message, refs: moves.map((move) => move.ref) };
+}
+
+const ON_WALL_M = 0.02;
+
+/** Metres along the infinite line through `seg`, negative before the start. */
+function signedMetres(seg, x, y) {
+  const dx = seg.x2 - seg.x1;
+  const dy = seg.y2 - seg.y1;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-9) return 0;
+  return ((x - seg.x1) * dx + (y - seg.y1) * dy) / len;
+}
+
+function openingCentre(seg, opening) {
+  const t = Math.min(1, Math.max(0, Number(opening.t)));
+  return {
+    x: seg.x1 + (seg.x2 - seg.x1) * t,
+    y: seg.y1 + (seg.y2 - seg.y1) * t,
+  };
+}
+
+function openingName(opening, skuById) {
+  const cat = skuById(opening?.sku)?.category;
+  if (cat === "window") return "window";
+  if (cat === "door") return "door";
+  return "opening";
+}
+
+/** True when the opening's centre would fall off the new centreline. */
+function openingLeaves(oldSeg, nextSeg, opening) {
+  if (opening.wallId !== oldSeg.id || !Number.isFinite(Number(opening.t))) return false;
+  const at = openingCentre(oldSeg, opening);
+  const len = Math.hypot(nextSeg.x2 - nextSeg.x1, nextSeg.y2 - nextSeg.y1);
+  const along = signedMetres(nextSeg, at.x, at.y);
+  return along < -ON_WALL_M || along > len + ON_WALL_M;
+}
+
+/**
+ * Keep a finish's plan footprint on the new wall. A whole-face finish still
+ * covers the face. A partial finish is cut back to the wall, and dropped
+ * when nothing of it remains. Returns false when the run should be removed.
+ */
+function retargetFinish(run, oldSeg, seg, skuById) {
+  if (run.a == null || run.b == null) {
+    reanchorRun(run, hostedWall(seg, skuById));
+    return true;
+  }
+  const len = Math.hypot(seg.x2 - seg.x1, seg.y2 - seg.y1);
+  const p1 = pointAlong(oldSeg, Number(run.a));
+  const p2 = pointAlong(oldSeg, Number(run.b));
+  let a = signedMetres(seg, p1.x, p1.y);
+  let b = signedMetres(seg, p2.x, p2.y);
+  if (a > b) [a, b] = [b, a];
+  const lo = Math.max(0, a);
+  const hi = Math.min(len, b);
+  if (hi - lo < ON_WALL_M) return false;
+  run.a = lo;
+  run.b = hi;
+  if (Array.isArray(run.outline)) {
+    const mapped = run.outline.map(([s, z]) => {
+      const p = pointAlong(oldSeg, Number(s));
+      return [signedMetres(seg, p.x, p.y), z];
+    });
+    const clipped = clipOutline(mapped, 0, len, 0);
+    if (clipped) run.outline = clipped;
+    else delete run.outline;
+  }
+  reanchorRun(run, hostedWall(seg, skuById));
+  return true;
+}
+
+function retargetOpening(opening, oldSeg, seg) {
+  const at = openingCentre(oldSeg, opening);
+  opening.t = fractionAlong(seg, at.x, at.y);
+}
+
+/**
+ * Move one end of a wall's location line onto a point, and store the
+ * centreline that location line implies. A neighbour whose centreline end
+ * met the old end moves to the new centreline end. Doors and windows keep
+ * their place on the plan. The edit is refused, and nothing is written,
+ * when one of them would no longer lie on its wall.
+ */
+export function moveWallEnd(doc, ref, end, point, { skuById = () => null, tol = CORNER_JOIN_TOL } = {}) {
+  if (!ref || ref.kind !== "segment") return fail("Select a wall to move an end.");
+  const obj = objectByRef(doc, ref);
+  if (!obj) return fail("Select a wall to move an end.");
+  if (end !== 1 && end !== 2) return fail("Click an end of this wall.");
+  if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return fail("Click where this end should meet.");
+
+  const thickness = faceThickness(obj, skuById);
+  const line = locationLineOf(obj, thickness);
+  const start = end === 1 ? { x: point.x, y: point.y } : { x: line.x1, y: line.y1 };
+  const finish = end === 2 ? { x: point.x, y: point.y } : { x: line.x2, y: line.y2 };
+  if (Math.hypot(finish.x - start.x, finish.y - start.y) < MIN_TRACE) return fail("That would make the wall too short.");
+
+  const center = centerlineFromLocation(start, finish, thickness, obj.location);
+  const old = endsOf(obj);
+  const oldEnd = end === 1 ? { x: old.x1, y: old.y1 } : { x: old.x2, y: old.y2 };
+  const newEnd = end === 1 ? { x: center.x1, y: center.y1 } : { x: center.x2, y: center.y2 };
+  const plans = [{ seg: obj, old, next: center }];
+
+  for (const other of doc.segments || []) {
+    if (!other || other.id === obj.id || !sameLevel(other, obj)) continue;
+    let x1 = other.x1;
+    let y1 = other.y1;
+    let x2 = other.x2;
+    let y2 = other.y2;
+    let touched = false;
+    if (endsMeet(other.x1, other.y1, oldEnd.x, oldEnd.y, tol)) {
+      x1 = newEnd.x;
+      y1 = newEnd.y;
+      touched = true;
+    }
+    if (endsMeet(other.x2, other.y2, oldEnd.x, oldEnd.y, tol)) {
+      x2 = newEnd.x;
+      y2 = newEnd.y;
+      touched = true;
+    }
+    if (!touched) continue;
+    if (Math.hypot(x2 - x1, y2 - y1) < MIN_TRACE) return fail("That would make the wall too short.");
+    plans.push({ seg: other, old: endsOf(other), next: { x1, y1, x2, y2 } });
+  }
+
+  for (const plan of plans) {
+    const host = { id: plan.seg.id, ...plan.old };
+    for (const opening of doc.openings || []) {
+      if (!openingLeaves(host, { id: plan.seg.id, ...plan.next }, opening)) continue;
+      return fail(`That would leave the ${openingName(opening, skuById)} off the wall.`);
+    }
+  }
+
+  for (const plan of plans) {
+    plan.seg.x1 = plan.next.x1;
+    plan.seg.y1 = plan.next.y1;
+    plan.seg.x2 = plan.next.x2;
+    plan.seg.y2 = plan.next.y2;
+    if (Number.isFinite(plan.seg.length)) {
+      plan.seg.length = Math.hypot(plan.next.x2 - plan.next.x1, plan.next.y2 - plan.next.y1);
+    }
+  }
+
+  const drop = new Set();
+  for (const plan of plans) {
+    const host = { id: plan.seg.id, ...plan.old };
+    for (const opening of doc.openings || []) {
+      if (opening.wallId !== plan.seg.id || !Number.isFinite(Number(opening.t))) continue;
+      retargetOpening(opening, host, plan.seg);
+    }
+    for (const run of doc.finishRuns || []) {
+      if (run.wallId !== plan.seg.id) continue;
+      if (!retargetFinish(run, host, plan.seg, skuById)) drop.add(run.id);
+    }
+  }
+  if (drop.size) doc.finishRuns = (doc.finishRuns || []).filter((run) => !drop.has(run.id));
+
+  return done("End moved.", [ref]);
 }
 
 // --- attach base -----------------------------------------------------------

@@ -7,7 +7,7 @@ import { readFileSync } from "node:fs";
 
 import { compile } from "../compile.js";
 import { PlanStore as Store, carryFinishRegionsToLevel, finishRegionPolygon, hasJobContent, hostedFinishRegions, normalizeDoc, roomPolygon, shapePolygon } from "../model.js";
-import { area as polygonArea, pointInPoly } from "../geom.js";
+import { area as polygonArea, pointInPoly, rectPoly, translatePolyEdge } from "../geom.js";
 import { copySelection, mirrorSelection, rotateSelection } from "../modify.js";
 import { normalizePackUnits } from "../schema.js";
 import { deriveWalls } from "../walls.js";
@@ -19,7 +19,9 @@ import {
   categoriesForSurface,
   createFinishRegion,
   createFinishRun,
+  materializeFinishRing,
   dependentsOfWalls,
+  finishBillNote,
   floorCoverage,
   presetFromRoom,
   planWallFinishMarks,
@@ -115,6 +117,30 @@ test("the default is not stored, and a job setting changes the external face", (
   const brick = rows.find((r) => r.finishCategory === "facebrick");
   assert.ok(brick.pcAllowance);
   assert.ok(brick.type.includes(PC_ALLOWANCE_LABEL));
+});
+
+test("paint names its bill item, and an unpriced paint shows the gap", () => {
+  assert.equal(finishBillNote("wallTile", null).kind, "allowance");
+  assert.equal(finishBillNote("wallTile", null).text, PC_ALLOWANCE_LABEL);
+  const gap = finishBillNote("paint", null);
+  assert.equal(gap.kind, "gap");
+  assert.equal(gap.text, "No rate on file (FINISH:paint)");
+  assert.equal(finishBillNote("paint", { id: "p", rateRef: "PAINT-1" }).text, "PAINT-1");
+
+  const doc = normalizeDoc({
+    segments: [{ id: "w1", sku: "TSP_MAS009", level: "01 GFL", x1: 0, y1: 0, x2: 6, y2: 0 }],
+  });
+  const walls = deriveWalls(doc, pack);
+  createFinishRun(doc, walls[0], 1, { category: "paint" });
+  const row = finishRows(doc).find((r) => r.finishCategory === "paint" && r.source === "run");
+  assert.ok(row.type.includes("No rate on file (FINISH:paint)"));
+  assert.equal(row.rateRef, null);
+  const marks = planWallFinishMarks(doc, pack, walls).filter((m) => m.category === "paint");
+  assert.ok(marks.length > 0 && marks.every((m) => m.label.includes("No rate on file (FINISH:paint)")));
+  const model = elevationModel(doc, pack, { wallId: "w1", side: 1 }, walls);
+  const html = faceFinishHtml(doc, model);
+  assert.ok(html.includes("No rate on file (FINISH:paint)"));
+  assert.ok(html.includes(">Paint<"));
 });
 
 test("a room rule tiles the room-side faces to its height, as an allowance without a product", () => {
@@ -341,6 +367,42 @@ test("a whole-floor region is the floor's outline, so reshaping the floor reshap
   const screed = finishRows(doc).find((r) => r.finishCategory === "screed");
   assert.ok(Math.abs(screed.area - 18) < 1e-6);
   assert.equal(normalizeDoc(JSON.parse(JSON.stringify(doc))).finishRegions.find((r) => r.whole)?.whole, true);
+});
+
+test("a line drag uses the drawn ring, so the bottom edge can sit on the floor", () => {
+  const doc = { finishRegions: [] };
+  const stored = [[4, 7], [8, 7], [11, 4], [8, 1], [4, 1], [1, 4]];
+  const region = createFinishRegion(doc, {
+    category: "screed",
+    shape: { kind: "poly", points: stored },
+  });
+  const drawn = shapePolygon({ kind: "poly", points: stored });
+  const bottomOf = (poly) => {
+    let idx = -1;
+    let y = -Infinity;
+    for (let i = 0; i < poly.length; i += 1) {
+      const a = poly[i];
+      const b = poly[(i + 1) % poly.length];
+      if (Math.abs(a[1] - b[1]) < 1e-9 && a[1] > y) {
+        y = a[1];
+        idx = i;
+      }
+    }
+    return idx;
+  };
+  const storedBottom = bottomOf(stored);
+  const drawnBottom = bottomOf(drawn);
+  assert.notEqual(storedBottom, drawnBottom);
+  const points = materializeFinishRing(doc, region);
+  assert.equal(bottomOf(points), drawnBottom);
+  const host = rectPoly(0, 0, 12, 8);
+  const next = translatePolyEdge(points, drawnBottom, 0, 2, host);
+  const a = next[drawnBottom];
+  const b = next[(drawnBottom + 1) % next.length];
+  assert.equal(a[1], 8);
+  assert.equal(b[1], 8);
+  const missed = translatePolyEdge(stored, drawnBottom, 0, 2, host);
+  assert.ok(Math.abs(missed[storedBottom][1] - 7) < 1e-9);
 });
 
 test("rotate, mirror, copy and merge of a floor treat its tiles as part of it", () => {
@@ -854,6 +916,8 @@ test("an open face lists the wall, then openings, finishes, and the room rule ap
   assert.ok(html.includes('class="fin-pill">Existing<') && html.includes('class="fin-pill">Kitchen side<'), "status and side are pills");
   assert.ok(html.includes("<h3>Finishes on this face</h3>") && !html.includes("fin-mark"), "the finishes heading has no number");
   assert.ok(html.includes('class="fin-line is-selected" data-fin="face-wall"'), "the wall row is the selected row");
+  assert.ok(html.includes('data-fin-fields="wall"') && html.includes('data-for-opening="'), "size fields have a slot under the wall and under each opening");
+  assert.ok(html.indexOf('data-fin="face-wall"') < html.indexOf('data-fin-fields="wall"'), "the wall fields sit under the wall row, not inside it");
   assert.ok(!html.includes("data-fin-summary") && !html.includes('data-fin="default-ask"'), "no coverage box beside the face editor");
   assert.ok(!html.includes("data-fin-newband") && !html.includes("fin-mini") && !html.includes('data-fin="add-open"'), "no add form and no second thumbnail");
   assert.ok(!html.includes("fin-kind") && !html.includes("fin-group"), "rows are single lines, not cards or type groups");

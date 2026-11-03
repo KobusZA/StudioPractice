@@ -32,7 +32,7 @@ test("full Add drawing keeps once-a-sheet commands in the group menu", () => {
   const ids = add.items.map((item) => item.id);
   for (const id of add.menu) assert.ok(ids.includes(id), id);
   assert.deepEqual(ids.filter((id) => !add.menu.includes(id)), [
-    "underlay", "satellite", "underlay-adjust", "calibrate", "reference", "align-floors",
+    "underlay", "satellite", "underlay-adjust", "trace-view", "calibrate", "reference", "align-floors",
   ]);
   const sheet = SIMPLE_TABS.find((t) => t.id === "draw").groups.find((g) => g.label === "Sheet");
   assert.equal(sheet.menu, undefined);
