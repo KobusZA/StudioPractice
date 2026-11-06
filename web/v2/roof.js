@@ -5,9 +5,17 @@
 // The footprint is an axis-aligned rect: that is everything the week-1 UI
 // can draw, and what massing.js already reduces a free polygon to before
 // folding it. Flat roofs have no guides.
+//
+// A cut is a second polygon on that roof. It does not rewrite the outline.
+// `hole` is an opening (the roof around it stays). `remove` is a part of
+// the roof to take off. Scheduled area is what remains after both.
+
+import { area as polyArea, clipPolygon } from "./geom.js";
 
 export const ROOF_FORMS = ["flat", "gable", "shed", "hip"];
 export const DEFAULT_ROOF_PITCH = 30;
+/** A cut smaller than this is a mis-click, not an opening. Square metres. */
+export const ROOF_CUT_MIN_AREA = 0.05;
 
 export function normalizeRoofForm(form) {
   const value = String(form || "flat").toLowerCase();
@@ -86,4 +94,67 @@ export function roofGuideLines(rect, form, ridge) {
   }
 
   return lines.filter((l) => Math.hypot(l.x2 - l.x1, l.y2 - l.y1) > 1e-6);
+}
+
+/** A cut is a hole unless it is explicitly a part to remove. */
+export function normalizeRoofCutKind(kind) {
+  return kind === "remove" ? "remove" : "hole";
+}
+
+function pieceArea(pieces) {
+  return (pieces || []).reduce((sum, poly) => sum + Math.abs(polyArea(poly)), 0);
+}
+
+function intersectLists(a, b) {
+  const out = [];
+  for (const pa of a || []) {
+    for (const pb of b || []) out.push(...clipPolygon(pa, pb));
+  }
+  return out;
+}
+
+/** Area of the union. Each list is one cut, already clipped so its pieces do not overlap. */
+function unionArea(lists) {
+  const n = lists.length;
+  if (!n) return 0;
+  if (n === 1) return pieceArea(lists[0]);
+  if (n > 8) {
+    let sum = lists.reduce((total, list) => total + pieceArea(list), 0);
+    for (let i = 0; i < n; i += 1) {
+      for (let j = i + 1; j < n; j += 1) sum -= pieceArea(intersectLists(lists[i], lists[j]));
+    }
+    return Math.max(0, sum);
+  }
+  let total = 0;
+  for (let mask = 1; mask < (1 << n); mask += 1) {
+    let acc = null;
+    let bits = 0;
+    for (let i = 0; i < n; i += 1) {
+      if ((mask & (1 << i)) === 0) continue;
+      bits += 1;
+      acc = acc ? intersectLists(acc, lists[i]) : lists[i];
+      if (!acc.length) break;
+    }
+    if (!acc?.length) continue;
+    total += (bits % 2 ? 1 : -1) * pieceArea(acc);
+  }
+  return Math.max(0, total);
+}
+
+/**
+ * Plan area of a roof after its cuts. `cuts` is `{ kind, poly }[]`.
+ * Overlapping cuts are counted once. Anything outside the outline counts
+ * as nothing. `retained` is the area to schedule.
+ */
+export function roofPlanAreas(hostPoly, cuts) {
+  const gross = hostPoly?.length >= 3 ? Math.abs(polyArea(hostPoly)) : 0;
+  const lists = [];
+  for (const cut of cuts || []) {
+    const poly = cut?.poly;
+    if (!poly || poly.length < 3 || gross <= 0) continue;
+    const pieces = clipPolygon(poly, hostPoly).filter((part) => Math.abs(polyArea(part)) > 1e-8);
+    if (pieces.length) lists.push(pieces);
+  }
+  const cut = Math.min(gross, unionArea(lists));
+  return { gross, cut, retained: Math.max(0, gross - cut) };
 }

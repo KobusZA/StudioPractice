@@ -192,6 +192,12 @@
         <div class="canvas-status">
           <p class="ribbon-hint" id="v2-ribbon-hint" hidden></p>
           <div class="plan-options" id="v2-plan-options" hidden>
+            <div class="plan-loc words" id="v2-roof-cut-kind" hidden>
+              <div class="seg" role="group" aria-label="What this cut does">
+                <button type="button" data-roof-cut="hole" class="active" aria-pressed="true" title="An opening. The roof around it stays.">Hole</button>
+                <button type="button" data-roof-cut="remove" aria-pressed="false" title="This part of the roof comes off. The outline stays.">Remove</button>
+              </div>
+            </div>
             <div class="plan-loc words" id="v2-shape-link" hidden>
               <div class="seg" role="group" aria-label="How this outline is drawn">
                 <button type="button" data-shape-link="sketch" class="active" aria-pressed="true" title="Click each corner of the outline. Enter closes it. It does not follow the walls until you ask.">Sketch</button>
@@ -525,6 +531,17 @@
               <option value="short">along short side</option>
             </select>
           </label>
+          <div id="v2-ctx-roof-cut" hidden>
+            <p class="hint" id="v2-ctx-roof-cut-note"></p>
+            <button type="button" id="v2-ctx-roof-cut-start">Cut into this roof</button>
+            <fieldset class="planner-status" id="v2-ctx-roof-cut-kind" hidden>
+              <legend>This cut</legend>
+              <div class="planner-status-opts">
+                <label><input type="radio" name="v2-roof-cut-kind" value="hole" /> Hole</label>
+                <label><input type="radio" name="v2-roof-cut-kind" value="remove" /> Remove</label>
+              </div>
+            </fieldset>
+          </div>
           <label id="v2-ctx-olevel-wrap" hidden>Cut
             <select id="v2-ctx-olevel"></select>
           </label>

@@ -181,3 +181,49 @@ test("revoking access signs that person out of the firm", async () => {
   const register = await member.get("/api/register");
   assert.equal(register.status, 401);
 });
+
+test("a platform administrator can open a job in a company they do not belong to", async () => {
+  const home = await signedUpAgent(baseUrl, { orgName: "Operator Firm" });
+  const other = await firmWithRegisterProject(baseUrl, { code: "P074", name: "Pretorius" });
+  allow.add(home.account.email);
+
+  const admin = agent(baseUrl);
+  await admin.post("/api/auth/sign-in", { email: home.account.email, password: PASSWORD });
+
+  const refused = await other.client.post(
+    `/api/admin/companies/${other.account.orgId}/jobs/${other.project.id}/open`,
+  );
+  assert.equal(refused.status, 403);
+
+  const missing = await admin.post(
+    `/api/admin/companies/${other.account.orgId}/jobs/prj_missing/open`,
+  );
+  assert.equal(missing.status, 404);
+  const unmoved = await admin.get("/api/auth/session");
+  assert.equal(unmoved.body.orgId, home.account.orgId);
+  assert.equal(unmoved.body.visiting, false);
+
+  const opened = await admin.post(
+    `/api/admin/companies/${other.account.orgId}/jobs/${other.project.id}/open`,
+  );
+  assert.equal(opened.status, 200);
+  assert.equal(opened.body.orgId, other.account.orgId);
+  assert.equal(opened.body.orgName, other.account.orgName);
+  assert.equal(opened.body.role, "owner");
+  assert.equal(opened.body.visiting, true);
+  assert.equal(opened.body.companies.some((company) => company.orgId === other.account.orgId), false);
+
+  const register = await admin.get("/api/register");
+  assert.equal(register.status, 200);
+  assert.deepEqual(register.body.projects.map((project) => project.id), [other.project.id]);
+
+  const detail = await admin.get(`/api/admin/companies/${other.account.orgId}`);
+  assert.equal(detail.body.company.members.some((member) => member.email === home.account.email), false);
+
+  const back = await admin.post("/api/auth/company", { orgId: home.account.orgId });
+  assert.equal(back.status, 200);
+  assert.equal(back.body.orgId, home.account.orgId);
+  assert.equal(back.body.visiting, false);
+  const homeRegister = await admin.get("/api/register");
+  assert.deepEqual(homeRegister.body.projects.map((project) => project.id), []);
+});

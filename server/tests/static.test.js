@@ -93,6 +93,10 @@ test("a directory with an index redirects to it, and one without is not listed",
   assert.equal(indexed.status, 302);
   assert.equal(indexed.headers.Location, "/v2/index.html");
 
+  const withQuery = await serve("/practice/?project=prj_abc");
+  assert.equal(withQuery.status, 302);
+  assert.equal(withQuery.headers.Location, "/practice/index.html?project=prj_abc");
+
   const bare = await serve("/v2/tests");
   assert.equal(bare.status, 403);
 });

@@ -8,7 +8,7 @@ import {
 } from "./admin.js";
 import {
   AuthError, RateLimiter, SESSION_COOKIE, SESSION_TTL_MS,
-  inviteMember, refreshOfflineLease, resolveSession, revokeSession, setSessionCompany, signIn, signUp,
+  enterCompany, inviteMember, refreshOfflineLease, resolveSession, revokeSession, setSessionCompany, signIn, signUp,
   platformAdminEmailsFrom,
 } from "./auth.js";
 import {
@@ -60,6 +60,7 @@ export function createApi(pool, options = {}, env = process.env) {
     // gate is platform_admin, checked in requirePlatformAdmin.
     ["GET", "/api/admin/companies", handleAdminListCompanies],
     ["GET", "/api/admin/companies/:orgId", handleAdminGetCompany],
+    ["POST", "/api/admin/companies/:orgId/jobs/:projectId/open", handleAdminOpenJob],
     ["POST", "/api/admin/companies/:orgId/members", handleAdminGrantAccess],
     ["PATCH", "/api/admin/companies/:orgId/members/:userId", handleAdminSetMemberRole],
     ["DELETE", "/api/admin/companies/:orgId/members/:userId", handleAdminRevokeAccess],
@@ -276,6 +277,20 @@ async function handleAdminGetCompany({ req, res, pool, params }) {
   const company = await getCompany(pool, params.orgId);
   if (!company) throw new HttpError(404, "No such company");
   sendJson(res, 200, { company });
+}
+
+/** Open one of this company's jobs in the practice. Moves the sign-in there. */
+async function handleAdminOpenJob({ req, res, pool, params }) {
+  const session = await requirePlatformAdmin(pool, req);
+  await enterCompany(pool, {
+    sessionId: session.sessionId,
+    userId: session.userId,
+    orgId: params.orgId,
+    projectId: params.projectId,
+  });
+  const next = await currentSession(pool, req);
+  const offlineUntil = await refreshOfflineLease(pool, next.sessionId);
+  sendJson(res, 200, { signedIn: true, ...sessionPayload({ ...next, offlineUntil }) });
 }
 
 async function handleAdminGrantAccess({ req, res, pool, params }) {
@@ -1008,6 +1023,7 @@ function sessionPayload(session) {
     // day a third role exists.
     capabilities: capabilitiesFor(session.role),
     platformAdmin: Boolean(session.platformAdmin),
+    visiting: Boolean(session.visiting),
     memberSince: session.memberSince ? new Date(session.memberSince).toISOString() : null,
     offlineUntil: session.offlineUntil ?? null,
   };
@@ -1041,8 +1057,9 @@ async function requirePlatformAdmin(pool, req) {
 
 async function requireStore(pool, req) {
   const session = await requireSession(pool, req);
-  // A platform administrator may have no firm of their own. The practice
-  // routes are still firm routes; they do not become a way to read one.
+  // A platform administrator may have no firm of their own. Practice routes
+  // stay firm routes until they open a job, which is what puts a company on
+  // this sign-in.
   if (!session.orgId) throw new AuthError(403, "That account is not a member of a firm");
   return openStore(pool, session);
 }

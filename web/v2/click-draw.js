@@ -194,6 +194,7 @@ export function hasClickDraft(state) {
     || state.siteDraft?.length
     || state.roomDraft?.length
     || state.boundaryDraft?.length
+    || state.roofCutDraft?.points?.length
     || state.regionDraft?.length
     || state.cameraDraft?.a
     || state.sectionDraft?.a

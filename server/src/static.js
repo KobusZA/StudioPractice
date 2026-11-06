@@ -77,7 +77,9 @@ export function createStatic(rootDir, { index = "/practice/index.html" } = {}) {
         indexInfo = null;
       }
       if (indexInfo?.isFile()) {
-        const location = (requested.endsWith("/") ? requested : `${requested}/`) + "index.html";
+        // Keep the query. /practice/?project=… is how a job is opened, and a
+        // redirect that drops it lands on the practice overview instead.
+        const location = (requested.endsWith("/") ? requested : `${requested}/`) + "index.html" + url.search + url.hash;
         res.writeHead(302, { Location: location, "Cache-Control": "no-store" }).end();
         return true;
       }

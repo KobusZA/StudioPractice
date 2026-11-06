@@ -368,12 +368,42 @@ export async function setSessionCompany(pool, { sessionId, userId, orgId }) {
 }
 
 /**
+ * Move this sign-in into a company so a job there can be opened.
+ *
+ * A platform administrator does not have to be a member. No membership row
+ * is written, so the firm's access list stays its own people. While the
+ * sign-in is in a company they do not belong to, the practice treats them
+ * as an owner — that is what makes the job readable in full. A company they
+ * already belong to keeps the role on that membership.
+ */
+export async function enterCompany(pool, { sessionId, userId, orgId, projectId }) {
+  const { rows: orgs } = await pool.query(
+    `select id, name from org where id = $1 and deleted_at is null`,
+    [orgId],
+  );
+  if (!orgs[0]) throw new AuthError(404, "No such company");
+  const { rows: projects } = await pool.query(
+    `select id from project where id = $1 and org_id = $2 and deleted_at is null`,
+    [projectId, orgId],
+  );
+  if (!projects[0]) throw new AuthError(404, "No such job");
+  await pool.query(
+    `update session set org_id = $2 where id = $1 and deleted_at is null`,
+    [sessionId, orgId],
+  );
+  await openStore(pool, { orgId, userId }).seedPracticeDefaults();
+  return { orgId: orgs[0].id, orgName: orgs[0].name };
+}
+
+/**
  * Who is this request, and which firm's data may it see. Returns null rather
  * than throwing for anything that amounts to "not signed in", so a handler can
  * decide whether that is a 401 or just an anonymous read.
  *
  * The company comes from a live membership. `session.org_id` only chooses which
  * of those memberships this sign-in is in. There is no `app_user.org_id`.
+ * The exception is a platform administrator who opened a job from the admin
+ * page: that sign-in may name a company they do not belong to, and only then.
  */
 export async function resolveSession(pool, token) {
   if (!token) return null;
@@ -397,6 +427,21 @@ export async function resolveSession(pool, token) {
   if (!row) return null;
   const memberships = await listLiveMemberships(pool, row.user_id);
   let current = memberships.find((membership) => membership.org_id === row.session_org_id) || null;
+  let visiting = false;
+  // Opening a job from the admin page sets the sign-in onto a company with
+  // no membership. Honour that only for a platform administrator, and only
+  // while the company still exists. Anyone else is put back on a firm they
+  // belong to, below.
+  if (!current && row.platform_admin && row.session_org_id) {
+    const { rows: orgs } = await pool.query(
+      `select id, name from org where id = $1 and deleted_at is null`,
+      [row.session_org_id],
+    );
+    if (orgs[0]) {
+      current = { org_id: orgs[0].id, org_name: orgs[0].name, role: "owner" };
+      visiting = true;
+    }
+  }
   // A session from before this column existed, or a company they have left,
   // opens another firm they still belong to. One write, then later requests
   // find the row directly.
@@ -416,6 +461,7 @@ export async function resolveSession(pool, token) {
     orgName: current ? current.org_name : null,
     role: current ? current.role : null,
     companies: companiesFrom(memberships),
+    visiting,
     platformAdmin: Boolean(row.platform_admin),
     memberSince: row.member_since,
     expiresAt: row.expires_at,

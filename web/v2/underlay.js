@@ -1249,6 +1249,11 @@ function translateLevelPlan(doc, levelId, dx, dy) {
     for (const obj of doc[key] || []) {
       if (!onLevel(obj, levelId)) continue;
       if (obj.shape) obj.shape = translateShape(obj.shape, dx, dy, null);
+      if (Array.isArray(obj.cuts)) {
+        for (const cut of obj.cuts) {
+          if (cut?.shape) cut.shape = translateShape(cut.shape, dx, dy, null);
+        }
+      }
       if (Number.isFinite(obj.seed?.x) && Number.isFinite(obj.seed?.y)) {
         obj.seed = { ...obj.seed, x: obj.seed.x + dx, y: obj.seed.y + dy };
       }

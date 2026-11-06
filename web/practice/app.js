@@ -4571,8 +4571,15 @@ function wireApp() {
 
 function paintWho() {
   const who = el("who");
-  const companies = state.session.companies || [];
+  const companies = [...(state.session.companies || [])];
   who.replaceChildren();
+  // A job opened from the admin page can be a company this account does not
+  // belong to. Show that name, and keep their own firms in the switcher so
+  // they can leave.
+  if (state.session.visiting && state.session.orgId
+      && !companies.some((company) => company.orgId === state.session.orgId)) {
+    companies.unshift({ orgId: state.session.orgId, orgName: state.session.orgName });
+  }
   if (companies.length < 2) {
     who.textContent = `${state.session.email} · ${state.session.orgName || "—"}`;
     return;

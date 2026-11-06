@@ -895,7 +895,12 @@ export class PlanStore {
     for (const ref of [...moving, ...carried, ...carriedSockets]) {
       const obj = objectByRef(this.doc, ref);
       if (!obj) continue;
-      if (obj.shape) snaps.push({ ref, shape: clone(obj.shape), seed: obj.seed ? clone(obj.seed) : null });
+      if (obj.shape) snaps.push({
+        ref,
+        shape: clone(obj.shape),
+        seed: obj.seed ? clone(obj.seed) : null,
+        cuts: Array.isArray(obj.cuts) ? clone(obj.cuts) : null,
+      });
       else if (obj.x1 !== undefined) {
         snaps.push({ ref, x1: obj.x1, y1: obj.y1, x2: obj.x2, y2: obj.y2 });
       } else if (obj.x !== undefined) {
@@ -921,6 +926,12 @@ export class PlanStore {
       if (snap.shape) {
         obj.shape = translateShape(snap.shape, dx, dy, grid);
         if (snap.seed) obj.seed = { x: snapVal(snap.seed.x + dx), y: snapVal(snap.seed.y + dy) };
+        if (Array.isArray(snap.cuts)) {
+          obj.cuts = snap.cuts.map((cut) => ({
+            ...cut,
+            shape: cut?.shape ? translateShape(cut.shape, dx, dy, grid) : cut?.shape,
+          }));
+        }
       } else if (snap.x1 !== undefined) {
         obj.x1 = snapVal(snap.x1 + dx);
         obj.y1 = snapVal(snap.y1 + dy);

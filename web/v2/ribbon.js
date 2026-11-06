@@ -79,6 +79,7 @@ export const RIBBON = [
         items: [
           { id: "floors", label: "Floors", tool: "slab", categories: ["floor", "pool"] },
           { id: "roofs", label: "Roofs", tool: "roof", categories: ["roof", "carport"] },
+          { id: "roof-cut", label: "Cut roof", tool: "roof-cut" },
         ],
       },
       {
@@ -324,6 +325,7 @@ export const HINTS = {
   foundations: "Click to start a foundation, click again to end. Draw on the centreline or a face. Space flips the face. Esc to stop.",
   floors: "Click around a room to draw a floor slab.",
   roofs: "Click around the outline to draw a roof.",
+  "roof-cut": "Click inside a roof, then around the part to cut. Enter closes it. Hole leaves the roof with an opening. Remove takes that part off. Esc steps back.",
   ceilings: "Draws at floor-to-ceiling height above this level, not at floor level.",
   doors: "Click a wall to place a door.",
   windows: "Click a wall to place a window.",
@@ -405,7 +407,7 @@ export const SIMPLE_TABS = [
       { label: "Walls", items: ["walls"] },
       { label: "Rooms", items: ["rooms", "room-sep"] },
       { label: "Finishes", items: ["wall-finishes", "finishes"] },
-      { label: "Floors & roofs", items: ["floors", "roofs"] },
+      { label: "Floors & roofs", items: ["floors", "roofs", "roof-cut"] },
       { label: "Ceilings", items: ["ceilings"] },
       { label: "Openings", large: true, items: ["doors", "windows"] },
       { label: "Circulation", items: ["stairs"] },

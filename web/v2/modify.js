@@ -132,6 +132,7 @@ export function rotateSelection(doc, refs, { degrees = 90 } = {}) {
     if (ref.kind === "item" && turnedSockets.has(obj.id)) continue;
     if (SHAPED.has(ref.kind)) {
       obj.shape = rotateShape(obj.shape, turn);
+      mapRoofCuts(obj, (shape) => rotateShape(shape, turn));
       if (obj.seed) [obj.seed.x, obj.seed.y] = turn(obj.seed.x, obj.seed.y);
     } else if (obj.rect && Number.isFinite(obj.rect.minX)) {
       obj.rect = rectFromCorners(obj.rect, turn);
@@ -178,6 +179,36 @@ function rotateShape(shape, turn) {
   return shape;
 }
 
+/** Move every cut with the roof. `mapShape` is the same transform as the outline. */
+function mapRoofCuts(obj, mapShape, { newIds = false } = {}) {
+  if (!Array.isArray(obj?.cuts)) return;
+  obj.cuts = obj.cuts.map((cut) => ({
+    ...cut,
+    id: newIds ? nid("rc") : cut.id,
+    shape: cut?.shape ? mapShape(cut.shape) : cut?.shape,
+  }));
+}
+
+function cutCentroid(shape) {
+  const poly = shapePolygon(shape);
+  if (poly.length < 3) return null;
+  return [
+    poly.reduce((sum, p) => sum + p[0], 0) / poly.length,
+    poly.reduce((sum, p) => sum + p[1], 0) / poly.length,
+  ];
+}
+
+/** Cuts whose centre sits in this half stay with it. The other half gets the rest. */
+function cutsInRect(cuts, rect, newIds) {
+  return (cuts || []).flatMap((cut) => {
+    const centre = cutCentroid(cut.shape);
+    if (!centre) return [];
+    const [x, y] = centre;
+    if (x < rect.x - 1e-6 || y < rect.y - 1e-6 || x > rect.x + rect.w + 1e-6 || y > rect.y + rect.h + 1e-6) return [];
+    return [{ ...cut, id: newIds ? nid("rc") : cut.id }];
+  });
+}
+
 // --- mirror ----------------------------------------------------------------
 
 /** Mirror about the selection's own vertical ("v") or horizontal ("h") centre line. */
@@ -208,6 +239,7 @@ export function mirrorSelection(doc, refs, { axis = "v" } = {}) {
     if (ref.kind === "item" && flippedSockets.has(obj.id)) continue;
     if (SHAPED.has(ref.kind)) {
       obj.shape = rotateShape(obj.shape, flip); // corner mapping is the same job
+      mapRoofCuts(obj, (shape) => rotateShape(shape, flip));
       if (obj.seed) [obj.seed.x, obj.seed.y] = flip(obj.seed.x, obj.seed.y);
     } else if (obj.rect && Number.isFinite(obj.rect.minX)) {
       obj.rect = rectFromCorners(obj.rect, flip);
@@ -244,6 +276,7 @@ export function copySelection(doc, refs, { dx = null, dy = 0 } = {}) {
     copy.id = nid(ref.kind[0]);
     if (SHAPED.has(ref.kind)) {
       copy.shape = translateAny(copy.shape, offsetX, dy);
+      mapRoofCuts(copy, (shape) => translateAny(shape, offsetX, dy), { newIds: true });
       if (copy.seed) {
         copy.seed = { x: copy.seed.x + offsetX, y: copy.seed.y + dy };
       }
@@ -329,6 +362,7 @@ function translateObject(ref, obj, dx, dy, doc = null) {
     // Found before the floor moves, while the tiles still sit on it.
     const hosted = doc ? hostedFinishRegions(doc, ref) : [];
     obj.shape = translateAny(obj.shape, dx, dy);
+    mapRoofCuts(obj, (shape) => translateAny(shape, dx, dy));
     for (const region of hosted) region.shape = translateAny(region.shape, dx, dy);
     if (ref.kind === "slab") translateFloorSockets(doc, obj.id, dx, dy);
   }
@@ -407,10 +441,13 @@ export function splitSelection(doc, refs) {
     ? { ...r, x: roundGrid(r.x + half), w: roundGrid(r.w - half) }
     : { ...r, y: roundGrid(r.y + half), h: roundGrid(r.h - half) };
 
+  const cuts = Array.isArray(obj.cuts) ? obj.cuts : null;
   obj.shape = { kind: "rect", ...a };
+  if (cuts) obj.cuts = cutsInRect(cuts, a, false);
   const copy = structuredClone(obj);
   copy.id = nid(ref.kind[0]);
   copy.shape = { kind: "rect", ...b };
+  if (cuts) copy.cuts = cutsInRect(cuts, b, true);
   if (copy.name) copy.name = `${copy.name} 2`;
   collectionFor(doc, ref.kind).push(copy);
 

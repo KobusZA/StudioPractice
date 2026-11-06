@@ -188,16 +188,17 @@ function paintCompany() {
         <thead><tr><th>Code</th><th>Job</th><th>Client</th><th>Type</th><th>Status</th><th>Opened</th></tr></thead>
         <tbody>
           ${company.jobs.map((job) => `
-            <tr>
+            <tr class="row-link" data-open-job="${esc(job.id)}">
               <td><span class="code-cell">${esc(job.code || "—")}</span></td>
-              <td>${esc(job.name || "—")}</td>
+              <td><button type="button" class="admin-company" data-open-job="${esc(job.id)}">${esc(job.name || job.code || "Open job")}</button></td>
               <td>${esc(job.clientName || "—")}</td>
               <td>${esc(job.typeCode || "—")}</td>
               <td>${esc(job.status || "—")}</td>
               <td>${esc(when(job.openedAt || job.createdAt))}</td>
             </tr>`).join("")}
         </tbody>
-      </table>` : `<p>This company has no jobs yet.</p>`}
+      </table>
+      <p class="note-line" data-job-error></p>` : `<p>This company has no jobs yet.</p>`}
 
     <h2>Access</h2>
     <p class="note-line">A new person needs a password of at least 10 characters. Tell them the password yourself — nothing is emailed.
@@ -247,7 +248,23 @@ function paintCompany() {
     <p class="note-line" data-member-error></p>`;
 }
 
+async function openJob(projectId) {
+  const note = el("main").querySelector("[data-job-error]");
+  if (note) note.textContent = "";
+  try {
+    await call("POST", `/api/admin/companies/${encodeURIComponent(state.companyId)}/jobs/${encodeURIComponent(projectId)}/open`);
+    location.assign(`/practice/index.html?project=${encodeURIComponent(projectId)}`);
+  } catch (error) {
+    if (note) note.textContent = error.message;
+  }
+}
+
 async function onClick(event) {
+  const job = event.target.closest("[data-open-job]");
+  if (job && state.companyId) {
+    await openJob(job.dataset.openJob);
+    return;
+  }
   const open = event.target.closest("[data-open-company]");
   if (open) {
     await openCompany(open.dataset.openCompany);

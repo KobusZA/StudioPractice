@@ -14,6 +14,7 @@
 // from `explodeRecipes` below (a foundation nobody drew has nothing to click).
 
 import { area as polyArea, perimeter as polyPerimeter, pointInPoly } from "./geom.js";
+import { roofPlanAreas } from "./roof.js";
 import { syncRoomBounds } from "./room-bound.js";
 import { levelAboveRise, lookDownLevelId } from "./level-view.js";
 import {
@@ -492,7 +493,11 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
     if (!sku) continue;
     const poly = shapePolygon(roof.shape);
     if (poly.length < 3) continue;
-    const a = polyArea(poly);
+    const areas = roofPlanAreas(poly, (roof.cuts || []).map((cut) => ({
+      kind: cut.kind,
+      poly: shapePolygon(cut.shape),
+    })));
+    const a = areas.retained;
     const form = roof.form || "flat";
     const levelZ = levelElevation(pack, roof.level);
     const elevation = levelZ < 0.05 ? (pack.system.wallHeight || 2.8) : levelZ;

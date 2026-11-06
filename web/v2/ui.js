@@ -156,9 +156,9 @@ import {
   wallFootprint,
   wallPlanColour,
 } from "./drawing-defaults.js?v=20261103-wave1";
-import { area as polyArea, bbox, clampDeltaInside, clampToPoly, clipSegToRect, distToSeg, fitPolygonToHost, formatLengthMm, headingDeg, parseLengthMm, pointInPoly, roundGrid, translatePolyEdge } from "./geom.js?v=20261103-bos14";
+import { area as polyArea, bbox, clampDeltaInside, clampToPoly, clipPolygon, clipSegToRect, distToSeg, fitPolygonToHost, formatLengthMm, headingDeg, parseLengthMm, pointInPoly, roundGrid, translatePolyEdge } from "./geom.js?v=20261103-bos14";
 import { SNAP_PIXEL_TOL, GAP_MAX_M, ALIGN_ORIGIN_MAX_M, NICE_MIN_STEP_M, PROBE_VECTORS, applyNicePoint, bestLinearMoveSnap, collectSnapEdges, collectSnapTargets, isExactPointSnap, nearestAlignments, resolveProbes, snapEdgeToLine, snapLengthFrom, snapLinearEnd, snapNiceDelta, snapPoint, snapToFace } from "./snap.js?v=20261103-bos14";
-import { DEFAULT_ROOF_PITCH, roofGuideLines } from "./roof.js";
+import { DEFAULT_ROOF_PITCH, ROOF_CUT_MIN_AREA, normalizeRoofCutKind, roofGuideLines, roofPlanAreas } from "./roof.js";
 import {
   ATTACHABLE_KINDS,
   PlanStore,
@@ -516,6 +516,12 @@ const el = {
   ctxPitchWrap: document.getElementById("v2-ctx-pitch-wrap"),
   ctxRidge: document.getElementById("v2-ctx-ridge"),
   ctxRidgeWrap: document.getElementById("v2-ctx-ridge-wrap"),
+  roofCutPanel: document.getElementById("v2-ctx-roof-cut"),
+  roofCutNote: document.getElementById("v2-ctx-roof-cut-note"),
+  roofCutStart: document.getElementById("v2-ctx-roof-cut-start"),
+  roofCutKindWrap: document.getElementById("v2-ctx-roof-cut-kind"),
+  roofCutKindBar: document.getElementById("v2-roof-cut-kind"),
+  shapeLink: document.getElementById("v2-shape-link"),
   ctxType: document.getElementById("v2-ctx-type"),
   ctxTypeWrap: document.getElementById("v2-ctx-type-wrap"),
   ctxStatusWrap: document.getElementById("v2-ctx-status-wrap"),
@@ -552,7 +558,6 @@ const el = {
   ctxShapePolyHint: document.getElementById("v2-ctx-shape-poly-hint"),
   ctxFollow: document.getElementById("v2-ctx-follow"),
   ctxFollowNote: document.getElementById("v2-ctx-follow-note"),
-  shapeLink: document.getElementById("v2-shape-link"),
   elevBody: document.getElementById("v2-elevation-body"),
   faceEditor: document.getElementById("v2-face-editor"),
   faceAdd: document.getElementById("v2-face-add"),
@@ -781,6 +786,14 @@ let doorHandSign = 1;
 let shapeDraft = null;
 // Corners of a floor or roof outline, while Sketch is the way it is drawn.
 let boundaryDraft = null;
+// A cut being sketched on one roof. `locked` means the inspector named the
+// roof; otherwise the first click chooses it. Points are in metres.
+let roofCutDraft = null;
+// hole | remove, for the cut being drawn.
+let roofCutKind = "hole";
+// The cut whose corners are open. The roof stays selected underneath.
+let editingRoofCut = null;
+let selectedRoofCutVertex = null;
 // How the floor and roof tools place the next outline. Sketch is freehand.
 // Room copies a room. External walls follow the building footprint.
 let shapePlaceMode = "sketch";
@@ -2506,7 +2519,7 @@ function buildProbes(point, edges) {
 
 function snapPreviewTool() {
   return tool === "wall" || tool === "beam" || tool === "room" || tool === "slab"
-    || tool === "roof" || tool === "property" || tool === "sg-ref" || tool === "camera" || tool === "section"
+    || tool === "roof" || tool === "roof-cut" || tool === "property" || tool === "sg-ref" || tool === "camera" || tool === "section"
     || tool === "callout" || tool === "revision" || tool === "model-line" || tool === "annot-line"
     || tool === "separation"
     || tool === "measure" || tool === "service-route" || tool === "region";
@@ -3259,6 +3272,7 @@ function selectStationIndex(idx, { keepSelection = false } = {}) {
     wallDraft = null;
     shapeDraft = null;
     boundaryDraft = null;
+    roofCutDraft = null;
     drag = null;
     if (!keepSelection) store.clearSelection();
     drawRibbon();
@@ -3586,6 +3600,9 @@ function draw() {
   }
   if (tool === "room" && roomDraft?.length) drawPolyDraft(roomDraft, "#b2451e");
   if ((tool === "slab" || tool === "roof") && boundaryDraft?.length) drawPolyDraft(boundaryDraft, tool === "roof" ? "#6e6458" : "#8a5a32");
+  if (tool === "roof-cut" && roofCutDraft?.points?.length) {
+    drawPolyDraft(roofCutDraft.points, roofCutKind === "remove" ? "#8a3a1e" : "#5c5348");
+  }
   if (tool === "region" && regionDraft?.length) drawPolyDraft(regionDraft, "#8a7d6c");
   if (tool === "sg-ref" && sgPick) drawSgPick();
   if (tool === "camera" && cameraDraft?.a) drawCameraDraft();
@@ -4293,6 +4310,7 @@ function drawPlanLevel(levelId, walls, { ghost = false, look = "down", allow = (
       const poly = shapePolygon(roof.shape);
       drawPolyFill(poly, COLOUR.roof, statusStroke(objectStatus(roof)));
       drawRoofGuides(bbox(poly), roof.form, roof.ridge);
+      drawRoofCuts(roof, poly);
     }
   }
   if (allow("room")) {
@@ -4468,6 +4486,73 @@ function drawPolyFill(poly, fill, stroke) {
   ctx.lineWidth = 1.4;
   ctx.stroke();
   ctx.restore();
+}
+
+/** Hole or demolition sketch on a roof. The outline of the roof is unchanged. */
+function drawRoofCuts(roof, host) {
+  if (!host || host.length < 3) return;
+  for (const cut of roof.cuts || []) {
+    const raw = shapePolygon(cut.shape);
+    const pieces = clipPolygon(raw, host).filter((part) => part.length >= 3);
+    if (!pieces.length) continue;
+    const remove = normalizeRoofCutKind(cut.kind) === "remove";
+    const selected = editingRoofCut?.roofId === roof.id && editingRoofCut?.cutId === cut.id;
+    for (const poly of pieces) {
+      ctx.save();
+      pathForPoly(poly);
+      if (remove) {
+        ctx.fillStyle = "rgba(138, 58, 30, 0.16)";
+        ctx.fill();
+        ctx.clip();
+        const box = bbox(poly);
+        ctx.beginPath();
+        ctx.strokeStyle = "rgba(138, 58, 30, 0.7)";
+        ctx.lineWidth = 1;
+        const step = 0.45;
+        for (let x = box.x - box.h; x < box.x + box.w + box.h; x += step) {
+          const [sx, sy] = worldToScreen(x, box.y);
+          const [ex, ey] = worldToScreen(x - box.h, box.y + box.h);
+          ctx.moveTo(sx, sy);
+          ctx.lineTo(ex, ey);
+        }
+        ctx.stroke();
+      } else {
+        ctx.fillStyle = "#f3eee4";
+        ctx.fill();
+      }
+      ctx.restore();
+      ctx.save();
+      pathForPoly(poly);
+      ctx.strokeStyle = remove ? "#8a3a1e" : "#5c5348";
+      ctx.lineWidth = selected ? 2 : 1.2;
+      ctx.setLineDash([6, 4]);
+      ctx.stroke();
+      ctx.restore();
+      const [cx, cy] = poly.reduce((s, p) => [s[0] + p[0], s[1] + p[1]], [0, 0]).map((n) => n / poly.length);
+      const [lx, ly] = worldToScreen(cx, cy);
+      ctx.save();
+      ctx.font = "11px Source Sans 3, sans-serif";
+      ctx.fillStyle = remove ? "#8a3a1e" : "#5c5348";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(remove ? "remove" : "hole", lx, ly);
+      ctx.restore();
+    }
+    if (selected && tool === "select") {
+      ctx.save();
+      ctx.fillStyle = "#f4ede1";
+      ctx.strokeStyle = "#8a3a1e";
+      ctx.lineWidth = 1.6;
+      raw.forEach(([x, y], i) => {
+        const [hx, hy] = worldToScreen(x, y);
+        const picked = selectedRoofCutVertex?.cutId === cut.id && selectedRoofCutVertex.index === i;
+        ctx.fillStyle = picked ? "#8a3a1e" : "#f4ede1";
+        ctx.fillRect(hx - HANDLE / 2, hy - HANDLE / 2, HANDLE, HANDLE);
+        ctx.strokeRect(hx - HANDLE / 2, hy - HANDLE / 2, HANDLE, HANDLE);
+      });
+      ctx.restore();
+    }
+  }
 }
 
 function drawPolyOutline(poly, stroke, dashed, width = 1.4, halo = false) {
@@ -8418,6 +8503,15 @@ function updateRibbonHint() {
     setRibbonHint("Click the next corner. Enter closes the room.");
     return;
   }
+  if (tool === "roof-cut") {
+    if (roofCutDraft?.points?.length) setRibbonHint("Click the next corner. Enter closes the cut.");
+    else if (roofCutDraft?.locked) {
+      setRibbonHint(roofCutKind === "remove"
+        ? "Click around the part to remove. Enter closes it."
+        : "Click around the hole. Enter closes it.");
+    } else setRibbonHint(HINTS["roof-cut"]);
+    return;
+  }
   if ((tool === "slab" || tool === "roof") && boundaryDraft?.length) {
     setRibbonHint("Click the next corner. Enter closes the outline.");
     return;
@@ -8714,6 +8808,7 @@ function onRibbonFunction(item) {
   sizeDraft = null;
   roomDraft = null;
   boundaryDraft = null;
+  roofCutDraft = null;
   regionDraft = null;
   measureDraft = null;
   showDimensions = false;
@@ -9271,6 +9366,7 @@ function startSeparation() {
   paletteFilter = null;
   roomDraft = null;
   boundaryDraft = null;
+  roofCutDraft = null;
   regionDraft = null;
   tool = "separation";
   activeFunction = "room-sep";
@@ -12006,7 +12102,7 @@ function beginPan(ev) {
 // Drags that edit geometry already in the document mutate it live, off the
 // speculative undo entry pushed on pointer-down. Cancelling one therefore
 // means rolling that entry back, not just forgetting the drag.
-const REVERTIBLE_DRAGS = new Set(["move", "segment-end", "shape-vertex", "shape-edge", "region-vertex", "region-edge", "region-move", "property-vertex", "property-move", "underlay-move", "underlay-scale", "underlay-rotate"]);
+const REVERTIBLE_DRAGS = new Set(["move", "segment-end", "shape-vertex", "shape-edge", "roof-cut-vertex", "roof-cut-move", "region-vertex", "region-edge", "region-move", "property-vertex", "property-move", "underlay-move", "underlay-scale", "underlay-rotate"]);
 
 /**
  * Drop the in-progress click–click segment (or last property-line vertex)
@@ -12015,7 +12111,7 @@ const REVERTIBLE_DRAGS = new Set(["move", "segment-end", "shape-vertex", "shape-
  */
 function abortClickDraft() {
   if (!hasClickDraft({
-    wallDraft, shapeDraft, beamStart, lineStart, siteDraft, roomDraft, boundaryDraft, regionDraft, cameraDraft, sectionDraft, calloutDraft, revisionCloudDraft, measureDraft, calibration,
+    wallDraft, shapeDraft, beamStart, lineStart, siteDraft, roomDraft, boundaryDraft, roofCutDraft, regionDraft, cameraDraft, sectionDraft, calloutDraft, revisionCloudDraft, measureDraft, calibration,
     serviceRoute, serviceConnect,
   })) return false;
   if (serviceRoute?.fromNodeId) finishServiceRoute();
@@ -12027,6 +12123,10 @@ function abortClickDraft() {
   else if (siteDraft?.length) siteDraft.pop();
   else if (roomDraft?.length) roomDraft.pop();
   else if (boundaryDraft?.length) boundaryDraft.pop();
+  else if (roofCutDraft?.points?.length) {
+    roofCutDraft.points.pop();
+    if (!roofCutDraft.points.length && !roofCutDraft.locked) roofCutDraft = null;
+  }
   else if (regionDraft?.length) regionDraft.pop();
   else if (cameraDraft?.a) cameraDraft = { a: null };
   else if (sectionDraft?.a) sectionDraft = { a: null };
@@ -12121,6 +12221,7 @@ function cancelDrawing() {
   siteDraft = null;
   roomDraft = null;
   boundaryDraft = null;
+  roofCutDraft = null;
   regionDraft = null;
   sgPick = null;
   attachPick = null;
@@ -12172,7 +12273,8 @@ function wireToolbar() {
       sizeDraft = null;
       siteDraft = null;
       roomDraft = null;
-  boundaryDraft = null;
+      boundaryDraft = null;
+      roofCutDraft = null;
       regionDraft = null;
       sgPick = null;
       attachPick = null;
@@ -12415,6 +12517,8 @@ function onPointerDown(ev) {
       const vi = hitPolyVertexIndex(ring, wx, wy, shapeEditTol());
       if (vi != null) {
         selectedShapeEdge = null;
+        editingRoofCut = null;
+        selectedRoofCutVertex = null;
         store.pushUndo(historyDid("Edited the outline of"), { pending: true });
         // A rectangle has no stored corner yet. Remember it for Delete only
         // once the drag turns the shape into a polygon.
@@ -12435,6 +12539,8 @@ function onPointerDown(ev) {
       // A door or window sits on this edge. The click belongs to the opening,
       // so the room edge is not reshaped out from under it.
       if (ei != null && !openingAt(wx, wy)) {
+        editingRoofCut = null;
+        selectedRoofCutVertex = null;
         store.pushUndo(historyDid("Edited the outline of"), { pending: true });
         const finishSnap = finishShapeSnapshot(editable.ref);
         let started = false;
@@ -12700,6 +12806,11 @@ function onPointerDown(ev) {
     render();
     return;
   }
+  if (tool === "roof-cut") {
+    underlaySelected = false;
+    clickRoofCut(wx, wy);
+    return;
+  }
   if (tool === "slab" || tool === "roof") {
     underlaySelected = false;
     if (shapePlaceMode === "room") {
@@ -12777,8 +12888,14 @@ function onPointerDown(ev) {
     return;
   }
 
+  if (tool === "select" && !ev.shiftKey && beginRoofCutDrag(ev, wx, wy)) return;
+
   const hit = hitTest(wx, wy);
   selectedShapeEdge = null;
+  if (editingRoofCut) {
+    editingRoofCut = null;
+    selectedRoofCutVertex = null;
+  }
   if (hit) {
     // The floor outline is editable only while Floor is the selection. A press
     // on that floor, while a finish is selected, selects Floor and does not
@@ -13312,6 +13429,201 @@ function placeOutlineFromFootprint(wx, wy) {
   });
   if (!row) return false;
   setStatusMessage(`The ${outlineNoun()} follows the external walls.`, "ok");
+  render();
+  return true;
+}
+
+function roofsOnPlan() {
+  return (store.doc.roofs || []).filter((roof) => onActiveLevel(roof) && planObjectVisible(roof) && keptByCut(roof, "roof"));
+}
+
+function roofAtPoint(wx, wy) {
+  const roofs = roofsOnPlan();
+  for (let i = roofs.length - 1; i >= 0; i -= 1) {
+    const poly = shapePolygon(roofs[i].shape);
+    if (poly.length >= 3 && pointInPoly(wx, wy, poly)) return roofs[i];
+  }
+  return null;
+}
+
+function roofCutAt(wx, wy) {
+  const roofs = roofsOnPlan();
+  for (let i = roofs.length - 1; i >= 0; i -= 1) {
+    const roof = roofs[i];
+    const host = shapePolygon(roof.shape);
+    if (host.length < 3 || !pointInPoly(wx, wy, host)) continue;
+    const cuts = roof.cuts || [];
+    for (let c = cuts.length - 1; c >= 0; c -= 1) {
+      const poly = shapePolygon(cuts[c].shape);
+      if (poly.length >= 3 && pointInPoly(wx, wy, poly)) return { roof, cut: cuts[c], poly };
+    }
+  }
+  return null;
+}
+
+function roofCutRecord(roofId, cutId) {
+  const roof = (store.doc.roofs || []).find((row) => row.id === roofId);
+  const cut = roof?.cuts?.find((row) => row.id === cutId);
+  return roof && cut ? { roof, cut } : null;
+}
+
+/** Select the cut under the pointer and drag a corner, or the whole cut. */
+function beginRoofCutDrag(ev, wx, wy) {
+  const hit = roofCutAt(wx, wy);
+  if (!hit) return false;
+  store.selectOne({ kind: "roof", id: hit.roof.id });
+  editingRoofCut = { roofId: hit.roof.id, cutId: hit.cut.id };
+  selectedShapeVertex = null;
+  selectedShapeEdge = null;
+  const vi = hitPolyVertexIndex(hit.poly, wx, wy, shapeEditTol());
+  store.pushUndo(vi != null ? "Edited a roof cut" : "Moved a roof cut", { pending: true });
+  if (vi != null) {
+    selectedRoofCutVertex = { roofId: hit.roof.id, cutId: hit.cut.id, index: vi };
+    drag = {
+      kind: "roof-cut-vertex",
+      roofId: hit.roof.id,
+      cutId: hit.cut.id,
+      index: vi,
+      origin: hit.poly.map((p) => [p[0], p[1]]),
+      moved: false,
+    };
+  } else {
+    selectedRoofCutVertex = null;
+    drag = {
+      kind: "roof-cut-move",
+      roofId: hit.roof.id,
+      cutId: hit.cut.id,
+      x0: wx,
+      y0: wy,
+      origin: hit.poly.map((p) => [p[0], p[1]]),
+      moved: false,
+    };
+  }
+  try { el.canvas.setPointerCapture(ev.pointerId); } catch { /* already released */ }
+  render();
+  return true;
+}
+
+function clickRoofCut(wx, wy) {
+  const snapped = applySnap(wx, wy);
+  let roof = roofCutDraft?.roofId
+    ? (store.doc.roofs || []).find((row) => row.id === roofCutDraft.roofId)
+    : null;
+  if (!roof) {
+    roof = roofAtPoint(snapped.x, snapped.y) || roofAtPoint(wx, wy);
+    if (!roof) {
+      setStatusMessage("Click inside a roof to cut it.", "warn");
+      return;
+    }
+    roofCutDraft = { roofId: roof.id, points: [], locked: false };
+  }
+  const host = shapePolygon(roof.shape);
+  if (host.length < 3) return;
+  const clamped = clampToPoly(snapped.x, snapped.y, host);
+  const point = { x: clamped.x, y: clamped.y };
+  if (!roofCutDraft.points.length) {
+    roofCutDraft.points = [point];
+    setStatusMessage("Point 1 placed. Keep clicking each corner. Enter closes the cut.", "ok");
+    updateRibbonHint();
+    render();
+    return;
+  }
+  const first = roofCutDraft.points[0];
+  if (roofCutDraft.points.length >= 3 && Math.hypot(point.x - first.x, point.y - first.y) < 0.3) {
+    finishRoofCut();
+    return;
+  }
+  const prev = roofCutDraft.points[roofCutDraft.points.length - 1];
+  if (Math.hypot(point.x - prev.x, point.y - prev.y) < 0.05) {
+    setStatusMessage("That corner is the same as the last one.", "warn");
+    return;
+  }
+  roofCutDraft.points.push(point);
+  setStatusMessage(`Point ${roofCutDraft.points.length} placed. Enter closes the cut.`, "ok");
+  updateRibbonHint();
+  render();
+}
+
+function finishRoofCut() {
+  const draft = roofCutDraft;
+  if (!draft || draft.points.length < 3) {
+    setStatusMessage("A cut needs at least three corners.", "warn");
+    return;
+  }
+  const roof = (store.doc.roofs || []).find((row) => row.id === draft.roofId);
+  const host = roof ? shapePolygon(roof.shape) : [];
+  const poly = draft.points.map((p) => [p.x, p.y]);
+  const areas = roofPlanAreas(host, [{ kind: roofCutKind, poly }]);
+  if (!roof || areas.cut < ROOF_CUT_MIN_AREA) {
+    setStatusMessage("The cut has to sit on the roof.", "warn");
+    return;
+  }
+  const cut = { id: nid("rc"), kind: normalizeRoofCutKind(roofCutKind), shape: polyShape(poly) };
+  store.pushUndo(cut.kind === "remove" ? "Marked a part of the roof to remove" : "Cut a hole in the roof");
+  if (!Array.isArray(roof.cuts)) roof.cuts = [];
+  roof.cuts.push(cut);
+  store.selectOne({ kind: "roof", id: roof.id });
+  editingRoofCut = { roofId: roof.id, cutId: cut.id };
+  selectedRoofCutVertex = null;
+  roofCutDraft = draft.locked ? { roofId: roof.id, points: [], locked: true } : null;
+  store.persist();
+  setStatusMessage(cut.kind === "remove"
+    ? "That part comes off. The roof outline is unchanged. Delete puts it back."
+    : "Hole cut. The roof around it stays. Delete removes the hole.", "ok");
+  updateRibbonHint();
+  render();
+}
+
+/** Draw the next cut on this roof. An existing roof starts as a removal. */
+function armRoofCut(roof) {
+  abandonMove();
+  setPanMode(false);
+  activeFunction = "roof-cut";
+  paletteFilter = null;
+  tool = "roof-cut";
+  roofCutKind = roof?.status === "existing" ? "remove" : "hole";
+  roofCutDraft = roof ? { roofId: roof.id, points: [], locked: true } : null;
+  editingRoofCut = null;
+  selectedRoofCutVertex = null;
+  boundaryDraft = null;
+  shapeDraft = null;
+  syncToolButtons();
+  drawRibbon();
+  updateRibbonHint();
+  render();
+}
+
+/** Delete removes the open cut, or one of its corners. The roof stays. */
+function deleteRoofCut() {
+  if (!editingRoofCut) return false;
+  const found = roofCutRecord(editingRoofCut.roofId, editingRoofCut.cutId);
+  if (!found) {
+    editingRoofCut = null;
+    selectedRoofCutVertex = null;
+    return false;
+  }
+  const { roof, cut } = found;
+  const ring = shapePolygon(cut.shape);
+  const v = selectedRoofCutVertex;
+  if (v && v.cutId === cut.id && ring.length > 3 && ring[v.index]) {
+    const points = ring.map((p) => [p[0], p[1]]);
+    points.splice(v.index, 1);
+    store.pushUndo("Removed a corner of a roof cut");
+    cut.shape = polyShape(points);
+    selectedRoofCutVertex = null;
+    store.persist();
+    setStatusMessage("Corner removed.", "ok");
+    render();
+    return true;
+  }
+  store.pushUndo(normalizeRoofCutKind(cut.kind) === "remove" ? "Put the removed roof back" : "Removed a hole");
+  roof.cuts = roof.cuts.filter((row) => row.id !== cut.id);
+  editingRoofCut = null;
+  selectedRoofCutVertex = null;
+  store.persist();
+  setStatusMessage(normalizeRoofCutKind(cut.kind) === "remove"
+    ? "That part is back on the roof."
+    : "Hole removed.", "ok");
   render();
   return true;
 }
@@ -13946,6 +14258,40 @@ function onPointerMove(ev) {
     return;
   }
   if (dragFinishRegion(wx, wy)) return;
+  if (drag?.kind === "roof-cut-vertex") {
+    const found = roofCutRecord(drag.roofId, drag.cutId);
+    const host = found ? shapePolygon(found.roof.shape) : [];
+    const pt = drag.origin[drag.index];
+    if (found && pt && host.length >= 3) {
+      const snapped = applySnap(wx, wy);
+      const p = clampToPoly(snapped.x, snapped.y, host);
+      if (Math.hypot(p.x - pt[0], p.y - pt[1]) * cam.scale > 2) drag.moved = true;
+      if (drag.moved) {
+        const next = drag.origin.map((corner, i) => (i === drag.index ? [p.x, p.y] : [corner[0], corner[1]]));
+        found.cut.shape = polyShape(next);
+        selectedRoofCutVertex = { roofId: drag.roofId, cutId: drag.cutId, index: drag.index };
+      }
+    }
+    render();
+    return;
+  }
+  if (drag?.kind === "roof-cut-move") {
+    const found = roofCutRecord(drag.roofId, drag.cutId);
+    const host = found ? shapePolygon(found.roof.shape) : [];
+    if (found && host.length >= 3) {
+      const limited = clampDeltaInside(drag.origin, wx - drag.x0, wy - drag.y0, host);
+      if (Math.hypot(limited.dx, limited.dy) * cam.scale > 2) drag.moved = true;
+      if (drag.moved) {
+        const grid = activeGrid();
+        found.cut.shape = polyShape(drag.origin.map(([x, y]) => [
+          roundGrid(x + limited.dx, grid),
+          roundGrid(y + limited.dy, grid),
+        ]));
+      }
+    }
+    render();
+    return;
+  }
   if (drag?.kind === "shape-edge") {
     const obj = objByRef(drag.ref);
     const origin = drag.origin;
@@ -14086,6 +14432,7 @@ function gestureBecomesStep(live) {
   if (live.kind === "underlay-move" || live.kind === "underlay-scale" || live.kind === "underlay-rotate") return Boolean(live.moved);
   if (live.kind === "segment-end") return live.target !== "segment" || Boolean(live.moved);
   if (live.kind === "shape-vertex" || live.kind === "shape-edge") return Boolean(live.moved || live.inserted);
+  if (live.kind === "roof-cut-vertex" || live.kind === "roof-cut-move") return Boolean(live.moved);
   if (live.kind === "region-vertex" || live.kind === "region-edge" || live.kind === "region-move") return Boolean(live.moved || live.inserted);
   if (live.kind === "property-vertex" || live.kind === "property-move") return Boolean(live.moved);
   return false;
@@ -14144,6 +14491,8 @@ function onPointerUp(ev) {
       store.dropUndo({ pendingOnly: true });
       if (drag.refused) setStatusMessage(drag.refused, "warn");
     } else store.persist();
+  } else if (drag.kind === "roof-cut-vertex" || drag.kind === "roof-cut-move") {
+    if (!drag.moved) store.dropUndo({ pendingOnly: true });
   } else if (drag.kind === "shape-vertex" || drag.kind === "shape-edge") {
     if (!drag.moved && !drag.inserted) {
       store.dropUndo({ pendingOnly: true });
@@ -14354,6 +14703,7 @@ function deleteElevCorner() {
 
 function deleteSelection() {
   if (deleteConfirming) return;
+  if (deleteRoofCut()) return;
   if (deleteElevCorner()) return;
   // A clicked finish is the thing Delete removes. The wall underneath stays
   // selected so the elevation can keep showing it, and must not go with the key.
@@ -14705,6 +15055,9 @@ function wireKeyboard() {
     } else if (ev.key === "Enter" && (currentUnderlayMode() === "align" || currentUnderlayMode() === "adjust") && !el.modeDone.disabled) {
       ev.preventDefault();
       doneUnderlayMode();
+    } else if (ev.key === "Enter" && tool === "roof-cut" && roofCutDraft?.points?.length >= 3) {
+      ev.preventDefault();
+      finishRoofCut();
     } else if (ev.key === "Enter" && (tool === "slab" || tool === "roof") && boundaryDraft?.length >= 3) {
       ev.preventDefault();
       finishBoundaryDraft();
@@ -20747,6 +21100,39 @@ function syncWallSettingsFold(kind) {
   setHidden(details, true);
 }
 
+function syncRoofCutKindButtons() {
+  if (!el.roofCutKindBar) return;
+  for (const btn of el.roofCutKindBar.querySelectorAll("[data-roof-cut]")) {
+    const on = btn.dataset.roofCut === roofCutKind;
+    btn.classList.toggle("active", on);
+    btn.setAttribute("aria-pressed", on ? "true" : "false");
+  }
+}
+
+function syncRoofCutInspector(roof) {
+  setHidden(el.roofCutPanel, !roof);
+  if (!roof || !el.roofCutNote) return;
+  const host = shapePolygon(roof.shape);
+  const areas = roofPlanAreas(host, (roof.cuts || []).map((cut) => ({
+    kind: cut.kind,
+    poly: shapePolygon(cut.shape),
+  })));
+  el.roofCutNote.textContent = areas.cut > 0.005
+    ? `Retained ${areas.retained.toFixed(2)} m² of ${areas.gross.toFixed(2)} m².`
+    : "A cut is a hole, or a part of this roof to remove. The outline stays.";
+  const cut = editingRoofCut?.roofId === roof.id
+    ? (roof.cuts || []).find((row) => row.id === editingRoofCut.cutId)
+    : null;
+  if (editingRoofCut && !cut) editingRoofCut = null;
+  const showKind = Boolean(cut) && tool !== "roof-cut";
+  setHidden(el.roofCutKindWrap, !showKind);
+  if (showKind) {
+    for (const input of el.roofCutKindWrap.querySelectorAll("input")) {
+      input.checked = input.value === normalizeRoofCutKind(cut.kind);
+    }
+  }
+}
+
 function syncShapeLinkControl() {
   const placing = (tool === "slab" || tool === "roof") && !serviceDockActive();
   setHidden(el.shapeLink, !placing);
@@ -20882,12 +21268,15 @@ function syncPlanContext() {
   if (faceEditing) pinFaceInspectorChrome();
 
   const placingShape = tool === "slab" || tool === "roof";
+  const cuttingRoof = tool === "roof-cut";
   const placingWall = tool === "wall";
   const placingSep = tool === "separation" && Boolean(lineStart);
   const moving = tool === "move" && Boolean(moveSession?.base);
   const faceWalls = draft ? [] : refs.filter((r) => r.kind === "segment" && segmentHasFaceControl(objByRef(r)));
   const editingFace = !placingWall && faceWalls.length > 0;
-  setHidden(el.planOptions, !showGeom && !placingWall && !placingSep && !editingFace && !moving && !placingShape);
+  setHidden(el.planOptions, !showGeom && !placingWall && !placingSep && !editingFace && !moving && !placingShape && !cuttingRoof);
+  setHidden(el.roofCutKindBar, !cuttingRoof);
+  syncRoofCutKindButtons();
   syncShapeLinkControl();
   setHidden(el.wallOpts, !(placingWall || editingFace) || moving);
   if (!moving) setDistanceField(false);
@@ -20930,7 +21319,15 @@ function syncPlanContext() {
     syncMoveDistanceField();
   }
 
+  if (cuttingRoof) {
+    setHidden(el.ctxLenWrap, true);
+    setHidden(el.ctxAngWrap, true);
+    setHidden(el.ctxWWrap, true);
+    setHidden(el.ctxHWrap, true);
+    setHidden(el.wallOpts, true);
+  }
   if (!moving && !showInspect && !showGeom && !creating && !editingProperty) {
+    if (!roof) setHidden(el.roofCutPanel, true);
     planContextKey = "";
     setHidden(el.ctxElevWrap, true);
     setHidden(el.ctxFloor, true);
@@ -20963,6 +21360,7 @@ function syncPlanContext() {
   setHidden(el.ctxShapePolyHint, !shapePoly);
   syncFollowControl((slab || roof) ? obj : null);
   setHidden(el.ctxFormWrap, !roof);
+  syncRoofCutInspector(roof ? obj : null);
   const pitched = Boolean(roof && obj && obj.form !== "flat");
   setHidden(el.ctxPitchWrap, !pitched);
   setHidden(el.ctxRidgeWrap, !pitched);
@@ -21301,6 +21699,34 @@ el.ctxRidge?.addEventListener("change", (e) => {
   if (!roof) return;
   store.pushUndo(`Set the ridge of ${historyThing(store.primary)} to ${e.target.value === "short" ? "short" : "long"}`);
   roof.ridge = e.target.value === "short" ? "short" : "long";
+  store.persist();
+  render();
+});
+
+el.roofCutStart?.addEventListener("click", () => {
+  const roof = soleOf("roof");
+  if (!roof) return;
+  armRoofCut(roof);
+});
+
+el.roofCutKindBar?.addEventListener("click", (ev) => {
+  const kind = ev.target.closest?.("[data-roof-cut]")?.dataset.roofCut;
+  if (kind !== "hole" && kind !== "remove") return;
+  roofCutKind = kind;
+  syncRoofCutKindButtons();
+  updateRibbonHint();
+});
+
+el.roofCutKindWrap?.addEventListener("change", (ev) => {
+  const kind = ev.target?.value;
+  if (kind !== "hole" && kind !== "remove") return;
+  const roof = soleOf("roof");
+  const cut = roof && editingRoofCut?.roofId === roof.id
+    ? (roof.cuts || []).find((row) => row.id === editingRoofCut.cutId)
+    : null;
+  if (!cut || normalizeRoofCutKind(cut.kind) === kind) return;
+  store.pushUndo(kind === "remove" ? "Marked the cut as roof to remove" : "Marked the cut as a hole");
+  cut.kind = kind;
   store.persist();
   render();
 });
