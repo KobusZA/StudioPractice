@@ -67,6 +67,20 @@ export function createStatic(rootDir, { index = "/practice/index.html" } = {}) {
       return true;
     }
     if (info.isDirectory()) {
+      // Same reason "/" redirects instead of serving the index in place:
+      // the page's ./app.js resolves against the document address. A directory
+      // with no index is still not listed.
+      let indexInfo;
+      try {
+        indexInfo = await stat(join(target, "index.html"));
+      } catch {
+        indexInfo = null;
+      }
+      if (indexInfo?.isFile()) {
+        const location = (requested.endsWith("/") ? requested : `${requested}/`) + "index.html";
+        res.writeHead(302, { Location: location, "Cache-Control": "no-store" }).end();
+        return true;
+      }
       res.writeHead(403).end();
       return true;
     }

@@ -35,6 +35,7 @@ const query = (params) => {
 
 export const api = {
   session: () => call("GET", "/api/auth/session"),
+  switchCompany: (orgId) => call("POST", "/api/auth/company", { orgId }),
   signIn: (body) => call("POST", "/api/auth/sign-in", body),
   signUp: (body) => call("POST", "/api/auth/sign-up", body),
   signOut: () => call("POST", "/api/auth/sign-out", {}),

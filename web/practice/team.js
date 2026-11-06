@@ -132,8 +132,8 @@ async function saveMember(host, ctx, form, kind) {
 async function removeMember(host, ctx, userId) {
   const member = view.roster.find((m) => m.userId === userId);
   const label = member?.fullName || member?.email || "this person";
-  if (!window.confirm(`Remove ${label} from the firm?\n\nThey will be signed out and can no longer sign in. `
-    + "Their logged time stays in your records.")) return;
+  if (!window.confirm(`Remove ${label} from this firm?\n\nThey lose access here. Their logged time stays. `
+    + "Their account stays, so they can still sign in to any other firm they belong to.")) return;
   try {
     view.roster = (await api.removeTeamMember(userId)).members;
     view.editing = null;
@@ -197,13 +197,14 @@ function paintRoster(host) {
       <p><button type="button" class="btn btn-sm" data-member-add>${view.adding ? "Cancel" : "+ Add team member"}</button></p>
       ${view.adding ? `<form data-form="member-add" class="tm-member-form">
         <label>Email<input type="email" name="email" required autocomplete="off" /></label>
-        <label>Password (10+ characters)<input type="text" name="password" required minlength="10" autocomplete="off" /></label>
+        <label>Password (10+ characters)<input type="text" name="password" minlength="10" autocomplete="off" /></label>
         <label>Full name<input name="fullName" /></label>
         <label>Job title<input name="jobTitle" /></label>
         <label>Phone<input type="tel" name="phone" /></label>
         <label>Joined the firm<input type="date" name="startDate" value="${today}" /></label>
         ${roleGrid("employee")}
-        <p class="note-line wide">Share the password with them directly &mdash; there is no email invite yet.</p>
+        <p class="note-line wide">A new email needs a password. Share it with them directly &mdash; nothing is emailed.
+          Leave the password blank when they already have an account. They keep it, and can switch into this firm.</p>
         <div class="wide"><button class="btn btn-sm btn-primary" type="submit">Add</button></div>
       </form>` : ""}
       <table class="grid tm-people">

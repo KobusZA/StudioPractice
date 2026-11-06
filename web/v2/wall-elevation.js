@@ -13,6 +13,8 @@ import { levelElevation, resolvedBase } from "./compile.js";
 import { nid } from "./model.js";
 import { foundationStorey, isFoundationLevel } from "./placement-warn.js";
 import {
+  fitArchSize,
+  isArchHead,
   openingOnWall,
   openingSize,
   roomEdgeSegment,
@@ -155,6 +157,7 @@ export function elevationModel(doc, pack, faceRef, walls = null, foundationSku =
       sku: opening.sku,
       name: placed.sku?.name || opening.sku,
       category,
+      head: isArchHead(placed.sku) ? "arch" : null,
       offset,
       width,
       sill: openingSill(pack, opening),
@@ -485,20 +488,37 @@ export function applyOpeningEdit(doc, pack, faceRef, openingId, edit, walls = nu
     else sill = Math.max(0, model.height - height);
   }
 
+  const sku = skuById(pack, opening.sku);
+  const arch = isArchHead(sku);
+  if (arch) {
+    height = fitArchSize(width, height).height;
+    if (sill + height > model.height) {
+      sill = Math.max(0, model.height - height);
+      if (sill + height > model.height) {
+        height = Math.max(ELEVATION_SNAP, model.height);
+        sill = 0;
+        if (height < width / 2) {
+          width = Math.min(model.length, height * 2);
+          left = Math.min(left, Math.max(0, model.length - width));
+        }
+      }
+    }
+  }
+
   const centre = left + width / 2;
   const fromA = model.flip ? model.length - centre : centre;
   opening.t = anchorT(doc, wall, opening, fromA);
 
-  const g = skuById(pack, opening.sku)?.geometry || {};
+  const g = sku?.geometry || {};
   const store = (field, value) => {
     const own = g[field];
     opening[field] = Number.isFinite(own) && Math.abs(own - value) < 0.0005 ? null : value;
   };
   if (Number.isFinite(edit.width) || Number.isFinite(edit.left)) store("width", width);
-  if (Number.isFinite(edit.height)) store("height", height);
+  if (Number.isFinite(edit.height) || arch) store("height", height);
   if (Number.isFinite(edit.sill)) {
-    // A door's floor-level sill is not an override.
-    if (skuById(pack, opening.sku)?.category === "window") store("sill", sill);
+    // A door's floor-level sill is not an override. A plain opening can be raised.
+    if (sku?.category === "window" || sku?.category === "opening") store("sill", sill);
   }
   return { left, width, sill, height };
 }

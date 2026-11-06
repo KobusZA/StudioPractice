@@ -59,10 +59,15 @@ create table if not exists app_user (
 create unique index if not exists app_user_email_live
   on app_user (lower(email)) where deleted_at is null;
 
--- One row per user today, and every user has exactly one. It exists now because
--- it is free now: suppliers, draughtsmen and clients will need narrower access,
--- and retrofitting a join table means finding every place that assumed
--- user.org_id. Nothing in src/ reads an org from a column on the user.
+-- Operator of this installation, not a role inside a firm. A firm owner sees
+-- one company; this flag is what /admin reads to see every company. Nothing
+-- seeds it. server.js turns on the emails in PLATFORM_ADMIN_EMAILS at boot,
+-- and sign-in does the same for an account created after that boot.
+alter table app_user add column if not exists platform_admin boolean not null default false;
+
+-- One person, several companies. Each row is their role in one firm. Nothing
+-- in src/ reads an org from a column on the user; the company a request is
+-- working in is the session's choice among these rows.
 create table if not exists membership (
   id          text primary key,
   user_id     text not null references app_user (id),
@@ -95,6 +100,10 @@ create table if not exists session (
   -- a pinned job lists but will not open. Unused until step 7 - the column is
   -- here so the session table is not migrated for it later.
   offline_until  timestamptz,
+  -- Which of this person's companies this sign-in is working in. Null only for
+  -- an operator who belongs to none. A request still has to find a live
+  -- membership for it; the column is the choice, not the permission.
+  org_id         text,
   created_by     text not null,
   created_at     timestamptz not null default now(),
   deleted_at     timestamptz
@@ -102,6 +111,8 @@ create table if not exists session (
 
 create index if not exists session_user_live
   on session (user_id) where deleted_at is null;
+
+alter table session add column if not exists org_id text;
 
 -- The job. Client, job number, quotes, legal documents, supplier correspondence
 -- and a timeline all hang off this row later; that is the whole reason it is

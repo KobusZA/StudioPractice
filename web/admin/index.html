@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Companies — StudioPractice</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,560&family=Source+Sans+3:wght@400;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../practice/practice.css" />
+  <link rel="stylesheet" href="./admin.css" />
+</head>
+<body>
+
+<div class="gate" id="gate" hidden>
+  <form class="form" id="gate-form">
+    <h1>Companies</h1>
+    <p>Sign in with a platform administrator account to see every firm on this system.</p>
+    <div class="fields">
+      <div class="field">
+        <label for="gate-email">Email</label>
+        <input id="gate-email" type="email" autocomplete="username" required />
+      </div>
+      <div class="field">
+        <label for="gate-password">Password</label>
+        <input id="gate-password" type="password" autocomplete="current-password" required />
+      </div>
+    </div>
+    <div class="actions">
+      <button class="btn btn-primary" type="submit">Sign in</button>
+    </div>
+    <p class="note-line" id="gate-error"></p>
+  </form>
+</div>
+
+<div class="app" id="app" hidden>
+  <div class="topbar">
+    <div class="brand"><div class="brand-mark">S</div><div class="brand-name">StudioPractice</div></div>
+    <nav class="nav" aria-label="Administration">
+      <button type="button" id="nav-companies" aria-current="page">Companies</button>
+    </nav>
+    <div class="spacer"></div>
+    <a class="btn btn-sm" id="practice-link" href="/practice/">Practice</a>
+    <span class="who" id="who"></span>
+    <button class="btn btn-sm" id="sign-out" type="button">Sign out</button>
+  </div>
+  <div class="workspace">
+    <div class="main panel" id="main"></div>
+  </div>
+</div>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>

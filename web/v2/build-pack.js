@@ -7,13 +7,17 @@
 // Three rules, inherited from migrate-pack.js:
 //   1. Compliance facts are only ever derived from what the template states.
 //      Everything else is null and lands in the gap report.
-//   2. Dimensions may fall back to the type name or a category default, because
-//      the schema requires them, but every fallback is reported as assumed.
+//   2. Dimensions may fall back to the type name, the measured plan extent, or a
+//      category default, because the schema requires them. A plan extent is the
+//      placed solid, measured by the add-in. Only a category default is reported
+//      as assumed.
 //   3. A Revit category we do not map is reported, never silently dropped.
 //
-//   node web/v2/build-pack.js ../../output/type-catalog.json ../samples/tsp-pack.json
+//   npm run build-pack
+// The catalog is the file Export Catalog writes, not TSP/output (that copy is stale).
 
 import { readFileSync, writeFileSync } from "node:fs";
+import { PLAIN_OPENING_SKUS } from "./openings.js";
 import {
   complianceFactsFor,
   REQUIRED_MEASURES,
@@ -84,7 +88,7 @@ const EXCLUDED = new Set([
 const DRAW_BY_CATEGORY = {
   wall: "wall", boundarywall: "wall", foundation: "wall",
   floor: "fill", pool: "fill", ceiling: "fill", roof: "roof",
-  door: "door", window: "window", beam: "beam", column: "beam",
+  door: "door", window: "window", opening: "opening", beam: "beam", column: "beam",
   stair: "stair", drainage: "pipe", carport: "roof",
   sanitary: "box", waterheater: "box", electrical: "point",
   furniture: "box", casework: "box",
@@ -200,6 +204,19 @@ function paramLookup(type, key) {
   return null;
 }
 
+// The add-in measures a placed family's solid in its own axes. A stated Width
+// parameter and a size written in the type name both win over this; the solid
+// wins over the category default. Millimetres already.
+const PLAN_EXTENT = { width: "planWidth", depth: "planDepth", height: "planHeight" };
+
+function planExtent(type, key) {
+  const field = PLAN_EXTENT[key];
+  if (!field) return null;
+  const value = type[field];
+  if (!Number.isFinite(value) || value <= 0) return null;
+  return Math.round(value);
+}
+
 function geometryFor(type, category, assumed) {
   const keys = requiredGeometryFor(category);
   const name = `${type.family} ${type.type}`;
@@ -232,6 +249,12 @@ function geometryFor(type, category, assumed) {
     }
     if (dims.single !== undefined && (key === "thickness" || key === "diameter")) {
       out[key] = dims.single;
+      continue;
+    }
+
+    const measured = planExtent(type, key);
+    if (measured !== null) {
+      out[key] = measured;
       continue;
     }
 
@@ -367,11 +390,19 @@ function makeId(type, category, taken) {
 const GENERIC_FAMILIES = new Set(["Basic Wall", "Floor", "Basic Roof", "Compound Ceiling",
   "Basic Ceiling", "Wall Foundation", "Foundation Slab", "Stair", "Cast-In-Place Stair"]);
 
+// Revit families in this firm are filed as TSP_Door-… or "TSP Closed Couple WC".
+// The mark is the library, not the type, so it never reaches a name a person reads.
+function withoutFirmMark(text) {
+  return String(text || "").replace(/^TSP(?:[\s_]+|(?=[A-Z]))/, "").trim();
+}
+
 function displayName(type) {
-  if (!type.family || GENERIC_FAMILIES.has(type.family)) return type.type;
-  if (type.type === type.family) return type.type;
-  if (/^(standard|default)$/i.test(type.type)) return type.family;
-  return `${type.family} — ${type.type}`;
+  const family = withoutFirmMark(type.family);
+  const typeName = withoutFirmMark(type.type);
+  if (!family || GENERIC_FAMILIES.has(type.family)) return typeName;
+  if (typeName === family) return typeName;
+  if (/^(standard|default)$/i.test(type.type)) return family;
+  return `${family} — ${typeName}`;
 }
 
 // --- unit guard -------------------------------------------------------------
@@ -458,17 +489,28 @@ export function buildPack(catalog, { includeUnplaced = false, id, name, version 
     skus.push({
       id: makeId(type, category, taken),
       name: displayName(type),
-      family: type.family || undefined,
+      family: withoutFirmMark(type.family) || undefined,
       category,
       unit: UNIT_BY_CATEGORY[category] || "ea",
       draw: DRAW_BY_CATEGORY[category] || "box",
-      revit: { category: type.category, family: type.family, type: type.type, placedCount: type.placedCount },
+      revit: {
+        category: type.category,
+        family: withoutFirmMark(type.family) || type.family,
+        type: withoutFirmMark(type.type) || type.type,
+        placedCount: type.placedCount,
+      },
       geometry: withCoreThickness(geometryFor(type, category, assumed), type, category, notes),
       cost: { rateRef: null, wasteFactor: null },
       compliance: complianceFor(type, category, notes),
       drawing: { colourClass: colourClassFor(type, category), hatch: null, symbol: null },
       schedule: { report: [...(REQUIRED_MEASURES[category] || ["count"])], scheduleName: null },
     });
+  }
+
+  // A plain opening and an arch are not in the Revit catalog export. They
+  // live in the Doors list: a hole, and the same hole with a semicircular head.
+  for (const sku of PLAIN_OPENING_SKUS) {
+    if (!skus.some((existing) => existing.id === sku.id)) skus.push(structuredClone(sku));
   }
 
   const levels = buildLevels(catalog, notes);

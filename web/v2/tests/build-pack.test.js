@@ -12,6 +12,17 @@ const { pack, assumed, skipped } = buildPack(catalog);
 
 const byName = (needle) => pack.skus.find((s) => s.name.includes(needle));
 
+test("type names drop the TSP library mark", () => {
+  assert.ok(pack.skus.length > 0);
+  const marked = /^TSP(?:[\s_]|[A-Z])/;
+  for (const sku of pack.skus) {
+    assert.equal(marked.test(sku.name), false, sku.name);
+    assert.equal(marked.test(sku.family || ""), false, sku.family);
+    assert.equal(marked.test(sku.revit?.family || ""), false, sku.revit?.family);
+    assert.equal(marked.test(sku.revit?.type || ""), false, sku.revit?.type);
+  }
+});
+
 test("the firm's family report parses into a catalog", () => {
   assert.equal(catalog.schema, "sp.catalog/1");
   assert.ok(catalog.types.length > 100);
@@ -37,7 +48,7 @@ test("a named masonry wall records its core, and a foundation does not", () => {
 
 test("dimensional type names yield real geometry", () => {
   assert.equal(byName("Masonary wall 110mm (plaster)").geometry.thickness, 110);
-  const door = byName("TSP_Door-Interior-Single-4_Panel-Wood — 850 x 2100mm");
+  const door = byName("Door-Interior-Single-4_Panel-Wood — 850 x 2100mm");
   assert.equal(door.geometry.width, 850);
   assert.equal(door.geometry.height, 2100);
   const footing = byName("Bearing Footing - 600X200 mm");
@@ -56,7 +67,7 @@ test("electrical point names are never read as dimensions", () => {
 });
 
 test("a fixed pane admits light but no ventilation", () => {
-  const fixed = byName("TSP_Window-Fixed — 900 x 1650mm");
+  const fixed = byName("Window-Fixed — 900 x 1650mm");
   assert.equal(fixed.compliance.providesLight, true);
   assert.equal(fixed.compliance.providesVentilation, false);
   assert.equal(fixed.compliance.openableAreaFraction, 0);
@@ -71,7 +82,7 @@ test("a casement is openable but its openable fraction stays unknown", () => {
 });
 
 test("a sliding leaf clears half its opening, a hinged leaf all of it", () => {
-  assert.equal(byName("TSP_Door-Double-Sliding").compliance.openableAreaFraction, 0.5);
+  assert.equal(byName("Door-Double-Sliding").compliance.openableAreaFraction, 0.5);
   assert.equal(byName("Two_Lite_Narrow").compliance.openableAreaFraction, 1);
 });
 
@@ -80,11 +91,49 @@ test("timber doors are notated as timber, not as unknown", () => {
 });
 
 test("geysers become water heaters with their stated capacity and heat source", () => {
-  const solar = byName("TSP Geyser Solar 200L");
+  const solar = byName("Geyser Solar 200L");
   assert.equal(solar.category, "waterheater");
   assert.equal(solar.compliance.capacityLitres, 200);
   assert.equal(solar.compliance.heatSource, "solar");
-  assert.equal(byName("TSP Geyser Electrcical 150L").compliance.heatSource, "resistance");
+  assert.equal(byName("Geyser Electrcical 150L").compliance.heatSource, "resistance");
+});
+
+test("a placed fitting with no size parameter takes the measured solid", () => {
+  const measured = {
+    schema: "sp.catalog/1",
+    units: "millimeters (lengths, widths, structure) / meters (level elevations)",
+    levels: [{ id: "1", name: "01 GFL", elevation: 0 }],
+    types: [
+      {
+        id: "wc", category: "Plumbing Fixtures", family: "TSP Closed Couple WC",
+        type: "Closed Couple", placedCount: 1,
+        typeParams: { "Default Elevation": 0 },
+        planWidth: 507, planDepth: 793, planHeight: 705,
+      },
+      {
+        id: "dish", category: "Plumbing Fixtures", family: "TSP Dishwasher",
+        type: "600mm", placedCount: 1,
+        typeParams: { Width: 600, Depth: 600, Height: 850 },
+        planWidth: 600, planDepth: 622, planHeight: 850,
+      },
+      {
+        id: "bare", category: "Plumbing Fixtures", family: "TSP Unknown Pan",
+        type: "Pan", placedCount: 0,
+      },
+    ],
+  };
+  const { pack: measuredPack, assumed: measuredAssumed } = buildPack(measured, { includeUnplaced: true });
+  const wc = measuredPack.skus.find((s) => s.family === "Closed Couple WC");
+  assert.equal(wc.geometry.width, 507);
+  assert.equal(wc.geometry.depth, 793);
+  assert.equal(wc.geometry.height, 705);
+  assert.equal(measuredAssumed.some((a) => a.name.includes("Closed Couple")), false);
+  const dish = measuredPack.skus.find((s) => s.family === "Dishwasher");
+  assert.equal(dish.geometry.depth, 600);
+  const bare = measuredPack.skus.find((s) => s.family === "Unknown Pan");
+  assert.equal(bare.geometry.width, 600);
+  assert.equal(bare.geometry.depth, 400);
+  assert.ok(measuredAssumed.some((a) => a.name.includes("Unknown Pan") && a.key === "width"));
 });
 
 test("sanitary fixtures carry their discharge type", () => {

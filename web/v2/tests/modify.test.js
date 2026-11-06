@@ -332,6 +332,20 @@ test("a finish past the shortened end is removed and the door stays put", () => 
   assert.equal(doc.finishRuns[0].b, 1);
 });
 
+test("moving the shared end of a split leaves the other piece", () => {
+  const doc = docWith({ segments: [wall("w1", 0, 0, 6, 0, "T220")] });
+  splitWallAt(doc, ref("segment", "w1"), { x: 2, y: 0 }, { skuById: snapSku });
+  const tail = doc.segments[1];
+  const result = moveWallEnd(doc, ref("segment", "w1"), 2, { x: 2, y: 1 }, { skuById: snapSku });
+  assert.equal(result.ok, true);
+  assert.equal(doc.segments[0].x2, 2);
+  assert.equal(doc.segments[0].y2, 1);
+  assert.equal(tail.x1, 2);
+  assert.equal(tail.y1, 0);
+  assert.equal(tail.x2, 6);
+  assert.equal(tail.y2, 0);
+});
+
 test("a split refuses a point off the wall or against an end", () => {
   const doc = docWith({ segments: [wall("w1", 0, 0, 6, 0)] });
   const off = splitWallAt(doc, ref("segment", "w1"), { x: 2, y: 1 });

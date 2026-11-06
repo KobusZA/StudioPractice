@@ -1,0 +1,952 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>BOS System Review — our response · StudioPractice</title>
+  <meta name="description" content="Point-by-point response to Floris Slabbert’s 1 November 2026 memorandum on drawing tools and BOQ integration." />
+  <link rel="icon" href="../logo.png" type="image/png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,560&family=Source+Sans+3:ital,wght@0,400;0,600;0,700;1,400&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #efe8dc;
+      --paper: #fffdf8;
+      --paper-2: #f7f3ea;
+      --ink: #1a1612;
+      --soft: #5c5348;
+      --muted: #8a8074;
+      --line: rgba(26, 22, 18, 0.12);
+      --line-strong: rgba(26, 22, 18, 0.22);
+      --copper: #b2451e;
+      --copper-dark: #8d3416;
+      --navy: #243044;
+      --ok: #2f6b4f;
+      --ok-bg: rgba(47, 107, 79, 0.12);
+      --warn: #8d5a16;
+      --warn-bg: rgba(141, 90, 22, 0.1);
+      --hold: #5c5348;
+      --hold-bg: rgba(92, 83, 72, 0.12);
+      --red: #d0121a;
+      --font: "Source Sans 3", "Segoe UI", sans-serif;
+      --display: Fraunces, Georgia, serif;
+      --memo-serif: Georgia, "Times New Roman", Times, serif;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background:
+        radial-gradient(1200px 480px at 10% -10%, rgba(178, 69, 30, 0.08), transparent 60%),
+        var(--bg);
+      color: var(--ink);
+      font-family: var(--font);
+      font-size: 18px;
+      line-height: 1.55;
+    }
+    a { color: var(--copper-dark); }
+    a:hover { color: var(--copper); }
+    img { max-width: 100%; }
+
+    .wrap { width: min(1080px, calc(100% - 40px)); margin: 0 auto; }
+    header.site {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 18px 0 14px;
+    }
+    .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: inherit; }
+    .brand img { width: 36px; height: 36px; border-radius: 50%; background: #000; }
+    .brand span { font-family: var(--display); font-weight: 560; font-size: 18px; }
+    .meta { color: var(--soft); font-size: 14px; letter-spacing: 0.02em; }
+
+    .memo-cover {
+      background: var(--paper);
+      border: 1px solid var(--line-strong);
+      border-radius: 2px;
+      padding: 36px 44px 32px;
+      margin-bottom: 28px;
+      box-shadow: 0 1px 0 rgba(26, 22, 18, 0.06);
+      font-family: var(--memo-serif);
+      color: #1a1612;
+    }
+    .memo-cover .org {
+      text-align: center;
+      font-size: 13px;
+      letter-spacing: 0.22em;
+      font-weight: 700;
+      margin: 0 0 6px;
+    }
+    .memo-cover h1.doc-title {
+      text-align: center;
+      font-family: var(--memo-serif);
+      font-size: 22px;
+      font-weight: 700;
+      margin: 0 0 4px;
+      letter-spacing: 0.04em;
+    }
+    .memo-cover .doc-kind {
+      text-align: center;
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: 0.18em;
+      margin: 0 0 22px;
+    }
+    .memo-cover table.meta-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 15px;
+      line-height: 1.45;
+    }
+    .memo-cover table.meta-table td {
+      padding: 4px 0;
+      vertical-align: top;
+    }
+    .memo-cover table.meta-table td:first-child {
+      width: 42%;
+      padding-right: 12px;
+    }
+    .memo-cover .intro {
+      margin: 22px 0 0;
+      padding-top: 18px;
+      border-top: 1px solid var(--line);
+      font-size: 15px;
+      line-height: 1.5;
+    }
+
+    .summary-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 24px;
+    }
+    .summary-bar span {
+      font-size: 14px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: var(--paper);
+    }
+
+    section.wave { padding: 18px 0 8px; }
+    .wave-head { margin: 8px 0 22px; max-width: 42rem; }
+    .wave-kicker {
+      margin: 0 0 6px;
+      color: var(--copper);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+    h2 {
+      margin: 0 0 8px;
+      font-family: var(--display);
+      font-weight: 560;
+      font-size: clamp(28px, 3vw, 36px);
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+    }
+    .wave-head p { margin: 0; color: var(--soft); }
+
+    article.item {
+      display: grid;
+      grid-template-columns: minmax(260px, 380px) minmax(0, 1fr);
+      gap: 28px;
+      align-items: start;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 18px;
+      margin: 0 0 16px;
+    }
+    article.item.no-figure { grid-template-columns: 1fr; }
+    article.item figure {
+      margin: 0;
+      background: var(--paper-2);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    article.item svg, article.item img { display: block; width: 100%; height: auto; background: #fff; }
+    figcaption {
+      padding: 8px 12px 10px;
+      font-size: 13px;
+      color: var(--soft);
+      border-top: 1px solid var(--line);
+    }
+
+    .floris {
+      margin: 0 0 14px;
+      padding: 12px 14px 12px 16px;
+      border-left: 3px solid var(--navy);
+      background: var(--paper-2);
+      font-family: var(--memo-serif);
+      font-size: 16px;
+      line-height: 1.5;
+      color: #2a2520;
+    }
+    .floris p { margin: 0 0 10px; }
+    .floris p:last-child { margin-bottom: 0; }
+
+    .status-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      margin: 0 0 10px;
+      font-size: 14px;
+      color: var(--soft);
+    }
+    .pill {
+      display: inline-block;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      padding: 4px 10px;
+      border-radius: 4px;
+    }
+    .pill.done { background: var(--ok-bg); color: var(--ok); }
+    .pill.todo { background: rgba(178, 69, 30, 0.12); color: var(--copper-dark); }
+    .pill.blocked { background: var(--hold-bg); color: var(--hold); }
+    .pill.already { background: var(--ok-bg); color: var(--ok); }
+
+    .response h3 {
+      margin: 0 0 8px;
+      font-family: var(--display);
+      font-weight: 560;
+      font-size: 22px;
+      line-height: 1.2;
+    }
+    .area {
+      margin: 0 0 6px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .response p { margin: 0 0 10px; }
+    .response p:last-child { margin-bottom: 0; }
+    .response ul { margin: 0 0 10px; padding-left: 1.15em; }
+    .response li { margin: 0 0 6px; }
+    .need {
+      margin-top: 10px;
+      padding: 10px 12px;
+      border-radius: 4px;
+      background: var(--warn-bg);
+      border: 1px solid rgba(141, 90, 22, 0.2);
+      font-size: 16px;
+      color: var(--soft);
+    }
+    .need strong { color: var(--warn); }
+
+    .aside {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 22px 24px;
+      margin: 8px 0 28px;
+    }
+    .aside h2 { font-size: 26px; }
+
+    footer {
+      border-top: 1px solid var(--line);
+      padding: 18px 0 36px;
+      color: var(--soft);
+      font-size: 14px;
+    }
+
+    figure.app-shots img + img {
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid var(--line);
+    }
+      .memo-cover { padding: 24px 20px; }
+      article.item { grid-template-columns: 1fr; }
+      .wrap { width: min(1080px, calc(100% - 28px)); }
+      body { font-size: 17px; }
+    }
+    @media print {
+      body { background: white; font-size: 12pt; }
+      .memo-cover { box-shadow: none; }
+      article.item { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="site">
+      <a class="brand" href="#top">
+        <img src="../logo.png" alt="" />
+        <span>StudioPractice</span>
+      </a>
+      <p class="meta">3 November 2026</p>
+    </header>
+
+    <section class="memo-cover" id="top">
+      <p class="org">THE STUDIO PRACTICE</p>
+      <h1 class="doc-title">BOS System Review</h1>
+      <p class="doc-kind">MEMORANDUM — RESPONSE</p>
+      <table class="meta-table">
+        <tr>
+          <td><strong>To:</strong> Floris Slabbert</td>
+          <td><strong>From:</strong> BOS development team</td>
+        </tr>
+        <tr>
+          <td><strong>Date:</strong> 3 November 2026</td>
+          <td><strong>Re:</strong> Drawing tools and BOQ integration (1 November 2026)</td>
+        </tr>
+      </table>
+      <p class="intro">Below we keep each request from your memorandum in your wording, then state the action: what is already in the product, what is queued next, and what is blocked pending a file or a decision. Screenshots and figures match the <a href="drawing-review-november-2026.html">November drawing update</a> unless noted.</p>
+    </section>
+
+    <div class="summary-bar" aria-label="Progress summary">
+      <span><strong>18</strong> implemented or already in the product</span>
+      <span><strong>6</strong> queued (wave 4)</span>
+      <span><strong>10</strong> blocked — waiting on you or product owner</span>
+    </div>
+
+    <!-- WALLS -->
+    <section class="wave" id="walls">
+      <div class="wave-head">
+        <p class="wave-kicker">Your memorandum · Walls</p>
+        <h2>Wall thickness and drawing defaults</h2>
+      </div>
+
+      <article class="item">
+        <figure>
+          <svg viewBox="0 0 360 210" role="img" aria-hidden="true">
+            <rect width="360" height="210" fill="#f7f3ea"/>
+            <rect x="36" y="36" width="150" height="34" rx="3" fill="#fffdf8" stroke="#1a1612" stroke-opacity="0.18"/>
+            <text x="48" y="58" fill="#1a1612" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="13" font-weight="600">220 mm · still selected</text>
+            <path d="M36 128 H324" stroke="#d0121a" stroke-width="28" stroke-linecap="butt"/>
+            <text x="180" y="176" text-anchor="middle" fill="#5c5348" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="13">Leave the tool and come back. This type still draws.</text>
+          </svg>
+          <figcaption>Leave the wall tool and start it again: the type and location line you last chose still draw.</figcaption>
+        </figure>
+        <div class="response">
+          <p class="area">Walls · BOS-01, BOS-02</p>
+          <blockquote class="floris">
+            <p>When starting a wall, I should be able to select a 220 mm wall and continue drawing with that thickness until I choose a different wall type.</p>
+            <p>The same should apply to the wall reference line. Once I select the centreline, inner face or outer face, the system should retain that setting for subsequent walls.</p>
+            <p>These selections should become the active drawing defaults. Starting another wall should not reset the thickness to 110 mm or change the reference line without my instruction.</p>
+            <p>At present, switching from a 110 mm wall back to a 220 mm wall appears to restore the default settings. Please check that changing the wall type does not also reset the selected reference line.</p>
+          </blockquote>
+          <div class="status-row">
+            <span class="pill done">Implemented</span>
+          </div>
+          <h3>Action:</h3>
+          <p>Choosing 220&nbsp;mm (or any wall type), leaving the wall tool, and starting Walls again keeps that type. Centre, exterior face, and interior face stay selected the same way. Changing from 110&nbsp;mm to 220&nbsp;mm does not clear the location line.</p>
+        </div>
+      </article>
+
+      <article class="item">
+        <figure class="app-shots">
+          <img src="app/wall-plaster-types.png" alt="Wall types in the inspector showing 220 mm masonry + plaster (240 mm overall)." />
+          <img src="app/wall-plaster-draw-240.png" alt="Wall being drawn with Width 240 mm and the plastered type label." />
+          <figcaption>From the drawing app: the type names core and overall; Width on the plan is 240&nbsp;mm face to face.</figcaption>
+        </figure>
+        <div class="response">
+          <p class="area">Walls · BOS-03</p>
+          <blockquote class="floris">
+            <p>The wall description shows a thickness of 220 mm, but the measured width appears to be 240 mm. Please investigate this discrepancy so that the description, drawn geometry and measured quantity agree.</p>
+          </blockquote>
+          <div class="status-row">
+            <span class="pill done">Implemented</span>
+          </div>
+          <h3>Action:</h3>
+          <p>The plastered masonry wall stores two thicknesses. The masonry core is 220&nbsp;mm. The wall on the plan, face to face, is 240&nbsp;mm. The 20&nbsp;mm between them is plaster, and the type reads <strong>220&nbsp;mm masonry + plaster (240&nbsp;mm overall)</strong>. The 110&nbsp;mm plastered wall and the plastered pool wall are named the same way.</p>
+          <ul>
+            <li>The stroke, the location line, a face-to-face measure, and the masonry quantity use the overall width.</li>
+            <li>Plaster stays its own coat on the bill. Paint does not thicken the wall.</li>
+            <li>A foundation that is not plastered is labelled with its overall thickness only. It is not described as plaster.</li>
+          </ul>
+        </div>
+      </article>
+
+      <article class="item no-figure">
+        <div class="response">
+          <p class="area">Walls · BOS-04</p>
+          <blockquote class="floris">
+            <p>Can the user duplicate an existing wall type and edit its thickness to create a new type? For example, a 220 mm wall could be used as the starting point for a 280 mm wall. The new type should remain available for use and be identifiable in the BOQ.</p>
+          </blockquote>
+          <div class="status-row">
+            <span class="pill blocked">Blocked</span>
+          </div>
+          <h3>Action:</h3>
+          <p>We agree this is useful. Wall types today come from the firm catalogue, not from in-app authoring. We need product-owner approval before users can duplicate and edit types.</p>
+          <p class="need"><strong>Needed to unblock:</strong> decision that user-authored wall types are in scope for this app.</p>
+        </div>
+      </article>
+
+      <article class="item no-figure">
+        <div class="response">
+          <p class="area">Walls · BOS-05</p>
+          <blockquote class="floris">
+            <p>My preliminary suggestion is to link the wall family to the relevant BOQ line item, while retaining the dimensions of each wall type. We still need to refine this approach so that walls requiring different descriptions or rates are not grouped incorrectly.</p>
+          </blockquote>
+          <div class="status-row">
+            <span class="pill blocked">Blocked — needs discussion</span>
+          </div>
+          <h3>Action:</h3>
+          <p>Each wall SKU already carries a rate reference for the bill. The open question is how walls roll up on the client summary when descriptions or rates differ.</p>
+          <p class="need"><strong>Needed to unblock:</strong> your confirmed grouping rule (which walls may share one bill line).</p>
+        </div>
+      </article>
+
+      <article class="item">
+        <figure>
+          <svg viewBox="0 0 360 210" role="img" aria-hidden="true">
+            <rect width="360" height="210" fill="#efe8dc"/>
+            <path d="M40 48 H168 V150 H40 Z" fill="none" stroke="#d0121a" stroke-width="14"/>
+            <path d="M192 48 H320 V150 H192 Z" fill="none" stroke="#ffffff" stroke-width="10"/>
+            <path d="M192 48 H320 V150 H192 Z" fill="none" stroke="#1a1612" stroke-width="16"/>
+          </svg>
+          <figcaption>New work red; existing work white with a dark edge for contrast.</figcaption>
+        </figure>
+        <div class="response">
+          <p class="area">Walls · BOS-06</p>
+          <blockquote class="floris">
+            <p>New walls should display in red by default, while existing walls remain white. Preferably, the user should be able to set the colour for a particular wall family without changing unrelated families.</p>
+          </blockquote>
+          <div class="status-row">
+            <span class="pill done">Implemented</span>
+          </div>
+          <h3>Action:</h3>
+          <p>New walls draw red; existing walls draw white with a dark outline so they stay visible on the sheet. Colour per wall family is not planned: pack colour is a material class, and changing it for one family would not be a free picker. Doors, windows, and other families keep their own colours.</p>
+        </div>
+      </article>
+
+      <article class="item">
+        <figure>
+          <img src="memo/snap-selected-wall.png" alt="Selected wall with Snap and Split on the plan." />
+          <figcaption>From your memorandum — contextual snap and split on one selected wall.</figcaption>
+        </figure>
+        <div class="response">
+          <p class="area">Walls · BOS-07</p>
+          <blockquote class="floris">
+            <p>Snap controls should be visible when they are needed, including when selecting or editing an existing wall. Could a contextual control appear above the selected wall, allowing the user to snap accurately or split the wall into two sections?</p>
+          </blockquote>
+          <div class="status-row">
+            <span class="pill done">Implemented</span>
+          </div>
+          <h3>Action:</h3>
+          <p>With exactly one wall selected, <strong>Snap</strong> and <strong>Split</strong> sit beside the run. Snap uses the same magnets as drawing; split takes a click on the wall. Openings and finishes stay on the correct piece after a split.</p>
+        </div>
+      </article>
+
+      <article class="item">
+        <figure>
+          <svg viewBox="0 0 360 210" role="img" aria-hidden="true">
+            <rect width="360" height="210" fill="#f7f3ea"/>
+            <line x1="40" y1="150" x2="310" y2="150" stroke="#d0121a" stroke-width="12"/>
+            <text x="48" y="178" fill="#1a1612" font-family="Source Sans 3, sans-serif" font-size="13" font-weight="700">Stored on the intended axis</text>
+          </svg>
+          <figcaption>Direction is fixed before length so the wall does not drift off the line you aimed at.</figcaption>
+        </figure>
+        <div class="response">
+          <p class="area">Walls · BOS-08</p>
+          <blockquote class="floris">
+            <p>Walls should follow the selected angle or alignment precisely. The current drawing behaviour appears to allow a wall to sit slightly off the intended line. Even a small angular error can create significant problems with dimensions, junctions and the overall layout.</p>
+          </blockquote>
+          <div class="status-row">
+            <span class="pill done">Implemented</span>
+          </div>
+          <h3>Action:</h3>
+          <p>While drawing, direction is chosen before length. Runs near an axis or an existing wall store on that line. Typing length or heading no longer tilts the wall by rounding X and Y separately.</p>
+        </div>
+      </article>
+
+      <article class="item">
+        <figure>
+          <svg viewBox="0 0 360 210" role="img" aria-hidden="true">
+            <rect width="360" height="210" fill="#f7f3ea"/>
+            <g opacity="0.55" stroke="#8a8074" stroke-width="8" fill="none">
+              <path d="M36 40 H150 M196 40 H324 M36 40 V160 M324 40 V160"/>
+            </g>
+            <rect x="118" y="172" width="58" height="22" rx="2" fill="#243044"/>
+            <text x="147" y="187" text-anchor="middle" fill="#f3eee4" font-family="Source Sans 3, sans-serif" font-size="11" font-weight="700">Model</text>
+            <rect x="180" y="172" width="58" height="22" rx="2" fill="#fffdf8" stroke="#1a1612" stroke-opacity="0.25"/>
+            <text x="209" y="187" text-anchor="middle" fill="#1a1612" font-family="Source Sans 3, sans-serif" font-size="11">Sheet</text>
+          </svg>
+          <figcaption>Model / Sheet toggle — PDF openings stay visible while you match walls.</figcaption>
+        </figure>
+        <div class="response">
+          <p class="area">Sheets · BOS-09</p>
+          <blockquote class="floris">
+            <p>After drawing the walls, I need to see where garage doors, doors and windows belong on the underlying plan. My preference is for the relevant opening on the PDF to remain visible when I select a wall. A toggle between the PDF and the modelled walls could provide an additional way to check alignment.</p>
+          </blockquote>
+          <div class="status-row">
+            <span class="pill done">Implemented</span>
+          </div>
+          <h3>Action:</h3>
+          <p>Selecting a wall no longer hides underlay openings. <strong>Model</strong> puts drawn walls on top; <strong>Sheet</strong> puts the PDF on top. Opacity control is unchanged.</p>
+        </div>
+      </article>
+
+      <article class="item">
+        <figure>
+          <img src="memo/wall-face.png" alt="Plan with wall selected and location line controls." />
+          <figcaption>From your memorandum — correct centreline, inner face, or outer face after the wall is placed.</figcaption>
+        </figure>
+        <div class="response">
+          <p class="area">Walls · BOS-10</p>
+          <blockquote class="floris">
+            <p>If a wall has been drawn using the wrong reference line, I should be able to select it and correct its alignment by choosing the centreline, inner face or outer face. The centreline option is particularly important when designing on a grid.</p>
+          </blockquote>
+          <div class="status-row">
+            <span class="pill done">Implemented</span>
+          </div>
+          <h3>Action:</h3>
+          <p>Select a wall and switch location line. The wall shifts so the chosen line stays where the old one was; joins at both ends stay closed. Centreline is included for grid work.</p>
+        </div>
+      </article>
+    </section>
+
+    <!-- FLOORS -->
+    <section class="wave" id="floors">
+      <div class="wave-head">
+        <p class="wave-kicker">Your memorandum · Floors</p>
+        <h2>Floors, undo, move, alignment</h2>
+      </div>
+
+      <article class="item">
+        <figure>
+          <img src="memo/floor-outline.png" alt="Floor outline with Line and Corner controls." />
+          <figcaption>From your memorandum — outline editing; wall-linked slab still to build.</figcaption>
+        </figure>
+        <div class="response">
+          <p class="area">Floors · BOS-11</p>
+          <blockquote class="floris">
+            <p>Floors should be created either by selecting a room or by sketching a boundary. For a typical ground floor, the user may draw one floor across the full footprint. Its boundary should remain linked to the external walls so that moving a linked wall updates the floor. The same principle should apply to an upper-floor slab or roof where that relationship is intended. If the layout changes substantially, for example by adding a new wall, the user must also be able to edit the boundary manually.</p>
+          </blockquote>
+          <div class="status-row">
+            <span class="pill todo">Queued — wave 4</span>
+          </div>
+          <h3>Action:</h3>
+          <p>A room can already take its outline from the walls around a seed. A slab or roof is still a rectangle and is not tied to the external walls. The queued work is that link: moving a linked wall updates the floor, an upper slab or roof can use the same link, and the link can be dropped so the boundary is edited by hand.</p>
+        </div>
+      </article>
+
+      <article class="item">
+        <figure>
+          <img src="memo/floor-outline.png" alt="Floor outline with Line control on one edge." />
+          <figcaption>Line moves one boundary edge without rebuilding the whole outline.</figcaption>
+        </figure>
+        <div class="response">
+          <p class="area">Floors · BOS-12</p>
+          <blockquote class="floris">
+            <p>The corner-editing control is useful, but I should also be able to select an individual boundary line and move or amend it directly, without having to rebuild the entire floor outline.</p>
+          </blockquote>
+          <div class="status-row">
+            <span class="pill done">Implemented</span>
+          </div>
+          <h3>Action:</h3>
+          <p>Select the floor (not a finish on it). <strong>Line</strong> picks one edge and drags it; other corners stay put. Corner handles and <strong>Corner</strong> to add a point still work.</p>
+        </div>
+      </article>
+
+      <article class="item no-figure">
+        <div class="response">
+          <p class="area">Floors · BOS-13</p>
+          <blockquote class="floris">
+            <p>Please add an Undo control so that an incorrect drawing or editing action can be reversed.</p>
+          </blockquote>
+          <div class="status-row">
+            <span class="pill already">Already in the product</span>
+          </div>
+          <h3>Action:</h3>
+          <p>Undo is on the toolbar. If you find an action that cannot be reversed, name it and we will treat that as a separate fix.</p>
+        </div>
+      </article>
+
+      <article class="item no-figure">
+        <div class="response">
+          <p class="area">Floors · BOS-14</p>
+          <blockquote class="floris">
+            <p>Please add a Move control for repositioning items such as an imported PDF, a wall or a tiled area. The user should be able to select the item and move it accurately.</p>
+          </blockquote>
+          <div class="status-row">
+            <span class="pill done">Implemented</span>
+          </div>
+          <h3>Action:</h3>
+          <p><strong>Modify → Move</strong> repositions one selected wall, the selected sheet, or the tiled area being edited. Snap and typed distance match wall drawing; the move is one undo step.</p>
+        </div>
+      </article>
+
+      <article class="item">
+        <figure>
+          <svg viewBox="0 0 360 210" role="img" aria-hidden="true">
+            <rect width="360" height="210" fill="#f7f3ea"/>
+            <rect x="78" y="36" width="168" height="108" fill="none" stroke="#8a8074" stroke-width="7" opacity="0.55"/>
+            <rect x="78" y="36" width="168" height="108" fill="none" stroke="#d0121a" stroke-width="4"/>
+            <circle cx="78" cy="144" r="8" fill="#fffdf8" stroke="#243044" stroke-width="2"/>
+          </svg>
+          <figcaption>Shared reference point on each level — sheets and walls align.</figcaption>
+        </figure>
+        <div class="response">
+          <p class="area">Floors · BOS-15</p>
+          <blockquote class="floris">
+            <p>It is difficult to align the two floor levels. Although both drawings have been scaled and display the same dimensions, the underlying walls do not line up. Please check the scaling and alignment workflow and provide a reliable way to snap corresponding reference points together.</p>
+          </blockquote>
+          <div class="status-row">
+            <span class="pill done">Implemented</span>
+          </div>
+          <h3>Action:</h3>
+          <p>Pick the same reference point on each level (for example a building corner). Sheets and walls drawn from them share that point. Alignment moves position; it does not change stored wall lengths except where you scale.</p>
+        </div>
+      </article>
+    </section>
+
+    <!-- DOORS -->
+    <section class="wave" id="doors">
+      <div class="wave-head">
+        <p class="wave-kicker">Your memorandum · Doors</p>
+        <h2>Door placement</h2>
+      </div>
+
+      <article class="item">
+        <figure>
+          <img src="app/doors-library.png" alt="Doors tool with the type list in the drawing app." />
+          <figcaption>From the drawing app. The selected door stays armed; the library lists types for quick pick.</figcaption>
+        </figure>
+        <div class="response">
+          <p class="area">Doors · BOS-16, BOS-17</p>
+          <blockquote class="floris">
+            <p>When placing several doors, the system should retain the previously selected door until I choose another type. I should not have to reopen the full library after every placement. As discussed, please add a Recently Used row at the bottom of the library so that frequently used doors can be selected quickly.</p>
+          </blockquote>
+          <div class="status-row">
+            <span class="pill done">Implemented</span>
+          </div>
+          <h3>Action:</h3>
+          <p>After one door is placed, that type stays ready until you pick another or leave the tool. The library shows a <strong>Recently used</strong> row for this session; it does not replace the full catalogue.</p>
+        </div>
+      </article>
+    </section>
+
+    <!-- SEWER -->
+    <section class="wave" id="sewer">
+      <div class="wave-head">
+        <p class="wave-kicker">Your memorandum · Sewer lines</p>
+        <h2>Service line colours</h2>
+      </div>
+
+      <article class="item">
+        <figure>
+          <img src="memo/service-lines.png" alt="Service lines in different colours on plan." />
+          <figcaption>From your memorandum — drainage, water, electrical, and gas already differ; sewer palette waits on your list.</figcaption>
+        </figure>
+        <div class="response">
+          <p class="area">Services · BOS-18</p>
+          <blockquote class="floris">
+            <p>Sewer lines should use the appropriate line colours so that the services are easy to distinguish on the drawing. I will provide the required colour conventions for implementation.</p>
+          </blockquote>
+          <div class="status-row">
+            <span class="pill blocked">Blocked</span>
+          </div>
+          <h3>Action:</h3>
+          <p>Drainage, cold and hot water, electrical, and gas already use distinct colours. Soil, waste, and vent will follow your convention when we have it.</p>
+          <p class="need"><strong>Needed to unblock:</strong> colour convention list from you.</p>
+        </div>
+      </article>
+    </section>
+
+    <!-- ELECTRICAL -->
+    <section class="wave" id="electrical">
+      <div class="wave-head">
+        <p class="wave-kicker">Your memorandum · Electrical</p>
+        <h2>Boards, circuits, sockets</h2>
+      </div>
+
+      <article class="item no-figure">
+        <div class="response">
+          <p class="area">Electrical · BOS-19</p>
+          <blockquote class="floris">
+            <p>Electrical lines should connect the relevant lights and other points to a distribution board (DB), with each circuit associated with a breaker. We can later consider rules that limit the load on a circuit. Because the system will also serve electricians, it should allow them to build up the DB and circuit information. When the first electrical point or line is placed, the system could prompt the user to locate the DB. Alternatively, the user could place the DB later and then link the circuits. The model must allow more than one DB, including separate boards serving different floors.</p>
+          </blockquote>
+          <div class="status-row">
+            <span class="pill todo">Queued — wave 4 (last in wave)</span>
+          </div>
+          <h3>Action:</h3>
+          <p>Electrical is drawn as a network today; there is no board, breaker, or circuit object yet. This is the largest item in the current queue. Load limits and auto-routing are explicitly out of scope for this step.</p>
+        </div>
+      </article>
+
+      <article class="item">
+        <figure>
+          <img src="memo/socket.png" alt="Plug on plan dimensioned from a reference point." />
+          <figcaption>From your memorandum — wall and floor sockets tied to their surface.</figcaption>
+        </figure>
+        <div class="response">
+          <p class="area">Electrical · BOS-20</p>
+          <blockquote class="floris">
+            <p>Can plug points automatically attach to the relevant surface? Wall sockets should sit against the selected wall, while floor sockets should be positioned within the selected floor. Their placement should remain tied to that surface so that they do not float in mid-air.</p>
+          </blockquote>
+          <div class="status-row">
+            <span class="pill done">Implemented</span>
+          </div>
+          <h3>Action:</h3>
+          <p>Wall plugs (single, double, shaver) store the wall and face they were clicked on, and they move with that wall. In the catalogue, the floor-hosted fittings are floor lights, recessed floor lights, and underfloor heating: those stay inside the selected floor. A wall or floor fitting with no surface is refused. Ceiling plugs, slab plugs, and switches stay free points — they are not tied to a wall or floor.</p>
+        </div>
+      </article>
+
+      <article class="item no-figure">
+        <div class="response">
+          <p class="area">Electrical · BOS-21</p>
+          <blockquote class="floris">
+            <p>Can each plug point also be linked to the appropriate DB, with a proposed cable route generated automatically? Where more than one DB is present, the user should be able to confirm which board serves the point.</p>
+          </blockquote>
+          <div class="status-row">
+            <span class="pill blocked">Blocked</span>
+          </div>
+          <h3>Action:</h3>
+          <p>Hand-drawn electrical runs already exist. Automatic routing is a product decision, and it waits on distribution boards (BOS-19). Where there is more than one board, the user would confirm which board serves the point — that is part of the feature, not a separate blocker.</p>
+          <p class="need"><strong>Needed to unblock:</strong> agreement to generate cable routes (today services are placed symbols and provisional sums, not routed cables).</p>
+        </div>
+      </article>
+    </section>
+
+    <!-- COLUMNS -->
+    <section class="wave" id="columns">
+      <div class="wave-head">
+        <p class="wave-kicker">Your memorandum · Columns</p>
+        <h2>Columns and structural steel</h2>
+      </div>
+
+      <article class="item no-figure">
+        <div class="response">
+          <p class="area">Columns · BOS-22</p>
+          <blockquote class="floris">
+            <p>I need round and square column options with editable dimensions. The dimensions should be entered directly into input fields and reflected immediately in the drawing. Selecting a column in the drawing should also display its current dimensions and allow them to be changed.</p>
+          </blockquote>
+          <div class="status-row">
+            <span class="pill todo">Queued — wave 4</span>
+          </div>
+          <h3>Action:</h3>
+          <p>Columns today are fixed catalogue sizes. Next: round and square placement with live width, depth, or diameter fields and inspector edit on selection.</p>
+        </div>
+      </article>
+
+      <article class="item no-figure">
+        <div class="response">
+          <p class="area">Columns · BOS-23</p>
+          <blockquote class="floris">
+            <p>How will these columns be described and measured in the BOQ? They cannot all be treated in the same way as walls. The system needs to distinguish the section shape, material, external dimensions and, where applicable, steel wall thickness. For example, steel tubes may have wall thicknesses of 3, 6, 10 or 12 mm, as well as different external dimensions.</p>
+            <p>I can provide a list of standard square tube sizes for the library. We will also need I-sections, which may be used as either columns or beams. The selected section and its use should remain clear in the drawing and the BOQ.</p>
+          </blockquote>
+          <div class="status-row">
+            <span class="pill blocked">Blocked</span>
+          </div>
+          <h3>Action:</h3>
+          <p>Bill logic for tubes and I-sections waits on editable columns and your standard tube list.</p>
+          <p class="need"><strong>Needed to unblock:</strong> standard square-tube list; BOS-22 done so shape, material, outer size, and wall thickness can be stored.</p>
+        </div>
+      </article>
+    </section>
+
+    <!-- FINISHES -->
+    <section class="wave" id="finishes">
+      <div class="wave-head">
+        <p class="wave-kicker">Your memorandum · Wall finishes</p>
+        <h2>Guidelines and paint on the bill</h2>
+      </div>
+
+      <article class="item">
+        <figure>
+          <svg viewBox="0 0 360 210" role="img" aria-hidden="true">
+            <rect width="360" height="210" fill="#f7f3ea"/>
+            <rect x="70" y="24" width="220" height="150" fill="#fffdf8" stroke="#1a1612" stroke-opacity="0.35"/>
+            <line x1="58" y1="78" x2="302" y2="78" stroke="#b2451e" stroke-width="1.4" stroke-dasharray="5 3"/>
+            <rect x="86" y="78" width="188" height="80" fill="rgba(178,69,30,0.12)" stroke="#b2451e" stroke-width="1.2"/>
+          </svg>
+          <figcaption>Offset down from the top of the wall on the elevation.</figcaption>
+        </figure>
+        <div class="response">
+          <p class="area">Finishes · BOS-24</p>
+          <blockquote class="floris">
+            <p>Can we add a guideline measured down from the top of the wall so that finish boundaries can be drawn accurately? The user should be able to enter the offset and use that line to define the extent of a finish.</p>
+          </blockquote>
+          <div class="status-row">
+            <span class="pill done">Implemented</span>
+          </div>
+          <h3>Action:</h3>
+          <p>On the wall elevation, type millimetres down from the top; a guideline appears and finish boundaries can be drawn to it. Quantities and bill mapping are unchanged.</p>
+        </div>
+      </article>
+
+      <article class="item">
+        <figure>
+          <svg viewBox="0 0 360 210" role="img" aria-hidden="true">
+            <rect width="360" height="210" fill="#f7f3ea"/>
+            <rect x="28" y="28" width="132" height="154" fill="#fffdf8" stroke="#1a1612" stroke-opacity="0.2"/>
+            <rect x="40" y="40" width="108" height="70" fill="#d9a441"/>
+            <text x="94" y="80" text-anchor="middle" fill="#1a1612" font-family="Source Sans 3, sans-serif" font-size="13" font-weight="700">Paint</text>
+            <text x="94" y="128" text-anchor="middle" fill="#1a1612" font-family="Source Sans 3, sans-serif" font-size="11">Bill item shown</text>
+          </svg>
+          <figcaption>Paint names its bill item; missing product stays an allowance.</figcaption>
+        </figure>
+        <div class="response">
+          <p class="area">Finishes · BOS-25</p>
+          <blockquote class="floris">
+            <p>When I select paint, the system does not appear to display the corresponding finish from the BOQ. Can this link be enabled so that the selected finish can be identified on the drawing and traced to the relevant BOQ item?</p>
+          </blockquote>
+          <div class="status-row">
+            <span class="pill done">Implemented</span>
+          </div>
+          <h3>Action:</h3>
+          <p>Selecting paint shows which bill item it prices as, on the panel and in the compiled bill. No product chosen → PC allowance label; no rate in the book → gap shown, not invented.</p>
+        </div>
+      </article>
+    </section>
+
+    <!-- BOQ -->
+    <section class="wave" id="boq">
+      <div class="wave-head">
+        <p class="wave-kicker">Your memorandum · Bill of quantities</p>
+        <h2>BOQ structure and measurement</h2>
+      </div>
+
+      <article class="item no-figure">
+        <div class="response">
+          <p class="area">Bill · BOS-26</p>
+          <blockquote class="floris">
+            <p>How can we incorporate a BOQ received directly from an architect for pricing? We need a practical way to retain its item structure and link the measured work to the relevant items.</p>
+          </blockquote>
+          <div class="status-row">
+            <span class="pill blocked">Blocked</span>
+          </div>
+          <h3>Action:</h3>
+          <p>Today the bill compiles from the model and the firm rate book. Importing an architect’s structure needs the sample bill and agreement that those item codes become the structure.</p>
+          <p class="need"><strong>Needed to unblock:</strong> architect BOQ to import; product-owner sign-off on item codes as structure.</p>
+        </div>
+      </article>
+
+      <article class="item no-figure">
+        <div class="response">
+          <p class="area">Bill · BOS-27</p>
+          <blockquote class="floris">
+            <p>Once the project is finalised, the builder will redraw the plans in the system. The resulting model and measurements should then support the pricing workflow.</p>
+          </blockquote>
+          <div class="status-row">
+            <span class="pill already">Already the product path</span>
+          </div>
+          <h3>Action:</h3>
+          <p>Draw in the app, quantities compile from the model, rates come from the rate book — that is the current finalise-and-price workflow.</p>
+        </div>
+      </article>
+
+      <article class="item no-figure">
+        <div class="response">
+          <p class="area">Bill · BOS-28</p>
+          <blockquote class="floris">
+            <p>Measuring drawings in BOS Admin — This approach could work, provided the contractor can scale the drawings accurately and measure the required quantities within BOS Admin. The link between the source drawing, the measurement and the BOQ item should be clear.</p>
+          </blockquote>
+          <div class="status-row">
+            <span class="pill blocked">Blocked — needs discussion</span>
+          </div>
+          <h3>Action:</h3>
+          <p>This drawing app already scales sheets and compiles quantities from the model. We need clarity whether “BOS Admin” means this app or a separate product.</p>
+          <p class="need"><strong>Needed to unblock:</strong> confirm which surface is meant; traceability rules if Admin is separate.</p>
+        </div>
+      </article>
+
+      <article class="item no-figure">
+        <div class="response">
+          <p class="area">Bill · BOS-29, BOS-30</p>
+          <blockquote class="floris">
+            <p>I will send you a typical Excel spreadsheet to use as a reference for the BOQ structure and the way the quantities should be summarised.</p>
+            <p>For tiling, the detailed floor and wall measurements should feed into the relevant BOQ line items as summary quantities. We still need to refine the supporting detail and agree how different tile types and finishes will be grouped.</p>
+            <p>Using the current measurement method, we can measure wall and floor tiles separately and allocate wall tiling to individual rooms. This should make it possible to trace each summary quantity back to the room and surface from which it was measured.</p>
+          </blockquote>
+          <div class="status-row">
+            <span class="pill blocked">Blocked (spreadsheet &amp; grouping)</span>
+          </div>
+          <h3>Action:</h3>
+          <p>Wall and floor tile are already measured separately; finishes can belong to a room. Summary roll-up to Excel columns waits on your spreadsheet; grouping different tile types waits on the rule you said still needs refining.</p>
+          <p class="need"><strong>Needed to unblock:</strong> typical Excel reference; agreed grouping rule for tile types and finishes.</p>
+        </div>
+      </article>
+    </section>
+
+    <!-- FINAL PRODUCT -->
+    <section class="wave" id="client-doc">
+      <div class="wave-head">
+        <p class="wave-kicker">Your memorandum · Final product</p>
+        <h2>Client costing document</h2>
+      </div>
+
+      <article class="item no-figure">
+        <div class="response">
+          <p class="area">Client document · BOS-31</p>
+          <blockquote class="floris">
+            <p>The builder should be able to give the client a detailed costing document that identifies the tile finish for each area. For example, the kitchen wall above the cupboards may require a 750 mm-high band of mosaic tiles, while the remaining scullery walls require porcelain tiles. These finishes carry different costs, so their locations, extent and specifications must be clear.</p>
+          </blockquote>
+          <div class="status-row">
+            <span class="pill todo">Queued — wave 4</span>
+          </div>
+          <h3>Action:</h3>
+          <p>The model can hold two finishes on one wall; the client document does not yet list each by place, extent, and cost. Next build targets that costing clarity (your mosaic / porcelain example).</p>
+        </div>
+      </article>
+
+      <article class="item no-figure">
+        <div class="response">
+          <p class="area">Client document · BOS-32</p>
+          <blockquote class="floris">
+            <p>Can the final document include internal elevations showing the type and extent of tiling, with each elevation referenced to the corresponding wall in the 3D model? This would help the client and contractor understand exactly which surfaces are to be tiled and where each finish starts and stops.</p>
+          </blockquote>
+          <div class="status-row">
+            <span class="pill todo">Queued — wave 4</span>
+          </div>
+          <h3>Action:</h3>
+          <p>Wall elevations exist for editing; they are not yet exported as client-document pages tied to a named wall. Follows finish naming in the costing (BOS-31).</p>
+        </div>
+      </article>
+
+      <article class="item no-figure">
+        <div class="response">
+          <p class="area">Client document · BOS-33</p>
+          <blockquote class="floris">
+            <p>Tiling should be priced in two clearly identified parts. The first covers the tiling work, including measured areas, installation labour, adhesive, grout, spacers and other installation materials. Its scope should be stated clearly so that the client can see what the installation price includes.</p>
+            <p>Tile supply allowances — The second part is the allowance for supplying the tiles. Separate allowances may be required for different tile types, such as porcelain, ceramic or mosaic. Each allowance should be linked to the relevant area or finish so that the client can understand the basis of the price.</p>
+          </blockquote>
+          <div class="status-row">
+            <span class="pill todo">Queued — wave 4</span>
+          </div>
+          <h3>Action:</h3>
+          <p>PC allowances exist for unchosen products; the tender does not yet split installation total from supply allowance per tile type. That split is queued before sales copy.</p>
+        </div>
+      </article>
+
+      <article class="item no-figure">
+        <div class="response">
+          <p class="area">Client document · BOS-34</p>
+          <blockquote class="floris">
+            <p>A low tile supply allowance can reduce the apparent tender total, while the final cost remains dependent on the client’s selection. This can make a tender appear cheaper at the outset and lead to an increase when the actual tiles are chosen.</p>
+            <p>Our sales message is that the builder can make these allowances transparent from the outset. By showing the installation costs and tile supply allowances clearly, the builder puts the client in a better position to compare competing tenders on a consistent basis and understand the effect of later selections.</p>
+          </blockquote>
+          <div class="status-row">
+            <span class="pill blocked">Blocked</span>
+          </div>
+          <h3>Action:</h3>
+          <p>We will add this plain-language paragraph to the client document once installation and supply are separate lines (BOS-33).</p>
+          <p class="need"><strong>Needed to unblock:</strong> BOS-33 completed.</p>
+        </div>
+      </article>
+    </section>
+
+    <section class="aside">
+      <p class="wave-kicker">Further reading</p>
+      <h2>Illustrated update for the same memo</h2>
+      <p style="margin:0;color:var(--soft);">Figures and screenshots are shared with the internal drawing-tools walkthrough. This page is the one that follows your memorandum point by point, including items finished after that walkthrough was first written (sockets on their surface among them).</p>
+    </section>
+
+    <footer>
+      StudioPractice · response to “Drawing tools and BOQ integration”, memorandum of 1 November 2026 from Floris Slabbert. Screenshots under <code>memo/</code> are from that memorandum.
+    </footer>
+  </div>
+</body>
+</html>

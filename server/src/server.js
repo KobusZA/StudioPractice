@@ -3,6 +3,7 @@ import { createServer } from "node:http";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createApi } from "./api.js";
+import { platformAdminEmailsFrom, syncPlatformAdmins } from "./auth.js";
 import { createPool, migrate } from "./db.js";
 import { createStatic } from "./static.js";
 
@@ -21,6 +22,7 @@ const pool = createPool();
 // tool arrives with the first change that is not additive; until then a
 // separate deploy step would only be a way to forget it.
 await migrate(pool);
+await syncPlatformAdmins(pool, platformAdminEmailsFrom(process.env.PLATFORM_ADMIN_EMAILS));
 
 const api = createApi(pool);
 const serveStatic = createStatic(WEB_DIR);

@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,560&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="./v2.css?v=20261103-history-icons" />
+  <link rel="stylesheet" href="./v2.css?v=20261106-san-preview" />
 </head>
 <body class="auth-pending">
   <div class="chrome">
@@ -462,7 +462,6 @@
         <div class="ctx-type-picker" id="v2-ctx-type-picker" hidden>
           <div class="ctx-type-picker-label">
             <span>Type</span>
-            <span id="v2-pack-name">Pack</span>
           </div>
           <button type="button" class="ctx-type-current" id="v2-type-current" aria-haspopup="listbox" aria-expanded="false" aria-controls="v2-type-flyout">
             <i></i>
@@ -757,9 +756,9 @@
   <!-- Type detail: opt-in escalation from the palette row's expand icon, not
        a step everyone has to pass through. Reuses the mass-overlay's
        fixed/centered-panel pattern so it doesn't need its own show/hide
-       plumbing conventions. Media pane is a skeleton today (placeholder or
-       a single photo); it is where per-SKU photos, AI renders and later
-       supplier images/links all land. -->
+       plumbing conventions. Sanitary types draw their plan symbol and a
+       size model into the canvas. Other categories stay on the placeholder
+       until a photo or render exists for them. -->
   <div class="type-detail-overlay" id="v2-type-detail-overlay" hidden>
     <div class="panel type-detail-panel">
       <header>
@@ -793,6 +792,8 @@
               <p class="hint">Supplier photos and 3D renders will appear here.</p>
             </div>
             <img id="v2-type-detail-img" alt="" hidden />
+            <canvas id="v2-type-detail-canvas" class="type-detail-canvas" hidden></canvas>
+            <p id="v2-type-detail-caption" class="type-detail-caption" hidden></p>
           </div>
         </div>
         <div class="type-detail-specs">
@@ -1150,6 +1151,6 @@
     </form>
   </div>
 
-  <script type="module" src="./ui.js?v=20261103-history-icons"></script>
+  <script type="module" src="./ui.js?v=20261106-plain-opening"></script>
 </body>
 </html>

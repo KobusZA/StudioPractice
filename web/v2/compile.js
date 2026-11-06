@@ -38,6 +38,7 @@ import {
   doorSwing,
   openingOnWall,
   openingSize,
+  openingVoidArea,
   skuById,
   wallForOpening,
 } from "./openings.js";
@@ -53,6 +54,7 @@ const CATEGORY_TO_SCHEDULE = {
   roof: "Roofs",
   door: "Doors",
   window: "Windows",
+  opening: "Openings",
   beam: "Beams",
   column: "Columns",
   stair: "Stairs",
@@ -611,7 +613,7 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
     const size = openingSize(pack, opening);
 
     const row = baseRow(pack, sku, opening.id, objectStatus(opening));
-    applyMeasures(row, sku, { count: 1, area: (size.width || 0) * (size.height || 0) });
+    applyMeasures(row, sku, { count: 1, area: openingVoidArea(size.width, size.height, sku) });
     if (size.nonStandard) {
       row.nonStandardSize = true;
       nonStandardOpenings.push(`${sku.name} ${Math.round(size.width * 1000)} x ${Math.round(size.height * 1000)} mm on ${levelName(pack, wall.level)}`);
@@ -628,7 +630,7 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
       name: sku.name,
       hostWallId: wall.id,
       depth: size.height || (sku.category === "window" ? 1.2 : 2.1),
-      sill: sku.category === "window" ? (size.sill ?? 0.9) : 0,
+      sill: sku.category === "door" ? 0 : (size.sill ?? (sku.category === "window" ? 0.9 : 0)),
       // Follows its host wall's base, so a door in a wall attached to a
       // foundation is not left sitting at the level datum below it.
       elevation: wallBases.get(wall.id)?.elevation ?? levelElevation(pack, wall.level),

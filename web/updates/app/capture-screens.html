@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>BOS update — app captures</title>
+  <link rel="stylesheet" href="../../v2/v2.css?v=capture" />
+  <style>
+    body {
+      margin: 0;
+      padding: 24px;
+      background: #e8e0d4;
+      font-family: "Source Sans 3", "Segoe UI", sans-serif;
+    }
+    .capture {
+      width: 520px;
+      margin: 0 0 32px;
+      background: var(--paper, #f7f3ea);
+      border: 1px solid rgba(26, 22, 18, 0.15);
+      border-radius: 4px;
+      overflow: hidden;
+      box-shadow: 0 2px 12px rgba(26, 22, 18, 0.08);
+    }
+    .capture-label {
+      padding: 8px 12px;
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #6b5f52;
+      border-bottom: 1px solid rgba(26, 22, 18, 0.1);
+      background: #fffdf8;
+    }
+    #shot-wall-types .dock-context {
+      width: 100%;
+      max-width: none;
+      position: relative;
+      border: 0;
+      box-shadow: none;
+    }
+    #shot-wall-types .panel-head {
+      padding: 10px 12px 6px;
+    }
+    #shot-wall-types .panel-head h2 {
+      margin: 0;
+      font-size: 15px;
+    }
+    #shot-wall-types .sku-list {
+      padding: 0 8px 10px;
+    }
+    #shot-wall-draft {
+      width: 640px;
+    }
+    #shot-wall-draft .plan-stage {
+      position: relative;
+      height: 220px;
+      background:
+        linear-gradient(rgba(26, 22, 18, 0.06) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(26, 22, 18, 0.06) 1px, transparent 1px),
+        #f3eee4;
+      background-size: 20px 20px;
+    }
+    #shot-wall-draft .wall-run {
+      position: absolute;
+      left: 80px;
+      top: 108px;
+      width: 420px;
+      height: 24px;
+      background: #d0121a;
+      border-radius: 1px;
+    }
+    #shot-wall-draft .dim {
+      position: absolute;
+      left: 80px;
+      top: 148px;
+      width: 420px;
+      text-align: center;
+      font-size: 13px;
+      font-weight: 600;
+      color: #1a1612;
+    }
+    #shot-wall-draft .dim line {
+      stroke: #1a1612;
+      stroke-width: 1;
+    }
+    #shot-wall-draft .plan-context {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px 18px;
+      padding: 12px 14px;
+      background: #fffdf8;
+      border-top: 1px solid rgba(26, 22, 18, 0.12);
+      font-size: 13px;
+    }
+    #shot-wall-draft .plan-context label {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-weight: 600;
+      color: #5c5348;
+    }
+    #shot-wall-draft .plan-context-field {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    #shot-wall-draft .plan-context-field input {
+      width: 5.5rem;
+      font: inherit;
+      padding: 4px 6px;
+      border: 1px solid rgba(26, 22, 18, 0.2);
+      border-radius: 3px;
+      background: #fff;
+    }
+    #shot-wall-draft .type-flyout {
+      padding: 8px 14px;
+      font-size: 12px;
+      color: #6b5f52;
+      border-top: 1px solid rgba(26, 22, 18, 0.08);
+      background: rgba(178, 69, 30, 0.06);
+    }
+  </style>
+</head>
+<body>
+  <div class="capture" id="shot-wall-types">
+    <p class="capture-label">StudioPractice · wall types (inspector)</p>
+    <aside class="dock dock-context planner-side planner-inspector">
+      <div class="panel-head">
+        <h2>Walls</h2>
+      </div>
+      <div class="sku-list" id="v2-sku-list">
+        <div class="sku-row">
+          <button type="button" class="sku-item">
+            <span class="sku-name">Masonary wall 110mm (plaster)</span>
+            <span class="sku-meta">TSP_WAL_MASONARY_WALL_110MM_PLASTER · 110 mm masonry + plaster (130 mm overall)</span>
+          </button>
+        </div>
+        <div class="sku-row">
+          <button type="button" class="sku-item active">
+            <span class="sku-name">Masonary wall 220mm (plaster)</span>
+            <span class="sku-meta">TSP_WAL_MASONARY_WALL_220MM_PLASTER · 220 mm masonry + plaster (240 mm overall)</span>
+          </button>
+        </div>
+        <div class="sku-row">
+          <button type="button" class="sku-item">
+            <span class="sku-name">Pool Masonry wall 220mm (plaster)</span>
+            <span class="sku-meta">TSP_WAL_POOL_MASONRY_WALL_220MM_PLAS · 220 mm masonry + plaster (240 mm overall)</span>
+          </button>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <div class="capture" id="shot-wall-draft">
+    <p class="capture-label">StudioPractice · drawing a plastered wall</p>
+    <div class="plan-stage">
+      <div class="wall-run" aria-hidden="true"></div>
+      <p class="dim">240 mm on plan (face to face)</p>
+    </div>
+    <p class="type-flyout"><strong>Masonary wall 220mm (plaster)</strong> · 220 mm masonry + plaster (240 mm overall)</p>
+    <div class="plan-context">
+      <label>Length
+        <span class="plan-context-field"><input type="text" value="4000" readonly /> <span>mm</span></span>
+      </label>
+      <label>Angle
+        <span class="plan-context-field"><input type="text" value="0.0" readonly /> <span>°</span></span>
+      </label>
+      <label>Width
+        <span class="plan-context-field"><input type="text" value="240" readonly /> <span>mm</span></span>
+      </label>
+      <label>Height
+        <span class="plan-context-field"><input type="text" value="2700" readonly /> <span>mm</span></span>
+      </label>
+    </div>
+  </div>
+</body>
+</html>

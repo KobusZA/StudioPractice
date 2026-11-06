@@ -47,6 +47,7 @@ test("leaving the wall tool and changing thickness keeps the location line", () 
 test("a door stays armed and recent doors sit beside the library, newest first", () => {
   assert.equal(openingStaysArmed("door"), true);
   assert.equal(openingStaysArmed("window"), false);
+  assert.equal(openingStaysArmed("opening"), false);
   const once = noteRecentDoor([], "d1");
   const twice = noteRecentDoor(noteRecentDoor(once, "d2"), "d1");
   assert.deepEqual(twice, ["d1", "d2"]);

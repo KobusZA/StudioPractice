@@ -11,6 +11,7 @@
 
 import { FINISH_CATEGORIES, finishSwatch } from "./finish-data.js";
 import { area as polyArea, clipPolygon, offsetPolygonInward, pointInPoly } from "./geom.js";
+import { archVoidPolygon } from "./openings.js";
 
 const PAD = 14;
 const HANDLE = 5;
@@ -424,7 +425,8 @@ const CUT_EPS = 1e-4;
 /** Openings this finish is measured net of. A length (skirting) loses doors only. */
 function cutsFor(band, openings) {
   const linear = FINISH_CATEGORIES[band.category]?.unit === "m";
-  return (openings || []).filter((o) => o.width > CUT_EPS && o.height > CUT_EPS && (!linear || o.category === "door"));
+  const cutsFloor = (o) => o.category === "door" || (o.category === "opening" && (o.sill || 0) <= 0.02);
+  return (openings || []).filter((o) => o.width > CUT_EPS && o.height > CUT_EPS && (!linear || cutsFloor(o)));
 }
 
 function openingPoly(o) {
@@ -432,6 +434,7 @@ function openingPoly(o) {
   const x1 = o.offset + o.width;
   const z0 = o.sill;
   const z1 = o.sill + o.height;
+  if (o.head === "arch") return archVoidPolygon({ from: x0, to: x1, bottom: z0, top: z1 });
   return [[x0, z0], [x1, z0], [x1, z1], [x0, z1]];
 }
 
@@ -788,11 +791,16 @@ export function elevationSvg(model, { width, height, interactive = false, select
     const w = o.width * scaleX;
     const h = o.height * scaleY;
     const sel = o.id === selectedId;
-    const cls = `elev-opening elev-${o.category === "door" ? "door" : "window"}${sel ? " is-selected" : ""}${o.nonStandard ? " is-nonstandard" : ""}`;
+    const cls = `elev-opening elev-${o.category === "door" ? "door" : o.head === "arch" ? "arch" : o.category === "opening" ? "opening" : "window"}${sel ? " is-selected" : ""}${o.nonStandard ? " is-nonstandard" : ""}`;
     // The inspector graph is a picture: the opening can be picked, not dragged.
     // Move handles exist only on the open elevation.
     const move = interactive ? ` data-elev-op="move"` : "";
-    parts.push(`<rect x="${x}" y="${y}" width="${w}" height="${h}" class="${cls}"${move} data-elev-id="${esc(o.id)}"/>`);
+    if (o.head === "arch") {
+      const d = openingPoly(o).map(([s, z], i) => `${i ? "L" : "M"}${xOf(s)},${yOf(model.base + z)}`).join("") + "Z";
+      parts.push(`<path d="${d}" class="${cls}"${move} data-elev-id="${esc(o.id)}"/>`);
+    } else {
+      parts.push(`<rect x="${x}" y="${y}" width="${w}" height="${h}" class="${cls}"${move} data-elev-id="${esc(o.id)}"/>`);
+    }
     if (sel) {
       // Setting-out, the way an elevation is dimensioned: the opening size
       // stays on the frame, the sill height is the run below it, and the
@@ -804,10 +812,10 @@ export function elevationSvg(model, { width, height, interactive = false, select
       dimensionOpening(parts, { x, y, w, h, opening: o, model, yOf, W, H });
     }
     if (interactive && sel) {
-      // A window is resized from its four corners. The left ones move the
-      // offset and keep the right edge; the bottom ones move the sill and
-      // keep the head. A door keeps its type width and has no sill, so only
-      // the head handle is drawn, and it changes the height.
+      // A window, a plain opening, and an arch are resized from four corners.
+      // The left ones move the offset and keep the right edge; the bottom
+      // ones move the sill and keep the head. A door keeps its type width
+      // and has no sill, so only the head handle is drawn.
       const hs = o.category === "door"
         ? [["t", x + w / 2, y]]
         : [["tl", x, y], ["tr", x + w, y], ["br", x + w, y + h], ["bl", x, y + h]];

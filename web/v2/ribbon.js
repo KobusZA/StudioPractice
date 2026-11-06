@@ -97,7 +97,7 @@ export const RIBBON = [
         label: "Openings",
         large: true,
         items: [
-          { id: "doors", label: "Doors", tool: "door", categories: ["door"] },
+          { id: "doors", label: "Doors", tool: "door", categories: ["door", "opening"] },
           { id: "windows", label: "Windows", tool: "window", categories: ["window"] },
         ],
       },

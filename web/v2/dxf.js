@@ -176,7 +176,7 @@ export function exportDxf(doc, pack) {
   if (!out) return null;
 
   const report = {
-    counts: { levels: 0, walls: 0, doors: 0, windows: 0, rooms: 0 },
+    counts: { levels: 0, walls: 0, doors: 0, windows: 0, openings: 0, rooms: 0 },
     skipped: [],
     notExported: [
       ["floors and slabs", (doc?.slabs || []).length],
@@ -239,7 +239,8 @@ export function exportDxf(doc, pack) {
     }
     const hostLevel = (out.walls || []).find((w) => w.id === row.hostWallId)?.level;
     const isWindow = sku?.category === "window";
-    const layer = layerName(isWindow ? "A-WIND" : "A-DOOR", levelNameOf(hostLevel));
+    const isHole = sku?.category === "opening";
+    const layer = layerName(isWindow ? "A-WIND" : isHole ? "A-OPEN" : "A-DOOR", levelNameOf(hostLevel));
     const a = toMmPts([curve.start])[0];
     const b = toMmPts([curve.end])[0];
     dxf.line(layer, a, b);
@@ -266,6 +267,7 @@ export function exportDxf(doc, pack) {
 
     dxf.text(layerName("A-ANNO", levelNameOf(hostLevel)), (a[0] + b[0]) / 2, (a[1] + b[1]) / 2, 120, label);
     if (isWindow) report.counts.windows += 1;
+    else if (isHole) report.counts.openings += 1;
     else report.counts.doors += 1;
   }
 

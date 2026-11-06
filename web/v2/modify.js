@@ -1002,6 +1002,8 @@ export function moveWallEnd(doc, ref, end, point, { skuById = () => null, tol = 
       touched = true;
     }
     if (!touched) continue;
+    // A collinear neighbour is a split, not a corner. Its end stays where it is.
+    if (runsCollinear(obj, other)) continue;
     if (Math.hypot(x2 - x1, y2 - y1) < MIN_TRACE) return fail("That would make the wall too short.");
     plans.push({ seg: other, old: endsOf(other), next: { x1, y1, x2, y2 } });
   }

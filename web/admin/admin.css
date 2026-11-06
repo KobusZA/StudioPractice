@@ -1,0 +1,33 @@
+/* Sits on practice.css. Only what the company list needs that the practice
+   screens do not already draw. */
+
+.kpis { display: flex; gap: 12px; margin: 14px 0 18px; flex-wrap: wrap; }
+.kpi {
+  background: var(--bg-elevated); border: 1px solid var(--hairline);
+  border-radius: var(--radius-md); padding: 10px 16px; min-width: 120px;
+}
+.kpi b {
+  display: block; font-family: var(--font-display); font-size: 1.7rem;
+  font-weight: 560; line-height: 1.1;
+}
+.kpi span { color: var(--ink-muted); font-size: 12px; }
+
+.admin-company {
+  border: 0; background: transparent; padding: 0; font-weight: 700;
+  color: var(--copper-dark); text-align: left;
+}
+.admin-company:hover { text-decoration: underline; }
+
+.admin-back {
+  border: 0; background: transparent; padding: 0; margin: 0 0 8px;
+  color: var(--copper-dark); font-weight: 600; font-size: 12.5px;
+}
+.admin-back:hover { text-decoration: underline; }
+
+#main h1 { font-family: var(--font-display); font-weight: 500; margin: 0 0 4px; }
+#main h2 { font-family: var(--font-display); font-weight: 500; font-size: 1.15rem; margin: 22px 0 8px; }
+
+.member-role { height: 27px; }
+
+.denied { max-width: 460px; }
+.denied h1 { font-family: var(--font-display); font-weight: 500; }

@@ -66,6 +66,34 @@ export function normalizeEmail(email) {
   return String(email || "").trim().toLowerCase();
 }
 
+/** Comma-separated PLATFORM_ADMIN_EMAILS. Blank pieces and non-emails drop out. */
+export function platformAdminEmailsFrom(value) {
+  const emails = new Set();
+  for (const part of String(value || "").split(",")) {
+    const email = normalizeEmail(part);
+    if (email.includes("@")) emails.add(email);
+  }
+  return emails;
+}
+
+/**
+ * Turn the flag on for every live account whose email is listed. Never turns
+ * it off: taking someone off the list is a deliberate update of the row, not
+ * a side effect of editing the environment and restarting.
+ */
+export async function syncPlatformAdmins(pool, emails) {
+  const list = [...emails];
+  if (!list.length) return 0;
+  const { rowCount } = await pool.query(
+    `update app_user set platform_admin = true
+      where deleted_at is null
+        and platform_admin = false
+        and lower(email) = any($1::text[])`,
+    [list],
+  );
+  return rowCount;
+}
+
 export class AuthError extends Error {
   constructor(status, message, code = null) {
     super(message);
@@ -80,7 +108,7 @@ export class AuthError extends Error {
  * membership row is what says so, and it is what a second member would be added
  * to rather than a migration.
  */
-export async function signUp(pool, { email, password, orgName }) {
+export async function signUp(pool, { email, password, orgName, platformAdminEmails = new Set() }) {
   const clean = normalizeEmail(email);
   if (!clean.includes("@")) throw new AuthError(400, "A valid email is required");
   if (String(password || "").length < 10) {
@@ -116,7 +144,12 @@ export async function signUp(pool, { email, password, orgName }) {
     // a working register, and seeding it on first use instead would mean a
     // read path that writes.
     await openStore(client, { orgId, userId }).seedPracticeDefaults();
-    const session = await issueSession(client, userId);
+    const platformAdmin = platformAdminEmails.has(clean);
+    if (platformAdmin) {
+      await client.query(`update app_user set platform_admin = true where id = $1`, [userId]);
+    }
+    const session = await issueSession(client, userId, orgId);
+    const orgNameClean = String(orgName || "").trim() || clean;
     // The role travels with the account rather than being looked up again: the
     // caller is about to render chrome that depends on it, and the membership
     // row it would re-read was written two statements ago.
@@ -124,8 +157,10 @@ export async function signUp(pool, { email, password, orgName }) {
       userId,
       orgId,
       email: clean,
-      orgName: String(orgName || "").trim() || clean,
+      orgName: orgNameClean,
       role: "owner",
+      companies: [{ orgId, orgName: orgNameClean, role: "owner" }],
+      platformAdmin,
       memberSince: new Date().toISOString(),
       ...session,
     };
@@ -133,12 +168,10 @@ export async function signUp(pool, { email, password, orgName }) {
 }
 
 /**
- * A second person under an existing firm, added by its owner. The shape is
- * `signUp` minus "create the org" - same account rules (email, a real
- * password), but the membership row joins the caller's org rather than a new
- * one, and its role is fixed to `'employee'`: this path exists to answer
- * PERMISSIONS-PROPOSAL.md's rollout step 3 ("no invite flow exists at all
- * today"), not to let anyone hand out `'owner'` over the API.
+ * A person under an existing firm. A new email gets an account (a real
+ * password, then a membership). An email that already has an account is
+ * attached: they keep the password they already have, and sign-in can switch
+ * into this firm. One person may belong to several companies.
  *
  * No practice-defaults seeding here - that only ever runs once, for the org's
  * first user, and the org this person is joining already has its type list
@@ -148,6 +181,14 @@ export async function inviteMember(pool, { orgId, invitedBy, email, password, ro
   if (!ROLES.includes(role)) throw new AuthError(400, `role must be one of: ${ROLES.join(", ")}`);
   const clean = normalizeEmail(email);
   if (!clean.includes("@")) throw new AuthError(400, "A valid email is required");
+
+  const { rows } = await pool.query(
+    `select id from app_user where lower(email) = $1 and deleted_at is null`,
+    [clean],
+  );
+  if (rows[0]) {
+    return addMembership(pool, { orgId, userId: rows[0].id, invitedBy, email: clean, role });
+  }
   if (String(password || "").length < 10) {
     throw new AuthError(400, "A password of at least 10 characters is required");
   }
@@ -155,22 +196,72 @@ export async function inviteMember(pool, { orgId, invitedBy, email, password, ro
   const passwordHash = await hashPassword(password);
 
   return withTransaction(pool, async (client) => {
+    await client.query("savepoint new_user");
     try {
       await client.query(
         `insert into app_user (id, email, password_hash, created_by) values ($1, $2, $3, $4)`,
         [userId, clean, passwordHash, invitedBy],
       );
     } catch (error) {
-      if (error.code === "23505") throw new AuthError(409, "That email is already registered");
-      throw error;
+      if (error.code !== "23505") throw error;
+      // The address was registered between the lookup and the insert. The
+      // transaction is aborted until the savepoint is rolled back; then this
+      // is the same attach the lookup would have done.
+      await client.query("rollback to savepoint new_user");
+      const { rows: raced } = await client.query(
+        `select id from app_user where lower(email) = $1 and deleted_at is null`,
+        [clean],
+      );
+      if (!raced[0]) throw error;
+      return addMembership(client, { orgId, userId: raced[0].id, invitedBy, email: clean, role });
     }
-    await client.query(
+    await insertMembership(client, { orgId, userId, invitedBy, role });
+    return { userId, email: clean, orgId, role };
+  });
+}
+
+/** Attach an existing account to a firm. Refuses a second row in the same firm. */
+export async function addMembership(queryable, { orgId, userId, invitedBy, email, role }) {
+  if (!ROLES.includes(role)) throw new AuthError(400, `role must be one of: ${ROLES.join(", ")}`);
+  const memberships = await listLiveMemberships(queryable, userId);
+  if (memberships.some((row) => row.org_id === orgId)) {
+    throw new AuthError(409, "That person already has access to this company");
+  }
+  await insertMembership(queryable, { orgId, userId, invitedBy, role });
+  return { userId, email, orgId, role };
+}
+
+async function insertMembership(queryable, { orgId, userId, invitedBy, role }) {
+  try {
+    await queryable.query(
       `insert into membership (id, user_id, org_id, role, created_by)
             values ($1, $2, $3, $4, $5)`,
       [sid("mem"), userId, orgId, role, invitedBy],
     );
-    return { userId, email: clean, orgId, role };
-  });
+  } catch (error) {
+    if (error.code === "23505") throw new AuthError(409, "That person already has access to this company");
+    throw error;
+  }
+}
+
+export async function listLiveMemberships(queryable, userId) {
+  const { rows } = await queryable.query(
+    `select m.org_id, m.role, o.name as org_name
+       from membership m
+       join org o on o.id = m.org_id and o.deleted_at is null
+      where m.user_id = $1 and m.deleted_at is null
+      order by m.created_at asc, m.id asc`,
+    [userId],
+  );
+  return rows;
+}
+
+function companiesFrom(rows) {
+  return rows.map((row) => ({
+    orgId: row.org_id,
+    orgName: row.org_name,
+    role: row.role,
+  }));
 }
 
 /**
@@ -180,10 +271,10 @@ export async function inviteMember(pool, { orgId, invitedBy, email, password, ro
  * still pays for a hash comparison so the response time does not answer the
  * question either.
  */
-export async function signIn(pool, { email, password }) {
+export async function signIn(pool, { email, password, platformAdminEmails = new Set() }) {
   const clean = normalizeEmail(email);
   const { rows } = await pool.query(
-    `select id, password_hash from app_user
+    `select id, password_hash, platform_admin, created_at from app_user
       where lower(email) = $1 and deleted_at is null`,
     [clean],
   );
@@ -191,33 +282,56 @@ export async function signIn(pool, { email, password }) {
   const ok = await verifyPassword(password, user?.password_hash ?? DUMMY_HASH);
   if (!user || !ok) throw new AuthError(401, "Email or password is incorrect");
 
+  const platformAdmin = Boolean(user.platform_admin) || platformAdminEmails.has(clean);
+  if (platformAdmin && !user.platform_admin) {
+    await pool.query(`update app_user set platform_admin = true where id = $1`, [user.id]);
+  }
+
   // The org is resolved after the password, not joined into the lookup above:
   // a user whose firm was deleted has a correct password and no org, and
   // "email or password is incorrect" would be a lie about which thing is wrong.
-  const { rows: memberships } = await pool.query(
-    `select m.org_id, m.role, o.name as org_name, u.created_at as member_since
-       from membership m
-       join org o on o.id = m.org_id and o.deleted_at is null
-       join app_user u on u.id = m.user_id
-      where m.user_id = $1 and m.deleted_at is null
+  const memberships = await listLiveMemberships(pool, user.id);
+  if (!memberships.length) {
+    // An operator may have no firm. Everyone else still has to belong to one.
+    if (!platformAdmin) throw new AuthError(403, "That account is not a member of a firm");
+    const session = await issueSession(pool, user.id, null);
+    return {
+      userId: user.id,
+      email: clean,
+      orgId: null,
+      orgName: null,
+      role: null,
+      companies: [],
+      platformAdmin: true,
+      memberSince: user.created_at,
+      ...session,
+    };
+  }
+
+  // Stay in the company they last worked in. A brand-new sign-in, or a company
+  // they have since left, opens the one they joined first.
+  const { rows: previous } = await pool.query(
+    `select org_id from session
+      where user_id = $1 and org_id is not null
+      order by created_at desc
       limit 1`,
     [user.id],
   );
-  if (!memberships[0]) throw new AuthError(403, "That account is not a member of a firm");
-
-  const membership = memberships[0];
+  const membership = memberships.find((row) => row.org_id === previous[0]?.org_id) || memberships[0];
   // Idempotent: ON CONFLICT DO NOTHING. Firms created before practice defaults
   // existed arrive with an empty type list; signing in is when that is fixed.
   await openStore(pool, { orgId: membership.org_id, userId: user.id }).seedPracticeDefaults();
 
-  const session = await issueSession(pool, user.id);
+  const session = await issueSession(pool, user.id, membership.org_id);
   return {
     userId: user.id,
     email: clean,
     orgId: membership.org_id,
     orgName: membership.org_name,
     role: membership.role,
-    memberSince: membership.member_since,
+    companies: companiesFrom(memberships),
+    platformAdmin,
+    memberSince: user.created_at,
     ...session,
   };
 }
@@ -228,16 +342,29 @@ export async function signIn(pool, { email, password }) {
 // back into an answer.
 const DUMMY_HASH = await hashPassword(randomBytes(32).toString("base64url"));
 
-export async function issueSession(queryable, userId) {
+export async function issueSession(queryable, userId, orgId = null) {
   const token = randomBytes(32).toString("base64url");
   const expiresAt = new Date(Date.now() + SESSION_TTL_MS).toISOString();
   const offlineUntil = new Date(Date.now() + OFFLINE_LEASE_MS).toISOString();
   await queryable.query(
-    `insert into session (id, token_hash, user_id, expires_at, offline_until, created_by)
-          values ($1, $2, $3, $4, $5, $3)`,
-    [sid("ses"), hashToken(token), userId, expiresAt, offlineUntil],
+    `insert into session (id, token_hash, user_id, org_id, expires_at, offline_until, created_by)
+          values ($1, $2, $3, $4, $5, $6, $3)`,
+    [sid("ses"), hashToken(token), userId, orgId, expiresAt, offlineUntil],
   );
   return { token, expiresAt, offlineUntil };
+}
+
+/** Move this sign-in into another company the person already belongs to. */
+export async function setSessionCompany(pool, { sessionId, userId, orgId }) {
+  const memberships = await listLiveMemberships(pool, userId);
+  const membership = memberships.find((row) => row.org_id === orgId);
+  if (!membership) throw new AuthError(403, "That account is not a member of that company");
+  await pool.query(
+    `update session set org_id = $2 where id = $1 and deleted_at is null`,
+    [sessionId, orgId],
+  );
+  await openStore(pool, { orgId, userId }).seedPracticeDefaults();
+  return membership;
 }
 
 /**
@@ -245,8 +372,8 @@ export async function issueSession(queryable, userId) {
  * than throwing for anything that amounts to "not signed in", so a handler can
  * decide whether that is a 401 or just an anonymous read.
  *
- * The org comes from the membership join. There is no `app_user.org_id` to read
- * by accident - see schema.sql.
+ * The company comes from a live membership. `session.org_id` only chooses which
+ * of those memberships this sign-in is in. There is no `app_user.org_id`.
  */
 export async function resolveSession(pool, token) {
   if (!token) return null;
@@ -254,31 +381,42 @@ export async function resolveSession(pool, token) {
     `select s.id       as session_id,
             s.expires_at,
             s.offline_until,
+            s.org_id   as session_org_id,
             u.id        as user_id,
             u.email,
-            u.created_at as member_since,
-            m.org_id,
-            m.role,
-            o.name     as org_name
+            u.platform_admin,
+            u.created_at as member_since
        from session s
        join app_user u on u.id = s.user_id and u.deleted_at is null
-       join membership m on m.user_id = u.id and m.deleted_at is null
-       join org o on o.id = m.org_id and o.deleted_at is null
       where s.token_hash = $1
         and s.deleted_at is null
-        and s.expires_at > now()
-      limit 1`,
+        and s.expires_at > now()`,
     [hashToken(token)],
   );
   const row = rows[0];
   if (!row) return null;
+  const memberships = await listLiveMemberships(pool, row.user_id);
+  let current = memberships.find((membership) => membership.org_id === row.session_org_id) || null;
+  // A session from before this column existed, or a company they have left,
+  // opens another firm they still belong to. One write, then later requests
+  // find the row directly.
+  if (!current && memberships[0]) {
+    current = memberships[0];
+    await pool.query(
+      `update session set org_id = $2 where id = $1 and deleted_at is null`,
+      [row.session_id, current.org_id],
+    );
+  }
+  if (!current && !row.platform_admin) return null;
   return {
     sessionId: row.session_id,
     userId: row.user_id,
     email: row.email,
-    orgId: row.org_id,
-    orgName: row.org_name,
-    role: row.role,
+    orgId: current ? current.org_id : null,
+    orgName: current ? current.org_name : null,
+    role: current ? current.role : null,
+    companies: companiesFrom(memberships),
+    platformAdmin: Boolean(row.platform_admin),
     memberSince: row.member_since,
     expiresAt: row.expires_at,
     offlineUntil: row.offline_until,

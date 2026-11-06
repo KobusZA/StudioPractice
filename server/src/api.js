@@ -1,10 +1,15 @@
 // The HTTP surface. Thin on purpose: a handler authenticates, then asks an
-// org-scoped store for something. No handler names an org id, and none of them
-// can - see store.js.
+// org-scoped store for something. Firm routes never name an org id - see
+// store.js. /api/admin is the exception: a platform administrator names the
+// company they are looking at, and those handlers do not go through the store.
 
 import {
+  getCompany, grantCompanyAccess, listCompanies, revokeCompanyAccess, setCompanyMemberRole,
+} from "./admin.js";
+import {
   AuthError, RateLimiter, SESSION_COOKIE, SESSION_TTL_MS,
-  inviteMember, refreshOfflineLease, resolveSession, revokeSession, signIn, signUp,
+  inviteMember, refreshOfflineLease, resolveSession, revokeSession, setSessionCompany, signIn, signUp,
+  platformAdminEmailsFrom,
 } from "./auth.js";
 import {
   ConflictError, DuplicateCodeError, IssuedError, PermissionError, ValidationError, openStore,
@@ -39,17 +44,28 @@ export function createApi(pool, options = {}, env = process.env) {
   const rateLimiter = options.rateLimiter ?? new RateLimiter();
   const openaiApiKey = options.openaiApiKey ?? env.OPENAI_API_KEY;
   const openaiFetch = options.openaiFetch ?? globalThis.fetch.bind(globalThis);
+  // A Set, not a copy: a test can add an email after the server is already up
+  // and the next sign-in sees it. Production passes the parsed env once.
+  const platformAdminEmails = options.platformAdminEmails
+    ?? platformAdminEmailsFrom(env.PLATFORM_ADMIN_EMAILS);
 
   const match = createRouter([
     ["POST", "/api/auth/sign-up", handleSignUp],
     ["POST", "/api/auth/sign-in", handleSignIn],
     ["POST", "/api/auth/sign-out", handleSignOut],
     ["GET", "/api/auth/session", handleSession],
+    ["POST", "/api/auth/company", handleSetCompany],
 
-    // A firm's own people, and adding a second one. Owner-only to add: this
-    // is the only path that can ever write a `membership` row after sign-up,
-    // and its role is fixed to `'employee'` (see auth.js's inviteMember) so
-    // it cannot be used to hand out `'owner'` over the API.
+    // Across every firm. The caller's own membership is irrelevant here; the
+    // gate is platform_admin, checked in requirePlatformAdmin.
+    ["GET", "/api/admin/companies", handleAdminListCompanies],
+    ["GET", "/api/admin/companies/:orgId", handleAdminGetCompany],
+    ["POST", "/api/admin/companies/:orgId/members", handleAdminGrantAccess],
+    ["PATCH", "/api/admin/companies/:orgId/members/:userId", handleAdminSetMemberRole],
+    ["DELETE", "/api/admin/companies/:orgId/members/:userId", handleAdminRevokeAccess],
+
+    // A firm's own people. Owner-only to add. An existing account is attached
+    // rather than refused, so one person can belong to several companies.
     ["GET", "/api/team", handleListTeam],
     ["POST", "/api/team", handleInviteTeamMember],
     ["GET", "/api/team/roster", handleTeamRoster],
@@ -125,6 +141,7 @@ export function createApi(pool, options = {}, env = process.env) {
 
   const context = {
     pool, secureCookies, allowedOrigins, rateLimiter, openaiApiKey, openaiFetch,
+    platformAdminEmails,
   };
 
   /** Returns true when it handled the request, so a static handler can follow. */
@@ -187,14 +204,14 @@ export function createApi(pool, options = {}, env = process.env) {
 
 // --- auth ------------------------------------------------------------------
 
-async function handleSignUp({ req, res, pool, secureCookies }) {
+async function handleSignUp({ req, res, pool, secureCookies, platformAdminEmails }) {
   const body = (await readJsonBody(req)) || {};
-  const account = await signUp(pool, body);
+  const account = await signUp(pool, { ...body, platformAdminEmails });
   setSession(res, account.token, secureCookies);
   sendJson(res, 201, sessionPayload(account));
 }
 
-async function handleSignIn({ req, res, pool, secureCookies, rateLimiter }) {
+async function handleSignIn({ req, res, pool, secureCookies, rateLimiter, platformAdminEmails }) {
   const body = (await readJsonBody(req)) || {};
   // Keyed by address and email together: one shared office IP must not lock
   // out a colleague, and one leaked address must not be attackable from a
@@ -203,10 +220,21 @@ async function handleSignIn({ req, res, pool, secureCookies, rateLimiter }) {
   if (!rateLimiter.check(key)) {
     throw new AuthError(429, "Too many sign-in attempts. Try again shortly.");
   }
-  const account = await signIn(pool, body);
+  const account = await signIn(pool, { ...body, platformAdminEmails });
   rateLimiter.clear(key);
   setSession(res, account.token, secureCookies);
   sendJson(res, 200, sessionPayload(account));
+}
+
+async function handleSetCompany({ req, res, pool }) {
+  const session = await requireSession(pool, req);
+  const body = (await readJsonBody(req)) || {};
+  const orgId = typeof body.orgId === "string" ? body.orgId.trim() : "";
+  if (!orgId) throw new AuthError(400, "A company is required");
+  await setSessionCompany(pool, { sessionId: session.sessionId, userId: session.userId, orgId });
+  const next = await currentSession(pool, req);
+  const offlineUntil = await refreshOfflineLease(pool, next.sessionId);
+  sendJson(res, 200, { signedIn: true, ...sessionPayload({ ...next, offlineUntil }) });
 }
 
 async function handleSignOut({ req, res, pool, secureCookies }) {
@@ -221,6 +249,66 @@ async function handleSession({ req, res, pool }) {
   // Being here, online, is what renews the offline lease (§6).
   const offlineUntil = await refreshOfflineLease(pool, session.sessionId);
   sendJson(res, 200, { signedIn: true, ...sessionPayload({ ...session, offlineUntil }) });
+}
+
+// --- platform admin ----------------------------------------------------
+
+async function handleAdminListCompanies({ req, res, pool, url }) {
+  await requirePlatformAdmin(pool, req);
+  const limitParam = url.searchParams.get("limit");
+  let limit = null;
+  if (limitParam !== null) {
+    const n = Number(limitParam);
+    if (!Number.isInteger(n) || n < 1 || n > 100) throw new HttpError(400, "limit is 1 to 100");
+    limit = n;
+  }
+  const offset = Number(url.searchParams.get("offset") || 0);
+  if (!Number.isInteger(offset) || offset < 0) throw new HttpError(400, "offset is a whole number");
+  sendJson(res, 200, await listCompanies(pool, {
+    q: url.searchParams.get("q") || "",
+    limit,
+    offset,
+  }));
+}
+
+async function handleAdminGetCompany({ req, res, pool, params }) {
+  await requirePlatformAdmin(pool, req);
+  const company = await getCompany(pool, params.orgId);
+  if (!company) throw new HttpError(404, "No such company");
+  sendJson(res, 200, { company });
+}
+
+async function handleAdminGrantAccess({ req, res, pool, params }) {
+  const session = await requirePlatformAdmin(pool, req);
+  const body = (await readJsonBody(req)) || {};
+  const member = await grantCompanyAccess(pool, {
+    orgId: params.orgId,
+    invitedBy: session.userId,
+    email: body.email,
+    password: body.password,
+    role: body.role || undefined,
+  });
+  sendJson(res, 201, { member });
+}
+
+async function handleAdminSetMemberRole({ req, res, pool, params }) {
+  await requirePlatformAdmin(pool, req);
+  const body = (await readJsonBody(req)) || {};
+  const member = await setCompanyMemberRole(pool, {
+    orgId: params.orgId,
+    userId: params.userId,
+    role: body.role,
+  });
+  sendJson(res, 200, { member });
+}
+
+async function handleAdminRevokeAccess({ req, res, pool, params }) {
+  await requirePlatformAdmin(pool, req);
+  const member = await revokeCompanyAccess(pool, {
+    orgId: params.orgId,
+    userId: params.userId,
+  });
+  sendJson(res, 200, { member });
 }
 
 // --- the team ----------------------------------------------------------
@@ -913,11 +1001,13 @@ function sessionPayload(session) {
     orgId: session.orgId ?? null,
     orgName: session.orgName ?? null,
     role: session.role ?? null,
+    companies: Array.isArray(session.companies) ? session.companies : [],
     // Sent alongside the role, not looked up separately by the client: the
     // web app hides money by capability, not by hardcoding "role ===
     // 'owner'" in a dozen places that would all have to change together the
     // day a third role exists.
     capabilities: capabilitiesFor(session.role),
+    platformAdmin: Boolean(session.platformAdmin),
     memberSince: session.memberSince ? new Date(session.memberSince).toISOString() : null,
     offlineUntil: session.offlineUntil ?? null,
   };
@@ -941,8 +1031,20 @@ async function requireSession(pool, req) {
 }
 
 /** The only way a handler gets at a firm's rows. */
+async function requirePlatformAdmin(pool, req) {
+  const session = await requireSession(pool, req);
+  if (!session.platformAdmin) {
+    throw new AuthError(403, "Platform administrator access is required");
+  }
+  return session;
+}
+
 async function requireStore(pool, req) {
-  return openStore(pool, await requireSession(pool, req));
+  const session = await requireSession(pool, req);
+  // A platform administrator may have no firm of their own. The practice
+  // routes are still firm routes; they do not become a way to read one.
+  if (!session.orgId) throw new AuthError(403, "That account is not a member of a firm");
+  return openStore(pool, session);
 }
 
 function requireDoc(doc) {

@@ -91,7 +91,10 @@ export function createSheetUi(ctx) {
   const repickBar = h("div", { class: "sheet-set-repick", hidden: true }, repickText, repickButton);
   // The sheets list: every page of the PDF, on the plan corner. Drawn pages
   // and pages left off the plan are separate tabs.
-  const sheetsList = h("div", { class: "sheet-set-list" });
+  const drawnList = h("div", { class: "sheet-set-list", role: "tabpanel" });
+  const otherList = h("div", { class: "sheet-set-list is-off", role: "tabpanel" });
+  const sheetsStack = h("div", { class: "sheet-set-stack" }, drawnList, otherList);
+  const sheetsList = sheetsStack;
   const sheetsToggle = h("button", { type: "button", class: "sheet-set-list-head", "aria-expanded": "true", onclick: () => {
     const collapsed = sheetsCard.classList.toggle("is-collapsed");
     sheetsToggle.setAttribute("aria-expanded", String(!collapsed));
@@ -112,11 +115,19 @@ export function createSheetUi(ctx) {
   const tabDrawn = h("button", { type: "button", class: "sheet-set-tab is-on", role: "tab", "aria-selected": "true", text: "Drawn" });
   const tabOther = h("button", { type: "button", class: "sheet-set-tab", role: "tab", "aria-selected": "false", text: "Not drawn" });
   const sheetsTabs = h("div", { class: "sheet-set-tabs", role: "tablist", "aria-label": "Which sheets" }, tabDrawn, tabOther);
+  function applyTab() {
+    const drawn = listTab === "drawn";
+    drawnList.classList.toggle("is-off", !drawn);
+    otherList.classList.toggle("is-off", drawn);
+    tabDrawn.classList.toggle("is-on", drawn);
+    tabOther.classList.toggle("is-on", !drawn);
+    tabDrawn.setAttribute("aria-selected", drawn ? "true" : "false");
+    tabOther.setAttribute("aria-selected", drawn ? "false" : "true");
+  }
   function pickTab(tab) {
     if (listTab === tab) return;
     listTab = tab;
-    listSignature = "";
-    syncList();
+    applyTab();
   }
   for (const [button, tab] of [[tabDrawn, "drawn"], [tabOther, "other"]]) {
     button.addEventListener("click", (e) => {
@@ -124,7 +135,7 @@ export function createSheetUi(ctx) {
       pickTab(tab);
     });
   }
-  const sheetsCard = h("div", { class: "sheet-set-card", hidden: true }, sheetsHead, sheetsTabs, sheetsList);
+  const sheetsCard = h("div", { class: "sheet-set-card", hidden: true }, sheetsHead, sheetsTabs, sheetsStack);
   const loadChip = h("span", { class: "sheet-set-chip", hidden: true });
   const uploadText = h("span", { text: "Saving plan file…" });
   const retryButton = h("button", { type: "button", text: "Retry", hidden: true });
@@ -949,12 +960,8 @@ export function createSheetUi(ctx) {
     const otherCount = set.pages.length - drawnCount;
     tabDrawn.textContent = `Drawn${drawnCount ? ` ${drawnCount}` : ""}`;
     tabOther.textContent = `Not drawn${otherCount ? ` ${otherCount}` : ""}`;
-    tabDrawn.classList.toggle("is-on", listTab === "drawn");
-    tabOther.classList.toggle("is-on", listTab === "other");
-    tabDrawn.setAttribute("aria-selected", listTab === "drawn" ? "true" : "false");
-    tabOther.setAttribute("aria-selected", listTab === "other" ? "true" : "false");
+    applyTab();
     const sig = JSON.stringify([
-      listTab,
       showing,
       levels.map((l) => [l.id, l.name]),
       set.pages.map((p) => [p.index, p.label, p.levelId, p.role, p.verified, p.printedScale, p.shown, p.suppressed, p.sourceId]),
@@ -1086,7 +1093,11 @@ export function createSheetUi(ctx) {
         h("span", { class: "sheet-set-list-dot", "aria-hidden": "true", text: isShowing ? "●" : "○" }),
         name,
         h("span", { class: "sheet-set-list-scale", text: `1:${p.printedScale}` }),
-        h("span", { class: `sheet-set-list-verify${p.verified ? "" : " is-unverified"}`, title: p.verified ? "Scale checked" : "Scale not yet checked", text: p.verified ? "✓" : "?" }),
+        h("span", {
+          class: `sheet-set-list-verify${p.verified ? " is-verified" : " is-unverified"}`,
+          title: p.verified ? "Scale checked" : "Scale not yet checked",
+          "aria-label": p.verified ? "Scale checked" : "Scale not yet checked",
+        }),
         view,
         eye));
       // On the showing row, under its name, so the slider and buttons are that
@@ -1189,14 +1200,13 @@ export function createSheetUi(ctx) {
       return head;
     };
 
-    const nodes = [];
     const sources = set.sources || [];
     const many = sources.length > 1;
 
     /** Drawn: plan pages by floor. Not drawn: elevations, sections, and pages left off the plan. */
-    const groups = (pages, sourceId) => {
+    const groups = (pages, sourceId, tab) => {
       const out = [];
-      if (listTab === "drawn") {
+      if (tab === "drawn") {
         const floorIds = many ? [] : levels.map((l) => l.id);
         for (const p of pages) if (isPlanPage(p) && p.levelId && !floorIds.includes(p.levelId)) floorIds.push(p.levelId);
         // With several files each floor shows only the sheets of that file, so a floor is listed where it has some.
@@ -1222,29 +1232,34 @@ export function createSheetUi(ctx) {
       return out;
     };
 
-    let anyRow = false;
-    for (const source of sources) {
-      const own = pagesOfSource(set, source.id);
-      const rows = groups(own, source.id);
-      if (rows.length) anyRow = true;
-      const pageCount = listTab === "drawn" ? own.filter((p) => isPlanPage(p)).length : own.filter((p) => !isPlanPage(p)).length;
-      const head = h("div", { class: "sheet-set-list-source" },
-        h("div", { class: "sheet-set-list-source-top" },
-          h("strong", { class: "sheet-set-list-source-name", title: source.name, text: source.name }),
-          h("span", { class: "sheet-set-list-count", text: `${pageCount} page${pageCount === 1 ? "" : "s"}` })),
-        h("div", { class: "sheet-set-list-source-actions" },
-          sourceButton("Replace…", `Swap ${source.name} for another file. Other files stay.`, () => pickPdfFile((file) => openImport(file, { mode: "replace", sourceId: source.id }))),
-          sourceButton("New revision…", `Match a newer ${source.name} to these sheets and keep their placement`, () => pickPdfFile((file) => openImport(file, { mode: "revision", sourceId: source.id }))),
-          many ? sourceButton("Remove", `Take ${source.name} and its sheets off the drawing`, () => removeSourceFile(source)) : null));
-      nodes.push(head, ...rows);
-    }
-    if (!anyRow) {
-      nodes.push(h("p", {
-        class: "sheet-set-list-empty",
-        text: listTab === "drawn" ? "Nothing on the plan yet." : "Every page is on the plan.",
-      }));
-    }
-    sheetsList.replaceChildren(...nodes);
+    const fill = (list, tab) => {
+      const nodes = [];
+      let anyRow = false;
+      for (const source of sources) {
+        const own = pagesOfSource(set, source.id);
+        const rows = groups(own, source.id, tab);
+        if (rows.length) anyRow = true;
+        const pageCount = tab === "drawn" ? own.filter((p) => isPlanPage(p)).length : own.filter((p) => !isPlanPage(p)).length;
+        const head = h("div", { class: "sheet-set-list-source" },
+          h("div", { class: "sheet-set-list-source-top" },
+            h("strong", { class: "sheet-set-list-source-name", title: source.name, text: source.name }),
+            h("span", { class: "sheet-set-list-count", text: `${pageCount} page${pageCount === 1 ? "" : "s"}` })),
+          h("div", { class: "sheet-set-list-source-actions" },
+            sourceButton("Replace…", `Swap ${source.name} for another file. Other files stay.`, () => pickPdfFile((file) => openImport(file, { mode: "replace", sourceId: source.id }))),
+            sourceButton("New revision…", `Match a newer ${source.name} to these sheets and keep their placement`, () => pickPdfFile((file) => openImport(file, { mode: "revision", sourceId: source.id }))),
+            many ? sourceButton("Remove", `Take ${source.name} and its sheets off the drawing`, () => removeSourceFile(source)) : null));
+        nodes.push(head, ...rows);
+      }
+      if (!anyRow) {
+        nodes.push(h("p", {
+          class: "sheet-set-list-empty",
+          text: tab === "drawn" ? "Nothing on the plan yet." : "Every page is on the plan.",
+        }));
+      }
+      list.replaceChildren(...nodes);
+    };
+    fill(drawnList, "drawn");
+    fill(otherList, "other");
   }
 
   function sourceButton(text, title, onClick) {

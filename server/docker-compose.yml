@@ -60,6 +60,9 @@ services:
       ALLOWED_ORIGINS: ""
       # Substituted from server/.env when you `docker compose up` from here.
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # Comma-separated emails that may open /admin. Empty means nobody can.
+      # Read from server/.env. Restart the app after changing it.
+      PLATFORM_ADMIN_EMAILS: ${PLATFORM_ADMIN_EMAILS:-}
     ports:
       - "8080:8080"
     # The schema is applied on boot (server.js) and is idempotent, so the only

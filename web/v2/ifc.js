@@ -173,7 +173,7 @@ export function exportIfc(doc, pack, { now = new Date(), author = "", organisati
   if (!out) return null;
 
   const report = {
-    counts: { levels: 0, walls: 0, doors: 0, windows: 0, rooms: 0 },
+    counts: { levels: 0, walls: 0, doors: 0, windows: 0, openings: 0, rooms: 0 },
     skipped: [],
     unmappedTypes: [],
     // Drawn, compiled, priced - and not in this file, because this version
@@ -487,6 +487,13 @@ export function exportIfc(doc, pack, { now = new Date(), author = "", organisati
     ]);
 
     const isWindow = sku?.category === "window";
+    const isHole = sku?.category === "opening";
+    if (isHole) {
+      place(host.wall.level, openingRef);
+      report.counts.openings += 1;
+      schedulePset(openingRef, row, opening.id);
+      continue;
+    }
     const leafShape = box(width, host.wall.thickness, height);
     const leafRef = f.add(isWindow ? "IFCWINDOW" : "IFCDOOR", [
       s(ifcGuid(`opening:${opening.id}`)), owner, s(label), "$", s(objectTypeFor(sku, isWindow ? "Window" : "Door")),

@@ -136,11 +136,23 @@ test("paint names its bill item, and an unpriced paint shows the gap", () => {
   assert.ok(row.type.includes("No rate on file (FINISH:paint)"));
   assert.equal(row.rateRef, null);
   const marks = planWallFinishMarks(doc, pack, walls).filter((m) => m.category === "paint");
-  assert.ok(marks.length > 0 && marks.every((m) => m.label.includes("No rate on file (FINISH:paint)")));
+  assert.ok(marks.length > 0 && marks.every((m) => m.label === "Paint"));
   const model = elevationModel(doc, pack, { wallId: "w1", side: 1 }, walls);
   const html = faceFinishHtml(doc, model);
   assert.ok(html.includes("No rate on file (FINISH:paint)"));
   assert.ok(html.includes(">Paint<"));
+
+  const priced = normalizeDoc({
+    finishProducts: [{ id: "p", category: "paint", name: "Double Velvet", rateRef: "PAINT-1" }],
+    segments: [{ id: "w1", sku: "TSP_MAS009", level: "01 GFL", x1: 0, y1: 0, x2: 6, y2: 0 }],
+  });
+  const pricedWalls = deriveWalls(priced, pack);
+  createFinishRun(priced, pricedWalls[0], 1, { category: "paint", productId: "p" });
+  const pricedMarks = planWallFinishMarks(priced, pack, pricedWalls).filter((m) => m.category === "paint");
+  assert.ok(pricedMarks.length > 0 && pricedMarks.every((m) => m.label === "Paint — PAINT-1"));
+  const pricedRow = finishRows(priced).find((r) => r.finishCategory === "paint" && r.source === "run");
+  assert.ok(pricedRow.type.includes("PAINT-1"));
+  assert.ok(!pricedRow.type.includes("No rate on file"));
 });
 
 test("a room rule tiles the room-side faces to its height, as an allowance without a product", () => {

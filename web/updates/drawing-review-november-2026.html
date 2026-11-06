@@ -1,0 +1,716 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Drawing tools update · StudioPractice</title>
+  <meta name="description" content="34 points from the 1 November memo: 19 done, 5 to build, 10 on hold. What changed in drawing, with your figures." />
+  <link rel="icon" href="../logo.png" type="image/png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,560&family=Source+Sans+3:ital,wght@0,400;0,600;0,700;1,400&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #efe8dc;
+      --paper: #fffdf8;
+      --paper-2: #f7f3ea;
+      --ink: #1a1612;
+      --soft: #5c5348;
+      --muted: #8a8074;
+      --line: rgba(26, 22, 18, 0.12);
+      --line-strong: rgba(26, 22, 18, 0.22);
+      --copper: #b2451e;
+      --copper-dark: #8d3416;
+      --navy: #243044;
+      --ok: #2f6b4f;
+      --red: #d0121a;
+      --font: "Source Sans 3", "Segoe UI", sans-serif;
+      --display: Fraunces, Georgia, serif;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background:
+        radial-gradient(1200px 480px at 10% -10%, rgba(178, 69, 30, 0.08), transparent 60%),
+        var(--bg);
+      color: var(--ink);
+      font-family: var(--font);
+      font-size: 18px;
+      line-height: 1.55;
+    }
+    a { color: var(--copper-dark); }
+    a:hover { color: var(--copper); }
+    img { max-width: 100%; }
+
+    .wrap { width: min(1080px, calc(100% - 40px)); margin: 0 auto; }
+    header.site {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 18px 0 14px;
+    }
+    .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: inherit; }
+    .brand img { width: 36px; height: 36px; border-radius: 50%; background: #000; }
+    .brand span { font-family: var(--display); font-weight: 560; font-size: 18px; }
+    .meta { color: var(--soft); font-size: 14px; letter-spacing: 0.02em; }
+
+    .hero {
+      background: var(--navy);
+      color: #f3eee4;
+      border-radius: 6px;
+      padding: 42px 44px 36px;
+      margin-bottom: 28px;
+    }
+    .eyebrow {
+      margin: 0 0 10px;
+      font-size: 13px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: #e7b59a;
+    }
+    h1 {
+      margin: 0 0 14px;
+      font-family: var(--display);
+      font-weight: 560;
+      font-size: clamp(34px, 5vw, 52px);
+      line-height: 1.08;
+      letter-spacing: -0.02em;
+    }
+    .lede { margin: 0; max-width: 42rem; font-size: 19px; color: rgba(243, 238, 228, 0.88); }
+    .hero-summary {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 18px;
+      max-width: 42rem;
+    }
+    .hero-summary span {
+      font-size: 14px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      border: 1px solid rgba(243, 238, 228, 0.18);
+      background: rgba(255, 253, 248, 0.06);
+      color: rgba(243, 238, 228, 0.88);
+    }
+    .hero-summary strong { color: #e7b59a; font-weight: 700; }
+    .hero-row {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 14px;
+      margin-top: 28px;
+    }
+    .hero-card {
+      display: block;
+      text-decoration: none;
+      color: inherit;
+      border: 1px solid rgba(243, 238, 228, 0.16);
+      border-radius: 4px;
+      padding: 14px 16px 16px;
+      background: rgba(255, 253, 248, 0.04);
+    }
+    .hero-card:hover { border-color: rgba(231, 181, 154, 0.7); color: inherit; }
+    .hero-card strong {
+      display: block;
+      font-family: var(--display);
+      font-weight: 560;
+      font-size: 20px;
+      margin-bottom: 4px;
+    }
+    .hero-card span { color: rgba(243, 238, 228, 0.75); font-size: 15px; }
+
+    section.wave { padding: 18px 0 8px; }
+    .wave-head { margin: 8px 0 22px; max-width: 42rem; }
+    .wave-kicker {
+      margin: 0 0 6px;
+      color: var(--copper);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+    h2 {
+      margin: 0 0 8px;
+      font-family: var(--display);
+      font-weight: 560;
+      font-size: clamp(28px, 3vw, 36px);
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+    }
+    .wave-head p { margin: 0; color: var(--soft); }
+
+    article.item {
+      display: grid;
+      grid-template-columns: minmax(260px, 380px) minmax(0, 1fr);
+      gap: 28px;
+      align-items: center;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 18px;
+      margin: 0 0 16px;
+    }
+    article.item figure {
+      margin: 0;
+      background: var(--paper-2);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    article.item svg, article.item img { display: block; width: 100%; height: auto; background: #fff; }
+    figcaption {
+      padding: 8px 12px 10px;
+      font-size: 13px;
+      color: var(--soft);
+      border-top: 1px solid var(--line);
+    }
+    .copy h3 {
+      margin: 0 0 8px;
+      font-family: var(--display);
+      font-weight: 560;
+      font-size: 26px;
+      line-height: 1.2;
+      letter-spacing: -0.015em;
+    }
+    .area {
+      margin: 0 0 6px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .copy p { margin: 0 0 10px; }
+    .copy p:last-child { margin-bottom: 0; }
+    .copy ul { margin: 0; padding-left: 1.15em; }
+    .copy li { margin: 0 0 6px; }
+    .copy li:last-child { margin-bottom: 0; }
+
+    .aside, .next {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 22px 24px;
+      margin: 8px 0 28px;
+    }
+    .aside h2, .next h2 { font-size: 26px; }
+    .next { margin-top: 10px; margin-bottom: 48px; }
+    .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+    .cols h3 { margin: 0 0 6px; font-size: 16px; font-family: var(--font); }
+    .cols p { margin: 0; color: var(--soft); font-size: 16px; }
+    .open-list { margin: 0 0 22px; padding: 0; list-style: none; }
+    .open-list li {
+      padding: 14px 0;
+      border-top: 1px solid var(--line);
+    }
+    .open-list h3 {
+      margin: 0 0 4px;
+      font-family: var(--font);
+      font-size: 18px;
+      font-weight: 700;
+    }
+    .open-list p { margin: 0; color: var(--soft); }
+
+    footer {
+      border-top: 1px solid var(--line);
+      padding: 18px 0 36px;
+      color: var(--soft);
+      font-size: 14px;
+    }
+
+    figure.app-shots img + img {
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid var(--line);
+    }
+
+    @media (max-width: 800px) {
+      .hero { padding: 28px 22px 24px; }
+      .hero-row, article.item, .cols { grid-template-columns: 1fr; }
+      .wrap { width: min(1080px, calc(100% - 28px)); }
+      body { font-size: 17px; }
+    }
+    @media print {
+      body { background: white; font-size: 12pt; }
+      .hero { break-after: avoid; }
+      article.item { break-inside: avoid; }
+      a { color: inherit; text-decoration: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="site">
+      <a class="brand" href="#top">
+        <img src="../logo.png" alt="" />
+        <span>StudioPractice</span>
+      </a>
+      <p class="meta">3 November 2026</p>
+    </header>
+
+    <section class="hero" id="top">
+      <p class="eyebrow">1 November memo</p>
+      <h1>Drawing tools — what we have done</h1>
+      <p class="lede">Your memo listed <strong>34</strong> points. <strong>19</strong> are done: fixed in the app or were already there. <strong>5</strong> are still on the build list. <strong>10</strong> are on hold until we have a decision or a file from you. Below is the detail, with the screenshots from the memo.</p>
+      <div class="hero-summary" aria-label="Progress summary">
+        <span><strong>34</strong> in the memo</span>
+        <span><strong>19</strong> done</span>
+        <span><strong>5</strong> to build</span>
+        <span><strong>10</strong> on hold</span>
+      </div>
+      <div class="hero-row">
+        <a class="hero-card" href="#choices">
+          <strong>When you draw</strong>
+          <span>Doors, wall type and centre line, paint on the BOQ, red/white walls, PDF on the plan, finish line from the top of the wall.</span>
+        </a>
+        <a class="hero-card" href="#accuracy">
+          <strong>Sizes and levels</strong>
+          <span>220&nbsp;mm wall measures 220&nbsp;mm, wall stays on the line you picked, two floor slabs meet at the corner.</span>
+        </a>
+        <a class="hero-card" href="#editing">
+          <strong>Change the plan</strong>
+          <span>Wall face, snap and split, one floor edge, one Move tool, socket on the right surface, floor linked to external walls.</span>
+        </a>
+        <a class="hero-card" href="#outstanding">
+          <strong>Not built yet</strong>
+          <span>Columns, client document, distribution boards, and the items on hold.</span>
+        </a>
+      </div>
+    </section>
+
+    <section class="wave" id="choices">
+      <div class="wave-head">
+        <p class="wave-kicker">Part 1</p>
+        <h2>The choice survives the next placement</h2>
+        <p>Leaving a tool, or placing one door, no longer throws away the type and the line you had just set.</p>
+      </div>
+
+      <article class="item">
+        <figure>
+          <svg viewBox="0 0 360 210" role="img" aria-labelledby="cap-door">
+            <rect width="360" height="210" fill="#f7f3ea"/>
+            <path d="M30 70 H150" stroke="#d0121a" stroke-width="14"/>
+            <path d="M198 70 H330" stroke="#d0121a" stroke-width="14"/>
+            <path d="M150 70 H198" stroke="#f3eee4" stroke-width="16"/>
+            <path d="M150 70 V22" stroke="#b2451e" stroke-width="1.6" fill="none"/>
+            <path d="M150 22 A48 48 0 0 1 198 70" stroke="#b2451e" stroke-width="1.2" fill="none"/>
+            <path d="M30 145 H150" stroke="#d0121a" stroke-width="14"/>
+            <path d="M198 145 H330" stroke="#d0121a" stroke-width="14"/>
+            <path d="M150 145 H198" stroke="#f3eee4" stroke-width="16"/>
+            <path d="M150 145 V193" stroke="#b2451e" stroke-width="1.6" fill="none"/>
+            <path d="M150 193 A48 48 0 0 1 198 145" stroke="#b2451e" stroke-width="1.2" fill="none"/>
+          </svg>
+          <figcaption id="cap-door">The door stays armed until you pick another type or leave the tool.</figcaption>
+        </figure>
+        <div class="copy">
+          <p class="area">Doors</p>
+          <h3>Place the same door again</h3>
+          <p>After a door goes on the plan, that type stays ready. You can place several in a row. Choosing another type, or leaving the door tool, stops the repeat.</p>
+          <p>The library also keeps a <strong>Recently used</strong> row at the bottom, for doors placed in this session. It sits under the full library and does not replace it. Opening another job clears that row.</p>
+        </div>
+      </article>
+
+      <article class="item">
+        <figure>
+          <svg viewBox="0 0 360 210" role="img" aria-labelledby="cap-thick">
+            <rect width="360" height="210" fill="#f7f3ea"/>
+            <rect x="36" y="36" width="150" height="34" rx="3" fill="#fffdf8" stroke="#1a1612" stroke-opacity="0.18"/>
+            <text x="48" y="58" fill="#1a1612" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="13" font-weight="600">220 mm · still selected</text>
+            <path d="M36 128 H324" stroke="#d0121a" stroke-width="28" stroke-linecap="butt"/>
+            <path d="M36 114 H324" stroke="#1a1612" stroke-width="1" stroke-dasharray="2 3" opacity="0.35"/>
+            <text x="180" y="176" text-anchor="middle" fill="#5c5348" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="13">Leave the tool and come back. This type still draws.</text>
+          </svg>
+          <figcaption id="cap-thick">The type you picked is the type that draws next.</figcaption>
+        </figure>
+        <div class="copy">
+          <p class="area">Walls</p>
+          <h3>Wall thickness is remembered</h3>
+          <p>Choosing 220&nbsp;mm, leaving the wall tool, and starting Walls again still draws 220&nbsp;mm. The same is true of any other wall type you picked. A deliberate choice of 110&nbsp;mm still draws 110&nbsp;mm.</p>
+          <p>The list no longer jumps back to the first wall in the catalogue every time the tool is started.</p>
+        </div>
+      </article>
+
+      <article class="item">
+        <figure>
+          <svg viewBox="0 0 360 210" role="img" aria-labelledby="cap-loc">
+            <rect width="360" height="210" fill="#f7f3ea"/>
+            <g font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12" fill="#5c5348">
+              <g transform="translate(28,48)">
+                <rect x="18" y="8" width="70" height="28" fill="#d0121a"/>
+                <line x1="53" y1="0" x2="53" y2="44" stroke="#243044" stroke-width="1.5" stroke-dasharray="3 2"/>
+                <text x="53" y="68" text-anchor="middle">Centre</text>
+              </g>
+              <g transform="translate(128,48)">
+                <rect x="18" y="8" width="70" height="28" fill="#d0121a"/>
+                <line x1="18" y1="0" x2="18" y2="44" stroke="#243044" stroke-width="2"/>
+                <text x="53" y="68" text-anchor="middle">Exterior</text>
+              </g>
+              <g transform="translate(228,48)">
+                <rect x="18" y="8" width="70" height="28" fill="#d0121a"/>
+                <line x1="88" y1="0" x2="88" y2="44" stroke="#243044" stroke-width="2"/>
+                <text x="53" y="68" text-anchor="middle">Interior</text>
+              </g>
+            </g>
+            <text x="180" y="168" text-anchor="middle" fill="#5c5348" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="13">The line on screen is the line the next wall uses</text>
+          </svg>
+          <figcaption id="cap-loc">Centre, exterior face, or interior face — kept when you leave the tool.</figcaption>
+        </figure>
+        <div class="copy">
+          <p class="area">Walls</p>
+          <h3>The location line stays selected</h3>
+          <p>Exterior or interior, once chosen, is still the active line after you leave the tool and start Walls again. Changing from 110&nbsp;mm to 220&nbsp;mm, or the other way, does not clear that choice.</p>
+          <p>The control on screen matches the line the next wall will use.</p>
+        </div>
+      </article>
+
+      <article class="item">
+        <figure>
+          <svg viewBox="0 0 360 210" role="img" aria-labelledby="cap-paint">
+            <rect width="360" height="210" fill="#f7f3ea"/>
+            <rect x="28" y="28" width="132" height="154" fill="#fffdf8" stroke="#1a1612" stroke-opacity="0.2"/>
+            <rect x="40" y="40" width="108" height="70" fill="#d9a441"/>
+            <text x="94" y="80" text-anchor="middle" fill="#1a1612" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="13" font-weight="700">Paint</text>
+            <text x="94" y="128" text-anchor="middle" fill="#1a1612" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="11">Bill item</text>
+            <text x="94" y="146" text-anchor="middle" fill="#5c5348" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="11">shown here and</text>
+            <text x="94" y="162" text-anchor="middle" fill="#5c5348" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="11">on the bill</text>
+            <rect x="184" y="28" width="148" height="154" fill="#fffdf8" stroke="#1a1612" stroke-opacity="0.2"/>
+            <text x="258" y="78" text-anchor="middle" fill="#1a1612" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="13" font-weight="700">No product</text>
+            <text x="258" y="108" text-anchor="middle" fill="#8d3416" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12">PC allowance,</text>
+            <text x="258" y="126" text-anchor="middle" fill="#8d3416" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12">product not chosen</text>
+            <text x="258" y="156" text-anchor="middle" fill="#5c5348" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="11">A missing rate is named,</text>
+            <text x="258" y="172" text-anchor="middle" fill="#5c5348" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="11">not invented</text>
+          </svg>
+          <figcaption id="cap-paint">Paint names the bill item it will price as.</figcaption>
+        </figure>
+        <div class="copy">
+          <p class="area">Finishes</p>
+          <h3>Paint shows its bill item</h3>
+          <p>Selecting paint shows which bill item it belongs to. That same item is identifiable on the drawing and in the compiled bill.</p>
+          <p>If no product is chosen, the row stays labelled as an allowance: “PC allowance, product not chosen.” If the rate book has no rate for that paint, the gap is shown. A rate is not filled in for you.</p>
+        </div>
+      </article>
+
+      <article class="item">
+        <figure>
+          <svg viewBox="0 0 360 210" role="img" aria-labelledby="cap-colour">
+            <rect width="360" height="210" fill="#efe8dc"/>
+            <path d="M40 48 H168 V150 H40 Z" fill="none" stroke="#d0121a" stroke-width="14"/>
+            <path d="M192 48 H320 V150 H192 Z" fill="none" stroke="#1a1612" stroke-width="16"/>
+            <path d="M192 48 H320 V150 H192 Z" fill="none" stroke="#ffffff" stroke-width="10"/>
+            <text x="104" y="182" text-anchor="middle" fill="#5c5348" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="13">New work</text>
+            <text x="256" y="182" text-anchor="middle" fill="#5c5348" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="13">Existing work</text>
+          </svg>
+          <figcaption id="cap-colour">New walls read red. Existing walls read white, with a dark edge so they stay visible on the sheet.</figcaption>
+        </figure>
+        <div class="copy">
+          <p class="area">Walls</p>
+          <h3>New walls red, existing walls white</h3>
+          <p>A wall placed as new work is red on the plan. A wall marked existing is white, and a dark edge keeps it readable on the paper.</p>
+          <p>Doors, windows, and the other families keep their own colours. This pair is for walls only.</p>
+        </div>
+      </article>
+
+      <article class="item">
+        <figure>
+          <svg viewBox="0 0 360 210" role="img" aria-labelledby="cap-sheet">
+            <rect width="360" height="210" fill="#f7f3ea"/>
+            <g opacity="0.55" stroke="#8a8074" stroke-width="8" fill="none">
+              <path d="M36 40 H150 M196 40 H324 M36 40 V160 M324 40 V160 M36 160 H140 M200 160 H324"/>
+            </g>
+            <g stroke="#3a5f7a" stroke-width="3">
+              <path d="M150 40 H196"/><path d="M140 160 H200"/>
+            </g>
+            <path d="M48 56 H300 V148 H48 Z" fill="none" stroke="#243044" stroke-width="3" stroke-dasharray="5 3"/>
+            <rect x="118" y="172" width="58" height="22" rx="2" fill="#243044"/>
+            <text x="147" y="187" text-anchor="middle" fill="#f3eee4" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="11" font-weight="700">Model</text>
+            <rect x="180" y="172" width="58" height="22" rx="2" fill="#fffdf8" stroke="#1a1612" stroke-opacity="0.25"/>
+            <text x="209" y="187" text-anchor="middle" fill="#1a1612" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="11">Sheet</text>
+          </svg>
+          <figcaption id="cap-sheet">A selected wall no longer hides the openings you are matching on the PDF.</figcaption>
+        </figure>
+        <div class="copy">
+          <p class="area">Sheets</p>
+          <h3>PDF openings stay visible</h3>
+          <p>Selecting a wall does not cover the garage doors, doors, and windows on the underlay. You can still see the opening you are trying to match.</p>
+          <p>One control switches the view: <strong>Model</strong> puts the drawn walls on top, <strong>Sheet</strong> puts the PDF on top, openings included. The opacity control is still there.</p>
+        </div>
+      </article>
+
+      <article class="item">
+        <figure>
+          <svg viewBox="0 0 360 210" role="img" aria-labelledby="cap-guide">
+            <rect width="360" height="210" fill="#f7f3ea"/>
+            <rect x="70" y="24" width="220" height="150" fill="#fffdf8" stroke="#1a1612" stroke-opacity="0.35"/>
+            <line x1="58" y1="78" x2="302" y2="78" stroke="#b2451e" stroke-width="1.4" stroke-dasharray="5 3"/>
+            <path d="M292 24 V78" stroke="#8d3416" stroke-width="1" fill="none"/>
+            <text x="306" y="56" fill="#8d3416" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12">900</text>
+            <rect x="86" y="78" width="188" height="80" fill="rgba(178,69,30,0.12)" stroke="#b2451e" stroke-width="1.2"/>
+            <text x="180" y="196" text-anchor="middle" fill="#5c5348" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="13">Offset typed down from the top of the wall</text>
+          </svg>
+          <figcaption id="cap-guide">A construction line you can draw a finish against.</figcaption>
+        </figure>
+        <div class="copy">
+          <p class="area">Finishes</p>
+          <h3>A guideline down from the top</h3>
+          <p>On the wall elevation you can type a distance in millimetres, measured down from the top of the wall. A guideline appears at that height.</p>
+          <p>A finish boundary can be drawn against that line. Finish quantities and the bill mapping are unchanged.</p>
+        </div>
+      </article>
+    </section>
+
+    <section class="wave" id="accuracy">
+      <div class="wave-head">
+        <p class="wave-kicker">Part 2</p>
+        <h2>What you measure is what was drawn</h2>
+        <p>The 20&nbsp;mm that made a “220” wall read wide is named as plaster. Direction is stored before length. Two levels can share one corner.</p>
+      </div>
+
+      <article class="item">
+        <figure class="app-shots">
+          <img src="app/wall-plaster-types.png" alt="Wall types in the inspector: 220 mm masonry + plaster (240 mm overall)." />
+          <img src="app/wall-plaster-draw-240.png" alt="Drawing a wall with Width 240 mm on the plan." />
+          <figcaption id="cap-plaster">From the drawing app. The type names core and overall; Width while drawing is 240&nbsp;mm face to face.</figcaption>
+        </figure>
+        <div class="copy">
+          <p class="area">Walls</p>
+          <h3>A 220 mm wall that measured about 240 mm</h3>
+          <p>The plastered masonry wall stores two thicknesses. The masonry core is 220&nbsp;mm. The wall on the plan, face to face, is 240&nbsp;mm. The 20&nbsp;mm between them is plaster, and the type now reads <strong>220&nbsp;mm masonry + plaster (240&nbsp;mm overall)</strong>. The 110&nbsp;mm plastered wall, and the plastered pool wall, are named the same way.</p>
+          <ul>
+            <li>The stroke, the location line, a face-to-face measure, and the masonry quantity use the overall width.</li>
+            <li>Plaster stays its own coat on the bill. Paint does not thicken the wall.</li>
+            <li>A foundation that is not plastered is labelled with its overall thickness only. It is not described as plaster.</li>
+          </ul>
+        </div>
+      </article>
+
+      <article class="item">
+        <figure>
+          <svg viewBox="0 0 360 210" role="img" aria-labelledby="cap-aim">
+            <rect width="360" height="210" fill="#f7f3ea"/>
+            <line x1="40" y1="150" x2="300" y2="96" stroke="#8a8074" stroke-width="2" stroke-dasharray="4 4"/>
+            <text x="250" y="88" fill="#8a8074" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12">aim, slightly off</text>
+            <line x1="40" y1="150" x2="310" y2="150" stroke="#d0121a" stroke-width="12"/>
+            <circle cx="40" cy="150" r="4" fill="#243044"/>
+            <text x="48" y="178" fill="#1a1612" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="13" font-weight="700">Stored on the axis</text>
+            <text x="48" y="196" fill="#5c5348" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12">Direction first, then length</text>
+          </svg>
+          <figcaption id="cap-aim">A run close to an axis, or to an existing wall, is stored on that line.</figcaption>
+        </figure>
+        <div class="copy">
+          <p class="area">Walls</p>
+          <h3>The wall sits on the line you aimed at</h3>
+          <p>While a wall is being drawn, the direction is chosen before the length. A run close to horizontal or vertical is stored on that axis. A run close to an existing wall, starting on that wall, is stored on that wall’s direction. Any other aim keeps the angle you drew; only the length snaps to a round millimetre.</p>
+          <p>Typing a length or a heading no longer shifts the ends separately, which was tilting a wall whose start sat off the grid.</p>
+        </div>
+      </article>
+
+      <article class="item">
+        <figure>
+          <svg viewBox="0 0 360 210" role="img" aria-labelledby="cap-align">
+            <rect width="360" height="210" fill="#f7f3ea"/>
+            <rect x="78" y="36" width="168" height="108" fill="none" stroke="#8a8074" stroke-width="7" opacity="0.55"/>
+            <rect x="78" y="36" width="168" height="108" fill="none" stroke="#d0121a" stroke-width="4"/>
+            <circle cx="78" cy="144" r="8" fill="#fffdf8" stroke="#243044" stroke-width="2"/>
+            <circle cx="78" cy="144" r="2.5" fill="#243044"/>
+            <text x="96" y="168" fill="#8a8074" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12">Ground sheet</text>
+            <text x="96" y="186" fill="#8d3416" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12">First-floor walls</text>
+          </svg>
+          <figcaption id="cap-align">Pick one reference point on each sheet. The sheets and the walls share it.</figcaption>
+        </figure>
+        <div class="copy">
+          <p class="area">Floors</p>
+          <h3>Two floor levels line up</h3>
+          <p>You can pick the same reference point on each level, such as a building corner. The sheets, and the walls drawn from them, share that point. Two levels scaled to the same known dimension land on the same model size.</p>
+          <p>Alignment moves position. It does not change a wall’s length. Scaling is the only place size changes, and only because you asked for a scale.</p>
+        </div>
+      </article>
+    </section>
+
+    <section class="wave" id="editing">
+      <div class="wave-head">
+        <p class="wave-kicker">Part 3</p>
+        <h2>Edit what is already on the plan</h2>
+        <p>All of this is in the product. A wall can change face, snap, or split. One edge of a floor can move. One Move command covers a sheet, a wall, or a tiled area. A plug stays on its wall, and a floor point stays inside its floor. A floor or a roof can follow the external walls.</p>
+      </div>
+
+      <article class="item">
+        <figure>
+          <img src="memo/wall-face.png" alt="Plan at a lift and fireplace, with a selected wall and a 2041 mm dimension." />
+          <figcaption>From the memorandum. Centreline, inner face, or outer face can be chosen after the wall is placed.</figcaption>
+        </figure>
+        <div class="copy">
+          <p class="area">Walls</p>
+          <h3>Correct the face of a wall already drawn</h3>
+          <p>Select a wall and switch it to centreline, inner face, or outer face. The wall shifts so the chosen line stays where the old line was, and the joins at both ends stay closed. Centreline is included, including for a wall drawn on a grid.</p>
+          <p>The same centre, exterior, and interior controls used while drawing appear when that wall is selected.</p>
+        </div>
+      </article>
+
+      <article class="item">
+        <figure>
+          <img src="memo/snap-selected-wall.png" alt="A selected run of wall with a 2000 mm dimension on the plan." />
+          <figcaption>From the memorandum. Snap and Split sit on a single selected wall.</figcaption>
+        </figure>
+        <div class="copy">
+          <p class="area">Walls</p>
+          <h3>Snap and split a selected wall</h3>
+          <p>With exactly one wall selected, <strong>Snap</strong> and <strong>Split</strong> appear beside the run. Snap uses the same magnets as drawing a wall: click an end, then the point it should meet. Split takes a click on the wall.</p>
+          <p>The wall keeps its id. An opening stays on the piece that holds its centre. A finish stays on the piece it covered; a finish that crosses the cut is divided, and a whole-face finish covers both pieces. Modify → Cut still splits at the midpoint.</p>
+        </div>
+      </article>
+
+      <article class="item">
+        <figure>
+          <img src="memo/floor-outline.png" alt="A floor outline around the ground-floor plan, with Line and Corner controls and overall dimensions." />
+          <figcaption>From the memorandum. Line moves one edge of the floor. Corner still edits a corner.</figcaption>
+        </figure>
+        <div class="copy">
+          <p class="area">Floors</p>
+          <h3>Move one floor edge</h3>
+          <p>Select the floor, not a finish on it. <strong>Line</strong> selects one boundary edge. Dragging that edge moves it, and the other corners stay where they are. The two edges that share the moved line change length so the outline stays closed.</p>
+          <p>Corner handles still drag. <strong>Corner</strong> adds a point on an edge. A tile or screed edge is a different edit: it stays inside the floor, and it does not move the outline.</p>
+        </div>
+      </article>
+
+      <ul class="open-list">
+        <li>
+          <h3>One Move command</h3>
+          <p>Modify → Move repositions one selected wall, the selected sheet, or the tiled area being edited. Click the point to move from, then where that point should land. The landing snaps the same way a new wall does, or a typed distance sets the length. Enter places it. Esc cancels. Undo puts it back. A tiled area stays on its floor. A pinned sheet stays put until it is unpinned.</p>
+        </li>
+      </ul>
+
+      <article class="item">
+        <figure>
+          <img src="memo/socket.png" alt="A single plug on the plan, dimensioned 0.78 m from another point, with a line between them." />
+          <figcaption>From the memorandum. A wall plug stays on the wall. A floor point stays inside the floor.</figcaption>
+        </figure>
+        <div class="copy">
+          <p class="area">Electrical</p>
+          <h3>A plug stays on its wall or floor</h3>
+          <p>A single plug, a double plug, or a shaver point stores the wall and the face it was clicked on. It moves when that wall is moved, split, or realigned, and dragging it slides it along the wall. A click that misses the wall places nothing.</p>
+          <p>A floor light, a recessed floor light, and an underfloor heating point store the floor. They move with that floor, and an edge edit that would leave them outside pulls them back in. A click outside the floor places nothing.</p>
+          <p>Ceiling plugs, slab plugs, switches, and the other fittings stay free points. A generated cable route to a board is a separate decision, listed with the items that are waiting.</p>
+        </div>
+      </article>
+
+      <article class="item">
+        <figure>
+          <img src="memo/floor-outline.png" alt="A floor outline around the ground-floor plan, with Line and Corner controls and overall dimensions." />
+          <figcaption>From the memorandum. Sketch, Room, or External walls. The link can be dropped and the outline edited by hand.</figcaption>
+        </figure>
+        <div class="copy">
+          <p class="area">Floors</p>
+          <h3>A floor that follows the walls</h3>
+          <p>While placing a floor or a roof, three choices sit on the plan. <strong>Sketch</strong> clicks each corner and does not follow the walls until you ask. <strong>Room</strong> copies the room you click, and follows that room when the room itself follows the walls. <strong>External walls</strong> takes a click inside the building: the outline follows those walls, so moving a linked wall updates the floor. A roof, and a slab on an upper level, use the same three choices.</p>
+          <p>On a floor or a roof already placed, <strong>Follow external walls</strong> ties the outline to the walls that close around it. <strong>Stop following walls</strong> drops the link. Dragging a corner drops it too, and Line and Corner then edit the boundary by hand.</p>
+        </div>
+      </article>
+    </section>
+
+    <section class="aside">
+      <p class="wave-kicker">Already in the product</p>
+      <h2>Two items from the memo needed no build</h2>
+      <div class="cols">
+        <div>
+          <h3>Undo</h3>
+          <p>Undo is on the toolbar. If a named action cannot be reversed, that is a separate fix.</p>
+        </div>
+        <div>
+          <h3>Redraw, then price</h3>
+          <p>The drawing is the source of the quantities, and the rate book prices them. Finalising the job and redrawing it is the path the app already takes.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="wave" id="outstanding">
+      <div class="wave-head">
+        <p class="wave-kicker">Part 4</p>
+        <h2>Still outstanding</h2>
+        <p>These are the requests from the same memorandum that are not in the product yet. Pictures are the ones supplied with the memorandum.</p>
+      </div>
+
+      <p class="wave-kicker">Model and the client document</p>
+      <ul class="open-list">
+        <li>
+          <h3>Column size typed and shown live</h3>
+          <p>A round column and a square column can be placed. Width, depth, or diameter is typed in a field and the plan updates immediately. Selecting a placed column shows those dimensions and accepts a change. How a column is measured on the bill waits on the tube list, below.</p>
+        </li>
+        <li>
+          <h3>The client costing names each finish</h3>
+          <p>Each finish is listed by place, with its extent and its specification: the height of a band, the product or the allowance, and the area. Two finishes on one wall are two costs. The example in the memorandum is 750&nbsp;mm of mosaic above the kitchen cupboards, and porcelain on the remaining scullery walls.</p>
+        </li>
+        <li>
+          <h3>Internal elevations in the client document</h3>
+          <p>The client document can include an internal elevation of a tiled wall. The elevation shows where each finish starts and stops, and it names the wall it comes from.</p>
+        </li>
+        <li>
+          <h3>Installation separate from tile supply</h3>
+          <p>The client document shows an installation total — measured area, labour, adhesive, grout, spacers, and the other installation materials, with that scope written out — and, separately, a supply allowance per tile type. Each allowance names the area or finish it covers. A low supply allowance cannot sit inside the installation total.</p>
+        </li>
+        <li>
+          <h3>Distribution boards and circuits</h3>
+          <p>More than one distribution board can be placed, including boards on different floors. A circuit belongs to one breaker on one board. Lights and other points can be associated with a circuit. The first electrical point can prompt for a board, and a board placed later can be linked. Load limits are not part of this step, and cable routes are not generated.</p>
+        </li>
+      </ul>
+
+      <p class="wave-kicker">Waiting on a decision or a file</p>
+
+      <article class="item">
+        <figure>
+          <img src="memo/service-lines.png" alt="Service lines in blue and orange across a garage and garden storage, with light-point notes." />
+          <figcaption>From the memorandum. Drainage, water, electrical, and gas already use different colours. Sewer colours wait on the list.</figcaption>
+        </figure>
+        <div class="copy">
+          <p class="area">Services</p>
+          <h3>Sewer line colours</h3>
+          <p>Sewer lines will use the colour convention you send. Soil, waste, and vent are separate colours only if that list says so.</p>
+        </div>
+      </article>
+
+      <ul class="open-list">
+        <li>
+          <h3>A wall type you can duplicate and thicken</h3>
+          <p>Duplicate a 220&nbsp;mm wall as the start of a 280&nbsp;mm wall, keep it available, and identify it on the bill. This waits until wall types authored in the app are accepted. Types currently come from the firm’s catalogue.</p>
+        </li>
+        <li>
+          <h3>Which walls share a bill line</h3>
+          <p>Walls that need different descriptions or rates must not be grouped together. The grouping rule is still to be confirmed.</p>
+        </li>
+        <li>
+          <h3>How columns are measured</h3>
+          <p>Columns are not measured like walls. The bill needs shape, material, outer size, and steel wall thickness. This waits on the standard square-tube list, and on columns whose size can be typed. I-sections may be a column or a beam, and the drawing and the bill must say which.</p>
+        </li>
+        <li>
+          <h3>Tile quantities that roll up and stay traceable</h3>
+          <p>Wall tile and floor tile are already measured separately, and a wall finish can belong to a room. How tile types and finishes are grouped on the summary bill is still to be agreed. Once that rule exists, a summary quantity still traces back to the room and the surface it came from.</p>
+        </li>
+        <li>
+          <h3>The sales wording for the two tile prices</h3>
+          <p>After installation and supply are separated, the client document says, in plain language, that they are separate so tenders can be compared, and that the supply allowance changes when the client chooses the tiles.</p>
+        </li>
+        <li>
+          <h3>An automatic cable route to a board</h3>
+          <p>This waits on a decision to generate routes. Services are placed symbols and provisional sums. A run can already be drawn by hand. Where there is more than one board, the user confirms which board serves the point.</p>
+        </li>
+        <li>
+          <h3>An architect’s bill as the structure</h3>
+          <p>Keep the architect’s item structure and link measured work to those items. This waits on the bill itself, and on agreement that those item codes become the bill structure. Today the bill is compiled from the model and the firm rate book.</p>
+        </li>
+        <li>
+          <h3>The Excel bill as the structure</h3>
+          <p>The spreadsheet is the reference for how the bill is organised and how quantities are summarised. This waits until that sheet arrives. The columns will not be invented in the meantime.</p>
+        </li>
+        <li>
+          <h3>Measuring inside BOS Admin</h3>
+          <p>This waits until it is clear whether “BOS Admin” means this drawing app or a second product. A sheet can already be scaled here, and quantities already compile from the model.</p>
+        </li>
+      </ul>
+    </section>
+
+    <footer>
+      StudioPractice · in reply to “Drawing tools and BOQ integration”, 1 November 2026. Pictures in Parts 3 and 4 are from that memorandum. The other figures use the same wall colours as the drawing app.
+    </footer>
+  </div>
+</body>
+</html>

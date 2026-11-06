@@ -20,7 +20,7 @@
 
 import { area as polyArea, clipPolygon, distToSeg, pointInPoly } from "./geom.js";
 import { effectiveLevel, finishRegionPolygon, finishRegionSlab, polyShape, roomArea, roomPolygon, shapeAsPoly } from "./model.js";
-import { openingOnWall, openingSize, pointOnWall, skuById, wallForOpening, wallNormal } from "./openings.js";
+import { archVoidPolygon, isArchHead, openingOnWall, openingSize, pointOnWall, skuById, wallForOpening, wallNormal } from "./openings.js";
 import { deriveWalls, isExternalWall } from "./walls.js";
 import {
   FINISH_CATEGORIES,
@@ -51,7 +51,8 @@ export function finishRateModel(product, category) {
 /**
  * The bill item a finish will price as. An unchosen product that the category
  * requires stays an allowance. A missing rate reference is stated; no rate is
- * invented. `text` is what the panel, the plan and the compiled row share.
+ * invented. `text` is what the panel and the compiled row share. The plan
+ * only names a priced item, so an unpriced paint stays "Paint".
  */
 export function finishBillNote(category, product) {
   const spec = FINISH_CATEGORIES[category];
@@ -131,6 +132,10 @@ export function wallOpeningRects(doc, pack, walls, wall) {
     out.push({
       id: opening.id,
       door: sku?.category === "door",
+      // Skirting is a length along the floor, so a hole cuts it only when the
+      // hole reaches the floor. A raised opening leaves the skirting.
+      cutsSkirting: sku?.category === "door" || (sku?.category === "opening" && sill <= 0.02),
+      arch: isArchHead(sku),
       from,
       to: from + placed.width,
       bottom: sill,
@@ -481,12 +486,24 @@ function rectPoly(rect) {
   return [[rect.from, rect.bottom], [rect.to, rect.bottom], [rect.to, rect.top], [rect.from, rect.top]];
 }
 
+/** The void, as a polygon. An arch is the rectangle under a semicircular head. */
+function voidPoly(opening) {
+  return opening.arch ? archVoidPolygon(opening) : rectPoly(opening);
+}
+
 /** Area of a drawn wall shape, cut to the face and net of openings. */
 function outlineQuantity(outline, wall, openings, height) {
   const face = [[0, 0], [wall.length, 0], [wall.length, height], [0, height]];
   const pieces = clipPolygon(outline, face);
   let qty = pieceArea(pieces);
-  for (const opening of openings) qty -= pieceArea(intersectPieceLists(pieces, [rectPoly(opening)]));
+  for (const opening of openings) {
+    // The void is the subject. A finish piece may be concave, and clipping
+    // splits that clip into convex parts. An arch must not be the clip.
+    const poly = voidPoly(opening);
+    let hole = 0;
+    for (const piece of pieces) hole += pieceArea(clipPolygon(poly, piece));
+    qty -= hole;
+  }
   return Math.max(0, qty);
 }
 
@@ -497,7 +514,7 @@ function outlineQuantity(outline, wall, openings, height) {
  */
 function defaultNetOfOutlines(piece, openings, outlines) {
   const rect = rectPoly(piece);
-  const openPieces = openings.map((o) => clipPolygon(rectPoly(o), rect)).filter((p) => p.length);
+  const openPieces = openings.map((o) => clipPolygon(voidPoly(o), rect)).filter((p) => p.length);
   const coatPieces = outlines.map((o) => clipPolygon(o, rect)).filter((p) => p.length);
   let qty = Math.abs(polyArea(rect)) - unionAreaOfLists(openPieces) - unionAreaOfLists(coatPieces);
   const both = [];
@@ -668,12 +685,13 @@ export function resolveFinishes(doc, pack, walls, { wallBases = null, onlyWallId
     } else if (spec.unit === "m") {
       quantity = band.to - band.from;
       for (const o of openingsOf(wall)) {
-        if (o.door) quantity -= overlap(band.from, band.to, o.from, o.to);
+        if (o.cutsSkirting) quantity -= overlap(band.from, band.to, o.from, o.to);
       }
     } else {
       quantity = (band.to - band.from) * (band.top - band.bottom);
+      const bandPoly = rectPoly(band);
       for (const o of openingsOf(wall)) {
-        quantity -= overlap(band.from, band.to, o.from, o.to) * overlap(band.bottom, band.top, o.bottom, o.top);
+        quantity -= pieceArea(clipPolygon(voidPoly(o), bandPoly));
       }
     }
     quantity = Math.max(0, quantity);
@@ -850,12 +868,12 @@ export function planWallFinishMarks(doc, pack, walls) {
   return marks;
 }
 
-/** Paint names the bill item. Other finishes keep the category name. */
+/** Paint names the rate when one exists. Other finishes keep the category name. */
 function planFinishLabel(doc, band) {
   const name = FINISH_CATEGORIES[band.category]?.label || band.category;
   if (band.category !== "paint") return name;
   const note = finishBillNote(band.category, finishProductById(doc, band.productId));
-  return note ? `${name} — ${note.text}` : name;
+  return note?.kind === "item" ? `${name} — ${note.text}` : name;
 }
 
 /** Merge overlapping bands on one face into spans, keeping the taller finish. */

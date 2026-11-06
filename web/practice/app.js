@@ -4569,10 +4569,45 @@ function wireApp() {
 
 // --- boot -------------------------------------------------------------------
 
+function paintWho() {
+  const who = el("who");
+  const companies = state.session.companies || [];
+  who.replaceChildren();
+  if (companies.length < 2) {
+    who.textContent = `${state.session.email} · ${state.session.orgName || "—"}`;
+    return;
+  }
+  const email = document.createElement("span");
+  email.textContent = `${state.session.email} ·`;
+  const select = document.createElement("select");
+  select.className = "who-company";
+  select.setAttribute("aria-label", "Company");
+  for (const company of companies) {
+    const option = document.createElement("option");
+    option.value = company.orgId;
+    option.textContent = company.orgName;
+    if (company.orgId === state.session.orgId) option.selected = true;
+    select.append(option);
+  }
+  select.addEventListener("change", async () => {
+    select.disabled = true;
+    try {
+      await api.switchCompany(select.value);
+      location.reload();
+    } catch (error) {
+      select.disabled = false;
+      select.value = state.session.orgId;
+      toast(error.message || "Could not switch company", true);
+    }
+  });
+  who.append(email, select);
+}
+
 async function start() {
   el("gate").hidden = true;
   el("app").hidden = false;
-  el("who").textContent = `${state.session.email} · ${state.session.orgName || "—"}`;
+  paintWho();
+  el("admin-link").hidden = !state.session.platformAdmin;
   state.reference = await api.reference();
   await loadProjects({ initial: true });
   await loadTab();
@@ -4594,6 +4629,11 @@ async function boot() {
   const session = await api.session().catch(() => ({ signedIn: false }));
   if (session.signedIn) {
     state.session = session;
+    // An operator with no firm of their own has nothing to open here.
+    if (session.platformAdmin && !session.orgId) {
+      location.replace("/admin/");
+      return;
+    }
     await start();
   } else {
     el("gate").hidden = false;

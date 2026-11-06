@@ -86,6 +86,7 @@ bite:
 | `COOKIE_SECURE` | `0` | A `Secure` cookie over plain HTTP is dropped by the browser and sign-in fails with nothing in any log. `1` the moment HTTPS is in front |
 | `TRUST_PROXY` | `0` | `X-Forwarded-For` is client-controlled unless something in front rewrites it; trusting it while exposed makes the sign-in rate limit a formality |
 | `ALLOWED_ORIGINS` | empty | The planner is same-origin, so no cross-origin request is expected. It is an allowlist, never `*`, because these responses carry a credentialed cookie |
+| `PLATFORM_ADMIN_EMAILS` | empty | Comma-separated emails allowed to open `/admin` (every company, live job counts, granting sign-in). Empty means nobody. A firm owner is not an administrator of the installation |
 
 **Port 5440 is not arbitrary.** A machine with Revit on it has usually collected
 a Postgres install or two, and 5432–5434 are the ones they take. Binding one of

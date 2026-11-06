@@ -191,7 +191,7 @@ import { clearShapeLink, enclosedFace, footprintFace, spaceAt, syncRoomBounds } 
 import { REGION_CONVENTIONS, regionConvention } from "./region.js";
 import { ELEVATION_SNAP, FINISH_MIN_M, OPENING_MIN_M, addFoundationUnderWall, alignOutlineShift, applyBandEdit, applyOpeningEdit, applyOutlinePoints, applyTypedGap, applyWallTopEdit, axisAlignedOutline, dropGuideZ, elevationModel, faceRefForSelection, foundationTypes, includeDropGuide, maxTypedGap, openingSnapEdges, resizeOpeningCorner, snapElevation, translateOutlineEdge } from "./wall-elevation.js?v=20261103-wave1";
 import { FACE_CORNER_ALONG, FACE_CORNER_TRAVEL, FACE_CUE_INTRO_MS, FACE_CUE_PULSE_MS, FACE_CUE_REST_ALPHA, faceCornerMarks, faceCueZoom } from "./face-plan-cue.js?v=20261102-face-corners";
-import { createFinishRegion, createFinishRun, dependentsOfWalls, finishBillNote, finishEditRing, finishProductById, floorCoverage, libraryLine, materializeFinishRing, planWallFinishMarks, presetFromRoom, roomsBySide, rulesFromPreset, savePreset } from "./finish-model.js?v=20261103-wave1";
+import { createFinishRegion, createFinishRun, dependentsOfWalls, finishBillNote, finishEditRing, finishProductById, floorCoverage, libraryLine, materializeFinishRing, planWallFinishMarks, presetFromRoom, roomsBySide, rulesFromPreset, savePreset } from "./finish-model.js?v=20261104-paint-label";
 import { FINISH_CATEGORIES, finishId, finishSwatch, normalizeFinishProducts, normalizeFinishSettings } from "./finish-data.js";
 import { HEIGHT_PRESETS, bandFaceLine, compareBands, draftBandPreviewHtml, faceFinishHtml, finishCalloutHtml, floorOpenHtml, formatFloorArea, openingCalloutHtml, floorProductSuggestions, parseTarget, productsHtml, roomFinishHtml, slabFinishHtml, targetOptions } from "./finish-panel.js?v=20261103-wave1";
 import { clampElevationView, edgeResizeCursor, elevationSvg, finishLocate, zoomElevationView } from "./wall-elevation-render.js?v=20261103-wave1";
@@ -200,6 +200,8 @@ import { CORNER_JOIN_TOL, deriveWalls, drawnSegmentFromWall, drawnWallThickness,
 import { findJoinTarget, resolveJoin, sideTowardTarget } from "./wall-join.js?v=20261022-corner-b";
 import {
   doorSwing,
+  fitArchSize,
+  isArchHead,
   openingDraftAt,
   openingOnWall,
   openingSideGaps,
@@ -211,7 +213,9 @@ import {
   pointOnOpeningSymbol,
   wallForOpening,
   wallNormal,
-} from "./openings.js?v=20261029-opening-move";
+} from "./openings.js?v=20261106-plain-opening";
+import { paintFixture } from "./plan-symbols.js?v=20261105-sans";
+import { paintSanitaryPreview, sanitaryPreview } from "./type-preview.js?v=20261106-san-preview";
 import {
   floorSocketDraft,
   slideWallSocket,
@@ -323,7 +327,6 @@ const el = {
   finishVisList: document.getElementById("v2-finish-vis-list"),
   skuList: document.getElementById("v2-sku-list"),
   search: document.getElementById("v2-search"),
-  packName: document.getElementById("v2-pack-name"),
   gaps: document.getElementById("v2-gaps"),
   gapCount: document.getElementById("v2-gap-count"),
   rules: document.getElementById("v2-rules"),
@@ -625,6 +628,8 @@ const el = {
   typeDetailPlaceholder: document.getElementById("v2-type-detail-placeholder"),
   typeDetailPlaceholderIcon: document.getElementById("v2-type-detail-placeholder-icon"),
   typeDetailImg: document.getElementById("v2-type-detail-img"),
+  typeDetailCanvas: document.getElementById("v2-type-detail-canvas"),
+  typeDetailCaption: document.getElementById("v2-type-detail-caption"),
   typeDetailCategory: document.getElementById("v2-type-detail-category"),
   typeDetailDims: document.getElementById("v2-type-detail-dims"),
   typeDetailUse: document.getElementById("v2-type-detail-use"),
@@ -694,6 +699,11 @@ let openProject = null;
 let openDrawingId = null;
 
 let tool = "select";
+
+/** A door, a window, or a plain opening: click a wall to place it. */
+function hostedOpeningTool(name = tool) {
+  return name === "door" || name === "window" || name === "opening";
+}
 // Pan is a view gesture, not a draw tool. The tool and any draft stay put
 // and come back when Pan is pressed again or Escape is pressed.
 let panMode = false;
@@ -1104,7 +1114,7 @@ let activeSheetId = null;
 
 async function boot() {
   try {
-    const res = await fetch("../samples/tsp-pack.json");
+    const res = await fetch("../samples/tsp-pack.json?v=20261106-plain-opening");
     if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
     // The pack on disk states geometry in millimetres (sp.pack/3); everything
     // downstream of here (walls.js, compile.js, openings.js, ...) still works in
@@ -1127,7 +1137,6 @@ async function boot() {
   el.healthDot.hidden = true;
   el.healthLabel.textContent = "";
   drawPackHealth();
-  el.packName.textContent = pack.name;
 
   store.doc.packId = pack.id;
   drawJobName();
@@ -3607,7 +3616,7 @@ function draw() {
   el.legend.hidden = !store.hasContent();
   syncServiceVisibility();
   syncFinishVisibility();
-  el.canvasWrap.classList.toggle("tool-opening", tool === "door" || tool === "window");
+  el.canvasWrap.classList.toggle("tool-opening", hostedOpeningTool());
   el.canvasWrap.classList.toggle("tool-align", tool === "align");
 }
 
@@ -4821,6 +4830,12 @@ function drawOpening(opening, walls, { preview = false } = {}) {
     ctx.stroke();
   }
   if (sku.category === "door") drawDoorPlanSymbol(wall, placed, opening);
+  else if (sku.category === "opening") {
+    ctx.strokeStyle = wall.drawn ? statusStroke(wall.status) : COLOUR.wall;
+    ctx.lineWidth = 1.5;
+    strokeJamb(wall, a);
+    strokeJamb(wall, b);
+  }
   ctx.restore();
 }
 
@@ -5132,18 +5147,25 @@ function drawCloudMark(rect, label) {
 function drawItem(item) {
   const sku = skuById(item.sku);
   if (!sku) return;
-  const box = itemRect(item, sku);
-  const [sx, sy] = worldToScreen(box.x, box.y);
-  const [ex, ey] = worldToScreen(box.x + box.w, box.y + box.h);
   ctx.save();
-  ctx.fillStyle = "rgba(58, 95, 122, 0.12)";
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  ctx.setLineDash([]);
   ctx.strokeStyle = statusStroke(objectStatus(item));
-  ctx.lineWidth = 1.2;
-  ctx.fillRect(sx, sy, ex - sx, ey - sy);
-  ctx.strokeRect(sx, sy, ex - sx, ey - sy);
-  ctx.font = "10px Source Sans 3, sans-serif";
-  ctx.fillStyle = "#5c5348";
-  ctx.fillText(sku.name, sx, sy - 3);
+  ctx.lineWidth = 1.25;
+  // SANS 10143 sanitary symbol at the measured size. Anything without a
+  // conventional mark stays the footprint rectangle and its type name.
+  if (!paintFixture(ctx, item, sku, (x, y) => worldToScreen(x, y), cam.scale)) {
+    const box = itemRect(item, sku);
+    const [sx, sy] = worldToScreen(box.x, box.y);
+    const [ex, ey] = worldToScreen(box.x + box.w, box.y + box.h);
+    ctx.fillStyle = "rgba(58, 95, 122, 0.12)";
+    ctx.fillRect(sx, sy, ex - sx, ey - sy);
+    ctx.strokeRect(sx, sy, ex - sx, ey - sy);
+    ctx.font = "10px Source Sans 3, sans-serif";
+    ctx.fillStyle = "#5c5348";
+    ctx.fillText(sku.name, sx, sy - 3);
+  }
   ctx.restore();
 }
 
@@ -5201,9 +5223,13 @@ function drawSelectionHighlights(walls) {
         strokeWorldLine(f.x1, f.y1, f.x2, f.y2);
         ctx.setLineDash([]);
       }
-      const paintedLength = drawLengthLabel(obj.x1, obj.y1, obj.x2, obj.y2, ref.kind === "segment" ? wallLengthPlace(obj) : null);
-      if (paintedLength && ref.kind === "segment" && store.selected.length === 1 && store.selected[0].id === obj.id) {
-        selectedWallLength = paintedLength;
+      // Split preview replaces the one length with the two pieces it would make.
+      const splitting = ref.kind === "segment" && wallEdit?.mode === "split" && wallEdit.id === obj.id && snapGuide;
+      if (!splitting) {
+        const paintedLength = drawLengthLabel(obj.x1, obj.y1, obj.x2, obj.y2, ref.kind === "segment" ? wallLengthPlace(obj) : null);
+        if (paintedLength && ref.kind === "segment" && store.selected.length === 1 && store.selected[0].id === obj.id) {
+          selectedWallLength = paintedLength;
+        }
       }
     } else if (ref.kind === "item") {
       const sku = skuById(obj.sku);
@@ -5904,6 +5930,21 @@ function drawWallSplitJoints() {
   }
 }
 
+/** The two lengths a split would make, on the same side as the wall's own length. */
+function drawSplitLengths(seg, point) {
+  const place = wallLengthPlace(seg);
+  const head = drawLengthLabel(seg.x1, seg.y1, point.x, point.y, place);
+  const tail = drawLengthLabel(point.x, point.y, seg.x2, seg.y2, place);
+  const boxes = [head, tail].filter(Boolean).map((row) => row.box);
+  if (!boxes.length) return;
+  const x = Math.min(...boxes.map((box) => box.x));
+  const y = Math.min(...boxes.map((box) => box.y));
+  const right = Math.max(...boxes.map((box) => box.x + box.w));
+  const bottom = Math.max(...boxes.map((box) => box.y + box.h));
+  const normal = place?.normal || { x: head?.nx || tail?.nx || 0, y: head?.ny ?? tail?.ny ?? -1 };
+  selectedWallLength = { box: { x, y, w: right - x, h: bottom - y }, nx: normal.x, ny: normal.y };
+}
+
 /** The split station, or the line the chosen end will move along. */
 function drawWallEditPreview() {
   if (!wallEdit || !snapGuide) return;
@@ -5918,10 +5959,13 @@ function drawWallEditPreview() {
     const [bx, by] = worldToScreen(seg.x2, seg.y2);
     const span = Math.hypot(bx - ax, by - ay) || 1;
     strokeWallTick(sx, sy, -(by - ay) / span, (bx - ax) / span, wallTickReach(seg), "#b2451e");
+    drawSplitLengths(seg, snapGuide);
   } else if (wallEdit.end) {
     const line = locationLineOf(seg, segmentThickness(seg));
-    const fixed = wallEdit.fixed || (wallEdit.end === 1 ? { x: line.x2, y: line.y2 } : { x: line.x1, y: line.y1 });
-    const [ax, ay] = worldToScreen(fixed.x, fixed.y);
+    // The line leaves the end that was picked. Rooting it on the other end
+    // made that end look like the one that would snap.
+    const moving = wallEdit.end === 1 ? { x: line.x1, y: line.y1 } : { x: line.x2, y: line.y2 };
+    const [ax, ay] = worldToScreen(moving.x, moving.y);
     const [bx, by] = worldToScreen(snapGuide.x, snapGuide.y);
     ctx.strokeStyle = "#3a5f7a";
     ctx.setLineDash([5, 4]);
@@ -7569,7 +7613,7 @@ function attachObjectAt(wx, wy) {
 
 const CATEGORY_LABEL = {
   wall: "Walls", boundarywall: "Boundary walls", foundation: "Foundations", floor: "Floors",
-  ceiling: "Ceilings", roof: "Roofs", door: "Doors", window: "Windows", beam: "Beams",
+  ceiling: "Ceilings", roof: "Roofs", door: "Doors", window: "Windows", opening: "Openings", beam: "Beams",
   column: "Columns", stair: "Stairs", sanitary: "Sanitary", waterheater: "Water heating",
   drainage: "Drainage", electrical: "Electrical", furniture: "Furniture", casework: "Casework",
   pool: "Pool", carport: "Carport",
@@ -7585,6 +7629,7 @@ const INSPECT_KIND_LABEL = {
   roof: "Roof",
   door: "Door",
   window: "Window",
+  opening: "Opening",
   beam: "Beam",
   column: "Column",
   stair: "Stair",
@@ -7664,8 +7709,9 @@ function holdUndo(label) {
 
 function skuDimLabel(sku) {
   const g = sku.geometry || {};
-  if (g.width && g.height && (sku.category === "door" || sku.category === "window")) {
-    return `${Math.round(g.width * 1000)} × ${Math.round(g.height * 1000)} mm`;
+  if (g.width && g.height && (sku.category === "door" || sku.category === "window" || sku.category === "opening")) {
+    const size = `${Math.round(g.width * 1000)} × ${Math.round(g.height * 1000)} mm`;
+    return isArchHead(sku) ? `${size}, semicircular head` : size;
   }
   if (isStripFooting(sku) && g.width && g.depth) {
     return `${Math.round(g.width * 1000)} × ${Math.round(g.depth * 1000)} mm`;
@@ -7830,7 +7876,7 @@ function appendPaletteGroup(title, skus, trackOrder) {
     btn.type = "button";
     btn.className = "sku-item";
     if (placeSkuId === sku.id) btn.classList.add("active");
-    btn.innerHTML = `<span class="sku-name">${escapeHtml(sku.name)}</span><span class="sku-meta">${escapeHtml(sku.id)} · ${escapeHtml(skuDimLabel(sku))}</span>`;
+    btn.innerHTML = `<span class="sku-name">${escapeHtml(sku.name)}</span><span class="sku-meta">${escapeHtml(skuDimLabel(sku))}</span>`;
     btn.addEventListener("click", () => onSkuClick(sku));
     const expand = document.createElement("button");
     expand.type = "button";
@@ -7872,7 +7918,7 @@ function onSkuClick(sku) {
       tool = "slab";
     } else if (sku.category === "roof" || sku.category === "carport") {
       tool = "roof";
-    } else if (sku.category === "door" || sku.category === "window") {
+    } else if (sku.category === "door" || sku.category === "window" || sku.category === "opening") {
       tool = sku.category;
     } else if (sku.category === "beam" || sku.category === "column") {
       tool = "beam";
@@ -7913,13 +7959,13 @@ function applySkuToSelection(sku) {
 // --- Type detail overlay -------------------------------------------------
 // A full-screen escalation the user opts into from a palette row's expand
 // icon, not something shown on every draw: picking a type stays a one-click
-// action in the compact Inspector. This is where a photo/3D preview lives
-// today (skeleton only - a placeholder), and later supplier photos, links
-// and pricing for that SKU. See PLAN discussion: "drawing options full
-// screen" - kept opt-in to avoid fatiguing users who already know the type.
+// action in the compact Inspector. Sanitary types draw their plan symbol
+// and a size model here. Other categories stay on the placeholder until a
+// photo exists. See PLAN discussion: "drawing options full screen" - kept
+// opt-in to avoid fatiguing users who already know the type.
 const TYPE_DETAIL_ICON = {
   wall: "\u25A4", boundarywall: "\u25A4", foundation: "\u2593", floor: "\u25A6",
-  ceiling: "\u25A6", roof: "\u25B2", door: "\u25AB", window: "\u25A2", beam: "\u2500",
+  ceiling: "\u25A6", roof: "\u25B2", door: "\u25AB", window: "\u25A2", opening: "\u25A1", beam: "\u2500",
   column: "\u25A0", stair: "\u2261", sanitary: "\u25CE", waterheater: "\u25CE",
   drainage: "\u2933", electrical: "\u26A1", furniture: "\u25A3", casework: "\u25A3",
   pool: "\u2248", carport: "\u25B2",
@@ -7930,13 +7976,21 @@ let typeDetailSku = null;
 // paletteSkuOrder when opened, so scrolling the palette or a stray re-render
 // while the overlay is open can't yank the list out from under the user.
 let typeDetailList = [];
+// "photo" draws the plan symbol. "3d" is the size model. The angle is kept
+// while stepping through the rail so each type is seen from the same side.
+let typeDetailView = "photo";
+let typeDetailCam = { yaw: 0.75, pitch: 1.02, zoom: 1 };
 
 function openTypeDetail(sku) {
   if (!sku || !el.typeDetailOverlay) return;
   typeDetailList = paletteSkuOrder.length ? paletteSkuOrder : [sku];
+  typeDetailView = "photo";
+  typeDetailCam = { yaw: 0.75, pitch: 1.02, zoom: 1 };
+  syncTypeDetailTabs();
   renderTypeDetailNav();
   selectTypeDetail(sku);
   el.typeDetailOverlay.hidden = false;
+  requestAnimationFrame(paintTypeDetail);
 }
 
 function closeTypeDetail() {
@@ -7994,7 +8048,7 @@ function renderTypeDetailNav() {
 
 function renderTypeDetail(sku) {
   if (el.typeDetailName) el.typeDetailName.textContent = sku.name;
-  if (el.typeDetailMeta) el.typeDetailMeta.textContent = `${sku.id} · ${skuDimLabel(sku)}`;
+  if (el.typeDetailMeta) el.typeDetailMeta.textContent = skuDimLabel(sku);
   if (el.typeDetailCategory) el.typeDetailCategory.textContent = CATEGORY_LABEL[sku.category] || sku.category;
   if (el.typeDetailCount) {
     const i = typeDetailList.findIndex((s) => s.id === sku.id);
@@ -8004,12 +8058,9 @@ function renderTypeDetail(sku) {
   if (el.typeDetailPrev) el.typeDetailPrev.hidden = !canStep;
   if (el.typeDetailNext) el.typeDetailNext.hidden = !canStep;
 
-  // No real imagery yet - a cached per-SKU photo/render (or later a
-  // supplier photo) would set el.typeDetailImg.src and hide the
-  // placeholder instead of returning early here.
   if (el.typeDetailImg) { el.typeDetailImg.hidden = true; el.typeDetailImg.removeAttribute("src"); }
-  if (el.typeDetailPlaceholder) el.typeDetailPlaceholder.hidden = false;
   if (el.typeDetailPlaceholderIcon) el.typeDetailPlaceholderIcon.textContent = TYPE_DETAIL_ICON[sku.category] || "\u25A1";
+  paintTypeDetail();
 
   if (el.typeDetailDims) {
     const g = sku.geometry || {};
@@ -8029,6 +8080,50 @@ function renderTypeDetail(sku) {
   }
 }
 
+function syncTypeDetailTabs() {
+  document.querySelectorAll("#v2-type-detail-overlay [data-detail-view]").forEach((b) => {
+    b.classList.toggle("active", b.dataset.detailView === typeDetailView);
+  });
+}
+
+/** Sanitary types draw a plan symbol or a size model. Anything else keeps
+ *  the empty placeholder. */
+function paintTypeDetail() {
+  const sku = typeDetailSku;
+  const canvas = el.typeDetailCanvas;
+  const frame = el.typeDetailMediaFrame;
+  const show = Boolean(sku && sanitaryPreview(sku));
+  if (el.typeDetailPlaceholder) el.typeDetailPlaceholder.hidden = show;
+  if (canvas) canvas.hidden = !show;
+  const photoBtn = document.querySelector('#v2-type-detail-overlay [data-detail-view="photo"]');
+  if (photoBtn) photoBtn.textContent = show ? "Plan" : "Photo";
+  if (el.typeDetailCaption) {
+    el.typeDetailCaption.hidden = !show;
+    el.typeDetailCaption.textContent = !show
+      ? ""
+      : (typeDetailView === "3d" ? "Size model · drag to turn" : "Plan symbol");
+  }
+  if (!show || !canvas || !frame) return;
+  const w = frame.clientWidth;
+  const h = frame.clientHeight;
+  if (w < 2 || h < 2) return;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.round(w * dpr);
+  canvas.height = Math.round(h * dpr);
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  paintSanitaryPreview(ctx, sku, {
+    view: typeDetailView,
+    viewW: w,
+    viewH: h,
+    yaw: typeDetailCam.yaw,
+    pitch: typeDetailCam.pitch,
+    zoom: typeDetailCam.zoom,
+  });
+  canvas.classList.toggle("is-orbit", typeDetailView === "3d");
+  canvas.setAttribute("aria-label", typeDetailView === "3d" ? `${sku.name} size model` : `${sku.name} plan symbol`);
+}
+
 function wireTypeDetail() {
   el.typeDetailClose?.addEventListener("click", closeTypeDetail);
   el.typeDetailPrev?.addEventListener("click", () => stepTypeDetail(-1));
@@ -8038,15 +8133,50 @@ function wireTypeDetail() {
   });
   document.querySelectorAll("#v2-type-detail-overlay [data-detail-view]").forEach((btn) => {
     btn.addEventListener("click", () => {
-      document.querySelectorAll("#v2-type-detail-overlay [data-detail-view]").forEach((b) => b.classList.toggle("active", b === btn));
-      // Both tabs show the same placeholder for now; once real photo and 3D
-      // sources exist, swap el.typeDetailImg.src / placeholder per tab here.
+      typeDetailView = btn.dataset.detailView === "3d" ? "3d" : "photo";
+      syncTypeDetailTabs();
+      paintTypeDetail();
     });
   });
   el.typeDetailUse?.addEventListener("click", () => {
     if (typeDetailSku) onSkuClick(typeDetailSku);
     closeTypeDetail();
   });
+  const canvas = el.typeDetailCanvas;
+  if (canvas) {
+    let drag = null;
+    canvas.addEventListener("pointerdown", (event) => {
+      if (typeDetailView !== "3d" || event.button !== 0) return;
+      drag = { x: event.clientX, y: event.clientY, yaw: typeDetailCam.yaw, pitch: typeDetailCam.pitch };
+      canvas.setPointerCapture(event.pointerId);
+      canvas.style.cursor = "grabbing";
+    });
+    canvas.addEventListener("pointermove", (event) => {
+      if (!drag) return;
+      typeDetailCam.yaw = drag.yaw + (event.clientX - drag.x) * 0.01;
+      typeDetailCam.pitch = Math.min(1.45, Math.max(0.2, drag.pitch + (event.clientY - drag.y) * 0.008));
+      paintTypeDetail();
+    });
+    const endDrag = () => {
+      drag = null;
+      canvas.style.cursor = "";
+    };
+    canvas.addEventListener("pointerup", endDrag);
+    canvas.addEventListener("pointercancel", endDrag);
+    canvas.addEventListener("wheel", (event) => {
+      if (typeDetailView !== "3d") return;
+      event.preventDefault();
+      const next = typeDetailCam.zoom * (event.deltaY > 0 ? 0.92 : 1.08);
+      typeDetailCam.zoom = Math.min(4, Math.max(0.4, next));
+      paintTypeDetail();
+    }, { passive: false });
+  }
+  if (el.typeDetailMediaFrame && typeof ResizeObserver !== "undefined") {
+    const observer = new ResizeObserver(() => {
+      if (el.typeDetailOverlay && !el.typeDetailOverlay.hidden) paintTypeDetail();
+    });
+    observer.observe(el.typeDetailMediaFrame);
+  }
 }
 
 el.search?.addEventListener("input", renderPalette);
@@ -8346,9 +8476,15 @@ function updateRibbonHint() {
     setRibbonHint("Click a wall. The side you are on is the side it opens to. Space flips which end it hinges from.");
     return;
   }
+  if (tool === "opening") {
+    setRibbonHint("Click a wall. On the elevation, drag a corner to change the size.");
+    return;
+  }
   if (tool === "select" && store.selected.length === 1 && store.primary?.kind === "opening") {
     if (selectedDoor()) {
       setRibbonHint("Drag the door along the wall to move it. Drag it to the other side to flip the swing. Space flips the hinge.");
+    } else if (skuById(objByRef(store.primary)?.sku)?.category === "opening") {
+      setRibbonHint("Drag it along the wall to move it. On the elevation, drag a corner to change the size.");
     } else {
       setRibbonHint("Drag the window along the wall to move it.");
     }
@@ -8570,6 +8706,7 @@ function onRibbonFunction(item) {
   );
   placeSkuId = armed.placeSkuId;
   wallLocation = armed.wallLocation;
+  if (item.id === "doors" && skuById(placeSkuId)?.category === "opening") tool = "opening";
   beamStart = null;
   lineStart = null;
   wallDraft = null;
@@ -9860,6 +9997,16 @@ function drawActiveSheet() {
     for (const form of forms || []) {
       const kind = (form.kind || "").toLowerCase();
       if (kind === "window" || kind === "opening") drawSheetOpening(sctx, project, pxPerM, form, payload.walls);
+    }
+    sctx.strokeStyle = "#1a1612";
+    sctx.lineWidth = 1;
+    sctx.lineJoin = "round";
+    sctx.lineCap = "round";
+    sctx.setLineDash([]);
+    for (const item of (store.doc.items || []).filter(onSheetLevel)) {
+      const sku = skuById(item.sku);
+      if (!sku) continue;
+      paintFixture(sctx, item, sku, project, pxPerM);
     }
     // Lines are not compiled (model.js LINE_KINDS): drawn from the document,
     // and only the storey this sheet is set to.
@@ -12092,7 +12239,7 @@ function wireCanvas() {
     const wasProp = propertyHover;
     propertyHover = null;
     const hadSpace = spaceNow.kind !== "empty";
-    if (wasProp || hadSpace || tool === "door" || tool === "window" || wallDraft || shapeDraft || beamStart || lineStart || (tool === "camera" && cameraDraft?.a) || (tool === "section" && sectionDraft?.a) || (tool === "callout" && calloutDraft?.a) || (tool === "revision" && revisionCloudDraft?.a) || (tool === "measure" && measureDraft?.a)) render();
+    if (wasProp || hadSpace || hostedOpeningTool() || wallDraft || shapeDraft || beamStart || lineStart || (tool === "camera" && cameraDraft?.a) || (tool === "section" && sectionDraft?.a) || (tool === "callout" && calloutDraft?.a) || (tool === "revision" && revisionCloudDraft?.a) || (tool === "measure" && measureDraft?.a)) render();
   });
   window.addEventListener("pointerup", onPointerUp);
   el.canvas.addEventListener("wheel", onWheel, { passive: false });
@@ -12575,7 +12722,7 @@ function onPointerDown(ev) {
     clickWallPoint(wx, wy);
     return;
   }
-  if (tool === "door" || tool === "window") {
+  if (hostedOpeningTool()) {
     underlaySelected = false;
     placeOpening(wx, wy);
     return;
@@ -13323,8 +13470,12 @@ function selectedWall() {
 function placeWallEdit() {
   const node = el.wallEdit;
   if (!node) return;
+  // The press that places a split is a drag, and this runs on that press.
+  // A drag used to count as "this wall is no longer selected", which cancelled
+  // the split and wiped the line before the mouse was released.
+  const splitting = drag?.kind === "wall-split";
   const sel = tool === "select" && !attachPick && !drag ? selectedWall() : null;
-  if (wallEdit && (!sel || wallEdit.id !== sel.obj.id)) {
+  if (!splitting && wallEdit && (!sel || wallEdit.id !== sel.obj.id)) {
     wallEdit = null;
     snapGuide = null;
   }
@@ -13441,31 +13592,6 @@ function wallEndAt(seg, wx, wy) {
   return best ? best.end : null;
 }
 
-/** Screen distance at which Snap takes the nearer end without a click on it. */
-const SNAP_END_PICK_PX = 48;
-
-/** The end within a short reach of the pointer, or null when the pointer is between them. */
-function nearestSnapEnd(seg, wx, wy) {
-  if (!seg || !Number.isFinite(wx) || !Number.isFinite(wy)) return null;
-  const tol = SNAP_END_PICK_PX / cam.scale;
-  let best = null;
-  for (const [x, y, end] of linearEnds(seg, "segment")) {
-    const dist = Math.hypot(x - wx, y - wy);
-    if (dist <= tol && (!best || dist < best.dist)) best = { dist, end };
-  }
-  return best ? best.end : null;
-}
-
-/** While Snap is waiting, a pointer already near an end chooses that end. */
-function takeNearbySnapEnd(seg, wx, wy) {
-  if (wallEdit?.mode !== "snap" || wallEdit.end) return false;
-  const end = nearestSnapEnd(seg, wx, wy);
-  if (!end) return false;
-  wallEdit.end = end;
-  setStatusMessage("Click where this end should meet. Esc cancels.", "ok");
-  return true;
-}
-
 function wallEndSnapshot() {
   return {
     segments: structuredClone(store.doc.segments || []),
@@ -13503,11 +13629,8 @@ function previewWallEdit(wx, wy) {
     return;
   }
   if (wallEdit.mode === "split") snapSplitPoint(sel.obj, wx, wy);
-  else {
-    if (!wallEdit.end) takeNearbySnapEnd(sel.obj, wx, wy);
-    if (wallEdit.end) snapWallEndPoint(sel.obj, wx, wy);
-    else snapGuide = null;
-  }
+  else if (wallEdit.end) snapWallEndPoint(sel.obj, wx, wy);
+  else snapGuide = null;
 }
 
 function commitWallEnd(seg, end, point) {
@@ -13532,7 +13655,9 @@ function commitWallSplit(seg, point) {
     setStatusMessage(result.message, "warn");
     return;
   }
-  store.setSelection(result.refs, result.refs[0]);
+  // One piece stays selected. Selecting both made the next drag move them
+  // as a single wall, so the split did not show until something else was picked.
+  store.selectOne(result.refs[0]);
   store.persist();
   wallEdit = null;
   snapGuide = null;
@@ -14153,8 +14278,11 @@ function elevationWallDeletePrompt() {
   const openings = (store.doc.openings || []).filter((o) => hosted.openingIds.includes(o.id));
   let doors = 0;
   let windows = 0;
+  let holes = 0;
   for (const opening of openings) {
-    if (skuById(opening.sku)?.category === "door") doors += 1;
+    const cat = skuById(opening.sku)?.category;
+    if (cat === "door") doors += 1;
+    else if (cat === "opening") holes += 1;
     else windows += 1;
   }
   const parts = [];
@@ -14162,6 +14290,7 @@ function elevationWallDeletePrompt() {
   if (finishes) parts.push(finishes === 1 ? "1 finish" : `${finishes} finishes`);
   if (windows) parts.push(windows === 1 ? "1 window" : `${windows} windows`);
   if (doors) parts.push(doors === 1 ? "1 door" : `${doors} doors`);
+  if (holes) parts.push(holes === 1 ? "1 opening" : `${holes} openings`);
   const plugs = (store.doc.items || []).filter((item) => item.host === "wall" && segments.some((s) => s.id === item.wallId)).length;
   if (plugs) parts.push(plugs === 1 ? "1 plug" : `${plugs} plugs`);
   const many = segments.length > 1;
@@ -14768,7 +14897,8 @@ function placeOpening(wx, wy) {
   const id = nid("o");
   store.doc.openings.push({ id, status: placementStatus(), ...draft });
   store.selectOne({ kind: "opening", id });
-  const door = openingStaysArmed(skuById(draft.sku)?.category);
+  const placedSku = skuById(draft.sku);
+  const door = openingStaysArmed(placedSku?.category);
   if (door) {
     recentDoorIds = noteRecentDoor(recentDoorIds, draft.sku);
     placeSkuMemory = rememberFunctionSku(placeSkuMemory, activeFunction, draft.sku);
@@ -14783,7 +14913,9 @@ function placeOpening(wx, wy) {
   store.persist();
   setStatusMessage(door
     ? "Door placed. Click the wall to place another of the same type. Esc stops."
-    : "Window placed. Drag it along the wall to move it. Press Delete to remove it.", "ok");
+    : placedSku?.category === "opening"
+      ? "Opening placed. Drag a corner on the elevation to change its size."
+      : "Window placed. Drag it along the wall to move it. Press Delete to remove it.", "ok");
   renderPalette();
   render();
 }
@@ -15291,8 +15423,9 @@ function syncHeightFields(obj, kind) {
   setHidden(el.ctxConvert, !room);
 
   const size = opening ? openingSize(pack, opening) : null;
-  const isWindow = Boolean(opening && skuById(opening.sku)?.category === "window");
-  setHidden(el.ctxSillWrap, !isWindow);
+  const openingCat = opening ? skuById(opening.sku)?.category : null;
+  const showSill = openingCat === "window" || openingCat === "opening";
+  setHidden(el.ctxSillWrap, !showSill);
   setHidden(el.ctxOWidthWrap, !opening);
   setHidden(el.ctxOHeightWrap, !opening);
   setHidden(el.ctxOSizeNote, !size?.nonStandard);
@@ -15351,6 +15484,14 @@ function setOpeningSize(field, raw, { allowZero = false } = {}) {
   const typeValue = g[field];
   store.pushUndo(`Set the ${field} of ${historyThing(store.primary)} to ${String(raw).trim()} mm`);
   opening[field] = value === null || (Number.isFinite(typeValue) && Math.abs(typeValue - value) < 0.0005) ? null : value;
+  if (isArchHead(skuById(opening.sku))) {
+    const size = openingSize(pack, opening);
+    const fitted = fitArchSize(size.width, size.height);
+    const typeH = skuById(opening.sku)?.geometry?.height;
+    if (Math.abs(fitted.height - (size.height || 0)) > 0.0005) {
+      opening.height = Number.isFinite(typeH) && Math.abs(typeH - fitted.height) < 0.0005 ? null : fitted.height;
+    }
+  }
   store.persist();
   render();
 }
@@ -15671,10 +15812,9 @@ function releaseFinishEditForOpening() {
   if (previewCallout?.kind === "finish") previewCallout = null;
   if (!elevationOpen) return;
   const opening = objByRef(store.primary);
-  const door = skuById(opening?.sku)?.category === "door";
-  setStatusMessage(door
-    ? "Editing the door. The finish shape is left as it is."
-    : "Editing the window. The finish shape is left as it is.", "ok");
+  const cat = skuById(opening?.sku)?.category;
+  const kind = cat === "door" ? "door" : cat === "opening" ? "opening" : "window";
+  setStatusMessage(`Editing the ${kind}. The finish shape is left as it is.`, "ok");
 }
 
 /** The edit a drag in progress implies, in viewing coordinates (metres). */
@@ -15995,7 +16135,7 @@ function syncFaceEditor() {
   if (el.faceType) el.faceType.disabled = !band?.editable && !pending;
   if (el.faceProduct) el.faceProduct.disabled = !band?.editable && !pending;
   if (opening) {
-    const kind = opening.category === "door" ? "Door" : "Window";
+    const kind = opening.category === "door" ? "Door" : opening.head === "arch" ? "Arch" : opening.category === "opening" ? "Opening" : "Window";
     if (el.faceWhich) el.faceWhich.textContent = opening.name || kind;
     if (el.faceMeta) el.faceMeta.textContent = `${kind} · ${Math.round(opening.width * 1000)} × ${Math.round(opening.height * 1000)}`;
     if (el.faceSwatch) el.faceSwatch.style.background = "#fffdf8";
@@ -20731,7 +20871,7 @@ function syncPlanContext() {
     const group = store.groupForRef(refs[0]);
     syncInspectKicker(group ? group.name : `${refs.length} selected`);
   } else if (creating) {
-    syncInspectKicker(pack.name || "—");
+    syncInspectKicker(skuById(placeSkuId)?.name || "");
   } else if (draft) {
     syncInspectKicker(skuById(placeSkuId)?.name || "—");
   } else if (obj) {
@@ -20997,18 +21137,12 @@ el.wallEdit?.addEventListener("click", (ev) => {
   } else {
     wallEdit = { id: sel.obj.id, mode, end: null, fixed: null };
     snapGuide = null;
-    if (mode === "snap") {
-      const [wx, wy] = pointerWorld(ev);
-      takeNearbySnapEnd(sel.obj, wx, wy);
-    }
-    if (!wallEdit?.end) {
-      setStatusMessage(
-        mode === "split"
-          ? "Drag along this wall. Release to split. Esc cancels."
-          : "Click a highlighted end. Esc cancels.",
-        "ok",
-      );
-    }
+    setStatusMessage(
+      mode === "split"
+        ? "Drag along this wall. Release to split. Esc cancels."
+        : "Click a highlighted end. Esc cancels.",
+      "ok",
+    );
   }
   render();
 });
@@ -22157,7 +22291,7 @@ function showExportPanel(title, fileName, report, extraHints) {
     <dl class="meta">
       <div><dt>Levels</dt><dd>${c.levels} storeys</dd></div>
       <div><dt>Walls</dt><dd>${c.walls}</dd></div>
-      <div><dt>Openings</dt><dd>${c.doors} doors, ${c.windows} windows</dd></div>
+      <div><dt>Openings</dt><dd>${c.doors} doors, ${c.windows} windows${c.openings ? `, ${c.openings} openings` : ""}</dd></div>
       <div><dt>Rooms</dt><dd>${c.rooms}</dd></div>
     </dl>
     ${extraHints}

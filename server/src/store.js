@@ -253,9 +253,10 @@ export function openStore(queryable, { orgId, userId, role }) {
     },
 
     /**
-     * Take someone out of the firm. Their time entries stay (they are the
-     * firm's record); their account is closed and their sessions end, so the
-     * address can be reused. Cannot remove yourself or an owner.
+     * Take someone out of this firm. Their time entries stay (they are the
+     * firm's record). The account stays too: they may still belong to another
+     * company, and the next request there moves their sign-in across. Cannot
+     * remove yourself or an owner.
      */
     async removeTeamMember(memberId) {
       requireCapability("canViewBilled", "only an owner can remove a team member");
@@ -267,8 +268,6 @@ export function openStore(queryable, { orgId, userId, role }) {
       if (!rows[0]) return false;
       if (rows[0].role === "owner") throw new ValidationError("An owner cannot be removed");
       await q(`update membership set deleted_at = now() where org_id = $1 and user_id = $2 and deleted_at is null`, [orgId, memberId]);
-      await q(`update session set deleted_at = now() where user_id = $1 and deleted_at is null`, [memberId]);
-      await q(`update app_user set deleted_at = now() where id = $1 and deleted_at is null`, [memberId]);
       return true;
     },
 

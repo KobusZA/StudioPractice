@@ -88,9 +88,13 @@ test("a path that climbs out of the web directory is refused", async () => {
   }
 });
 
-test("a directory is not listed", async () => {
-  const res = await serve("/v2");
-  assert.equal(res.status, 403);
+test("a directory with an index redirects to it, and one without is not listed", async () => {
+  const indexed = await serve("/v2");
+  assert.equal(indexed.status, 302);
+  assert.equal(indexed.headers.Location, "/v2/index.html");
+
+  const bare = await serve("/v2/tests");
+  assert.equal(bare.status, 403);
 });
 
 test("a missing file is a 404", async () => {

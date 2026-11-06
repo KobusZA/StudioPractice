@@ -41,6 +41,101 @@ export function openingSize(pack, opening) {
   return { width, height, sill, nonStandard };
 }
 
+/** A hole with no leaf. An arch is the same hole with a semicircular head. */
+export function isPlainOpening(sku) {
+  return sku?.category === "opening";
+}
+
+export function isArchHead(sku) {
+  return isPlainOpening(sku) && sku?.geometry?.head === "arch";
+}
+
+/** Rise of a semicircular head, metres. The diameter is the opening width. */
+export function archRise(width) {
+  return Math.max(0, Number(width) || 0) / 2;
+}
+
+/** The height stays at least the rise, so the head remains a semicircle. */
+export function fitArchSize(width, height) {
+  const w = Math.max(0, Number(width) || 0);
+  const rise = archRise(w);
+  return { width: w, height: Math.max(Number(height) || 0, rise) };
+}
+
+/**
+ * Area of the void. A rectangular hole is width × height. An arch drops the
+ * two spandrels above the springing line.
+ */
+export function openingVoidArea(width, height, sku) {
+  const w = Math.max(0, Number(width) || 0);
+  const h = Math.max(0, Number(height) || 0);
+  if (!isArchHead(sku) || !(w > 0) || !(h > 0)) return w * h;
+  const rise = Math.min(archRise(w), h);
+  return w * (h - rise) + (Math.PI * rise * rise) / 2;
+}
+
+/**
+ * The void of an arched opening. `rect` is `{ from, to, bottom, top }` in
+ * wall coordinates. The head is a semicircle of diameter `to - from`.
+ */
+export function archVoidPolygon(rect, steps = 8) {
+  const from = rect.from;
+  const to = rect.to;
+  const bottom = rect.bottom;
+  const top = rect.top;
+  const width = Math.max(0, to - from);
+  const rise = Math.min(archRise(width), Math.max(0, top - bottom));
+  const spring = top - rise;
+  const cx = (from + to) / 2;
+  const r = width / 2;
+  const pts = [];
+  if (spring - bottom > 1e-6) pts.push([from, bottom]);
+  pts.push([from, spring]);
+  const n = Math.max(2, steps);
+  for (let i = 1; i < n; i += 1) {
+    const a = Math.PI - (Math.PI * i) / n;
+    pts.push([cx + r * Math.cos(a), spring + r * Math.sin(a)]);
+  }
+  pts.push([to, spring]);
+  if (spring - bottom > 1e-6) pts.push([to, bottom]);
+  return pts;
+}
+
+/**
+ * The two types that live in the Doors list and are not doors. Geometry is
+ * millimetres, the same as a pack on disk. `head: "arch"` is not a length.
+ */
+export const PLAIN_OPENING_SKUS = [
+  {
+    id: "TSP_OPENING",
+    name: "Opening",
+    family: "Opening",
+    category: "opening",
+    unit: "ea",
+    draw: "opening",
+    revit: { category: "Doors", family: "Opening", type: "Opening", placedCount: 0 },
+    geometry: { width: 900, height: 2100, sill: 0 },
+    cost: { rateRef: null, wasteFactor: null },
+    compliance: {},
+    drawing: { colourClass: "other", hatch: null, symbol: null },
+    schedule: { report: ["count"], scheduleName: null },
+  },
+  {
+    id: "TSP_ARCH",
+    name: "Arch",
+    family: "Arch",
+    category: "opening",
+    unit: "ea",
+    draw: "opening",
+    revit: { category: "Doors", family: "Arch", type: "Arch", placedCount: 0 },
+    geometry: { width: 900, height: 2100, sill: 0, head: "arch" },
+    cost: { rateRef: null, wasteFactor: null },
+    compliance: {},
+    drawing: { colourClass: "other", hatch: null, symbol: null },
+    schedule: { report: ["count"], scheduleName: null },
+  },
+];
+
 export function allowedHosts(pack, skuId) {
   return pack?.recipes?.allowedHosts?.[skuId] || null;
 }

@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Wall draw capture</title>
+  <link rel="stylesheet" href="../../v2/v2.css?v=capture" />
+  <style>
+    body { margin: 0; padding: 16px; background: #e8e0d4; }
+    .capture {
+      width: 640px;
+      background: #f7f3ea;
+      border: 1px solid rgba(26, 22, 18, 0.15);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .capture-label {
+      padding: 8px 12px;
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #6b5f52;
+      border-bottom: 1px solid rgba(26, 22, 18, 0.1);
+      background: #fffdf8;
+      font-family: "Source Sans 3", "Segoe UI", sans-serif;
+    }
+    .plan-stage {
+      position: relative;
+      height: 220px;
+      background:
+        linear-gradient(rgba(26, 22, 18, 0.06) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(26, 22, 18, 0.06) 1px, transparent 1px),
+        #f3eee4;
+      background-size: 20px 20px;
+    }
+    .wall-run {
+      position: absolute;
+      left: 80px;
+      top: 108px;
+      width: 420px;
+      height: 24px;
+      background: #d0121a;
+    }
+    .dim {
+      position: absolute;
+      left: 80px;
+      top: 148px;
+      width: 420px;
+      text-align: center;
+      font-size: 13px;
+      font-weight: 600;
+      color: #1a1612;
+      font-family: "Source Sans 3", "Segoe UI", sans-serif;
+    }
+    .plan-context {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px 18px;
+      padding: 12px 14px;
+      background: #fffdf8;
+      border-top: 1px solid rgba(26, 22, 18, 0.12);
+      font-size: 13px;
+      font-family: "Source Sans 3", "Segoe UI", sans-serif;
+    }
+    .plan-context label {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-weight: 600;
+      color: #5c5348;
+    }
+    .plan-context-field {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .plan-context-field input {
+      width: 5.5rem;
+      font: inherit;
+      padding: 4px 6px;
+      border: 1px solid rgba(26, 22, 18, 0.2);
+      border-radius: 3px;
+    }
+    .type-flyout {
+      padding: 8px 14px;
+      font-size: 12px;
+      color: #6b5f52;
+      border-top: 1px solid rgba(26, 22, 18, 0.08);
+      background: rgba(178, 69, 30, 0.06);
+      font-family: "Source Sans 3", "Segoe UI", sans-serif;
+    }
+  </style>
+</head>
+<body>
+  <div class="capture" id="shot">
+    <p class="capture-label">StudioPractice · drawing a plastered wall</p>
+    <div class="plan-stage">
+      <div class="wall-run"></div>
+      <p class="dim">240 mm on plan (face to face)</p>
+    </div>
+    <p class="type-flyout"><strong>Masonary wall 220mm (plaster)</strong> · 220 mm masonry + plaster (240 mm overall)</p>
+    <div class="plan-context">
+      <label>Length <span class="plan-context-field"><input value="4000" readonly /> mm</span></label>
+      <label>Angle <span class="plan-context-field"><input value="0.0" readonly /> °</span></label>
+      <label>Width <span class="plan-context-field"><input value="240" readonly /> mm</span></label>
+      <label>Height <span class="plan-context-field"><input value="2700" readonly /> mm</span></label>
+    </div>
+  </div>
+</body>
+</html>

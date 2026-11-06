@@ -569,7 +569,7 @@ function nearestOpening(box, model) {
     const oTo = opening.offset + opening.width;
     const oBottom = opening.sill || 0;
     const oTop = oBottom + opening.height;
-    const name = opening.category === "door" ? "door" : "window";
+    const name = openingKindLabel(opening).toLowerCase();
     const bandW = box.to - box.from;
     const openW = opening.width;
     const hOverlap = Math.min(box.to, oTo) - Math.max(box.from, oFrom);
@@ -793,12 +793,25 @@ export function finishCalloutHtml(doc, band, model) {
  * The same temporary note for a window or door on the inspector graph.
  * That graph does not move the opening; Edit opens the elevation that does.
  */
+export function openingKindLabel(opening) {
+  if (opening?.category === "door") return "Door";
+  if (opening?.head === "arch") return "Arch";
+  if (opening?.category === "opening") return "Opening";
+  return "Window";
+}
+
+function openingPlaceLabel(opening) {
+  if (opening?.category === "door") return "Door";
+  if ((opening?.sill || 0) > 0.005) return `Sill ${mm(opening.sill)} mm`;
+  return openingKindLabel(opening);
+}
+
 export function openingCalloutHtml(opening) {
-  const kind = opening.category === "door" ? "Door" : "Window";
+  const kind = openingKindLabel(opening);
   const name = opening.name || kind;
   const size = `${mm(opening.width)} × ${mm(opening.height)}`;
   const place = [];
-  if (opening.category !== "door" && opening.sill > 0.005) place.push(`Sill ${mm(opening.sill)} mm`);
+  if (opening.category !== "door" && opening.sill > 0.005) place.push(openingPlaceLabel(opening));
   if (Number.isFinite(opening.offset)) place.push(`${mm(Math.max(0, opening.offset))} mm from the left`);
   const note = opening.nonStandard ? `<p class="fin-badge">Non-standard size</p>` : "";
   return `<div class="elev-callout" data-elev-callout="opening" data-opening-id="${esc(opening.id)}">
@@ -954,13 +967,13 @@ function faceGroupsHtml(doc, model, opts) {
  */
 function openingsBillHtml(model, selectedId) {
   const rows = (model.openings || []).map((o) => {
-    const kind = o.category === "door" ? "Door" : "Window";
+    const kind = openingKindLabel(o);
     const name = o.name || kind;
     const on = o.id === selectedId ? " fin-editing" : "";
     return `<button type="button" class="fin-kind fin-kind-face${on}" data-opening-id="${esc(o.id)}">
       <span class="fin-kind-main">
         <span class="fin-kind-head"><span class="fin-kind-name">${esc(name)}</span><span class="fin-area">${esc(`${mm(o.width)} × ${mm(o.height)}`)}</span></span>
-        <span class="fin-where">${o.category === "door" ? "Door" : `Sill ${mm(o.sill)} mm`} · ${mm(Math.max(0, o.offset))} mm from the left</span>
+        <span class="fin-where">${openingPlaceLabel(o)} · ${mm(Math.max(0, o.offset))} mm from the left</span>
       </span>
     </button>`;
   }).join("");
@@ -1096,13 +1109,12 @@ function faceOpenHtml(doc, model, opts) {
     area: `${mm(model.height)} mm`,
   })}<div class="fin-line-fields" data-fin-fields="wall"></div></div>`;
   const openings = (model.openings || []).map((o) => {
-    const door = o.category === "door";
     return `<div class="fin-line-host">${lineHtml({
       attrs: `data-opening-id="${esc(o.id)}"`,
       selected: o.id === opts.openingId,
       swatch: { kind: "opening" },
-      name: o.name || (door ? "Door" : "Window"),
-      place: `${door ? "Door" : `Sill ${mm(o.sill)} mm`} · ${mm(Math.max(0, o.offset))} mm from the left`,
+      name: o.name || openingKindLabel(o),
+      place: `${openingPlaceLabel(o)} · ${mm(Math.max(0, o.offset))} mm from the left`,
       area: `${mm(o.width)} × ${mm(o.height)}`,
     })}<div class="fin-line-fields" data-fin-fields="opening" data-for-opening="${esc(o.id)}"></div></div>`;
   }).join("");
