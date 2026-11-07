@@ -7,15 +7,38 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,560&family=Source+Sans+3:wght@400;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../shared/tokens.css" />
+  <link rel="stylesheet" href="../shared/splash.css" />
   <link rel="stylesheet" href="./practice.css" />
+  <!-- Painted before the stylesheet arrives, so a cold load is ink rather
+       than a white flash. A reload in this tab skips it. -->
+  <style>
+    #splash { position: fixed; inset: 0; z-index: 100; background: #1a1612; }
+    html.splash-skip #splash { display: none; }
+  </style>
+  <script>
+    try {
+      if (sessionStorage.getItem("tsp-splash-seen") === "1") {
+        document.documentElement.classList.add("splash-skip");
+      }
+    } catch (e) { /* private mode: show the splash */ }
+  </script>
 </head>
 <body>
+
+<div id="splash" role="status" aria-live="polite" aria-label="Loading StudioPractice">
+  <img class="splash-mark" src="../shared/splash/mark.svg" alt="" width="72" height="72" />
+  <div class="splash-name">StudioPractice</div>
+  <div class="splash-progress" aria-hidden="true"><span></span></div>
+</div>
 
 <!-- Signed out. The register is a firm's book of work; there is no anonymous
      view of it, so this is a gate rather than a banner. -->
 <div class="gate" id="gate" hidden>
   <form class="form" id="gate-form">
-    <h1>Practice operations</h1>
+    <img class="gate-mark" src="../shared/splash/mark.svg" alt="" width="48" height="48" />
+    <p class="gate-product">StudioPractice</p>
+    <h1 id="gate-title">Sign in</h1>
     <p id="gate-blurb">The project register, the timesheet and payment certificates.</p>
     <div class="fields">
       <div class="field">
@@ -26,9 +49,13 @@
         <label for="gate-password">Password</label>
         <input id="gate-password" type="password" autocomplete="current-password" required />
       </div>
-      <div class="field" id="gate-org-field" hidden>
-        <label for="gate-org">Firm name</label>
-        <input id="gate-org" type="text" autocomplete="organization" />
+    </div>
+    <div class="gate-org" id="gate-org-field">
+      <div class="gate-org-clip">
+        <div class="field">
+          <label for="gate-org">Firm name</label>
+          <input id="gate-org" type="text" autocomplete="organization" disabled />
+        </div>
       </div>
     </div>
     <div class="actions">

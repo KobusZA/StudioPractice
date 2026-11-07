@@ -413,6 +413,113 @@ export function wallCornerNeighbors(wall, end, others, {
 }
 
 /**
+ * Where a selected wall's angle is measured from, once drawing is over.
+ * One corner neighbour at the start wins; otherwise one at the end. A
+ * continuing straight wall is not a corner, and two neighbours at the same
+ * end are ambiguous, so both leave this null and the angle stays the one
+ * from the horizontal. `prev` leaves the joint along the neighbour, so the
+ * wedge sits in the corner the two walls make.
+ */
+export function selectionAngleJoint(wall, others, thicknessOf = (w) => Number(w?.thickness) || 0) {
+  const crossing = (end) => wallCornerNeighbors(wall, end, others, { thicknessOf }).filter((hit) => hit.x != null);
+  let end = 1;
+  let hits = crossing(1);
+  if (hits.length !== 1) {
+    end = 2;
+    hits = crossing(2);
+    if (hits.length !== 1) return null;
+  }
+  const hit = hits[0];
+  const other = hit.wall;
+  const prev = hit.end === 2
+    ? { x: other.x1 - other.x2, y: other.y1 - other.y2 }
+    : { x: other.x2 - other.x1, y: other.y2 - other.y1 };
+  const joint = end === 1 ? { x: wall.x1, y: wall.y1 } : { x: wall.x2, y: wall.y2 };
+  const far = end === 1 ? { x: wall.x2, y: wall.y2 } : { x: wall.x1, y: wall.y1 };
+  return { joint, far, prev };
+}
+
+/** A selected wall shows a gap this far, and no further. */
+export const SELECT_GAP_MAX_M = 12;
+const SELECT_GAP_MIN_M = 0.05;
+const SELECT_TOUCH_M = 0.35;
+
+function gapDistToSegment(seg, x, y) {
+  const dx = seg.x2 - seg.x1;
+  const dy = seg.y2 - seg.y1;
+  const len2 = dx * dx + dy * dy;
+  if (len2 < 1e-12) return Infinity;
+  let t = ((x - seg.x1) * dx + (y - seg.y1) * dy) / len2;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(x - (seg.x1 + dx * t), y - (seg.y1 + dy * t));
+}
+
+/**
+ * The nearest wall on each side of `wall`, measured square off its line.
+ * A wall that corners into this one is measured to its far end, so the join
+ * itself is not reported as a tiny gap. A separate wall is the perpendicular
+ * distance when it runs alongside, otherwise the nearest end whose foot
+ * lands on this wall.
+ */
+export function selectionSideGaps(wall, others, { max = SELECT_GAP_MAX_M } = {}) {
+  const dx = wall.x2 - wall.x1;
+  const dy = wall.y2 - wall.y1;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-9) return [];
+  const ux = dx / len;
+  const uy = dy / len;
+  const nx = -uy;
+  const ny = ux;
+  const gaps = [];
+  for (const sign of [1, -1]) {
+    const sideNx = nx * sign;
+    const sideNy = ny * sign;
+    let best = null;
+    for (const other of others || []) {
+      if (!other || other === wall || (other.id != null && other.id === wall.id)) continue;
+      const odx = other.x2 - other.x1;
+      const ody = other.y2 - other.y1;
+      const olen = Math.hypot(odx, ody);
+      if (olen < 1e-9) continue;
+      const ends = [[other.x1, other.y1], [other.x2, other.y2]];
+      const connected = ends.some(([x, y]) => gapDistToSegment(wall, x, y) <= SELECT_TOUCH_M);
+      const parallel = Math.abs(ux * ody - uy * odx) / olen < 0.08;
+      const consider = (hit) => {
+        if (!hit || hit.dist < SELECT_GAP_MIN_M || hit.dist > max) return;
+        if (!best || hit.dist < best.dist) best = hit;
+      };
+      if (!connected && parallel) {
+        const dist = (other.x1 - wall.x1) * sideNx + (other.y1 - wall.y1) * sideNy;
+        const a1 = (other.x1 - wall.x1) * ux + (other.y1 - wall.y1) * uy;
+        const a2 = (other.x2 - wall.x1) * ux + (other.y2 - wall.y1) * uy;
+        const lo = Math.max(0, Math.min(a1, a2));
+        const hi = Math.min(len, Math.max(a1, a2));
+        if (hi - lo >= SELECT_GAP_MIN_M && dist >= SELECT_GAP_MIN_M) {
+          const at = (lo + hi) / 2;
+          const x1 = wall.x1 + ux * at;
+          const y1 = wall.y1 + uy * at;
+          consider({ x1, y1, x2: x1 + sideNx * dist, y2: y1 + sideNy * dist, dist });
+        }
+        continue;
+      }
+      for (const [px, py] of ends) {
+        if (connected && gapDistToSegment(wall, px, py) <= SELECT_TOUCH_M) continue;
+        const vx = px - wall.x1;
+        const vy = py - wall.y1;
+        const along = vx * ux + vy * uy;
+        const dist = vx * sideNx + vy * sideNy;
+        if (along < -0.02 || along > len + 0.02) continue;
+        const x1 = wall.x1 + ux * Math.min(len, Math.max(0, along));
+        const y1 = wall.y1 + uy * Math.min(len, Math.max(0, along));
+        consider({ x1, y1, x2: px, y2: py, dist });
+      }
+    }
+    if (best) gaps.push(best);
+  }
+  return gaps;
+}
+
+/**
  * Pull every wall/foundation endpoint within `tol` of another one on the
  * same level onto a single shared point, before any renderer turns a wall
  * into a solid.

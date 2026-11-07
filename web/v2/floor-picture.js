@@ -1,7 +1,10 @@
 // The floor picture drawn in the wall elevation's strip. Zoom, pan and the
-// shared-patch mark are the wall's: this only supplies the floor's polygons
-// in the same fitted frame (plan x, and z = −plan y, so the elevation's
-// upward axis shows the plan the same way up).
+// shared-patch mark are the wall's. Plan x runs across, and z = −plan y, so
+// the picture is the same way up as the plan.
+//
+// The inspector card fits the floor to its box. The open strip passes `frame`:
+// both axes use the plan's scale, and the box sits where the strip is holding
+// it. Zoom 1 with no pan is that match.
 
 import { pointInPoly } from "./geom.js";
 import { finishSwatch } from "./finish-data.js";
@@ -66,6 +69,73 @@ export function planToFace(x, y, face) {
 /** Face point back on the plan. */
 export function faceToPlan(s, z, face) {
   return { x: face.minX + s, y: face.maxY - z };
+}
+
+/** The floor's box on the plan. `cx` and `cy` are the centre the strip holds. */
+export function floorBox(host) {
+  const face = floorFaceOf(host);
+  return {
+    minX: face.minX,
+    maxX: face.maxX,
+    minY: face.minY,
+    maxY: face.maxY,
+    spanX: face.length,
+    spanY: face.height,
+    cx: (face.minX + face.maxX) / 2,
+    cy: (face.minY + face.maxY) / 2,
+  };
+}
+
+/**
+ * Where the floor's centre sits in the strip. A new floor (`hold` null) starts
+ * at `center`. Panning the plan never comes through here. Moving the floor
+ * adds that movement, in pixels, on both axes.
+ */
+export function trackFloorHold(hold, box, scale, center = null) {
+  if (!box || !(scale > 0)) return hold;
+  if (!hold) {
+    return {
+      cx: box.cx,
+      cy: box.cy,
+      centerX: center?.x ?? 0,
+      centerY: center?.y ?? 0,
+    };
+  }
+  return {
+    cx: box.cx,
+    cy: box.cy,
+    centerX: hold.centerX + (box.cx - hold.cx) * scale,
+    centerY: hold.centerY + (box.cy - hold.cy) * scale,
+  };
+}
+
+/** Strip frame at the plan's scale. `originX` is the left of the box, `originY` its top. */
+export function floorFrameFromHold(box, scale, hold) {
+  if (!box || !hold || !(scale > 0)) return null;
+  const halfW = box.spanX / 2 * scale;
+  const halfH = box.spanY / 2 * scale;
+  return {
+    scale,
+    originX: hold.centerX - halfW,
+    originY: hold.centerY - halfH,
+  };
+}
+
+/**
+ * Hold that puts the floor's centre on the centre of the strip at this zoom.
+ * The picture grows from its top-left, so the hold shifts as the zoom leaves 1
+ * and the centre stays put.
+ */
+export function floorHoldCentered(box, scale, zoom, width, height) {
+  const z = zoom > 0 ? zoom : 1;
+  const halfW = box.spanX / 2 * scale;
+  const halfH = box.spanY / 2 * scale;
+  return {
+    cx: box.cx,
+    cy: box.cy,
+    centerX: width / 2 - halfW * (z - 1),
+    centerY: height / 2 - halfH * (z - 1),
+  };
 }
 
 /**
@@ -143,6 +213,8 @@ function rgba(hex, alpha) {
  *  and the stack pile stay on the open picture. The finish polygons stay clickable.
  * @param {{s:?number,z:?number}} [spec.guides] face-space alignment, the wall's dashed lines
  * @param {object} [spec.locate] a `finishLocate` result, plus `typeable` and `typing`
+ * @param {{scale:number, originX:number, originY:number}|null} [spec.frame] plan match for the open strip.
+ *  Both axes use `scale`. `originX` is the left of the floor's box, `originY` its top.
  * @returns {{svg:string, fit:object, scaleX:number, scaleY:number, originX:number, originY:number, minX:number}}
  */
 export function floorPictureSvg({
@@ -158,6 +230,7 @@ export function floorPictureSvg({
   preview = false,
   guides = null,
   locate = null,
+  frame = null,
 } = {}) {
   const W = Math.max(80, Math.round(width || 0));
   const H = Math.max(60, Math.round(height || 0));
@@ -167,36 +240,61 @@ export function floorPictureSvg({
     return { svg: "", fit: emptyFit, scaleX: 1, scaleY: 1, originX: 0, originY: 0, minX: 0 };
   }
 
-  let minX = Infinity;
-  let maxX = -Infinity;
-  let minY = Infinity;
-  let maxY = -Infinity;
-  const consider = (poly) => {
-    for (const [x, y] of poly) {
-      if (x < minX) minX = x;
-      if (x > maxX) maxX = x;
-      if (y < minY) minY = y;
-      if (y > maxY) maxY = y;
-    }
-  };
-  consider(ring);
-  for (const region of regions) if (region.poly?.length >= 3) consider(region.poly);
-  const spanX = Math.max(maxX - minX, 0.1);
-  const spanY = Math.max(maxY - minY, 0.1);
-  const fitScaleX = Math.max(1e-3, (W - PAD * 2) / spanX);
-  const fitScaleY = Math.max(1e-3, (H - PAD * 2) / spanY);
-  // The frame is the floor, the same way a wall's frame is the face.
-  // originX is the left of that floor, not the plan's zero. A room that
-  // sits away from the origin would otherwise be clamped off the picture.
-  const fit = {
-    scaleX: fitScaleX,
-    scaleY: fitScaleY,
-    originX: PAD,
-    originY: PAD - minY * fitScaleY,
-    top: PAD,
-    spanX: spanX * fitScaleX,
-    spanY: spanY * fitScaleY,
-  };
+  const box = floorBox(ring);
+  const planScale = Number(frame?.scale);
+  const locked = planScale > 0 && Number.isFinite(Number(frame?.originX)) && Number.isFinite(Number(frame?.originY));
+  let minX;
+  let minY;
+  let fit;
+  if (locked) {
+    // The open strip matches the plan: one scale, the floor's own box, held
+    // where the plan left it. A finish past the box still draws; it does not
+    // change the scale.
+    minX = box.minX;
+    minY = box.minY;
+    fit = {
+      scaleX: planScale,
+      scaleY: planScale,
+      originX: Number(frame.originX),
+      originY: Number(frame.originY) - minY * planScale,
+      top: Number(frame.originY),
+      spanX: box.spanX * planScale,
+      spanY: box.spanY * planScale,
+      dir: 1,
+    };
+  } else {
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    minX = Infinity;
+    minY = Infinity;
+    const consider = (poly) => {
+      for (const [x, y] of poly) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    };
+    consider(ring);
+    for (const region of regions) if (region.poly?.length >= 3) consider(region.poly);
+    const spanX = Math.max(maxX - minX, 0.1);
+    const spanY = Math.max(maxY - minY, 0.1);
+    const fitScaleX = Math.max(1e-3, (W - PAD * 2) / spanX);
+    const fitScaleY = Math.max(1e-3, (H - PAD * 2) / spanY);
+    // The card fits the floor. originX is the left of that floor, not the
+    // plan's zero. A room that sits away from the origin would otherwise be
+    // clamped off the picture.
+    fit = {
+      scaleX: fitScaleX,
+      scaleY: fitScaleY,
+      originX: PAD,
+      originY: PAD - minY * fitScaleY,
+      top: PAD,
+      spanX: spanX * fitScaleX,
+      spanY: spanY * fitScaleY,
+      dir: 1,
+    };
+  }
   const placed = elevationPlacement(fit, view);
   const scaleX = placed.scaleX;
   const scaleY = placed.scaleY;

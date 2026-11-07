@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { LADDERS, maxStep, planSteps, shrinkKey } from "../ribbon-fit.js";
-import { RIBBON, SIMPLE_TABS } from "../ribbon.js";
+import { readFileSync } from "node:fs";
+import { CONTEXT_TABS, GROUP_PRIORITY, RIBBON, placingTab, ribbonItems, selectionTab, tabWithStatus } from "../ribbon.js";
 
 // A toy width model: each group's width depends on its kind and step, so the
 // planner can be exercised without a browser. Wider = nicer.
@@ -34,10 +35,6 @@ test("full Add drawing keeps once-a-sheet commands in the group menu", () => {
   assert.deepEqual(ids.filter((id) => !add.menu.includes(id)), [
     "underlay", "satellite", "underlay-adjust", "trace-view", "calibrate", "reference", "align-floors",
   ]);
-  const sheet = SIMPLE_TABS.find((t) => t.id === "draw").groups.find((g) => g.label === "Sheet");
-  assert.equal(sheet.menu, undefined);
-  assert.ok(sheet.items.includes("sheet-list"));
-  assert.ok(sheet.items.includes("underlay-toggle"));
 });
 
 test("DWG and CAD sit on Output with the export commands", () => {
@@ -46,20 +43,129 @@ test("DWG and CAD sit on Output with the export commands", () => {
   assert.equal(exchange.items.find((item) => item.id === "dwg").todo.length > 20, true);
 });
 
-test("route edits wait for a selection and place-component is not a second place tool", () => {
+test("route edits live on the Services tab and place-component is not a second place tool", () => {
   const services = RIBBON.find((t) => t.id === "build").groups.find((g) => g.label === "Services");
   const ids = services.items.map((item) => item.id);
   assert.equal(ids.includes("service-place"), false);
-  assert.deepEqual(services.items.filter((item) => item.needs !== "service").map((item) => item.id), [
+  assert.deepEqual(services.items.filter((item) => !item.contextOnly).map((item) => item.id), [
     "electrical", "plumbing", "waterheater", "drainage", "service-route",
   ]);
-  assert.deepEqual(services.items.filter((item) => item.needs === "service").map((item) => item.id), [
-    "service-node", "service-rise", "service-connect", "service-type", "service-slope",
+  const route = CONTEXT_TABS.service.groups.find((g) => g.label === "Route");
+  assert.deepEqual(route.items, ["service-node", "service-rise", "service-connect", "service-type", "service-slope"]);
+  for (const id of route.items) assert.equal(services.items.find((item) => item.id === id).needs, undefined, id);
+});
+
+test("every id on a contextual tab is a RIBBON item, so a command is defined once", () => {
+  const items = ribbonItems();
+  for (const [key, tab] of Object.entries(CONTEXT_TABS)) {
+    for (const group of tab.groups) for (const id of group.items) assert.ok(items.has(id), `${key}: ${id}`);
+  }
+});
+
+test("the Walls tab lists the agreed actions, and its Edit group is the last to shrink", () => {
+  const wall = selectionTab(new Set(["wall"]));
+  assert.equal(wall.label, "Walls");
+  assert.deepEqual(wall.groups.map((g) => g.label), ["Edit", "Wall", "Trim and extend", "View", "Finishes", "Height", "Arrange"]);
+  assert.deepEqual(wall.groups[0].items.map((i) => i.id), ["move", "copy", "rotate", "mirror", "align", "delete"]);
+  assert.deepEqual(wall.groups[1].items.map((i) => i.id), ["split-wall", "snap", "join", "select-similar"]);
+  assert.deepEqual(wall.groups[2].items.map((i) => i.id), ["trim-corner", "trim-single", "trim-circle"]);
+  assert.deepEqual(wall.groups[3].items.map((i) => i.id), ["edit-face", "flip-face", "second-screen"]);
+  assert.deepEqual(wall.groups[4].items.map((i) => i.id), ["wall-finishes"]);
+  assert.deepEqual(wall.groups[5].items.map((i) => i.id), ["attach", "detach"]);
+  assert.equal(ribbonItems().get("edit-face").label, "Show face");
+  assert.equal(ribbonItems().get("split-wall").label, "Split here");
+  assert.deepEqual(selectionTab(new Set(["door"])).groups[0].items.map((i) => i.id), ["move", "copy", "align", "delete", "select-similar"]);
+  assert.deepEqual(selectionTab(new Set(["door"])).groups[1].items.map((i) => i.id), ["flip-hinge", "flip-swing"]);
+  assert.equal(GROUP_PRIORITY.Edit, -1);
+  assert.equal(GROUP_PRIORITY.Walls, -1);
+});
+
+test("a room and a site boundary get no tab, and nothing selected gets none", () => {
+  assert.equal(selectionTab(new Set(["room"])), null);
+  assert.equal(selectionTab(new Set()), null);
+});
+
+test("a selectable kind with no tab of its own gets Modify | Selection", () => {
+  const sel = selectionTab(new Set(["other"]));
+  assert.equal(sel.label, "Selection");
+  assert.equal(sel.key, "selection");
+  assert.deepEqual(sel.groups.map((g) => g.label), ["Edit"]);
+  assert.deepEqual(sel.groups[0].items.map((i) => i.id), ["move", "copy", "rotate", "mirror", "align", "delete"]);
+  const withWall = selectionTab(new Set(["wall", "other"]));
+  assert.equal(withWall.label, "Multi-Select");
+  assert.deepEqual(withWall.groups[0].items.map((i) => i.id), ["move", "copy", "rotate", "mirror", "align", "delete"]);
+});
+
+test("a selection of more than one thing gains Existing and Proposed", () => {
+  const walls = tabWithStatus(selectionTab(new Set(["wall"])));
+  const status = walls.groups.find((group) => group.label === "Status");
+  assert.deepEqual(status.items.map((item) => item.id), ["mark-existing", "mark-proposed"]);
+  assert.equal(status.items[0].label, "Existing");
+  assert.equal(status.items[1].label, "Proposed");
+  const mixed = tabWithStatus(selectionTab(new Set(["wall", "door"])));
+  assert.equal(mixed.label, "Multi-Select");
+  assert.deepEqual(mixed.groups.at(-1).items.map((item) => item.id), ["mark-existing", "mark-proposed"]);
+  assert.deepEqual(mixed.groups[0].items.map((item) => item.id), ["move", "copy", "align", "delete"]);
+  const placing = tabWithStatus(placingTab("walls"));
+  assert.equal(placing.label, "Place Wall");
+  assert.deepEqual(placing.groups.at(-1).items.map((item) => item.id), ["mark-existing", "mark-proposed"]);
+  const source = readFileSync(new URL("../ribbon-fit.js", import.meta.url), "utf8");
+  assert.ok(source.includes('"mark-existing": \''));
+  assert.ok(source.includes('"mark-proposed": \''));
+});
+
+test("Multi-Select is the intersection of the kinds' Edit groups", () => {
+  const mixed = selectionTab(new Set(["wall", "door"]));
+  assert.equal(mixed.label, "Multi-Select");
+  // A door's Edit group has no Rotate or Mirror, so a wall and a door share neither.
+  assert.deepEqual(mixed.groups[0].items.map((i) => i.id), ["move", "copy", "align", "delete"]);
+  const withRoute = selectionTab(new Set(["wall", "service"]));
+  assert.deepEqual(withRoute.groups[0].items.map((i) => i.id), ["move", "delete"]);
+  const withRoom = selectionTab(new Set(["wall", "room"]));
+  assert.deepEqual(withRoom.groups[0].items.map((i) => i.id), ["delete"]);
+});
+
+test("a placing tab is derived from the item's tool, not written out", () => {
+  const walls = placingTab("walls");
+  assert.equal(walls.label, "Place Wall");
+  assert.deepEqual(walls.groups[0].items.map((i) => i.id), ["walls", "boundary", "foundations"]);
+  assert.equal(placingTab("doors").label, "Place Door");
+  assert.equal(placingTab("windows").label, "Place Window");
+  assert.equal(placingTab("floors").label, "Place Floor");
+  assert.equal(placingTab("stairs").label, "Place Stair");
+  assert.equal(placingTab("waterheater").label, "Place Water heater");
+  for (const [id, item] of ribbonItems()) {
+    if (item.tool && item.tabId === "build" && id !== "roof-cut") assert.ok(placingTab(id), id);
+    else assert.equal(placingTab(id), null, id);
+  }
+  // Trims arm a tool but do not place anything. Cut roof edits a roof.
+  assert.equal(placingTab("trim-corner"), null);
+  assert.equal(placingTab("roof-cut"), null);
+});
+
+test("only the agreed commands wait for a selection", () => {
+  const waits = [...ribbonItems().values()].filter((i) => i.needsSelection).map((i) => i.id).sort();
+  assert.deepEqual(waits, [
+    "attach", "copy", "delete", "detach", "group", "mirror", "move", "rotate", "select-similar", "snap", "ungroup",
   ]);
+  for (const id of ["align", "join", "split", "split-wall", "trim-corner", "trim-single", "trim-circle"]) {
+    assert.equal(ribbonItems().get(id).needsSelection, undefined, id);
+  }
+});
+
+test("every id on a contextual tab has its own icon", () => {
+  const source = readFileSync(new URL("../ribbon-fit.js", import.meta.url), "utf8");
+  for (const tab of Object.values(CONTEXT_TABS)) {
+    for (const group of tab.groups) {
+      for (const id of group.items) {
+        assert.ok(source.includes(`${/^[a-z]+$/i.test(id) ? id : `"${id}"`}: '`), `no glyph for ${id}`);
+      }
+    }
+  }
 });
 
 test("only Openings opts into large buttons", () => {
-  const labels = [...RIBBON, ...SIMPLE_TABS]
+  const labels = RIBBON
     .flatMap((tab) => tab.groups)
     .filter((group) => group.large)
     .map((group) => group.label);

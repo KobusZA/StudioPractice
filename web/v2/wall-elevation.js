@@ -25,7 +25,7 @@ import {
 } from "./openings.js";
 import { joinedWallPolygon } from "./drawing-defaults.js";
 import { deriveWalls, drawnSegmentFromWall, skuDrawnHeight } from "./walls.js";
-import { faceFinishBands, reanchorRun } from "./finish-model.js";
+import { faceArcScale, faceFinishBands, reanchorRun } from "./finish-model.js";
 
 /** Drags and typed values snap to this, metres. */
 export const ELEVATION_SNAP = 0.05;
@@ -121,6 +121,11 @@ function heightGuide(pack, wall) {
 export function faceExtent(wall, all, side) {
   const length = wall.length;
   const whole = { from: 0, to: length };
+  // Stations stay on the centreline. The developed face is longer on the
+  // outside of a curve and shorter on the inside; that scale is applied when
+  // the face is measured. The straight mitre outline is only the chord, and
+  // reading it in these stations would shorten the face.
+  if (wall?.arc) return whole;
   if (!(wall.thickness > 0) || !(length > 1e-6)) return whole;
   const sameLevel = (all || []).filter((w) => w.level === wall.level);
   const poly = joinedWallPolygon(wall, sameLevel);
@@ -162,6 +167,7 @@ export function elevationModel(doc, pack, faceRef, walls = null, foundationSku =
   const flip = side === -1;
   const length = wall.length;
   const extent = faceExtent(wall, all, side);
+  const faceScale = faceArcScale(wall, side);
 
   const sku = skuById(pack, wall.sku);
   const resolved = resolvedBase(doc, pack, wall, wall.height || sku?.geometry?.height || pack.system?.wallHeight || 0);
@@ -224,9 +230,12 @@ export function elevationModel(doc, pack, faceRef, walls = null, foundationSku =
     length,
     // Where this side's face begins and ends, in the same stations as `length`
     // (viewing order). Corner joins push it past 0 / length or pull it short.
-    // `length` stays the centreline, which openings, finishes and quantities use.
+    // `length` stays the centreline, which openings and finish stations use.
+    // `faceScale` turns those stations into the developed length of this face.
     faceFrom: extent.from,
     faceTo: extent.to,
+    faceScale,
+    faceLength: (extent.to - extent.from) * faceScale,
     base,
     top,
     height: top - base,

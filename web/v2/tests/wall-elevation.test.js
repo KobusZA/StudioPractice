@@ -9,7 +9,7 @@ import { normalizePackUnits } from "../schema.js";
 import { deriveWalls } from "../walls.js";
 import { createFinishRun } from "../finish-model.js";
 import { addFoundationUnderWall, alignOutlineShift, applyOpeningEdit, applyTypedGap, applyWallTopEdit, axisAlignedOutline, dropGuideZ, elevationModel, faceRefForSelection, foundationTypes, includeDropGuide, maxTypedGap, openingSnapEdges, resizeOpeningCorner, snapElevation, translateOutlineEdge } from "../wall-elevation.js";
-import { elevationSvg } from "../wall-elevation-render.js";
+import { elevationSvg, faceScreenCenter, planFaceFrame } from "../wall-elevation-render.js";
 
 test("a guideline is measured down from the top of the wall and is a snap target", () => {
   assert.equal(dropGuideZ(2.4, 750), 1.65);
@@ -34,10 +34,48 @@ function drawnDoc(openings = []) {
   });
 }
 
+test("a curved face is the unrolled wall, centred on the chord", () => {
+  const doc = normalizeDoc({
+    segments: [{ id: "w1", sku: "TSP_MAS009", level: "01 GFL", x1: 0, y1: 0, x2: 6, y2: 0, arc: { radius: 4, side: 1 } }],
+  });
+  const wall = deriveWalls(doc, pack).find((w) => w.id === "w1");
+  assert.ok(wall.length > 6);
+  const model = elevationModel(doc, pack, { wallId: "w1", side: 1 });
+  assert.equal(model.faceFrom, 0);
+  assert.ok(Math.abs(model.faceTo - wall.length) < 1e-6, "the face is not shortened to the chord");
+  assert.ok(model.faceScale < 1, "the face toward the centre is the inside");
+  const outside = elevationModel(doc, pack, { wallId: "w1", side: -1 });
+  assert.ok(outside.faceScale > 1, "the other face is the outside");
+  assert.ok(Math.abs((outside.faceScale - model.faceScale) * wall.arc.radius - wall.thickness) < 1e-9);
+  assert.ok(Math.abs(model.faceLength - wall.length * model.faceScale) < 1e-9);
+  assert.ok(outside.faceLength > model.faceLength);
+  createFinishRun(doc, wall, 1, { category: "paint" });
+  const painted = elevationModel(doc, pack, { wallId: "w1", side: 1 });
+  const band = painted.finishBands.find((b) => b.category === "paint");
+  assert.ok(Math.abs((band.to - band.from) - wall.length) < 1e-6, "paint covers the unrolled face");
+  const centreArea = (band.to - band.from) * (band.top - band.bottom);
+  assert.ok(Math.abs(band.quantity - centreArea * model.faceScale) < 1e-6, "paint is the inside face");
+  const drawn = elevationSvg(painted, { width: 800, height: 400, interactive: true, frame: planFaceFrame({ ...wall, side: 1 }, { scale: 40, ox: 100, oy: 80 }, 0) });
+  assert.match(drawn.svg, new RegExp(`Wall elevation, ${Math.round(painted.faceLength * 1000)} long`));
+  const rect = drawn.svg.match(/<rect x="[^"]+" y="[^"]+" width="([^"]+)" height="[^"]+" class="elev-wall"/);
+  assert.ok(rect);
+  assert.ok(Math.abs(Number(rect[1]) - wall.length * painted.faceScale * 40) < 1e-4, "the drawing is the developed face");
+
+  const cam = { scale: 40, ox: 100, oy: 80 };
+  const frame = planFaceFrame({ ...wall, side: 1 }, cam, 0);
+  assert.ok(Math.abs(frame.span - 6 * 40) < 1e-6, "the plan span is the chord");
+  const centre = faceScreenCenter(frame.originX, frame.span);
+  assert.ok(Math.abs(centre - (frame.originX + frame.span / 2)) < 1e-6);
+  const hungOffTheStart = frame.originX + frame.dir * wall.length / 2 * frame.scale;
+  assert.ok(Math.abs(centre - hungOffTheStart) > 1, "the centre is not halfway along the unrolled length");
+});
+
 test("the model gives the face's length, base, top and its openings", () => {
   const doc = drawnDoc([{ id: "o1", sku: "TSP_WN1212", wallId: "w1", t: 0.5 }]);
   const m = elevationModel(doc, pack, { wallId: "w1", side: 1 });
   assert.equal(m.length, 6);
+  assert.equal(m.faceScale, 1);
+  assert.equal(m.faceLength, 6);
   assert.equal(m.top - m.base, m.height);
   assert.ok(m.height > 0);
   assert.equal(m.openings.length, 1);
@@ -684,6 +722,8 @@ test("the open face matches the plan scale and lines up with the wall", async ()
   assert.equal(frame.dir, 1);
   assert.equal(frame.vertical, false);
   assert.equal(frame.originX, 100 + 8);
+  assert.equal(frame.span, 6 * 40);
+  assert.equal(faceScreenCenter(frame.originX, frame.span), frame.originX + 120);
 
   const drawn = elevationSvg(face, { width: 800, height: 500, interactive: true, frame });
   const wall = drawn.svg.match(/<rect x="([^"]+)" y="([^"]+)" width="([^"]+)" height="([^"]+)" class="elev-wall"/);

@@ -1,0 +1,72 @@
+/* Shared by practice operations and, later, the planner. One palette: cream
+   paper, ink, and copper. Each colour has one job.
+   - Copper: the primary action, "you are here", and flagged money.
+   - Navy: links.
+   - Ink: job codes, and tabs that are not the current one.
+   - Green and amber: status, nothing else. */
+
+:root {
+  --bg-primary: #efe8dc;
+  --bg-secondary: #f7f3ea;
+  --bg-tertiary: #e8e0d2;
+  --bg-elevated: #fffdf8;
+  --bg-hover: rgba(26, 22, 18, 0.05);
+  --ink: #1a1612;
+  --ink-soft: #5c5348;
+  --ink-muted: #8a8074;
+  --hairline: rgba(26, 22, 18, 0.10);
+  --hairline-strong: rgba(26, 22, 18, 0.18);
+  --copper: #b2451e;
+  --copper-dark: #8d3416;
+  --copper-tint-8: rgba(178, 69, 30, 0.08);
+  --copper-tint-16: rgba(178, 69, 30, 0.16);
+  --ok: #2f6b4f;
+  --ok-tint: rgba(47, 107, 79, 0.12);
+  --warn: #9a6b1f;
+  --warn-tint: rgba(154, 107, 31, 0.14);
+  --navy: #243044;
+
+  /* A field is lighter than the page, so it reads as something to type in. */
+  --field-bg: #fffdf8;
+  --focus-ring: 0 0 0 3px var(--copper-tint-16);
+
+  --radius-sm: 3px;
+  --radius-md: 4px;
+  --radius-lg: 8px;
+
+  --lift-1: 0 1px 2px rgba(26, 22, 18, 0.06), 0 2px 8px rgba(26, 22, 18, 0.06);
+  --lift-2: 0 4px 16px rgba(26, 22, 18, 0.10);
+  --lift-3: 0 18px 40px rgba(26, 22, 18, 0.14);
+
+  --ease: cubic-bezier(.2, .7, .2, 1);
+  --t-fast: 120ms;
+  --t: 200ms;
+  --t-slow: 360ms;
+
+  --font-ui: "Source Sans 3", "Segoe UI", sans-serif;
+  --font-display: Fraunces, Georgia, serif;
+
+  /* The dark screen the planner already signs in on. The splash and the
+     practice sign-in use the same ground, so one fades into the other. */
+  --login-bg: #1a1612;
+  --login-bg-glow: rgba(178, 69, 30, 0.16);
+  --login-card-bg: #f3eee4;
+
+  /* Optional artwork behind the splash. `none` until a file is dropped in;
+     setting this to a url() needs no other change. */
+  --splash-art: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --t-fast: 0.01ms;
+    --t: 0.01ms;
+    --t-slow: 0.01ms;
+  }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

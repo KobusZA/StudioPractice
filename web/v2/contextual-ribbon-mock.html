@@ -1,0 +1,796 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>StudioPractice — contextual ribbon, the way Revit does it</title>
+  <link rel="icon" href="../logo-full.png" type="image/png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,560&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --paper: #f3eee4;
+      --paper-2: #e8e0d2;
+      --ink: #1a1612;
+      --ink-soft: #5c5348;
+      --line: #cfc4b3;
+      --copper: #b2451e;
+      --navy: #243044;
+      --ok: #2f6b4f;
+      --ctx: #7fba5a;
+      --ctx-deep: #245c28;
+      --ctx-wash: #e5f3dc;
+      --ctx-tab: #d7ebc8;
+      --select: #2a6fdb;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      background:
+        radial-gradient(1200px 500px at 10% -10%, #fff8ee 0%, transparent 55%),
+        var(--paper);
+      color: var(--ink);
+      font-family: "Source Sans 3", "Segoe UI", sans-serif;
+    }
+    button, select { font: inherit; color: inherit; }
+    button { cursor: pointer; }
+    .eval {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 8px 16px;
+      padding: 10px 22px;
+      background: var(--navy);
+      color: #f3eee4;
+      position: sticky;
+      top: 0;
+      z-index: 8;
+    }
+    .eval h1 {
+      font-family: Fraunces, serif;
+      font-size: 1.05rem;
+      font-weight: 500;
+      margin: 0;
+    }
+    .eval p { margin: 0; font-size: 0.82rem; opacity: 0.85; }
+    .chrome { background: rgba(243, 238, 228, 0.96); border-bottom: 1px solid var(--line); }
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 22px;
+    }
+    .brand { display: flex; gap: 10px; align-items: center; }
+    .brand img { width: 36px; height: 36px; }
+    .brand h1 { font-family: Fraunces, serif; font-size: 1.15rem; font-weight: 500; margin: 0; }
+    .brand p { margin: 0; font-size: 0.78rem; color: var(--ink-soft); }
+    .top-actions { display: flex; gap: 8px; }
+    .top-actions button {
+      border: 1px solid var(--line);
+      background: #fff;
+      padding: 6px 12px;
+    }
+    .top-actions .primary { background: var(--navy); color: #f3eee4; border-color: var(--navy); }
+    .tabs { display: flex; gap: 0; padding: 0 14px; border-top: 1px solid var(--line); }
+    .tab {
+      border: none;
+      border-bottom: 2px solid transparent;
+      background: transparent;
+      padding: 8px 14px;
+      font-size: 0.86rem;
+      color: var(--ink-soft);
+    }
+    .tab:hover { background: rgba(26, 22, 18, 0.04); }
+    .tab.active { color: var(--ink); border-bottom-color: var(--copper); font-weight: 600; }
+    .tab.ctx {
+      background: var(--ctx-tab);
+      color: var(--ctx-deep);
+      margin: 0 4px;
+      border-radius: 3px 3px 0 0;
+      animation: tab-in 160ms ease-out;
+    }
+    .tab.ctx .pipe { opacity: 0.55; padding: 0 4px; }
+    .tab.ctx.active {
+      background: var(--ctx);
+      color: #10280f;
+      border-bottom-color: var(--ctx-deep);
+    }
+    @keyframes tab-in {
+      from { transform: translateY(-4px); opacity: 0; }
+      to { transform: none; opacity: 1; }
+    }
+    .ribbon-body {
+      display: flex;
+      align-items: stretch;
+      min-height: 148px;
+      padding: 8px 18px 6px;
+      gap: 0;
+      overflow-x: auto;
+    }
+    .ribbon-body.is-contextual { background: var(--ctx-wash); }
+    .group {
+      display: flex;
+      flex: 0 0 auto;
+      flex-direction: column;
+      justify-content: flex-end;
+      gap: 4px;
+      padding: 0 12px;
+      border-right: 1px solid var(--line);
+    }
+    .ribbon-body.is-contextual .group { border-right-color: #c5ddb4; }
+    .group:last-child { border-right: none; }
+    .group-items {
+      display: grid;
+      grid-auto-flow: column;
+      grid-template-rows: repeat(3, 1fr);
+      gap: 1px 2px;
+      align-content: end;
+    }
+    .group-label {
+      font-size: 0.66rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--ink-soft);
+      text-align: center;
+      white-space: nowrap;
+    }
+    .ribbon-body button.item {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      justify-content: center;
+      gap: 0;
+      border: 1px solid transparent;
+      background: transparent;
+      padding: 2px 8px;
+      font-size: 0.8rem;
+      line-height: 1.15;
+      white-space: nowrap;
+      text-align: left;
+    }
+    .ribbon-body button.item:hover:not(:disabled) { background: rgba(26, 22, 18, 0.06); }
+    .ribbon-body button.item:disabled { opacity: 0.38; cursor: default; }
+    .ribbon-body button.item.flash,
+    .ribbon-body button.item.on { background: var(--ink); color: var(--paper); }
+    .ribbon-body button.item.on .was { color: inherit; background: transparent; }
+    .item .was {
+      font-size: 0.62rem;
+      letter-spacing: 0.02em;
+      color: var(--ink-soft);
+      background: rgba(26, 22, 18, 0.06);
+      border-radius: 2px;
+      padding: 0 4px;
+    }
+    .ribbon-body.is-contextual .item .was { background: rgba(36, 92, 40, 0.1); color: var(--ctx-deep); }
+    .ribbon-body button.item.flash .was { color: inherit; background: transparent; }
+    .empty-note {
+      align-self: center;
+      margin: 0;
+      color: var(--ink-soft);
+      font-size: 0.86rem;
+    }
+    .status {
+      margin: 0;
+      padding: 8px 22px;
+      font-size: 0.84rem;
+      background: var(--paper-2);
+      border-bottom: 1px solid var(--line);
+    }
+    .status strong { font-weight: 600; }
+    .stage {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 280px;
+      gap: 16px;
+      padding: 16px 22px 8px;
+      align-items: start;
+    }
+    .plan {
+      border: 1px solid var(--line);
+      background: #fff;
+      min-height: 280px;
+    }
+    .plan header, .inspector header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 12px;
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--line);
+      background: var(--paper-2);
+    }
+    .plan h2, .inspector h2 {
+      margin: 0;
+      font-family: Fraunces, serif;
+      font-size: 1rem;
+      font-weight: 500;
+    }
+    .plan header span, .inspector header span { font-size: 0.75rem; color: var(--ink-soft); }
+    .plan svg { display: block; width: 100%; height: auto; }
+    .obj { cursor: pointer; }
+    .floor { fill: rgba(180, 69, 30, 0.06); stroke: none; }
+    .roof { fill: rgba(36, 48, 68, 0.06); stroke: var(--navy); stroke-width: 1.5; }
+    .wall { fill: none; stroke: var(--ink); stroke-width: 8; stroke-linejoin: miter; }
+    .wall-hit { fill: none; stroke: transparent; stroke-width: 22; }
+    .door { fill: #fff; stroke: var(--copper); stroke-width: 2; }
+    .window { fill: #d5e4ef; stroke: #3a5f7a; stroke-width: 2; }
+    .room-hit { fill: transparent; }
+    .room-label { font-size: 15px; fill: var(--ink-soft); pointer-events: none; }
+    .tag { font-size: 11px; fill: var(--ink-soft); pointer-events: none; }
+    .is-selected.floor { stroke: var(--select); stroke-width: 2; fill: rgba(42, 111, 219, 0.1); }
+    .is-selected.roof { stroke: var(--select); stroke-width: 2.5; fill: rgba(42, 111, 219, 0.12); }
+    .is-selected.wall { stroke: var(--select); }
+    .is-selected.door, .is-selected.window { stroke: var(--select); stroke-width: 3; }
+    .is-selected.room-hit { stroke: var(--select); stroke-width: 1.5; stroke-dasharray: 4 3; }
+    .inspector { border: 1px solid var(--line); background: #fff; }
+    .fields { padding: 10px 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+    .fields p { margin: 0; font-size: 0.84rem; color: var(--ink-soft); }
+    .field { display: flex; flex-direction: column; gap: 2px; font-size: 0.72rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-soft); }
+    .field b { font-weight: 600; font-size: 0.92rem; letter-spacing: 0; text-transform: none; color: var(--ink); }
+    .options {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px 18px;
+      min-height: 36px;
+      padding: 4px 22px;
+      background: #fff;
+      border-top: 1px solid var(--line);
+      font-size: 0.82rem;
+    }
+    .options label { display: flex; align-items: center; gap: 6px; }
+    .options select, .options input { font: inherit; }
+    .options .opt-hint { color: var(--ink-soft); }
+    .options .opt-name { font-weight: 600; }
+    .preview { border: 1px dashed var(--line); padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+    .preview-pic {
+      height: 72px;
+      background: linear-gradient(#f7f4ee, #e4eef3);
+      border: 1px solid var(--line);
+      display: flex;
+      align-items: flex-end;
+      padding: 4px 6px;
+      font-size: 0.72rem;
+      color: var(--ink-soft);
+    }
+    .notes { max-width: 48rem; margin: 8px 22px 36px; font-size: 0.88rem; color: var(--ink-soft); }
+    .notes h2 { font-family: Fraunces, serif; font-size: 1.15rem; color: var(--ink); font-weight: 500; }
+    .notes ul { padding-left: 1.2rem; }
+    .notes li { margin: 0.35em 0; }
+    @media (max-width: 860px) {
+      .stage { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="eval">
+    <h1>Contextual ribbon</h1>
+    <p>Prototype only. The planner is unchanged. Click the plan, a draw tool, or press Esc.</p>
+  </div>
+
+  <div class="chrome">
+    <header class="topbar">
+      <div class="brand">
+        <img src="../logo.png" width="36" height="36" alt="" />
+        <div>
+          <h1>StudioPractice</h1>
+          <p>Full ribbon. A green tab appears for a selection, or while a tool is placing.</p>
+        </div>
+      </div>
+      <div class="top-actions">
+        <button type="button">Demo house</button>
+        <button type="button" class="primary">Compile</button>
+      </div>
+    </header>
+    <nav class="ribbon" aria-label="Toolbars">
+      <div class="tabs" id="tabs"></div>
+      <div class="ribbon-body" id="ribbon"></div>
+    </nav>
+    <div class="options" id="options" aria-label="Options bar"></div>
+  </div>
+  <p class="status" id="status"></p>
+
+  <div class="stage">
+    <section class="plan" aria-label="Plan">
+      <header>
+        <h2>Ground floor</h2>
+        <span>Shift-click adds to the selection. The plan header no longer carries Rotate, Copy or Delete.</span>
+      </header>
+      <svg id="plan" viewBox="0 0 760 340" role="img" aria-label="A small plan. Click a wall, door, window, floor, room or roof.">
+        <polygon class="obj floor" data-id="floor" data-kind="floor" data-name="Ground floor slab" points="48,36 360,36 360,250 48,250" />
+        <polyline class="obj wall" data-id="wall" data-kind="wall" data-name="Wall A" points="48,36 360,36 360,250 48,250 48,36" />
+        <polyline class="obj wall-hit" data-id="wall" data-kind="wall" data-name="Wall A" points="48,36 360,36 360,250 48,250 48,36" />
+        <rect class="obj window" data-id="window" data-kind="window" data-name="Window W1" x="150" y="28" width="90" height="16" />
+        <rect class="obj door" data-id="door" data-kind="door" data-name="Door D1" x="168" y="242" width="64" height="16" />
+        <path d="M168 258 A64 64 0 0 1 232 194" fill="none" stroke="#b2451e" stroke-width="1" pointer-events="none" />
+        <rect class="obj room-hit" data-id="room" data-kind="room" data-name="Kitchen" x="150" y="120" width="110" height="36" />
+        <text class="room-label" x="205" y="143" text-anchor="middle">Kitchen</text>
+        <text class="tag" x="56" y="28">Wall A</text>
+        <text class="tag" x="248" y="24">W1</text>
+        <text class="tag" x="236" y="272">D1</text>
+        <polygon class="obj roof" data-id="roof" data-kind="roof" data-name="Main roof" points="430,70 700,70 700,150 565,230 430,150" />
+        <text class="tag" x="520" y="120">Roof</text>
+        <text class="tag" x="48" y="318">Click the floor fill for the slab. Click the Kitchen label for the room. Click the outline for the wall.</text>
+      </svg>
+    </section>
+    <aside class="inspector" aria-label="Properties">
+      <header>
+        <h2 id="insp-title">Properties</h2>
+        <span id="insp-kicker">Values</span>
+      </header>
+      <div class="fields" id="insp"></div>
+    </aside>
+  </div>
+
+  <section class="notes">
+    <h2>How Revit behaves, and what this copies</h2>
+    <ul>
+      <li>Select a wall, door, window, floor or roof and a green tab opens on its own. A room does not get one: Delete is already on Modify, and the name stays in the properties.</li>
+      <li>Click <strong>Walls</strong> and the green tab becomes <strong>Modify | Place Wall</strong>. The location line, and the note that Space flips the face, sit on the options bar under the ribbon. Esc stops placing before it clears a selection.</li>
+      <li>Move keeps you on the selection tab and puts Disjoin on the options bar. Align, Join and the trims stay available with nothing selected, because they ask you to pick as you go.</li>
+      <li>Flip face sits with Edit this face and Second screen. It switches which side of the wall you are looking at. It does not move the wall.</li>
+      <li>The tags mark where each action lives today. They are part of this mock, not the ribbon to build.</li>
+    </ul>
+  </section>
+
+  <script>
+    const FROM = {
+      ribbon: "Ribbon",
+      header: "Plan header",
+      pill: "On the plan",
+      inspector: "Inspector",
+    };
+
+    function item(id, label, from, needsSelection = true, extra = {}) {
+      return { id, label, from, needsSelection, ...extra };
+    }
+
+    // Align, join and the trims ask you to pick as you go, so they stay
+    // available with nothing selected. The rest act on a selection.
+    const EDIT = [
+      item("move", "Move", "ribbon"),
+      item("copy", "Copy", "ribbon"),
+      item("rotate", "Rotate", "ribbon"),
+      item("mirror", "Mirror", "ribbon"),
+      item("align", "Align", "ribbon", false),
+      item("delete", "Delete", "ribbon"),
+    ];
+
+    const PERMANENT = [
+      {
+        id: "build",
+        label: "Build",
+        groups: [
+          { label: "Walls", items: [item("walls", "Walls", null, false, { place: "wall" }), item("boundary", "Boundary", null, false, { place: "wall" }), item("foundations", "Foundations", null, false, { place: "wall" })] },
+          { label: "Openings", items: [item("doors", "Doors", null, false, { place: "door" }), item("windows", "Windows", null, false, { place: "window" })] },
+          { label: "Floors & roofs", items: [item("floors", "Floors", null, false, { place: "floor" }), item("roofs", "Roofs", null, false, { place: "roof" }), item("ceilings", "Ceiling", null, false, { place: "ceiling" })] },
+          { label: "Rooms", items: [item("rooms", "Room", null, false, { place: "room" }), item("room-sep", "Separate", null, false, { place: "separate" })] },
+          { label: "Finishes", items: [item("wall-finishes", "Wall finishes", null, false, { place: "wall-finish" }), item("finishes", "Floor finishes", null, false, { place: "floor-finish" })] },
+          { label: "Site", items: [item("contour", "Contour", null, false), item("platform", "Platform cut-out", null, false)] },
+        ],
+      },
+      {
+        id: "document",
+        label: "Document",
+        groups: [
+          { label: "Annotate", items: [item("dimensions", "Dimensions", null, false), item("revision", "Revision cloud", null, false), item("region", "Region", null, false)] },
+          { label: "Views", items: [item("section", "Section", null, false), item("elevation", "Elevation", null, false)] },
+        ],
+      },
+      {
+        id: "modify",
+        label: "Modify",
+        groups: [
+          { label: "Edit", items: EDIT },
+          { label: "Geometry", items: [item("split", "Split", "ribbon", false), item("join", "Join", "ribbon", false), item("trim-corner", "Trim to corner", "ribbon", false), item("trim-single", "Trim single", "ribbon", false), item("trim-circle", "Trim circle", "ribbon", false)] },
+          { label: "Arrange", items: [item("group", "Group", "ribbon"), item("ungroup", "Ungroup", "ribbon"), item("select-similar", "Select same type", "ribbon")] },
+        ],
+      },
+      {
+        id: "output",
+        label: "Output",
+        groups: [
+          { label: "Views", items: [item("view-3d", "3D", null, false), item("callout", "Call out", null, false)] },
+          { label: "Quantities", items: [item("boq", "BOQ", null, false), item("sheets", "Sheets", null, false)] },
+        ],
+      },
+      {
+        id: "check",
+        label: "Check",
+        groups: [
+          { label: "Compliance", items: [item("part-c", "Part C dimensions", null, false), item("gaps", "Data quality", null, false)] },
+        ],
+      },
+    ];
+
+    const CONTEXT = {
+      wall: {
+        label: "Walls",
+        groups: [
+          { label: "Edit", items: EDIT.map((it) => ({ ...it, from: it.id === "copy" || it.id === "rotate" || it.id === "delete" ? "header" : "ribbon" })) },
+          { label: "Wall", items: [
+            item("split", "Split", "pill", false),
+            item("snap", "Snap end", "pill"),
+            item("join", "Join", "ribbon", false),
+            item("trim-corner", "Trim to corner", "ribbon", false),
+            item("trim-single", "Trim single", "ribbon", false),
+            item("trim-circle", "Trim circle", "ribbon", false),
+            item("select-similar", "Select same type", "ribbon"),
+          ] },
+          { label: "View", items: [
+            item("edit-face", "Edit this face", "inspector", false),
+            item("flip-face", "Flip face", "inspector", false),
+            item("second-screen", "Second screen", "inspector", false),
+          ] },
+          { label: "Height", items: [
+            item("attach", "Attach base", "ribbon"),
+            item("detach", "Detach base", "ribbon"),
+            item("wall-finishes", "Wall finishes", "ribbon", false),
+          ] },
+          { label: "Arrange", items: [item("group", "Group", "ribbon"), item("ungroup", "Ungroup", "ribbon")] },
+        ],
+      },
+      door: {
+        label: "Doors",
+        groups: [
+          { label: "Edit", items: [item("move", "Move", "ribbon"), item("copy", "Copy", "ribbon"), item("rotate", "Rotate", "ribbon"), item("mirror", "Mirror", "ribbon"), item("align", "Align", "ribbon", false), item("delete", "Delete", "header"), item("select-similar", "Select same type", "ribbon")] },
+          { label: "Door", items: [item("flip-hinge", "Flip hinge", "header"), item("flip-swing", "Flip swing", "header")] },
+        ],
+      },
+      window: {
+        label: "Windows",
+        groups: [
+          { label: "Edit", items: [item("move", "Move", "ribbon"), item("copy", "Copy", "header"), item("rotate", "Rotate", "header"), item("align", "Align", "ribbon", false), item("delete", "Delete", "header"), item("select-similar", "Select same type", "ribbon")] },
+        ],
+      },
+      floor: {
+        label: "Floors",
+        groups: [
+          { label: "Edit", items: EDIT },
+          { label: "Floor", items: [
+            item("edit-poly", "Edit as polygon", "inspector"),
+            item("follow", "Follow external walls", "inspector"),
+            item("finishes", "Floor finishes", "ribbon"),
+          ] },
+        ],
+      },
+      roof: {
+        label: "Roofs",
+        groups: [
+          { label: "Edit", items: EDIT },
+          { label: "Roof", items: [item("roof-cut", "Cut into this roof", "inspector"), item("edit-poly", "Edit as polygon", "inspector")] },
+        ],
+      },
+      multi: {
+        label: "Multi-Select",
+        groups: [
+          { label: "Edit", items: [...EDIT, item("group", "Group", "ribbon")] },
+        ],
+      },
+    };
+
+    const PLACE = {
+      wall: {
+        label: "Place Wall",
+        hint: "Click to start a wall, click again to end.",
+        options: "wall",
+        groups: [{ label: "Draw", items: PERMANENT[0].groups[0].items }],
+      },
+      door: { label: "Place Door", hint: "Click a wall to place a door.", options: "hint", groups: [{ label: "Draw", items: [item("doors", "Doors", null, false, { place: "door" })] }] },
+      window: { label: "Place Window", hint: "Click a wall to place a window.", options: "hint", groups: [{ label: "Draw", items: [item("windows", "Windows", null, false, { place: "window" })] }] },
+      floor: { label: "Place Floor", hint: "Click around a room to draw a floor slab.", options: "hint", groups: [{ label: "Draw", items: [item("floors", "Floors", null, false, { place: "floor" })] }] },
+      roof: { label: "Place Roof", hint: "Click around the outline to draw a roof.", options: "hint", groups: [{ label: "Draw", items: [item("roofs", "Roofs", null, false, { place: "roof" })] }] },
+      ceiling: { label: "Place Ceiling", hint: "Draws at floor-to-ceiling height above this level, not at floor level.", options: "hint", groups: [{ label: "Draw", items: [item("ceilings", "Ceiling", null, false, { place: "ceiling" })] }] },
+      room: { label: "Place Room", hint: "Click inside the walls. The area is already shown; this names the room.", options: "hint", groups: [{ label: "Draw", items: [item("rooms", "Room", null, false, { place: "room" })] }] },
+      separate: { label: "Place Separation", hint: "Click one end, then the other. A separation line bounds a room where there is no wall.", options: "hint", groups: [{ label: "Draw", items: [item("room-sep", "Separate", null, false, { place: "separate" })] }] },
+      "wall-finish": { label: "Place Wall Finish", hint: "Add a finish on the selected wall, or draw where it runs.", options: "hint", groups: [{ label: "Draw", items: [item("wall-finishes", "Wall finishes", null, false, { place: "wall-finish" })] }] },
+      "floor-finish": { label: "Place Floor Finish", hint: "Add a finish, then cover the whole floor or draw an area.", options: "hint", groups: [{ label: "Draw", items: [item("finishes", "Floor finishes", null, false, { place: "floor-finish" })] }] },
+    };
+
+    const PROPS = {
+      wall: [["Type", "230 cavity brick"], ["Height", "2 700 mm"], ["Location line", "Centre"], ["Status", "Proposed"]],
+      door: [["Type", "813 mm door"], ["Width", "813 mm"], ["Host", "Wall A"]],
+      window: [["Type", "1 200 mm window"], ["Width", "1 200 mm"], ["Sill", "900 mm"]],
+      floor: [["Type", "100 mm slab"], ["Level", "Ground floor"]],
+      roof: [["Type", "Sheet roof"], ["Pitch", "15°"], ["Form", "Gable"]],
+      room: [["Name", "Kitchen"], ["Use", "Kitchen"]],
+    };
+
+    const OBJECTS = {
+      floor: { kind: "floor", name: "Ground floor slab" },
+      roof: { kind: "roof", name: "Main roof" },
+      wall: { kind: "wall", name: "Wall A" },
+      door: { kind: "door", name: "Door D1" },
+      window: { kind: "window", name: "Window W1" },
+      room: { kind: "room", name: "Kitchen" },
+    };
+
+    let active = "build";
+    let previous = "build";
+    let tool = null;
+    const selected = new Set();
+
+    const tabsEl = document.getElementById("tabs");
+    const ribbonEl = document.getElementById("ribbon");
+    const statusEl = document.getElementById("status");
+    const inspEl = document.getElementById("insp");
+    const inspTitle = document.getElementById("insp-title");
+    const optionsEl = document.getElementById("options");
+
+    function selectionKind() {
+      if (!selected.size) return null;
+      const kinds = new Set([...selected].map((id) => OBJECTS[id].kind));
+      if (kinds.size > 1) return "multi";
+      return [...kinds][0];
+    }
+
+    // A room has no actions worth a tab of their own. Delete is already on Modify.
+    function contextKey() {
+      const kind = selectionKind();
+      if (!kind || kind === "room") return null;
+      return kind;
+    }
+
+    function greenTab() {
+      if (tool?.place) return PLACE[tool.place];
+      const key = contextKey();
+      return key ? CONTEXT[key] : null;
+    }
+
+    function tabName(id) {
+      return PERMANENT.find((t) => t.id === id)?.label || "Build";
+    }
+
+    function selectionSentence() {
+      if (selected.size === 1) return `${OBJECTS[[...selected][0]].name} is selected.`;
+      return `${selected.size} things are selected.`;
+    }
+
+    function render() {
+      const ctx = greenTab();
+      const key = contextKey();
+
+      tabsEl.innerHTML = "";
+      for (const tab of PERMANENT) {
+        tabsEl.append(tabButton(tab.id, tab.label, false));
+        if (tab.id === "modify" && ctx) {
+          tabsEl.append(tabButton("contextual", `Modify <span class="pipe">|</span> ${ctx.label}`, true));
+        }
+      }
+
+      const contextualOn = active === "contextual" && ctx;
+      const showing = contextualOn ? ctx : PERMANENT.find((t) => t.id === (active === "contextual" ? "modify" : active));
+      ribbonEl.classList.toggle("is-contextual", Boolean(contextualOn));
+      ribbonEl.innerHTML = "";
+      if (showing) {
+        for (const group of showing.groups) {
+          const wrap = document.createElement("div");
+          wrap.className = "group";
+          const items = document.createElement("div");
+          items.className = "group-items";
+          for (const it of group.items) {
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "item" + (tool && tool.id === it.id ? " on" : "");
+            btn.textContent = it.label;
+            if (it.from) {
+              const tag = document.createElement("span");
+              tag.className = "was";
+              tag.textContent = FROM[it.from];
+              btn.append(tag);
+              btn.title = `Today this lives on the ${FROM[it.from].toLowerCase()}.`;
+            }
+            btn.disabled = it.needsSelection && selected.size === 0 && !tool?.place;
+            btn.addEventListener("click", () => onItem(btn, it));
+            items.append(btn);
+          }
+          const label = document.createElement("div");
+          label.className = "group-label";
+          label.textContent = group.label;
+          wrap.append(items, label);
+          ribbonEl.append(wrap);
+        }
+      }
+
+      renderOptions();
+      renderStatus(key, ctx);
+      renderInspector();
+      paintSelection();
+    }
+
+    function tabButton(id, html, contextual) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "tab" + (contextual ? " ctx" : "") + (active === id ? " active" : "");
+      btn.innerHTML = html;
+      btn.addEventListener("click", () => {
+        if (id !== "contextual") {
+          previous = id;
+          tool = null;
+        }
+        active = id;
+        render();
+      });
+      return btn;
+    }
+
+    function renderOptions() {
+      optionsEl.innerHTML = "";
+      const mode = tool?.place ? PLACE[tool.place].options : tool?.id === "move" ? "move" : null;
+      if (mode === "wall") {
+        optionsEl.innerHTML = `<span class="opt-name">Location line</span>
+          <label>Line
+            <select aria-label="Location line">
+              <option>Centre</option>
+              <option>Exterior face</option>
+              <option>Interior face</option>
+            </select>
+          </label>
+          <span class="opt-hint">Space flips the face.</span>`;
+        return;
+      }
+      if (mode === "move") {
+        optionsEl.innerHTML = `<span class="opt-name">Move</span>
+          <label><input type="checkbox" /> Disjoin</label>
+          <span class="opt-hint">Joined walls stay joined. Disjoin pulls them apart.</span>`;
+        return;
+      }
+      if (mode === "hint") {
+        optionsEl.innerHTML = `<span class="opt-hint">${PLACE[tool.place].hint} Esc stops.</span>`;
+        return;
+      }
+      optionsEl.innerHTML = `<span class="opt-hint">Tool settings show here while a command is running.</span>`;
+    }
+
+    function renderStatus(key, ctx) {
+      if (tool?.place) {
+        const place = PLACE[tool.place];
+        setStatus(`<strong>Modify | ${place.label}.</strong> ${place.hint} Esc stops placing and returns to ${tabName(previous)}.`);
+        return;
+      }
+      if (tool?.id === "move") {
+        setStatus("<strong>Move.</strong> Click the point to move from, then where it should land. Disjoin is on the options bar. Esc cancels the move and keeps the selection.");
+        return;
+      }
+      if (selectionKind() === "room") {
+        setStatus(`<strong>${selectionSentence()}</strong> A room keeps the Modify tab. Its name and use are in the properties. Delete is on Modify.`);
+        return;
+      }
+      if (!key) {
+        setStatus("<strong>Nothing selected.</strong> Click a wall, or click Walls to place one.");
+        return;
+      }
+      if (active === "contextual") {
+        const where = key === "multi"
+          ? "Only the actions shared by everything in the selection are shown."
+          : "Every action for this selection is on this tab. The tags mark where each one lives today.";
+        setStatus(`<strong>${selectionSentence()}</strong> Modify | ${ctx.label} opened on its own. ${where}`);
+        return;
+      }
+      setStatus(`<strong>${selectionSentence()}</strong> ${tabName(active)} is showing. The green Modify | ${ctx.label} tab is still there.`);
+    }
+
+    function setStatus(html) {
+      statusEl.innerHTML = html;
+    }
+
+    function renderInspector() {
+      inspEl.innerHTML = "";
+      const kind = selectionKind();
+      if (!kind || kind === "multi") {
+        inspTitle.textContent = "Properties";
+        const p = document.createElement("p");
+        p.textContent = kind === "multi"
+          ? `${selected.size} things selected. They do not share a type, so there is no type to edit. Actions that apply to all of them are on Modify | Multi-Select.`
+          : "Select a wall, door, window, floor, room or roof. Type, size and name show here. The actions stay on the ribbon.";
+        inspEl.append(p);
+        return;
+      }
+      const only = OBJECTS[[...selected][0]];
+      inspTitle.textContent = only.name;
+      for (const [k, v] of PROPS[kind]) {
+        const row = document.createElement("label");
+        row.className = "field";
+        row.innerHTML = `${k}<b>${v}</b>`;
+        inspEl.append(row);
+      }
+      if (kind === "wall") {
+        const preview = document.createElement("div");
+        preview.className = "preview";
+        preview.innerHTML = `<div class="preview-pic">Wall elevation</div>
+          <p>The picture stays here. Edit this face, Flip face and Second screen are on the ribbon.</p>`;
+        inspEl.append(preview);
+      }
+    }
+
+    function paintSelection() {
+      document.querySelectorAll("#plan .obj").forEach((node) => {
+        node.classList.toggle("is-selected", selected.has(node.dataset.id));
+      });
+    }
+
+    function onItem(btn, it) {
+      if (it.place) {
+        armPlace(it);
+        return;
+      }
+      if (it.id === "move" && selected.size) {
+        tool = { id: "move" };
+        render();
+        return;
+      }
+      btn.classList.add("flash");
+      setStatus(`<strong>${it.label}</strong> would run from this tab. The planner is unchanged.`);
+      setTimeout(() => btn.classList.remove("flash"), 700);
+    }
+
+    function armPlace(it) {
+      if (active !== "contextual") previous = active;
+      selected.clear();
+      tool = { id: it.id, place: it.place };
+      active = "contextual";
+      render();
+    }
+
+    function selectObject(id, additive) {
+      tool = null;
+      if (additive) {
+        if (selected.has(id)) selected.delete(id);
+        else selected.add(id);
+      } else {
+        selected.clear();
+        selected.add(id);
+      }
+      if (selected.size === 0) {
+        clearSelection();
+        return;
+      }
+      if (contextKey()) {
+        if (active !== "contextual") previous = active;
+        active = "contextual";
+      } else if (active === "contextual") {
+        active = previous;
+      }
+      render();
+    }
+
+    function clearSelection() {
+      selected.clear();
+      if (active === "contextual" && !tool?.place) active = previous;
+      render();
+    }
+
+    function cancelTool() {
+      const placing = Boolean(tool?.place);
+      tool = null;
+      if (placing) active = previous;
+      render();
+    }
+
+    document.getElementById("plan").addEventListener("click", (ev) => {
+      const obj = ev.target.closest(".obj");
+      if (tool?.place) {
+        const place = PLACE[tool.place];
+        const where = obj ? ` on ${obj.dataset.name}` : "";
+        setStatus(`<strong>${place.label}.</strong> ${place.hint} A click${where} would draw here. Esc stops placing.`);
+        return;
+      }
+      if (!obj) {
+        clearSelection();
+        return;
+      }
+      ev.stopPropagation();
+      selectObject(obj.dataset.id, ev.shiftKey);
+    });
+
+    document.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Escape") return;
+      if (tool) cancelTool();
+      else clearSelection();
+    });
+
+    render();
+  </script>
+</body>
+</html>

@@ -854,7 +854,8 @@ function netArea(model, pieces, cuts) {
     }
   }
   const cutArea = islands.length ? unionOnFace(model, islands) : 0;
-  return Math.max(0, unionOnFace(model, kept) - cutArea);
+  const along = model.faceScale > 0 ? model.faceScale : 1;
+  return Math.max(0, unionOnFace(model, kept) - cutArea) * along;
 }
 
 function openingPolys(model) {

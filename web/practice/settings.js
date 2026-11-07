@@ -14,6 +14,7 @@
 // by a load, a save, a discard or a reset.
 
 import { api } from "./api.js";
+import { emptyBlock } from "../shared/illustrations/marks.js";
 
 const draft = {
   code: null,
@@ -210,8 +211,8 @@ function html(ctx) {
   } else if (!draft.phases) {
     body = `<p class="note-line">${esc(draft.error || "Pick a project type.")}</p>`;
   } else if (!draft.phases.length) {
-    body = `<div class="empty">This type has no template, so a new job of this type starts with a
-      blank fee schedule that you fill in by hand. Add a phase to give it one.</div>`;
+    body = emptyBlock("plan", `This type has no template, so a new job of this type starts with a
+      blank fee schedule that you fill in by hand. Add a phase to give it one.`);
   } else {
     body = draft.phases.map((phase, p) => {
       const rows = phase.tasks.map((task, t) => {

@@ -16,7 +16,7 @@
        #screen-face and handles every control in it. The script below only
        says so when the plan tab is gone or has been reloaded. -->
   <main class="wall-screen-main">
-    <p class="wall-screen-wait" id="screen-waiting">Waiting for a wall. Select a wall on the plan and choose Open this face.</p>
+    <p class="wall-screen-wait" id="screen-waiting">Waiting for a wall or a floor. Select one on the plan and open it here.</p>
     <div class="wall-screen-face" id="screen-face" hidden></div>
     <div class="wall-screen-note" id="screen-note" hidden>
       <p id="screen-note-text"></p>
@@ -58,7 +58,7 @@
         close.hidden = state !== "closed";
         text.textContent = state === "closed"
           ? "The plan is closed."
-          : "The plan was reloaded. Choose Open this face on the plan to continue.";
+          : "The plan was reloaded. Open the wall or the floor on the plan to continue.";
         document.title = "Wall elevation";
       }
       tick();

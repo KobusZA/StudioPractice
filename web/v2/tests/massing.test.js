@@ -486,6 +486,34 @@ test("a wall under a gable follows the slope, and a low wall stays low", () => {
   assert.ok(Math.max(...lowPts.map((p) => p[2])) < 1.3, "a low wall is not stretched up to the roof");
 });
 
+test("a gable-end wall follows the ridge on the face outside the plate", () => {
+  const doc = normalizeDoc({
+    segments: [
+      { id: "w", sku: "TSP_MAS009", level: "01 GFL", x1: 0, y1: 0, x2: 0, y2: 6, status: "planned" },
+      { id: "s", sku: "TSP_MAS009", level: "01 GFL", x1: 0, y1: 0, x2: 8, y2: 0, status: "existing" },
+    ],
+    roofs: [{ id: "rf1", sku: pack.system.defaultRoofSku, form: "gable", pitch: 30, shape: rectShape(0, 0, 8, 6) }],
+  });
+  const payload = compile(doc, pack);
+  const roof = payload.sketchForms.find((f) => f.elementId === "rf1");
+  const rise = 3 * Math.tan((30 * Math.PI) / 180);
+  const ridgeZ = roof.elevation + rise;
+  const pts = facesFromPayload(payload).filter((f) => f.id === "w").flatMap((f) => f.pts);
+  const outerRidge = pts.filter((p) => p[0] < -0.05 && Math.abs(p[1] - 3) < 0.15 && p[2] > roof.elevation);
+  assert.ok(outerRidge.length > 0, "the outside face is split at the ridge");
+  assert.ok(outerRidge.every((p) => Math.abs(p[2] - ridgeZ) < 0.15), "the outside face rises to the ridge");
+  const above = pts.filter((p) => {
+    const y = Math.min(6, Math.max(0, p[1]));
+    const allowed = roof.elevation + (3 - Math.abs(y - 3)) * Math.tan((30 * Math.PI) / 180) + 0.05;
+    return p[2] > allowed;
+  });
+  assert.equal(above.length, 0, "nothing on the gable end sticks through the slope");
+
+  const side = facesFromPayload(payload).filter((f) => f.id === "s").flatMap((f) => f.pts);
+  const stuck = side.filter((p) => p[2] > roof.elevation + 0.2);
+  assert.equal(stuck.length, 0, "the eave wall stays at the plate");
+});
+
 test("a plate step is named on the higher roof, and a storey is not", () => {
   assert.deepEqual(plateCallouts([
     { id: "low", eaveZ: 2.8 },

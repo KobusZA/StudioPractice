@@ -1,18 +1,18 @@
+/* Palette lives in web/shared/tokens.css, imported below. These names are the
+   planner's own: a change to the shared palette lands here without a second
+   edit. Pages that load this file and not tokens.css still get the tokens,
+   because the import is in the file. */
+@import "../shared/tokens.css";
+
 :root {
-  --paper: #f3eee4;
-  --paper-2: #e8e0d2;
-  --ink: #1a1612;
-  --ink-soft: #5c5348;
+  --paper: var(--bg-primary);
+  --paper-2: var(--bg-tertiary);
+  /* A solid rule, heavier than the shared hairline, for the planner's chrome. */
   --line: #cfc4b3;
-  --copper: #b2451e;
-  --copper-dark: #8d3416;
-  --navy: #243044;
   --room: rgba(180, 69, 30, 0.08);
-  --wall: #1a1612;
-  --door: #b2451e;
+  --wall: var(--ink);
+  --door: var(--copper);
   --window: #3a5f7a;
-  --ok: #2f6b4f;
-  --warn: #9a6b1f;
   --fail: #9b2c2c;
   --shadow: 0 18px 40px rgba(26, 22, 18, 0.08);
   --control-pad: 8px 12px;
@@ -1204,6 +1204,34 @@ tbody tr:hover { background: rgba(26, 22, 18, 0.04); }
   line-height: 1.15;
 }
 
+/* Status sits with the other inspector labels. The word is the value, and clicking it flips. */
+.ctx-status-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+}
+.ctx-status-line > span {
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+.planner-fields #v2-ctx-status {
+  align-self: auto;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  cursor: pointer;
+}
+.planner-fields #v2-ctx-status:hover,
+.planner-fields #v2-ctx-status:focus-visible {
+  color: var(--copper, #b2451e);
+}
+
 #v2-ctx-remove {
   color: var(--copper-dark, #8d3416);
 }
@@ -1742,34 +1770,32 @@ tbody tr:hover { background: rgba(26, 22, 18, 0.04); }
   border-left: 1px solid var(--line);
 }
 
-.chrome .job-code {
+/* The same chip practice operations uses for "you are in this job"
+   (#current-job.is-here). Here it is also the way back: one chip, both apps. */
+.chrome .job-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 34ch;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--copper-dark);
+  border-radius: var(--radius-sm);
+  background: var(--copper);
+  color: #fff;
   font-size: 0.78rem;
   font-weight: 700;
   letter-spacing: 0.04em;
-  color: var(--copper);
-  white-space: nowrap;
-}
-
-.chrome .job-code[hidden],
-.chrome .practice-link[hidden] {
-  display: none;
-}
-
-.chrome .practice-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  font-size: 0.72rem;
-  font-weight: 600;
-  color: inherit;
-  opacity: 0.8;
   text-decoration: none;
   white-space: nowrap;
 }
 
-.chrome .practice-link:hover {
-  opacity: 1;
-  text-decoration: underline;
+.chrome .job-chip[hidden] {
+  display: none;
+}
+
+.chrome .job-chip:hover {
+  background: var(--copper-dark);
 }
 
 /* The name of the job is the most important thing in the bar, so it is also
@@ -1941,9 +1967,7 @@ body.library-home {
 }
 
 .auth-view {
-  --login-bg: #1a1612;
-  --login-bg-glow: rgba(178, 69, 30, 0.16);
-  --login-card-bg: #f3eee4;
+  /* --login-bg, --login-bg-glow and --login-card-bg come from the shared tokens. */
   --login-input-bg: #fff8ee;
   --login-border: #cfc4b3;
   --login-accent: #b2451e;
@@ -2222,10 +2246,6 @@ body.library-home {
     font-size: 0.86rem;
     max-width: 18ch;
   }
-
-  .ribbon-density-label {
-    display: none;
-  }
 }
 
 /* Active-level widget: a permanent sidebar beside the plan canvas, ported in
@@ -2294,6 +2314,14 @@ body.library-home {
   height: 0;
   border-left: 0;
   border-top: 1.5px dashed #b2451e;
+}
+
+.elev-align-line.is-skew {
+  width: auto;
+  height: 0;
+  border-left: 0;
+  border-top: 1.5px dashed #b2451e;
+  transform-origin: 0 0;
 }
 
 .svc-profile-dock {
@@ -2405,6 +2433,10 @@ body.library-home {
   width: auto;
   max-width: none;
   flex: 0 1 auto;
+}
+
+.svc-profile-dock.is-floor-picture .face-editor label[hidden] {
+  display: none;
 }
 
 .svc-profile-dock.is-floor-picture .face-editor-controls {
@@ -3063,30 +3095,6 @@ button.fin-kind {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.elev-card-actions {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex: 0 0 auto;
-}
-.planner-fields .elev-open-btn {
-  align-self: auto;
-  flex: 0 0 auto;
-  min-height: 22px;
-  padding: 0 6px;
-  border: 1px solid var(--line, rgba(26, 22, 18, 0.18));
-  border-radius: 3px;
-  background: #fffdf8;
-  color: var(--copper-dark, #8d3416);
-  font-size: 0.7rem;
-  font-weight: 600;
-  white-space: nowrap;
-}
-.planner-fields .elev-open-btn:hover,
-.planner-fields .elev-open-btn[aria-expanded="true"] {
-  border-color: var(--copper);
-  background: rgba(178, 69, 30, 0.08);
-}
 .elev-card-stage { position: relative; }
 
 /* On the preview drawing: send this face straight to the second screen. */
@@ -3122,6 +3130,12 @@ button.fin-kind {
 }
 
 /* A selected room or slab leads with this picture. Clicking it opens the floor strip. */
+.floor-card-wrap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+.planner-fields .floor-card-wrap button.elev-screen-btn { top: 34px; z-index: 3; }
 .planner-fields button.floor-card {
   position: relative;
   display: flex;
@@ -3569,8 +3583,7 @@ input.level-station-elev:focus {
   background: var(--paper-2);
 }
 
-/* Tabs on the left, the density switch on the right: it changes this row, so
-   it lives on this row. */
+/* The ribbon's tab row. */
 .ribbon-tabrow {
   display: flex;
   align-items: center;
@@ -3586,23 +3599,30 @@ input.level-station-elev:focus {
   border-bottom: none;
 }
 
-.ribbon-density {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
+/* The green contextual tab (Modify | Walls, Modify | Place Wall). It sits
+   right after Modify and takes a green wash over the row beneath it.
+   No top margin: a 4px inset made the tab row taller than the permanent
+   tabs, and the drawing jumped down every time the tab opened. Side
+   margins keep it a chip between its neighbours without changing the row. */
+.ribbon-tabs .tab.tab-context {
+  margin: 0 4px;
+  border-radius: 3px 3px 0 0;
+  background: #d7ebc8;
+  color: #245c28;
 }
 
-.ribbon-density-label {
-  font-size: 0.66rem;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--ink-soft);
+.ribbon-tabs .tab.tab-context.active {
+  background: #7fba5a;
+  color: #10280f;
+  border-bottom-color: #245c28;
 }
 
-.ribbon-density .seg button {
-  padding: 3px 9px;
-  font-size: 0.72rem;
+.ribbon-functions.is-contextual {
+  background: #e5f3dc;
+}
+
+.ribbon-functions.is-contextual .ribbon-group {
+  border-right-color: #c5ddb4;
 }
 
 /* Shrink-to-width row: groups never wrap to a second line or grow a
@@ -4020,13 +4040,6 @@ input.level-station-elev:focus {
   display: none;
 }
 
-/* Simple's Modify tab, shown before anything is selected. */
-.ribbon-select-hint {
-  margin: 6px 12px;
-  font-size: 0.84rem;
-  color: var(--ink-soft);
-}
-
 /* Overlay on the canvas, not in page flow: showing a hint or length/angle
    fields must not resize the sketch (a click on a type or the first wall
    click used to shove the canvas and the rubber-band jumped). Kept small and
@@ -4053,6 +4066,12 @@ input.level-station-elev:focus {
   pointer-events: none;
 }
 
+/* Length and angle sit in this overlay, so the fields have to take clicks
+   while the hint beside them does not. */
+.canvas-status .plan-options {
+  pointer-events: auto;
+}
+
 /* Next-step hint once a category/tool function is armed (e.g. "Click a wall
    to place a door."). One-shot commands surface their own feedback instead. */
 .ribbon-hint {
@@ -4072,13 +4091,6 @@ input.level-station-elev:focus {
   display: none !important;
 }
 
-/* Draw on / Corner in the bar share a row with the ribbon hint until the
-   first click; give the hint the full width so it does not sit on the buttons. */
-.canvas-status:has(#v2-wall-opts:not(.floating):not([hidden])) .ribbon-hint:not([hidden]) {
-  flex: 1 1 100%;
-  max-width: 100%;
-}
-
 /* Overrides the plain next-step hint when the armed tool would place
    something on a foundation storey - the one thing the level switcher can
    rule out without guessing which real storey is meant. Same amber as
@@ -4087,20 +4099,6 @@ input.level-station-elev:focus {
   color: #7a4a05;
   background: rgba(214, 158, 46, 0.16);
   border-color: rgba(214, 158, 46, 0.45);
-}
-
-/* Rotate / Copy / Delete on the plan header: shown only while something on
-   the plan is selected, so the three most common edits do not require a trip
-   to the Modify tab. */
-.header-modify {
-  display: inline-flex;
-  gap: 6px;
-}
-
-/* Author display beats the hidden attribute, which left Delete on screen
-   with an empty selection (Rotate and Copy hide themselves). */
-.header-modify[hidden] {
-  display: none !important;
 }
 
 #v2-rules .rules-part {
@@ -4215,6 +4213,13 @@ input.level-station-elev:focus {
   white-space: nowrap;
 }
 
+.plan-options label.move-disjoin input {
+  width: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
 .plan-options input {
   width: 3.6rem;
   font: inherit;
@@ -4262,32 +4267,6 @@ input.level-station-elev:focus {
   gap: 4px 12px;
 }
 
-/* While a wall is being drawn the choices sit beside its start (placed from
-   ui.js), so the eye does not have to leave the line to change them. Before
-   the first click, the same box sits beside the other wall's end the pointer
-   is on — the top-left bar cannot be reached without leaving that join. */
-.wall-opts.floating {
-  position: fixed;
-  z-index: 30;
-  flex-direction: column;
-  flex-wrap: nowrap;
-  align-items: flex-start;
-  gap: 6px;
-  padding: 6px 8px;
-  background: rgba(243, 238, 228, 0.96);
-  border: 1px solid var(--line);
-  box-shadow: var(--shadow);
-  pointer-events: auto;
-}
-
-.wall-opts.floating .plan-loc {
-  flex-direction: row;
-  align-items: center;
-}
-.wall-opts.floating {
-  gap: 4px;
-  padding: 3px;
-}
 .plan-loc .seg button {
   display: inline-flex;
   align-items: center;
@@ -4307,6 +4286,37 @@ input.level-station-elev:focus {
 .plan-loc .seg button {
   padding: 3px 5px;
   font-size: 0.72rem;
+}
+
+/* The running command's settings, as a ribbon group. It does not shrink
+   (data-fit="fixed"): location line, arc, corner, Hole / Remove, outline link.
+   Disjoin sits in the Move button's own group instead. */
+.ribbon-settings .ribbon-settings-items {
+  align-items: center;
+  gap: 10px;
+}
+
+.ribbon-group .move-disjoin {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  height: var(--row, 24px);
+  margin: 0;
+  padding: 0 8px;
+  font-size: 0.72rem;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.ribbon-group .move-disjoin input {
+  width: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
 }
 
 /* Merged Types + Inspector dock: one panel, three states

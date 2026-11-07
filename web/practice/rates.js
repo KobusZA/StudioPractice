@@ -13,6 +13,7 @@
 // by a load, a save or a discard.
 
 import { api } from "./api.js";
+import { emptyBlock } from "../shared/illustrations/marks.js";
 
 /** Exactly what qtyForUnit() in web/v2/schedule.js measures. */
 const UNITS = [
@@ -198,8 +199,8 @@ function html() {
   } else if (!draft.lines) {
     body = `<p class="note-line">${esc(draft.error || "Pick a rate book.")}</p>`;
   } else if (!draft.lines.length) {
-    body = `<div class="empty">This book prices nothing, so every line of a BOQ run against it
-      reads "&mdash;". Add a rate to give it something to price.</div>`;
+    body = emptyBlock("plan", `This book prices nothing, so every line of a BOQ run against it
+      reads "&mdash;". Add a rate to give it something to price.`);
   } else {
     body = grouped().map(([category, rows]) => `
       <section class="tpl-phase">

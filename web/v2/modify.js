@@ -1,11 +1,10 @@
 // Modify operations: toolbar 3 of the customer's requirements sheet.
 //
-// Every operation here is a single deterministic click with a stated default,
-// not an interactive gesture. Rotate is 90 degrees, mirror is about the
-// selection's own centre, align is to the primary object's left edge. That is a
-// deliberate trade: it makes the whole toolbar usable in a week instead of one
-// operation being usable in a week, and the defaults are the ones a rectangle
-// plan actually needs.
+// Rotate, mirror and align are a single click with a stated default: 90
+// degrees, the selection's own centre, the primary object's left edge. Copy is
+// the exception the plan makes interactive. The user picks a point and where
+// it lands, and the plan calls copySelection with that offset. With no offset
+// it still steps one object-width to the right, which is what the tests use.
 //
 // Pure functions over (doc, refs). They mutate the document and return
 // { ok, message }, so ui.js owns undo, persistence and redraw, and the tests
@@ -38,6 +37,7 @@ import {
 import { finishId } from "./finish-data.js";
 import { reanchorRun } from "./finish-model.js";
 import { CORNER_JOIN_TOL, drawnWallThickness, wallCornerNeighbors } from "./walls.js";
+import { findJoinTarget } from "./wall-join.js";
 import { rehostSocketsAfterSplit, transformFloorSockets, translateFloorSockets } from "./socket-host.js";
 
 const SHAPED = new Set(["room", "slab", "roof", "region"]);
@@ -1075,6 +1075,204 @@ function lineCross(a, b) {
   if (Math.abs(den) < 1e-12) return null;
   const t = ((b.x1 - a.x1) * by - (b.y1 - a.y1) * bx) / den;
   return { x: a.x1 + t * ax, y: a.y1 + t * ay };
+}
+
+// --- held joins ------------------------------------------------------------
+//
+// A joined end stays on the wall it meets. The join is not stored on the
+// segment: it is read once, at the start of a move, and then reapplied after
+// every translation. `shiftJoinedEnds` is the other half. It moves the
+// stationary neighbour. This one moves the ends of the wall under the pointer.
+
+const JOIN_GONE = {
+  parallel: "The join is gone — these walls now run parallel.",
+  reach: "The join is gone — the wall no longer reaches.",
+  short: "The join is gone — holding it would leave the wall too short.",
+};
+
+function wallDir(seg) {
+  const len = Math.hypot(seg.x2 - seg.x1, seg.y2 - seg.y1);
+  if (len < 1e-9) return null;
+  return { x: (seg.x2 - seg.x1) / len, y: (seg.y2 - seg.y1) / len, len };
+}
+
+function breakRow(rec, reason, name) {
+  const message = reason === "opening"
+    ? `The join is gone — holding it would push the ${name || "opening"} off the wall.`
+    : JOIN_GONE[reason];
+  return { wallId: rec.wallId, end: rec.end, hostId: rec.hostId, reason, message };
+}
+
+function openingBlocked(oldSeg, nextSeg, doc, skuById) {
+  for (const opening of doc.openings || []) {
+    if (openingLeaves(oldSeg, nextSeg, opening)) return openingName(opening, skuById);
+  }
+  return null;
+}
+
+/**
+ * Joins to remember for a move. One per end of each moving wall, to a wall
+ * that is not itself moving and is on the same level. A tee into the middle
+ * of a wall counts, which an end-only corner search misses. A wall that
+ * continues the same straight line does not: translation never changes the
+ * angle, so there is no line to slide along.
+ *
+ * `slack` is how far, along this wall, the end sits from the centreline
+ * crossing. It is what keeps a face-drawn corner from snapping to the
+ * centreline. `atHostEnd` is true when the host's own end is the join, so
+ * the host may stretch past where it ended. A mid-wall tee is not that, and
+ * sliding off the host's end breaks it.
+ */
+export function captureWallJoins(doc, refs, { skuById = () => null, tol = CORNER_JOIN_TOL } = {}) {
+  const movingIds = new Set();
+  const moving = [];
+  for (const ref of refs || []) {
+    if (!ref || ref.kind !== "segment" || movingIds.has(ref.id)) continue;
+    const seg = objectByRef(doc, ref);
+    if (!seg) continue;
+    movingIds.add(seg.id);
+    moving.push(seg);
+  }
+  const thick = (seg) => drawnWallThickness(skuById(seg?.sku));
+  const joins = [];
+  for (const seg of moving) {
+    const dir = wallDir(seg);
+    if (!dir) continue;
+    const others = (doc.segments || []).filter((other) => other && !movingIds.has(other.id) && sameLevel(other, seg));
+    for (const end of [1, 2]) {
+      const px = end === 1 ? seg.x1 : seg.x2;
+      const py = end === 1 ? seg.y1 : seg.y2;
+      const hosts = new Map();
+      const tee = findJoinTarget(others, { x: px, y: py }, thick, { reach: thick(seg) });
+      if (tee?.seg) hosts.set(tee.seg.id, { seg: tee.seg, atHostEnd: tee.end != null });
+      const corners = wallCornerNeighbors(
+        { ...seg, thickness: thick(seg) },
+        end,
+        others.map((other) => ({ ...other, thickness: thick(other) })),
+        { thicknessOf: (wall) => wall.thickness || 0, tol },
+      );
+      for (const hit of corners) {
+        if (hit.x === null || !hit.wall) continue;
+        hosts.set(hit.wall.id, { seg: hit.wall, atHostEnd: true });
+      }
+      let best = null;
+      for (const { seg: host, atHostEnd } of hosts.values()) {
+        const cross = lineCross(seg, host);
+        if (!cross) continue;
+        const slack = (px - cross.x) * dir.x + (py - cross.y) * dir.y;
+        if (!best || Math.abs(slack) < Math.abs(best.slack) - 1e-9) {
+          best = { hostId: host.id, slack, atHostEnd };
+        }
+      }
+      if (best) joins.push({ wallId: seg.id, end, ...best });
+    }
+  }
+  return joins;
+}
+
+/**
+ * Put each joined end back on its host after a translation. The end slides
+ * along the host, or the wall stretches, and the offset it was drawn with
+ * stays. A join that cannot be kept is left at the translated point and
+ * reported in `broken`; the caller drops it for the rest of the gesture.
+ * One end breaking does not release the other.
+ *
+ * An opening or finish on a wall whose length changed keeps its place on
+ * the plan. The hold is refused, and that end stays translated, when the
+ * wall would become shorter than a trace or a door or window would leave it.
+ */
+export function holdWallJoins(doc, joins, { skuById = () => null } = {}) {
+  const held = [];
+  const broken = [];
+  const groups = new Map();
+  for (const join of joins || []) {
+    if (!join?.wallId) continue;
+    const list = groups.get(join.wallId) || [];
+    list.push(join);
+    groups.set(join.wallId, list);
+  }
+  for (const [wallId, records] of groups) {
+    const seg = (doc.segments || []).find((row) => row && row.id === wallId);
+    if (!seg) continue;
+    const pre = endsOf(seg);
+    const dir = wallDir(pre);
+    if (!dir) continue;
+    const pending = [];
+    for (const rec of records) {
+      const host = (doc.segments || []).find((row) => row && row.id === rec.hostId);
+      if (!host || !sameLevel(host, seg)) {
+        broken.push(breakRow(rec, "reach"));
+        continue;
+      }
+      const cross = lineCross(pre, host);
+      if (!cross) {
+        broken.push(breakRow(rec, "parallel"));
+        continue;
+      }
+      const along = signedMetres(host, cross.x, cross.y);
+      const hostLen = Math.hypot(host.x2 - host.x1, host.y2 - host.y1);
+      if (!rec.atHostEnd && (along < -1e-3 || along > hostLen + 1e-3)) {
+        broken.push(breakRow(rec, "reach"));
+        continue;
+      }
+      pending.push({
+        rec,
+        x: cross.x + dir.x * (Number(rec.slack) || 0),
+        y: cross.y + dir.y * (Number(rec.slack) || 0),
+      });
+    }
+    let cur = { ...pre };
+    const accepted = [];
+    for (const hit of pending) {
+      const trial = { ...cur };
+      if (hit.rec.end === 1) { trial.x1 = hit.x; trial.y1 = hit.y; }
+      else { trial.x2 = hit.x; trial.y2 = hit.y; }
+      if (Math.hypot(trial.x2 - trial.x1, trial.y2 - trial.y1) < MIN_TRACE) {
+        broken.push(breakRow(hit.rec, "short"));
+        continue;
+      }
+      const off = openingBlocked({ id: seg.id, ...pre }, { id: seg.id, ...trial }, doc, skuById);
+      if (off) {
+        broken.push(breakRow(hit.rec, "opening", off));
+        continue;
+      }
+      cur = trial;
+      accepted.push(hit);
+    }
+    if (!accepted.length) continue;
+    seg.x1 = cur.x1;
+    seg.y1 = cur.y1;
+    seg.x2 = cur.x2;
+    seg.y2 = cur.y2;
+    if (Number.isFinite(seg.length)) seg.length = Math.hypot(cur.x2 - cur.x1, cur.y2 - cur.y1);
+    fitWallArc(seg);
+    const rigid = Math.abs((cur.x1 - pre.x1) - (cur.x2 - pre.x2)) < 1e-9
+      && Math.abs((cur.y1 - pre.y1) - (cur.y2 - pre.y2)) < 1e-9;
+    if (!rigid) {
+      const old = { id: seg.id, ...pre };
+      for (const opening of doc.openings || []) {
+        if (opening.wallId !== seg.id || !Number.isFinite(Number(opening.t))) continue;
+        retargetOpening(opening, old, seg);
+      }
+      const drop = [];
+      for (const run of doc.finishRuns || []) {
+        if (run.wallId !== seg.id) continue;
+        if (!retargetFinish(run, old, seg, skuById)) drop.push(run.id);
+      }
+      if (drop.length) doc.finishRuns = (doc.finishRuns || []).filter((run) => !drop.includes(run.id));
+    }
+    for (const hit of accepted) {
+      held.push({ wallId, end: hit.rec.end, hostId: hit.rec.hostId, x: hit.x, y: hit.y });
+    }
+  }
+  return { held, broken };
+}
+
+/** Joins already broken during this gesture. They are not tried again. */
+export function dropBrokenJoins(joins, broken) {
+  const gone = new Set((broken || []).map((row) => `${row.wallId}:${row.end}:${row.hostId}`));
+  if (!gone.size) return joins ? [...joins] : [];
+  return (joins || []).filter((join) => !gone.has(`${join.wallId}:${join.end}:${join.hostId}`));
 }
 
 /**

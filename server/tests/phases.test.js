@@ -97,6 +97,33 @@ test("ticking every task in a phase does not advance the job", async () => {
   assert.equal(after.current, null, "a full checklist is not a statement about where we are");
 });
 
+test("the register carries the phase list and when the job was last edited", async () => {
+  const { baseUrl } = await testServer();
+  const { client, project } = await firmWithRegisterProject(baseUrl, {
+    code: "R086", typeCode: "REZONING", budgetEstimate: null,
+  });
+  const { body: listed } = await client.get(`/api/projects/${project.id}/phases`);
+  const { body: before } = await client.get("/api/register");
+  const row = before.projects.find((item) => item.id === project.id);
+  assert.deepEqual(row.phases, listed.phases.map((phase) => phase.ref));
+  assert.ok(row.lastEditedAt);
+
+  await logHour(client, project.id);
+  const { body: after } = await client.get("/api/register");
+  const edited = after.projects.find((item) => item.id === project.id);
+  assert.ok(
+    new Date(edited.lastEditedAt).getTime() >= new Date(row.lastEditedAt).getTime(),
+    "logging time moves the job to the front of date-edited",
+  );
+
+  const quiet = await firmWithRegisterProject(baseUrl, {
+    code: "B012", typeCode: "BOQ", budgetEstimate: null,
+  });
+  const { body: quietRegister } = await quiet.client.get("/api/register");
+  const empty = quietRegister.projects.find((item) => item.id === quiet.project.id);
+  assert.deepEqual(empty.phases, [], "a job with no phase list sends none, not a guessed one");
+});
+
 test("the register carries each job's phase, so twelve jobs cost one query", async () => {
   const { baseUrl } = await testServer();
   const { client, project } = await firmWithRegisterProject(baseUrl, {

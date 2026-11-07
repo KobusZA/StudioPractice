@@ -119,17 +119,17 @@ export const RIBBON = [
           { id: "plumbing", label: "Plumbing", tool: "place", categories: ["sanitary"] },
           { id: "waterheater", label: "Water heating", tool: "place", categories: ["waterheater"] },
           { id: "drainage", label: "Drainage", tool: "place", categories: ["drainage"] },
-          // 2.5D routing (Full only — Simple's Services group is unchanged).
+          // 2.5D routing.
           // The four buttons above already place a component with the palette
           // filtered to one trade. Draw route is the other create action.
-          // The rest edit a route that exists, so they render only while a
-          // route or node is selected (`needs: "service"`).
+          // The rest edit a route that exists, so they live on the contextual
+          // Modify | Services tab (`contextOnly`), not on this row.
           { id: "service-route", label: "Draw route", command: "service-route" },
-          { id: "service-node", label: "Add node", command: "service-node", needs: "service" },
-          { id: "service-rise", label: "Rise / drop", command: "service-rise", needs: "service" },
-          { id: "service-connect", label: "Connect", command: "service-connect", needs: "service" },
-          { id: "service-type", label: "Change size / type", command: "service-type", needs: "service" },
-          { id: "service-slope", label: "Drainage slope", command: "service-slope", needs: "service" },
+          { id: "service-node", label: "Add node", command: "service-node", contextOnly: true },
+          { id: "service-rise", label: "Rise / drop", command: "service-rise", contextOnly: true },
+          { id: "service-connect", label: "Connect", command: "service-connect", contextOnly: true },
+          { id: "service-type", label: "Change size / type", command: "service-type", contextOnly: true },
+          { id: "service-slope", label: "Drainage slope", command: "service-slope", contextOnly: true },
         ],
       },
       {
@@ -199,11 +199,14 @@ export const RIBBON = [
       {
         label: "Modify",
         items: [
-          { id: "move", label: "Move", command: "move" },
-          { id: "select-similar", label: "Select same type", command: "select-similar" },
-          { id: "rotate", label: "Rotate", command: "rotate" },
-          { id: "mirror", label: "Mirror", command: "mirror" },
-          { id: "copy", label: "Copy", command: "copy" },
+          // `needsSelection` items grey out until something is selected.
+          // Align, Join, Split and the trims ask you to pick as you go, so
+          // they stay live.
+          { id: "move", label: "Move", command: "move", needsSelection: true },
+          { id: "select-similar", label: "Select same type", command: "select-similar", needsSelection: true },
+          { id: "rotate", label: "Rotate", command: "rotate", needsSelection: true },
+          { id: "mirror", label: "Mirror", command: "mirror", needsSelection: true },
+          { id: "copy", label: "Copy", command: "copy", needsSelection: true },
           { id: "align", label: "Align", command: "align" },
           { id: "merge", label: "Merge", command: "merge" },
           { id: "split", label: "Split", command: "split" },
@@ -211,18 +214,36 @@ export const RIBBON = [
           { id: "join", label: "Join", command: "join" },
           { id: "trim-corner", label: "Trim to corner", tool: "trim-corner" },
           { id: "trim-single", label: "Trim single", tool: "trim-single" },
-          { id: "attach", label: "Attach base", command: "attach" },
-          { id: "detach", label: "Detach base", command: "detach" },
+          { id: "trim-circle", label: "Trim circle", tool: "trim-circle" },
+          { id: "attach", label: "Attach base", command: "attach", needsSelection: true },
+          { id: "detach", label: "Detach base", command: "detach", needsSelection: true },
+          // Defined here once, shown only on the contextual tabs
+          // (`contextOnly`): they act on one kind of selection.
+          // "Split here" drags along the selected wall. "Split" above picks as you go.
+          { id: "split-wall", label: "Split here", command: "split-wall", contextOnly: true },
+          { id: "snap", label: "Snap end", command: "snap", needsSelection: true, contextOnly: true },
+          // Opens the elevation strip under the plan. The name says that.
+          { id: "edit-face", label: "Show face", command: "edit-face", contextOnly: true },
+          { id: "flip-face", label: "Flip face", command: "flip-face", contextOnly: true },
+          { id: "second-screen", label: "Second screen", command: "second-screen", contextOnly: true },
+          { id: "flip-hinge", label: "Flip hinge", command: "flip-hinge", contextOnly: true },
+          { id: "flip-swing", label: "Flip swing", command: "flip-swing", contextOnly: true },
+          { id: "roof-cut-here", label: "Cut into this roof", command: "roof-cut-here", contextOnly: true },
+          { id: "edit-poly", label: "Edit as polygon", command: "edit-poly", contextOnly: true },
+          { id: "follow-walls", label: "Follow external walls", command: "follow-walls", contextOnly: true },
+          // Shown on a contextual tab only while more than one thing is selected.
+          { id: "mark-existing", label: "Existing", command: "mark-existing", contextOnly: true },
+          { id: "mark-proposed", label: "Proposed", command: "mark-proposed", contextOnly: true },
         ],
       },
       {
         label: "Arrange",
         items: [
-          { id: "group", label: "Group", command: "group" },
-          { id: "ungroup", label: "Ungroup", command: "ungroup" },
+          { id: "group", label: "Group", command: "group", needsSelection: true },
+          { id: "ungroup", label: "Ungroup", command: "ungroup", needsSelection: true },
           { id: "undo", label: "Undo", command: "undo" },
           { id: "redo", label: "Redo", command: "redo" },
-          { id: "delete", label: "Delete", command: "delete" },
+          { id: "delete", label: "Delete", command: "delete", needsSelection: true },
         ],
       },
     ],
@@ -308,7 +329,7 @@ const ITEM_INDEX = ribbonItems();
  * Next-step hints shown over the canvas once a tool is armed (a
  * category/tool function became the active function). This is real UX -
  * "what do I do now" - not a decoration, so it lives with the item ids
- * rather than duplicated per density.
+ * rather than duplicated per tab.
  */
 export const HINTS = {
   underlay: "Load a PDF or image to trace.",
@@ -349,9 +370,11 @@ export const HINTS = {
   region: "Click each corner of the patch, then Enter. Pick Brick red, Concrete or Concrete 2 in the inspector. The patch stays ink on the drawing.",
   finishes: "Picture of this floor. Add a finish, then cover the whole floor or draw an area. Floor types stay on Floors.",
   dimensions: "Click two points. The dimension stays on this level and prints on its sheet. Select it and press Delete to remove it.",
-  move: "Click the point to move from, then where it should land. It snaps, or type the distance. Esc cancels.",
+  move: "Click the point to move from, then where it should land. Joined walls stay joined. Disjoin, or hold Alt, to pull them apart. Esc cancels.",
+  copy: "Click the point to copy from, then where the copy should land. Esc cancels.",
   "trim-corner": "Click each wall on the part you want to keep. Esc cancels.",
   "trim-single": "Click the wall that stays, then the wall to trim, on the part you want to keep. Esc cancels.",
+  "trim-circle": "Move the circle over a corner. A line that crosses inside it loses its shorter part. A line that stops short stretches to a meeting inside the circle. Click applies it. [ and ] resize the circle. Esc stops.",
   rotate: "Select something first, then rotate.",
   attach: "Click a wall or beam on this storey or the one below to sit the selection on top of it. Esc to cancel.",
   detach: "Stop following what the selection sits on, leaving it at the elevation it already has.",
@@ -377,11 +400,13 @@ export const HINTS = {
  * too narrow (see ribbon-fit.js). Positive = shrinks early (set up once per
  * job); negative = protected (drawn all day). Unlisted groups are 0.
  */
-const GROUP_PRIORITY = {
+export const GROUP_PRIORITY = {
   "Add drawing": 2,
   Sheet: 2,
   Levels: 1,
   Walls: -1,
+  // The contextual tabs' Edit group is the one drawn all day: last to shrink.
+  Edit: -1,
   // 3 ties Add drawing's first mixed step (shrink key step - 3). These groups
   // sit to its right, and a tie shrinks the rightmost, so they give up a step
   // before PDF / image and Satellite leave side by side. They are already
@@ -394,135 +419,225 @@ const GROUP_PRIORITY = {
   Components: 1,
 };
 
-/**
- * Simple density: a task-ordered *view* over the RIBBON items above, not a
- * second copy of them. Only ids, tab/group placement and the "collapse once
- * a sheet is loaded" behaviour live here; label, command, tool, categories
- * and todo all still come from RIBBON, so there is exactly one place that
- * defines what a function actually does.
- */
-export const SIMPLE_TABS = [
-  {
-    id: "draw",
-    label: "Draw",
-    groups: [
-      { label: "Sheet", collapseAfterLoad: true, items: ["underlay", "satellite", "calibrate", "reference", "sheet-list", "align-floors", "underlay-adjust", "trace-view", "underlay-toggle"] },
-      { label: "Levels", items: ["level-isolate"] },
-      { label: "Walls", items: ["walls"] },
-      { label: "Rooms", items: ["rooms", "room-sep"] },
-      { label: "Finishes", items: ["wall-finishes", "finishes"] },
-      { label: "Floors & roofs", items: ["floors", "roofs", "roof-cut"] },
-      { label: "Ceilings", items: ["ceilings"] },
-      { label: "Openings", large: true, items: ["doors", "windows"] },
-      { label: "Circulation", items: ["stairs"] },
-      { label: "Services", items: ["electrical", "plumbing", "waterheater", "drainage"] },
-    ],
-  },
-  {
-    id: "annotate",
-    label: "Annotate",
-    groups: [
-      { label: "Measure", items: ["dimensions"] },
-    ],
-  },
-  {
-    id: "modify",
-    label: "Modify",
-    needsSelection: true,
-    groups: [
-      { label: "Edit", items: ["move", "select-similar", "rotate", "mirror", "copy", "align", "split", "join", "trim-corner", "trim-single"] },
-      { label: "Elevation", items: ["attach", "detach"] },
-      { label: "Arrange", items: ["group", "ungroup", "delete"] },
-    ],
-  },
-  {
-    id: "issue",
-    label: "Issue",
-    groups: [
-      { label: "Views", items: ["view-3d", "view-camera", "section"] },
-      { label: "Quantities", items: ["boq"] },
-      { label: "Print", items: ["sheets", "project-info"] },
-      { label: "Check", items: ["gaps"] },
-    ],
-  },
-];
-
-/** First tab id for a density, so switching modes lands somewhere real. */
-export function firstTabId(mode) {
-  return (mode === "simple" ? SIMPLE_TABS : RIBBON)[0]?.id;
+/** First tab id: the permanent tab a first load opens on. */
+export function firstTabId() {
+  return RIBBON[0].id;
 }
 
-/** In Simple, the Sheet group offers only these until a sheet is loaded, then only the tools that act on it. */
-const SHEET_LOADERS = new Set(["underlay", "satellite"]);
+/** The id of the contextual tab while it is on the row. */
+export const CONTEXT_TAB_ID = "context";
 
-function visibleInSimple(item, group, state, sheetLoaded) {
-  if (!item) return false;
-  if (item.todo) return false;
-  if (item.categories && state.skuCount(item.categories) === 0) return false;
-  // The loaders stay after a sheet is there, so a second file can still be added.
-  if (group.collapseAfterLoad) return SHEET_LOADERS.has(item.id) || sheetLoaded;
-  return true;
+const EDIT_COMMON = ["move", "copy", "rotate", "mirror", "align", "delete"];
+
+/**
+ * Contextual tabs, by selection kind: a view over the RIBBON items above, not
+ * a second copy of them. Only ids and placement live here; label, command,
+ * glyph and hint all follow the id back to RIBBON, so a command is still
+ * defined once.
+ *
+ * A room and a site boundary get no tab: Delete is on Modify and the rest is
+ * in the inspector.
+ */
+export const CONTEXT_TABS = {
+  wall: {
+    label: "Walls",
+    groups: [
+      { label: "Edit", items: EDIT_COMMON },
+      // Wall finishes is not a height. The trims also extend a wall that
+      // stops short, so they sit together under that name.
+      { label: "Wall", items: ["split-wall", "snap", "join", "select-similar"] },
+      { label: "Trim and extend", items: ["trim-corner", "trim-single", "trim-circle"] },
+      { label: "View", items: ["edit-face", "flip-face", "second-screen"] },
+      { label: "Finishes", items: ["wall-finishes"] },
+      { label: "Height", items: ["attach", "detach"] },
+      { label: "Arrange", items: ["group", "ungroup"] },
+    ],
+  },
+  door: {
+    label: "Doors",
+    // A door stays in its wall, so Rotate flips the hinge and Mirror flips
+    // the swing. Those two are the Door buttons; listing them again here
+    // would show the same action twice.
+    groups: [
+      { label: "Edit", items: ["move", "copy", "align", "delete", "select-similar"] },
+      { label: "Door", items: ["flip-hinge", "flip-swing"] },
+    ],
+  },
+  window: {
+    label: "Windows",
+    groups: [{ label: "Edit", items: [...EDIT_COMMON, "select-similar"] }],
+  },
+  floor: {
+    label: "Floors",
+    groups: [
+      { label: "Edit", items: EDIT_COMMON },
+      { label: "Floor", items: ["edit-poly", "follow-walls", "finishes"] },
+    ],
+  },
+  roof: {
+    label: "Roofs",
+    groups: [
+      { label: "Edit", items: EDIT_COMMON },
+      { label: "Roof", items: ["roof-cut-here", "edit-poly"] },
+    ],
+  },
+  service: {
+    label: "Services",
+    groups: [
+      { label: "Edit", items: ["move", "delete"] },
+      { label: "Route", items: ["service-node", "service-rise", "service-connect", "service-type", "service-slope"] },
+    ],
+  },
+};
+
+/** What a selection kind with no tab of its own can still take from the Edit group. */
+const EDIT_OF_KIND = { room: ["delete"] };
+
+function editIdsOf(kind) {
+  const group = CONTEXT_TABS[kind]?.groups.find((g) => g.label === "Edit");
+  return group ? group.items : (EDIT_OF_KIND[kind] || EDIT_COMMON);
+}
+
+/** Resolve a tab's item ids against RIBBON, dropping any that do not exist. */
+function resolveGroups(groups) {
+  return groups
+    .map((group) => ({ ...group, items: group.items.map((id) => ITEM_INDEX.get(id)).filter(Boolean) }))
+    .filter((group) => group.items.length);
 }
 
 /**
- * Resolve the Simple layout against the live RIBBON items, dropping
- * unfinished (todo) and empty-catalog items entirely rather than greying
- * them out - a missing Ramp should not look like a broken Walls button.
+ * The contextual tab for a selection, or null when its kinds have none.
+ * `kinds` is a set of CONTEXT_TABS keys, plus "room" and "other". A room and
+ * a site boundary get no tab. Anything else with no tab of its own (a beam,
+ * a column, furniture, a stair) gets Modify | Selection, holding the shared
+ * Edit actions. A mixed selection gets Multi-Select: the intersection of the
+ * kinds' Edit groups, in the first kind's order.
  */
-function simpleTabsForState(state) {
-  const sheetLoaded = Boolean(state.sheetLoaded?.());
-  return SIMPLE_TABS.map((tab) => ({
-    ...tab,
-    groups: tab.groups
-      .map((group) => ({
-        ...group,
-        items: group.items.map((id) => ITEM_INDEX.get(id)).filter((item) => visibleInSimple(item, group, state, sheetLoaded)),
-      }))
-      .filter((group) => group.items.length),
-  })).filter((tab) => tab.groups.length);
+export function selectionTab(kinds) {
+  const list = [...kinds];
+  if (!list.length) return null;
+  if (list.length === 1) {
+    if (list[0] === "room") return null;
+    const def = CONTEXT_TABS[list[0]];
+    if (def) return { id: CONTEXT_TAB_ID, key: list[0], label: def.label, groups: resolveGroups(def.groups) };
+    const groups = resolveGroups([{ label: "Edit", items: editIdsOf(list[0]) }]);
+    return groups.length ? { id: CONTEXT_TAB_ID, key: "selection", label: "Selection", groups } : null;
+  }
+  const shared = editIdsOf(list[0]).filter((id) => list.every((kind) => editIdsOf(kind).includes(id)));
+  const groups = resolveGroups([{ label: "Edit", items: shared }]);
+  return groups.length ? { id: CONTEXT_TAB_ID, key: "multi", label: "Multi-Select", groups } : null;
+}
+
+/**
+ * Existing and Proposed on the open tab: a selection of one or many, and
+ * the tab shown while placing. The inspector only names the current status.
+ */
+export function tabWithStatus(tab) {
+  if (!tab) return tab;
+  if (tab.groups.some((group) => group.label === "Status")) return tab;
+  const items = ["mark-existing", "mark-proposed"].map((id) => ITEM_INDEX.get(id)).filter(Boolean);
+  if (!items.length) return tab;
+  return { ...tab, groups: [...tab.groups, { label: "Status", items }] };
+}
+
+/**
+ * A RIBBON item that arms a drawing tool on Build, i.e. places something.
+ * Cut roof edits a roof that is already there, so it keeps Modify | Roofs
+ * instead of opening Place Cut roof.
+ */
+const NOT_PLACING = new Set(["roof-cut"]);
+
+export function isPlacingItem(item) {
+  return Boolean(item?.tool && item.tabId === "build" && !NOT_PLACING.has(item.id));
+}
+
+/** "Walls" becomes "Wall", "Doors" "Door". Caption words that are not plural stay. */
+function singular(label) {
+  return /[^s]s$/i.test(label) ? label.slice(0, -1) : label;
+}
+
+/**
+ * Captions that do not singularise into the thing you place. "Staircase"
+ * is not "Staircas", and "Water heating" is the trade, not the heater.
+ */
+const PLACE_NAMES = {
+  stairs: "Stair",
+  waterheater: "Water heater",
+};
+
+function placeName(item) {
+  return PLACE_NAMES[item.id] || singular(item.label);
+}
+
+/**
+ * The tab shown while a draw tool is armed: Place Wall, Place Door, and so
+ * on. Derived from the item that armed it, never written out by hand. It
+ * shows the group that item came from, so the wrong type is one click away.
+ */
+export function placingTab(itemId) {
+  const item = ITEM_INDEX.get(itemId);
+  if (!isPlacingItem(item)) return null;
+  const group = RIBBON.find((t) => t.id === item.tabId)?.groups.find((g) => g.label === item.group);
+  const items = (group?.items || [item]).filter((it) => !it.contextOnly).map((it) => ITEM_INDEX.get(it.id));
+  return {
+    id: CONTEXT_TAB_ID,
+    key: `place:${item.id}`,
+    label: `Place ${placeName(item)}`,
+    groups: [{ label: item.group, large: group?.large, items }],
+  };
+}
+
+/** A permanent tab's groups: what only a contextual tab shows is left out. */
+function permanentGroups(tab) {
+  return tab.groups
+    .map((group) => ({ ...group, items: group.items.filter((item) => !item.contextOnly) }))
+    .filter((group) => group.items.length);
 }
 
 /**
  * Render the tab strip and the active tab's functions.
- * `state.mode` is "simple" (default) or "full". Simple filters RIBBON down to
- * a task-ordered subset via `state.skuCount`/`state.sheetLoaded`, hides todo
- * and empty-catalog items outright, and gates the Modify tab on
- * `state.hasSelection()`. Full renders every RIBBON tab/item as-is, including
- * the grey roadmap items. `state.serviceSelected()` decides whether route-edit
- * commands (`needs: "service"`) are on the row.
+ * Renders every RIBBON tab/item as-is, including the grey roadmap items.
+ * `state.contextTab` is the green tab for the selection or the armed draw
+ * tool (see `selectionTab` / `placingTab`), or null. It sits right after the
+ * permanent Modify tab, and `state.activeTab === CONTEXT_TAB_ID` shows it.
+ * `state.hasSelection()` greys out the `needsSelection` items.
  * `state.skuCount(categories)` decides whether a catalog-backed function has
  * anything behind it: a function pointing at an empty category is disabled and
  * says so, rather than opening a blank palette.
  */
 export function renderRibbon(tabsEl, functionsEl, state) {
-  const mode = state.mode === "full" ? "full" : "simple";
-  const tabs = mode === "simple" ? simpleTabsForState(state) : RIBBON;
+  const context = state.contextTab || null;
+  const hasSelection = Boolean(state.hasSelection?.());
 
   tabsEl.innerHTML = "";
-  for (const tab of tabs) {
+  tabsEl.setAttribute("role", "tablist");
+  tabsEl.setAttribute("aria-label", "Ribbon tabs");
+  const addTab = (id, label, className) => {
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.className = "tab";
-    btn.textContent = tab.label;
-    btn.classList.toggle("active", tab.id === state.activeTab);
-    btn.addEventListener("click", () => state.onTab(tab.id));
+    btn.className = className;
+    btn.textContent = label;
+    btn.dataset.tab = id;
+    btn.setAttribute("role", "tab");
+    btn.setAttribute("aria-selected", id === state.activeTab ? "true" : "false");
+    btn.classList.toggle("active", id === state.activeTab);
+    btn.addEventListener("click", () => state.onTab(id));
     tabsEl.appendChild(btn);
+  };
+  for (const tab of RIBBON) {
+    addTab(tab.id, tab.label, "tab");
+    if (tab.id === "modify" && context) addTab(CONTEXT_TAB_ID, `Modify | ${context.label}`, "tab tab-context");
   }
 
-  const tab = tabs.find((t) => t.id === state.activeTab) || tabs[0];
+  const shown = state.activeTab === CONTEXT_TAB_ID && context
+    ? context
+    : RIBBON.find((t) => t.id === state.activeTab) || RIBBON[0];
   functionsEl.innerHTML = "";
-  if (!tab) return;
+  functionsEl.classList.toggle("is-contextual", shown === context);
+  if (!shown) return;
+  const groups = shown === context ? shown.groups : permanentGroups(shown);
 
-  const selectionLocked = mode === "simple" && tab.needsSelection && !state.hasSelection?.();
-  if (selectionLocked) {
-    const note = document.createElement("p");
-    note.className = "ribbon-select-hint";
-    note.textContent = "Select a wall, door or slab on the plan, then these tools unlock.";
-    functionsEl.appendChild(note);
-    return;
-  }
-
-  for (const group of tab.groups) {
+  for (const group of groups) {
     const wrap = document.createElement("div");
     wrap.className = "ribbon-group";
     // How the group lays out (and how ribbon-fit.js shrinks it) follows from
@@ -545,15 +660,11 @@ export function renderRibbon(tabsEl, functionsEl, state) {
       items.append(anchorsEl, restEl);
     }
     // Commands listed on the group stay out of the row and open from More.
-    // Simple groups do not set this, so their copy of the same ids stays put.
     const menuIds = new Set(group.menu || []);
     const menuEl = document.createElement("div");
     menuEl.className = "ribbon-menu";
     let menuCount = 0;
     for (const item of group.items) {
-      // Route edits are useless until a route or node is selected. Omit them
-      // rather than greying a second column onto Build.
-      if (item.needs === "service" && !state.serviceSelected?.()) continue;
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = item.anchor ? "ribbon-item anchor" : "ribbon-item";
@@ -569,6 +680,9 @@ export function renderRibbon(tabsEl, functionsEl, state) {
       } else if (empty) {
         btn.disabled = true;
         btn.title = `The template has no ${item.categories.join(" or ")} types.`;
+      } else if (item.needsSelection && !hasSelection) {
+        btn.disabled = true;
+        btn.title = "Select something first.";
       } else if (extra.disabled) {
         btn.disabled = true;
         btn.title = extra.title || "Load a PDF or image first.";

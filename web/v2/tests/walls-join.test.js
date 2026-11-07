@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { joinWallCorners } from "../walls.js";
+import { joinWallCorners, selectionAngleJoint, selectionSideGaps } from "../walls.js";
 
 function wall(id, x1, y1, x2, y2, level = "l1") {
   return { id, x1, y1, x2, y2, level, length: Math.hypot(x2 - x1, y2 - y1) };
@@ -83,4 +83,74 @@ test("joinWallCorners closes a rectangle drawn with a slightly-off last corner",
   assert.equal(bottom.y2, left.y1);
   assert.equal(left.x2, top.x1);
   assert.equal(left.y2, top.y1);
+});
+
+test("selectionAngleJoint measures from the corner at the start", () => {
+  const run = wall("run", 0, 0, 4, 0);
+  const leg = wall("leg", 0, 0, 0, 3);
+  const joint = selectionAngleJoint(run, [leg], () => 0.22);
+  assert.deepEqual(joint.joint, { x: 0, y: 0 });
+  assert.deepEqual(joint.far, { x: 4, y: 0 });
+  assert.ok(joint.prev.y > 0, "the reference leaves the joint along the other wall");
+  assert.equal(joint.prev.x, 0);
+});
+
+test("selectionAngleJoint uses the end when the start meets nothing", () => {
+  const run = wall("run", 0, 0, 4, 0);
+  const leg = wall("leg", 4, 0, 4, 3);
+  const joint = selectionAngleJoint(run, [leg], () => 0.22);
+  assert.deepEqual(joint.joint, { x: 4, y: 0 });
+  assert.deepEqual(joint.far, { x: 0, y: 0 });
+});
+
+test("selectionAngleJoint prefers the start when both ends meet a wall", () => {
+  const run = wall("run", 0, 0, 4, 0);
+  const start = wall("start", 0, 0, 0, 3);
+  const end = wall("end", 4, 0, 4, -3);
+  const joint = selectionAngleJoint(run, [start, end], () => 0.22);
+  assert.deepEqual(joint.joint, { x: 0, y: 0 });
+});
+
+test("selectionAngleJoint leaves a free wall, a straight run, and a crowded corner", () => {
+  const run = wall("run", 0, 0, 4, 0);
+  assert.equal(selectionAngleJoint(run, [], () => 0.22), null);
+  const straight = wall("on", 4, 0, 8, 0);
+  assert.equal(selectionAngleJoint(run, [straight], () => 0.22), null);
+  const a = wall("a", 0, 0, 0, 3);
+  const b = wall("b", 0, 0, -2, 2);
+  assert.equal(selectionAngleJoint(run, [a, b], () => 0.22), null);
+});
+
+test("selectionSideGaps measures a return to its far end, not the join", () => {
+  const run = wall("run", 0, 0, 0, 4);
+  const leg = wall("leg", 0, 0, 3, 0);
+  const gaps = selectionSideGaps(run, [leg]);
+  assert.equal(gaps.length, 1);
+  assert.ok(Math.abs(gaps[0].dist - 3) < 1e-9);
+  assert.deepEqual({ x: gaps[0].x2, y: gaps[0].y2 }, { x: 3, y: 0 });
+});
+
+test("selectionSideGaps measures a wall running alongside", () => {
+  const run = wall("run", 0, 0, 4, 0);
+  const beside = wall("beside", 0, 2, 4, 2);
+  const gaps = selectionSideGaps(run, [beside]);
+  assert.equal(gaps.length, 1);
+  assert.ok(Math.abs(gaps[0].dist - 2) < 1e-9);
+  assert.ok(Math.abs(gaps[0].x1 - 2) < 1e-9);
+});
+
+test("selectionSideGaps keeps the nearer wall on a side", () => {
+  const run = wall("run", 0, 0, 4, 0);
+  const near = wall("near", 0, 1.5, 4, 1.5);
+  const far = wall("far", 0, 5, 4, 5);
+  const gaps = selectionSideGaps(run, [far, near]);
+  assert.equal(gaps.length, 1);
+  assert.ok(Math.abs(gaps[0].dist - 1.5) < 1e-9);
+});
+
+test("selectionSideGaps ignores a wall beyond the limit and a bare wall", () => {
+  const run = wall("run", 0, 0, 4, 0);
+  const away = wall("away", 0, 20, 4, 20);
+  assert.equal(selectionSideGaps(run, []).length, 0);
+  assert.equal(selectionSideGaps(run, [away]).length, 0);
 });

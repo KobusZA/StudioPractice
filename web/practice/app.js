@@ -1,4 +1,4 @@
-﻿// Practice operations: the register, the timesheet, and payment certificates.
+// Practice operations: the register, the timesheet, and payment certificates.
 //
 // Deliberately not part of web/v2. That is the drawing app, and the drawing
 // app is one activity that logs time against a job rather than the product.
@@ -13,6 +13,7 @@ import { mountTemplateEditor } from "./settings.js";
 import { mountRateBook } from "./rates.js";
 import { mountFirmSettings } from "./firm.js";
 import { mountTeam } from "./team.js";
+import { emptyBlock, pencilMark } from "../shared/illustrations/marks.js";
 
 const state = {
   session: null,
@@ -27,6 +28,11 @@ const state = {
   registerQuery: "",
   registerSort: "risk",
   registerAsc: false,
+  // Cards is the register's default. List is the table. Remembered per person
+  // and firm, along with pins and the jobs they actually opened.
+  registerLayout: "cards",
+  gallerySort: "edited",
+  pins: [],
   switcher: null,
   recentIds: [],
   phases: null,
@@ -45,6 +51,11 @@ const state = {
   entries: [],
   certificates: [],
   openCertificate: null,
+  // Set for the one render after a row is logged or a certificate is issued,
+  // so the confirmation plays once and a later redraw does not replay it.
+  freshEntryId: null,
+  stampId: null,
+  panelEnter: false,
   feeSchedule: null,
   tasks: [],
   // Task-list UI on the job page, reset when the job changes: which phase
@@ -60,6 +71,8 @@ const state = {
   signUpMode: false,
   returnView: null,
   newJob: null,
+  // Set when a job has just been created, so its header washes in from copper once.
+  jobArriving: false,
   // The "My time" screen: one person's log across every job. Built lazily by
   // ensureMyTime() the first time the view is opened.
   myTime: null,
@@ -325,7 +338,7 @@ const warningsHtml = (warnings) => (warnings.length
         <b>${esc(w.title)}</b>
         <p>${w.body}</p>
       </div>`).join("")}</div>`
-  : `<div class="empty">Nothing to flag. Quoted, captured and certified all agree.</div>`);
+  : emptyBlock("ticks", "Nothing to flag. Quoted, captured and certified all agree."));
 
 // --- the register list ------------------------------------------------------
 
@@ -464,32 +477,238 @@ function compareBy(column, ascending) {
   };
 }
 
-function visibleProjects() {
+/** Search and the filter chips, with no order applied. Cards and the table share this. */
+function filteredProjects() {
   const query = state.registerQuery.trim().toLowerCase();
   const filter = REGISTER_FILTERS[state.registerFilter] ?? REGISTER_FILTERS.all;
-  const rows = state.projects.filter((project) => {
+  return state.projects.filter((project) => {
     if (!filter.match(project)) return false;
     if (!query) return true;
     return [project.code, project.name, project.clientName]
       .some((field) => String(field || "").toLowerCase().includes(query));
   });
+}
+
+function visibleProjects() {
+  const rows = filteredProjects();
   return state.registerSort === "risk"
     ? rows.sort(byRisk)
     : rows.sort(compareBy(state.registerSort, state.registerAsc));
 }
 
-function registerHtml() {
-  if (!state.projects.length) {
-    return `<div class="empty">No jobs yet.<br />
-      The register is the spine: a job here needs no drawing, no template and no fee.<br />
-      Press <b>New job</b> and it will walk through each of those choices.</div>`;
+/** A muted band per project type, stable for a code, so a card without a drawing still has a colour that means something. */
+const TYPE_TINTS = ["#e4d3c4", "#d5ddd4", "#d4dbe3", "#e3dcc8", "#e0d0cb", "#d7ddd4", "#ddd4c8", "#d3d8d0"];
+
+function typeTint(code) {
+  const text = String(code || "");
+  if (!text) return "var(--bg-tertiary)";
+  let hash = 0;
+  for (let i = 0; i < text.length; i += 1) hash = (hash * 33 + text.charCodeAt(i)) >>> 0;
+  return TYPE_TINTS[hash % TYPE_TINTS.length];
+}
+
+function typeNameOf(project) {
+  const type = state.reference?.projectTypes?.find((item) => item.code === project.typeCode);
+  return type?.name || project.typeCode || "";
+}
+
+/** "2 days ago" while it is recent, then a short date. A missing stamp is left off, not guessed. */
+function editedLabel(iso) {
+  const days = daysSince(iso);
+  if (days === null) return "";
+  if (days === 0) return "Edited today";
+  if (days === 1) return "Edited yesterday";
+  if (days < 31) return `Edited ${days} days ago`;
+  const when = new Date(iso);
+  if (Number.isNaN(when.getTime())) return "";
+  return `Edited ${when.toLocaleDateString("en-ZA", { day: "numeric", month: "short", year: "numeric" })}`;
+}
+
+function editedBucket(iso) {
+  const days = daysSince(iso);
+  if (days === null || days >= 7) {
+    const when = iso ? new Date(iso) : null;
+    const now = new Date();
+    if (when && !Number.isNaN(when.getTime())
+      && when.getFullYear() === now.getFullYear() && when.getMonth() === now.getMonth()
+      && (days === null || days >= 7)) return "month";
+    return "older";
   }
-  const rows = visibleProjects();
+  return "week";
+}
+
+/** The warnings the register already derives. Named, so the dot is not a colour without a sentence. */
+function cardWarnings(project) {
+  const notes = [];
+  if (REGISTER_FILTERS.over.match(project)) notes.push("Past the fee");
+  if (REGISTER_FILTERS.unbilled.match(project)) notes.push("Worked, never billed");
+  if (project.status === "on_hold") notes.push("On hold");
+  else if (project.status === "halted") notes.push("Halted");
+  return notes;
+}
+
+function feeBadge(project) {
+  const burn = project.financials?.burn;
+  if (burn === null || burn === undefined) return `<span class="real flat">no fee</span>`;
+  const tone = burn > 1 ? "bad" : burn >= 0.8 ? "mid" : "good";
+  return `<span class="real ${tone}" title="Captured ÷ quoted">${percent(burn)}</span>`;
+}
+
+function cardPhaseStrip(project) {
+  const phases = Array.isArray(project.phases) ? project.phases : [];
+  if (!phases.length) return "";
+  const current = String(project.currentPhase || "").trim().toUpperCase();
+  const at = phases.findIndex((phase) => String(phase).trim().toUpperCase() === current);
+  return `<div class="card-phases" aria-hidden="true">
+    ${phases.map((phase, index) => {
+      const tone = at < 0 ? "future" : index < at ? "done" : index === at ? "now" : "future";
+      return `<span class="${tone}" title="${esc(phase)}"></span>`;
+    }).join("")}
+  </div>`;
+}
+
+/**
+ * One job, as a card. The picture is the plan when there is one. A job with
+ * no drawing gets a title block — the code, on a band of its type — because a
+ * grey frame would be a picture of work that does not exist.
+ */
+function jobCardHtml(project, { arrive = false, delay = 0 } = {}) {
+  const code = project.code || "no code";
+  const name = project.name || "Untitled";
+  const kind = typeNameOf(project);
+  const warnings = cardWarnings(project);
+  const pinned = state.pins.includes(project.id);
+  const edited = editedLabel(project.lastEditedAt);
+  const client = project.clientName || "—";
+  const picture = project.drawingId
+    ? `<div class="dwg dwg-cardpic">
+         <div class="dwg-frame"><canvas data-preview="${esc(project.id)}"></canvas></div>
+       </div>`
+    : `<div class="job-titleblock" style="--type-tint: ${typeTint(project.typeCode)}">
+         <div class="job-title-code">${esc(code)}</div>
+         ${kind ? `<div class="job-title-type">${esc(kind)}</div>` : ""}
+       </div>`;
+  return `
+    <article class="job-card${arrive ? " arrive" : ""}" style="${arrive ? `--arrive:${delay}ms` : ""}">
+      <button type="button" class="job-open" data-project="${esc(project.id)}"
+              aria-label="Open ${esc(code)}, ${esc(name)}">
+        <div class="job-pic">
+          ${picture}
+          <div class="job-badges">
+            ${feeBadge(project)}
+            ${warnings.length ? `<span class="card-warn" title="${esc(warnings.join(". "))}"></span>` : ""}
+          </div>
+        </div>
+        <div class="job-body">
+          <div class="job-code">${esc(code)}</div>
+          <div class="job-name">${esc(name)}</div>
+          <div class="job-meta"><span>${esc(client)}</span>${edited ? `<span>${esc(edited)}</span>` : ""}</div>
+        </div>
+        ${cardPhaseStrip(project)}
+      </button>
+      <button type="button" class="card-pin" data-pin="${esc(project.id)}"
+              aria-pressed="${pinned}" aria-label="${pinned ? "Unpin" : "Pin"} ${esc(code)}"
+              title="${pinned ? "Unpin" : "Pin"}">${pinned ? "Pinned" : "Pin"}</button>
+    </article>`;
+}
+
+function sortGallery(rows) {
+  const copy = rows.slice();
+  if (state.gallerySort === "code") {
+    return copy.sort((a, b) => String(a.code || "").localeCompare(String(b.code || "")));
+  }
+  if (state.gallerySort === "client") {
+    return copy.sort((a, b) => String(a.clientName || "").localeCompare(String(b.clientName || "")));
+  }
+  if (state.gallerySort === "risk") return copy.sort(byRisk);
+  return copy.sort((a, b) => String(b.lastEditedAt || "").localeCompare(String(a.lastEditedAt || "")));
+}
+
+function cardGroup(title, projects, stamp) {
+  if (!projects.length) return "";
+  const cards = projects.map((project) => {
+    const arrive = stamp.n < 24;
+    const delay = arrive ? stamp.n * 20 : 0;
+    stamp.n += 1;
+    return jobCardHtml(project, { arrive, delay });
+  }).join("");
+  return `<h3 class="card-group">${esc(title)}</h3><div class="card-grid">${cards}</div>`;
+}
+
+/** Pinned first. Date edited groups the rest; any other sort is one grid. */
+function galleryHtml(rows) {
+  const pinnedIds = new Set(state.pins);
+  const pinned = state.pins.map((id) => rows.find((project) => project.id === id)).filter(Boolean);
+  const rest = rows.filter((project) => !pinnedIds.has(project.id));
+  const stamp = { n: 0 };
+  let body = cardGroup("Pinned", pinned, stamp);
+  if (state.gallerySort === "edited") {
+    const sorted = sortGallery(rest);
+    const groups = { week: [], month: [], older: [] };
+    for (const project of sorted) groups[editedBucket(project.lastEditedAt)].push(project);
+    body += cardGroup("This week", groups.week, stamp);
+    body += cardGroup("This month", groups.month, stamp);
+    body += cardGroup("Older", groups.older, stamp);
+  } else {
+    body += `<div class="card-grid">${sortGallery(rest).map((project) => {
+      const arrive = stamp.n < 24;
+      const delay = arrive ? stamp.n * 20 : 0;
+      stamp.n += 1;
+      return jobCardHtml(project, { arrive, delay });
+    }).join("")}</div>`;
+  }
+  return body;
+}
+
+function registerToolbar({ cards = false } = {}) {
   const chips = Object.entries(REGISTER_FILTERS).map(([key, { label, match }]) => {
     const count = key === "all" ? state.projects.length : state.projects.filter(match).length;
     return `<button class="chip" data-filter="${key}"
               aria-pressed="${state.registerFilter === key}">${esc(label)} <b>${count}</b></button>`;
   }).join("");
+  const sort = cards ? `
+      <label class="gallery-sort">Sort
+        <select id="gallery-sort" aria-label="Sort jobs">
+          ${[["edited", "Date edited"], ["code", "Code"], ["client", "Client"], ["risk", "Risk order"]]
+            .map(([value, label]) => `<option value="${value}"${state.gallerySort === value ? " selected" : ""}>${label}</option>`)
+            .join("")}
+        </select>
+      </label>` : `
+      <button class="chip" data-sort="risk" aria-pressed="${state.registerSort === "risk"}">Risk order</button>`;
+  return `
+    <div class="toolbar">
+      <div class="layout-toggle" role="group" aria-label="How jobs are shown">
+        <button type="button" data-action="layout" data-layout="cards"
+                aria-pressed="${cards}">Cards</button>
+        <button type="button" data-action="layout" data-layout="list"
+                aria-pressed="${!cards}">List</button>
+      </div>
+      <input type="search" id="register-query" value="${esc(state.registerQuery)}"
+             placeholder="Code, description or client" aria-label="Search the register" />
+      <div class="chips">${chips}</div>
+      <div class="spacer" style="flex:1"></div>
+      ${sort}
+    </div>`;
+}
+
+function registerHtml() {
+  if (!state.projects.length) {
+    return emptyBlock("plan", `No jobs yet.<br />
+      The register is the spine: a job here needs no drawing, no template and no fee.<br />
+      Press <b>New job</b> and it will walk through each of those choices.<br />
+      <button class="btn btn-primary" type="button" data-action="new-job-empty">New job</button>`);
+  }
+  const cards = state.registerLayout !== "list";
+  const rows = cards ? filteredProjects() : visibleProjects();
+  const toolbar = registerToolbar({ cards });
+  if (cards) {
+    return `
+      <h3 class="sec">All jobs <small>${rows.length} of ${state.projects.length} jobs</small></h3>
+      ${toolbar}
+      ${rows.length ? galleryHtml(rows) : emptyBlock("search", "No job matches that.")}
+      <p class="note-line">Click a card to open the job. Double-click a card that has a drawing
+        to open the plan. A pin keeps that job in its own row at the top.</p>`;
+  }
 
   const head = registerColumns().map(([key, label, numeric]) => {
     const sorted = state.registerSort === key;
@@ -524,17 +743,11 @@ function registerHtml() {
 
   return `
     <h3 class="sec">All jobs <small>${rows.length} of ${state.projects.length} jobs</small></h3>
-    <div class="toolbar">
-      <input type="search" id="register-query" value="${esc(state.registerQuery)}"
-             placeholder="Code, description or client" aria-label="Search the register" />
-      <div class="chips">${chips}</div>
-      <div class="spacer" style="flex:1"></div>
-      <button class="chip" data-sort="risk" aria-pressed="${state.registerSort === "risk"}">Risk order</button>
-    </div>
+    ${toolbar}
     ${rows.length ? `<table class="grid">
       <thead><tr>${head}</tr></thead>
       <tbody>${body}</tbody>
-    </table>` : `<div class="empty">No job matches that.</div>`}
+    </table>` : emptyBlock("search", "No job matches that.")}
     <p class="note-line">${state.registerSort === "risk"
     ? `Ordered by risk: past the fee first, worst realisation next, then jobs that have not
        said anything yet.${canViewBilled()
@@ -603,12 +816,14 @@ function renderMain() {
   const main = el("main");
   if (state.view === "practice") {
     main.innerHTML = `<div class="panel wrap">${practiceHtml()}</div>`;
-    paintPreviews();
+    watchPreviews();
+    playArrivals(main);
     syncAddress();
     return;
   }
   if (state.view === "register") {
     main.innerHTML = `<div class="panel wrap">${registerHtml()}</div>`;
+    watchPreviews();
     syncAddress();
     return;
   }
@@ -627,6 +842,7 @@ function renderMain() {
       syncMyTimeProject(composerForm);
       updatePreview(composerForm);
     }
+    state.freshEntryId = null;
     syncAddress();
     return;
   }
@@ -706,8 +922,12 @@ function renderMain() {
   // task" or the Register form and then, say, striking an unrelated task
   // makes the field you were mid-sentence in "snap back" to empty.
   const pending = capturePendingEdits(main);
+  const arriving = state.jobArriving && !motionOff();
+  state.jobArriving = false;
+  const enter = state.panelEnter && !motionOff();
+  state.panelEnter = false;
   main.innerHTML = `
-    <div class="proj-head">
+    <div class="proj-head${arriving ? " arriving" : ""}">
       <nav class="crumbs" aria-label="Breadcrumb">
         <button type="button" data-action="go-register" title="Back to the list of all jobs">&lsaquo; All jobs</button>
       </nav>
@@ -727,7 +947,7 @@ function renderMain() {
         <div class="proj-head-side">
           <button class="btn btn-sm btn-primary" type="button" data-action="log-time">Log time</button>
           <div class="proj-head-drawing">
-            ${previewHtml(project, { size: "md", opens: "drawing" })}
+            ${headerPicture(project)}
             <button class="btn btn-sm" type="button" data-action="drawing">${drawingLabel}</button>
           </div>
         </div>
@@ -737,7 +957,7 @@ function renderMain() {
           <button data-tab="${tab}" aria-selected="${state.tab === tab}">${label}</button>`).join("")}
       </div>
     </div>
-    <div class="panel">${
+    <div class="panel${enter ? " tab-enter" : ""}">${
       state.tab === "schedule" ? feeScheduleHtml(project)
         : state.tab === "time" ? timeHtml(project)
           : state.tab === "certificates" ? certificatesHtml(project)
@@ -745,7 +965,10 @@ function renderMain() {
               : overviewHtml(project)
     }</div>`;
   restorePendingEdits(main, pending, draftScope());
-  paintPreviews();
+  watchPreviews();
+  playArrivals(main);
+  state.freshEntryId = null;
+  state.stampId = null;
   syncAddress();
 }
 
@@ -931,6 +1154,7 @@ async function openJob(id, { tab } = {}) {
   state.phases = null;
   state.phasePicker = false;
   state.recentIds = [id, ...state.recentIds.filter((other) => other !== id)].slice(0, 8);
+  saveGalleryPrefs();
   await loadTab();
   renderMain();
 }
@@ -979,6 +1203,14 @@ async function goToDrawing(project) {
     }));
     if (!attached?.drawing) return;
   }
+  // The planner reads this on its first paint, so the splash can name the
+  // job before the drawing itself has loaded.
+  try {
+    sessionStorage.setItem("tsp-splash-job", JSON.stringify({
+      code: project.code || "",
+      name: project.name || "",
+    }));
+  } catch { /* private mode: the splash names the product only */ }
   location.assign(`/v2/index.html?project=${encodeURIComponent(project.id)}`);
 }
 
@@ -1017,54 +1249,87 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
  * same reason the warnings are derived: it reports what the renderer actually
  * put on the canvas, so it cannot describe a plan that is not there.
  */
+function paintCanvas(canvas) {
+  if (!canvas.clientWidth || !canvas.clientHeight) return false;
+  const id = canvas.dataset.preview;
+  const preview = state.previews?.get(id) || null;
+  const drawn = preview ? drawPreview(canvas, preview) : null;
+  // Hatched paper only when the document is known and empty. A preview that
+  // has not loaded yet is not the same thing as a blank sheet.
+  const frame = canvas.closest(".dwg-frame");
+  if (preview) canvas.closest(".dwg")?.classList.toggle("blank", !drawn);
+  if (preview && !drawn) {
+    if (frame && !frame.querySelector(".blank-mark")) frame.insertAdjacentHTML("beforeend", pencilMark());
+  } else frame?.querySelector(".blank-mark")?.remove();
+  canvas.dataset.painted = "1";
+  const note = document.querySelector(`[data-preview-note="${CSS.escape(id)}"]`);
+  if (!note) return true;
+  if (!drawn) {
+    // An empty drawing is already shown as hatched paper; no caption needed.
+    note.textContent = preview ? "" : "Drawing not loaded";
+    if (preview) canvas.closest(".dwg")?.setAttribute("title", "Started, nothing drawn on it yet");
+    return true;
+  }
+  // What the plan is made of, not an inventory of it. Rooms are the answer
+  // where there are any - a house has a slab and a roof and saying so is
+  // not news. Where there are none, a site layout is its erven and a
+  // boundary job is its walls, and those are worth naming.
+  const parts = [];
+  if (drawn.rooms) parts.push(plural(drawn.rooms, "room"));
+  else if (drawn.slabs) parts.push(plural(drawn.slabs, "slab"));
+  else if (drawn.roofs) parts.push(plural(drawn.roofs, "roof"));
+  if (drawn.walls) parts.push(plural(drawn.walls, "wall"));
+  parts.push(`${drawn.width.toFixed(1)} \u00d7 ${drawn.height.toFixed(1)} m`);
+  note.textContent = parts.join(" \u00b7 ");
+  return true;
+}
+
+/** Resize repaints what is already on screen. Cards off screen wait until they scroll in. */
 function paintPreviews() {
-  for (const canvas of document.querySelectorAll("canvas[data-preview]")) {
-    const id = canvas.dataset.preview;
-    const preview = state.previews?.get(id) || null;
-    const drawn = preview ? drawPreview(canvas, preview) : null;
-    canvas.closest(".dwg")?.classList.toggle("blank", !drawn);
-    const note = document.querySelector(`[data-preview-note="${CSS.escape(id)}"]`);
-    if (!note) continue;
-    if (!drawn) {
-      // An empty drawing is already shown as hatched paper; no caption needed.
-      note.textContent = preview ? "" : "Drawing not loaded";
-      if (preview) canvas.closest(".dwg")?.setAttribute("title", "Started, nothing drawn on it yet");
-      continue;
-    }
-    // What the plan is made of, not an inventory of it. Rooms are the answer
-    // where there are any - a house has a slab and a roof and saying so is
-    // not news. Where there are none, a site layout is its erven and a
-    // boundary job is its walls, and those are worth naming.
-    const parts = [];
-    if (drawn.rooms) parts.push(plural(drawn.rooms, "room"));
-    else if (drawn.slabs) parts.push(plural(drawn.slabs, "slab"));
-    else if (drawn.roofs) parts.push(plural(drawn.roofs, "roof"));
-    if (drawn.walls) parts.push(plural(drawn.walls, "wall"));
-    parts.push(`${drawn.width.toFixed(1)} \u00d7 ${drawn.height.toFixed(1)} m`);
-    note.textContent = parts.join(" \u00b7 ");
+  for (const canvas of document.querySelectorAll("canvas[data-preview][data-painted]")) {
+    paintCanvas(canvas);
   }
 }
 
+let previewObserver = null;
+
+function watchPreviews() {
+  previewObserver?.disconnect();
+  const canvases = [...document.querySelectorAll("canvas[data-preview]")];
+  if (!canvases.length) return;
+  if (typeof IntersectionObserver !== "function") {
+    canvases.forEach(paintCanvas);
+    return;
+  }
+  previewObserver = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      if (paintCanvas(entry.target)) previewObserver.unobserve(entry.target);
+    }
+  }, { root: null, rootMargin: "200px" });
+  for (const canvas of canvases) previewObserver.observe(canvas);
+}
+
 /**
- * The drawings, together. Only jobs that have one appear - there is no
- * placeholder tile for a job nobody has drawn, because a grey rectangle
- * captioned with a job code is a picture of work that does not exist.
+ * The six jobs last opened, as cards. With none remembered yet, the six most
+ * recently edited stand in, so a first visit is not an empty row.
  */
-function drawingsHtml() {
-  if (!state.previews) return "";
-  const drawn = state.projects.filter((project) => state.previews.has(project.id));
-  if (!drawn.length) return "";
+function recentCardsHtml(opened) {
+  const cards = opened.length
+    ? opened.slice(0, 6)
+    : state.projects.slice().sort(
+      (a, b) => String(b.lastEditedAt || "").localeCompare(String(a.lastEditedAt || "")),
+    ).slice(0, 6);
+  if (!cards.length) return "";
+  const stamp = { n: 0 };
   return `
-    <h3 class="sec">Drawings
-      <small>${drawn.length} of ${plural(state.projects.length, "job")}
-        ${drawn.length === 1 ? "has" : "have"} a document</small>
-    </h3>
-    <div class="dwg-grid">${drawn.map((project) => `
-      <div class="dwg-card">
-        ${previewHtml(project)}
-        <button type="button" class="link-job" data-project="${esc(project.id)}"
-          >${esc(project.code || "no code")} &middot; ${esc(project.name || "Untitled")}</button>
-      </div>`).join("")}</div>`;
+    <h3 class="sec">Recent</h3>
+    <div class="card-grid recent-row">${cards.map((project) => {
+      const delay = stamp.n * 20;
+      stamp.n += 1;
+      return jobCardHtml(project, { arrive: true, delay });
+    }).join("")}</div>
+    <p class="recent-more"><button type="button" class="link-btn" data-action="go-register">All jobs →</button></p>`;
 }
 
 // --- where the job has got to -----------------------------------------------
@@ -1278,15 +1543,123 @@ const TABS = [
  * It used to render only when nothing was selected, which nothing could
  * produce - boot always opened the first job - so the firm never saw it.
  */
+const COUNT_WORDS = ["no", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve"];
+
+/** "Two jobs", "One job". Past twelve, the digits. */
+function countPhrase(n, singular, plural) {
+  if (n === 1) return `One ${singular}`;
+  const word = n <= 12 ? COUNT_WORDS[n] : String(n);
+  return `${word} ${plural}`;
+}
+
+/**
+ * The session carries an email and no given name. The first word of the
+ * address is used when it reads as a name, and left off when it does not.
+ */
+function greetingName() {
+  const local = String(state.session?.email || "").split("@")[0] || "";
+  const first = local.split(/[._+\-]/)[0];
+  if (!/^[A-Za-z]{2,20}$/.test(first)) return "";
+  return first.charAt(0).toUpperCase() + first.slice(1).toLowerCase();
+}
+
+function greetingHtml() {
+  const hour = new Date().getHours();
+  const part = hour < 12 ? "morning" : hour < 17 ? "afternoon" : "evening";
+  const name = greetingName();
+  const hello = name ? `Good ${part}, ${name}.` : `Good ${part}.`;
+  const over = state.projects.filter(REGISTER_FILTERS.over.match).length;
+  const unbilled = canViewBilled()
+    ? state.projects.filter(REGISTER_FILTERS.unbilled.match).length
+    : 0;
+  const rest = over
+    ? `${countPhrase(over, "job is", "jobs are")} past ${over === 1 ? "its" : "their"} fee.`
+    : unbilled
+      ? `${countPhrase(unbilled, "job has", "jobs have")} been worked and never billed.`
+      : "Everything agrees.";
+  const date = new Date().toLocaleDateString("en-ZA", {
+    weekday: "long", day: "numeric", month: "long", year: "numeric",
+  });
+  return `<header class="greeting"><h2>${esc(hello)} ${esc(rest)}</h2><p>${esc(date)}</p></header>`;
+}
+
+/**
+ * A figure that can count up. Null stays the gap (an em dash) and is never
+ * given a number to animate. The text is the real value; the first paint of
+ * the session rewrites it from zero, so a failed script still shows the truth.
+ */
+function countVal(value, { asMoney = false } = {}) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return `<div class="val">${asMoney ? money(value) : "&mdash;"}</div>`;
+  }
+  const shown = asMoney ? money(value) : esc(String(value));
+  return `<div class="val" data-count="${Number(value)}"${asMoney ? ' data-money="1"' : ""}>${shown}</div>`;
+}
+
+function motionOff() {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+const ARRIVED_KEY = "tsp.look.arrived";
+
+function finishCount(node) {
+  const target = Number(node.dataset.count);
+  node.textContent = node.dataset.money ? money(target) : String(Math.round(target));
+}
+
+/** Fee bars grow, and KPI figures count, once per session. */
+function playArrivals(root) {
+  if (!root) return;
+  const counts = [...root.querySelectorAll("[data-count]")];
+  const bars = [...root.querySelectorAll(".feebar:not(.compact)")];
+  if (!counts.length && !bars.length) return;
+  let arrived = false;
+  try { arrived = sessionStorage.getItem(ARRIVED_KEY) === "1"; } catch { /* private mode */ }
+  const reduced = motionOff();
+  if (arrived || reduced) {
+    for (const node of counts) finishCount(node);
+    try { sessionStorage.setItem(ARRIVED_KEY, "1"); } catch { /* private mode */ }
+    return;
+  }
+  try { sessionStorage.setItem(ARRIVED_KEY, "1"); } catch { /* private mode */ }
+  for (const node of counts) node.textContent = node.dataset.money ? money(0) : "0";
+  for (const bar of bars) bar.classList.add("arrive");
+  const started = performance.now();
+  const step = (now) => {
+    const t = Math.min(1, (now - started) / 360);
+    const eased = 1 - (1 - t) ** 3;
+    for (const node of counts) {
+      if (!node.isConnected) continue;
+      const target = Number(node.dataset.count);
+      const value = target * eased;
+      node.textContent = node.dataset.money ? money(value) : String(Math.round(value));
+    }
+    if (t < 1) requestAnimationFrame(step);
+    else for (const node of counts) if (node.isConnected) finishCount(node);
+  };
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    for (const bar of bars) bar.classList.remove("arrive");
+    if (counts.length) requestAnimationFrame(step);
+  }));
+}
+
+function headerPicture(project) {
+  if (project.drawingId) return previewHtml(project, { size: "md", opens: "drawing" });
+  const kind = typeNameOf(project);
+  return `<div class="job-titleblock header-titleblock" style="--type-tint: ${typeTint(project.typeCode)}">
+    <div class="job-title-code">${esc(project.code || "no code")}</div>
+    ${kind ? `<div class="job-title-type">${esc(kind)}</div>` : ""}
+  </div>`;
+}
+
 function practiceHtml() {
   const jobs = state.projects;
   if (!jobs.length) {
-    return `<div class="empty">
+    return emptyBlock("plan", `
       <h3>Welcome. Start with your first job.</h3>
       A job is one piece of work for one client. It needs only a code to exist.<br />
-      Then, from the job: set its fee, log time against it, and, if you need one, start a drawing.<br /><br />
-      <button class="btn btn-primary" type="button" data-action="new-job-empty">Create your first job</button>
-    </div>`;
+      Then, from the job: set its fee, log time against it, and, if you need one, start a drawing.<br />
+      <button class="btn btn-primary" type="button" data-action="new-job-empty">Create your first job</button>`);
   }
   const open = jobs.filter((p) => p.status === "open");
   const overFee = jobs.filter(REGISTER_FILTERS.over.match);
@@ -1317,7 +1690,7 @@ function practiceHtml() {
     <button class="kpi${list.length ? " flag" : ""}" type="button"
             data-goto-filter="${filter}"${list.length ? "" : " disabled"}>
       <div class="lbl">${esc(label)}</div>
-      <div class="val">${list.length}</div>
+      ${countVal(list.length)}
       <div class="sub">${sub}</div>
       ${list.length ? '<div class="go">Show these &rarr;</div>' : ""}
     </button>`;
@@ -1332,17 +1705,17 @@ function practiceHtml() {
     .filter(Boolean);
 
   return `
-    <h3 class="sec">The practice <small>every job, not the one you had open</small></h3>
+    ${greetingHtml()}
     <div class="kpis">
       <button class="kpi" type="button" data-goto-filter="all">
         <div class="lbl">Open jobs</div>
-        <div class="val">${open.length}</div>
+        ${countVal(open.length)}
         <div class="sub">${jobs.length} in the register altogether</div>
         <div class="go">Open the register &rarr;</div>
       </button>
       <div class="kpi">
         <div class="lbl">Captured this month</div>
-        <div class="val">${money(capturedThisMonth)}</div>
+        ${countVal(capturedThisMonth, { asMoney: true })}
         <div class="sub">${duration(minutesThisMonth)} logged since ${esc(monthStart())}</div>
       </div>
       ${tile("over", "Past the fee", overFee, codes(overFee))}
@@ -1374,18 +1747,7 @@ function practiceHtml() {
 
     ${whereTheWorkIsHtml()}
 
-    ${drawingsHtml()}
-
-    ${recent.length ? `
-      <h3 class="sec">Recently opened</h3>
-      <table class="grid"><tbody>${recent.map((project) => `
-        <tr class="row-link" data-project="${esc(project.id)}">
-          <td><span class="code-cell">${esc(project.code || "no code")}</span></td>
-          <td>${esc(project.name || "Untitled")}</td>
-          <td>${esc(project.clientName || "—")}</td>
-          <td class="num">${project.financials.burn === null ? "&mdash;"
-    : `<span class="real ${project.financials.burn > 1 ? "bad" : "flat"}">${percent(project.financials.burn)}</span>`}</td>
-        </tr>`).join("")}</tbody></table>` : ""}`;
+    ${recentCardsHtml(recent)}`;
 }
 
 /**
@@ -1434,7 +1796,7 @@ function unrecoverableReportHtml() {
 
   if (!byReason.size && !unnamed.length) {
     return `<h3 class="sec">Unrecoverable, by reason</h3>
-      <div class="empty">Nothing has been written down, and no fixed-fee job is past its fee.</div>`;
+      ${emptyBlock("ticks", "Nothing has been written down, and no fixed-fee job is past its fee.")}`;
   }
   const rows = [...byReason.entries()].sort((a, b) => b[1].amount - a[1].amount);
   const total = cents(rows.reduce((sum, [, entry]) => sum + entry.amount, 0));
@@ -1476,8 +1838,8 @@ function readyToInvoiceHtml() {
     .sort((a, b) => b.financials.uncertifiedCaptured - a.financials.uncertifiedCaptured);
   if (!queue.length) {
     return `<h3 class="sec">Ready to invoice</h3>
-      <div class="empty">Every captured hour in the register is on a certificate line.<br />
-        Nothing is sitting unbilled.</div>`;
+      ${emptyBlock("ticks", `Every captured hour in the register is on a certificate line.<br />
+        Nothing is sitting unbilled.`)}`;
   }
   const total = cents(queue.reduce((sum, p) => sum + p.financials.uncertifiedCaptured, 0));
   return `
@@ -1560,9 +1922,9 @@ function whereTheWorkIsHtml() {
           <td class="num">${dayCount(days)}</td>
         </tr>`;
   }).join("")}</tbody>
-    </table>` : `<div class="empty">No open job has a phase recorded.<br />
+    </table>` : emptyBlock("plan", `No open job has a phase recorded.<br />
       Open one and press <b>Record where this job is</b>; the register will start being able
-      to answer &ldquo;what is at council&rdquo; without anybody opening a file.</div>`}
+      to answer &ldquo;what is at council&rdquo; without anybody opening a file.`)}
     ${stated.length && silent.length ? `<p class="note-line">${silent.length} open
       job${silent.length === 1 ? " has" : "s have"} no phase recorded
       (${silent.slice(0, 5).map((p) => esc(p.code || "no code")).join(", ")}${
@@ -1584,8 +1946,8 @@ function attentionHtml() {
 
   if (!flagged.length) {
     return `<h3 class="sec">Needs attention</h3>
-      <div class="empty">Nothing at the top severity. Quoted, captured and certified agree
-        across the register.</div>`;
+      ${emptyBlock("ticks", `Nothing at the top severity. Quoted, captured and certified agree
+        across the register.`)}`;
   }
   return `
     <h3 class="sec">Needs attention
@@ -1690,14 +2052,14 @@ function feeScheduleHtml(project) {
         estimate${f.budgetEstimate === null
     ? (canViewBilled() ? " (none entered)" : " (hidden from this role)")
     : ` of ${money(f.budgetEstimate)}`} is only used when there is no schedule.</p>`
-    : `<div class="empty">No fee schedule on this job.<br />
+    : emptyBlock("plan", `No fee schedule on this job.<br />
         Burn is measured against the register's budget estimate
         ${f.budgetEstimate === null
     ? (canViewBilled()
       ? "&mdash; and there isn't one, so it cannot be measured at all."
       : "&mdash; hidden from this role.")
     : `of ${money(f.budgetEstimate)}.`}<br />
-        A schedule replaces that single figure with the phases it was built from.</div>`}
+        A schedule replaces that single figure with the phases it was built from.`)}
 
     ${canViewBilled() ? `
     <h3 class="sec">Revise the schedule <small>the whole document, the way a proposal is reissued</small></h3>
@@ -2030,7 +2392,7 @@ function overviewHtml(project) {
     <div class="kpis">
       <div class="kpi${f.quoted === null ? " dim" : ""}">
         <div class="lbl">Quoted</div>
-        <div class="val">${money(f.quoted)}</div>
+        ${countVal(f.quoted, { asMoney: true })}
         <div class="sub">${f.quoted === null
     ? (canViewBilled() ? "No figure entered" : "Hidden from this role")
     : f.quotedSource === "fee_schedule"
@@ -2040,7 +2402,7 @@ function overviewHtml(project) {
       <button type="button" class="kpi${f.burn !== null && f.burn > 1 ? " flag" : ""}" data-open-tab="time"
               title="The hours behind this figure">
         <div class="lbl">Captured</div>
-        <div class="val">${money(f.captured)}</div>
+        ${countVal(f.captured, { asMoney: true })}
         <div class="sub">${f.capturedMinutes
     ? `${duration(f.capturedMinutes)} logged${f.burn === null ? "" : ` &middot; ${percent(f.burn)} of fee`}`
     : "No time logged yet"}</div>
@@ -2048,7 +2410,7 @@ function overviewHtml(project) {
       ${canViewBilled() ? `
       <div class="kpi${f.projectedProfit === null ? " dim" : (f.projectedProfit < 0 ? " flag" : "")}">
         <div class="lbl">Projected profit</div>
-        <div class="val">${money(f.projectedProfit)}</div>
+        ${countVal(f.projectedProfit, { asMoney: true })}
         <div class="sub">${f.projectedCost === null
     ? "No projected cost entered &mdash; set one under Details"
     : f.projectedProfit === null
@@ -2154,10 +2516,10 @@ function tasksHtml(project) {
   if (!tasks.length) {
     return `
       <h3 class="sec">Tasks</h3>
-      <div class="empty">${type?.isPlaceholder
+      ${emptyBlock("plan", type?.isPlaceholder
     ? `No tasks yet. ${esc(type.name)} has no fee template, so add the tasks this job needs.`
     : "No task list on this job. Tasks are cloned from the project type's fee template when "
-      + "the job is registered; this one had no type, or none with a template."}</div>
+      + "the job is registered; this one had no type, or none with a template.")}
       ${addForm}`;
   }
 
@@ -2442,8 +2804,12 @@ function readComposerFields() {
 
 function composerStepError() {
   const job = state.newJob;
-  if (job.step === 0 && !String(job.code).trim()) {
+  if (job.step === 0 && !codeKey(job.code)) {
     return "A project code is the one thing a job needs before it can exist.";
+  }
+  if (job.step === 0 && codeClash(job.code)) {
+    job.whyOpen = true;
+    return "clash";
   }
   if (job.step === 1 && job.typeCode === null) {
     return "Choose a type, or choose to leave it unclassified. Either is a finished answer.";
@@ -2510,7 +2876,38 @@ function typeTag(type) {
   return TYPE_TAG[type.code] || "Copies a template";
 }
 
+/** The same comparison the register's unique index uses: trimmed, case-folded. */
+function codeKey(code) {
+  return String(code || "").trim().toUpperCase();
+}
+
+/** The job already carrying this code, or null. Blank is not a clash. */
+function codeClash(code) {
+  const key = codeKey(code);
+  if (!key) return null;
+  return state.projects.find((project) => codeKey(project.code) === key) || null;
+}
+
+/** Named when we know the other job; otherwise the server's own sentence. */
+function clashSentence(job) {
+  const existing = codeClash(job.code);
+  if (existing) {
+    const code = existing.code || String(job.code).trim();
+    return existing.name
+      ? `${code} is already in use, on ${existing.name}.`
+      : `${code} is already in use.`;
+  }
+  if (/already in use/i.test(job.error || "")) return job.error;
+  return "";
+}
+
+function nameNoteOpen(job) {
+  return Boolean(job.whyOpen) || Boolean(clashSentence(job));
+}
+
 function composerNameStep(job) {
+  const open = nameNoteOpen(job);
+  const clash = clashSentence(job);
   return `
     <div class="form">
       <div class="fields">
@@ -2525,10 +2922,16 @@ function composerNameStep(job) {
                  placeholder="Bon Accord township" />
         </div>
       </div>
-      <p class="note-line">The code is unique in the firm, compared ignoring case and surrounding
-        spaces. The workbook carried <code>P078</code> twice and <code>C036&nbsp;</code> beside
-        <code>CO36.9</code>, and those only surfaced when somebody tried to bill them.
-        The description is the name people read in the register; it can wait.</p>
+      <p class="note-line">The code is unique in the firm, compared ignoring case and surrounding spaces.
+        <button type="button" class="link-btn" data-action="composer-why"
+                aria-expanded="${open}" aria-controls="composer-why">Why?</button>
+      </p>
+      <div class="composer-why" id="composer-why"${open ? "" : " hidden"}>
+        <p class="note-line">The workbook carried <code>P078</code> twice and <code>C036&nbsp;</code> beside
+          <code>CO36.9</code>, and those only surfaced when somebody tried to bill them.
+          The description is the name people read in the register; it can wait.</p>
+        ${clash ? `<p class="composer-clash" tabindex="-1" role="alert">${esc(clash)}</p>` : ""}
+      </div>
     </div>`;
 }
 
@@ -2636,6 +3039,7 @@ function paintRoadmap() {
   // and jumping the page when the sequence resolves reads as a glitch
   // rather than a helpful cue.
   node.innerHTML = roadmapBodyHtml(state.newJob);
+  paintComposerCard();
 }
 
 function ensureRoadmap() {
@@ -2645,6 +3049,7 @@ function ensureRoadmap() {
   const type = (state.reference?.projectTypes || []).find((item) => item.code === code);
   if (!code || type?.isPlaceholder) {
     job.roadmap = null;
+    paintComposerCard();
     return;
   }
   if (roadmapCache.has(code)) {
@@ -2756,6 +3161,81 @@ function composerClientStep(job) {
     </div>`;
 }
 
+/** Phases the chosen type will copy, once that sequence has loaded. */
+function composerPhases(job) {
+  const code = job.typeCode || "";
+  if (!code || job.roadmap?.typeCode !== code || job.roadmap.loading || job.roadmap.error) return [];
+  return (job.roadmap.phases || []).map((phase) => phase.name).filter(Boolean);
+}
+
+/** "no fee" until a budget is typed. A blank budget is not 0%, and 0% is not a fee. */
+function composerFeeBadge(job) {
+  if (job.billingBasis === null || job.billingBasis === undefined) return "";
+  const amount = Number(job.budgetEstimate);
+  if (String(job.budgetEstimate).trim() === "" || !Number.isFinite(amount) || amount <= 0) {
+    return `<span class="real flat">no fee</span>`;
+  }
+  return `<span class="real flat" title="Budget estimate">${money(amount)}</span>`;
+}
+
+/** The Phase 2 card, filled from what has been typed. Not a control: nothing here is saved yet. */
+function composerPreviewHtml(job) {
+  const code = String(job.code || "").trim();
+  const name = String(job.name || "").trim();
+  const typeCode = job.typeCode || "";
+  const kind = typeNameOf({ typeCode });
+  const client = String(job.clientName || "").trim();
+  return `
+    <article class="job-card">
+      <div class="job-open">
+        <div class="job-pic">
+          <div class="job-titleblock" style="--type-tint: ${typeTint(typeCode)}">
+            <div class="job-title-code${code ? "" : " is-ghost"}">${esc(code || "Code")}</div>
+            ${kind ? `<div class="job-title-type">${esc(kind)}</div>` : ""}
+          </div>
+          <div class="job-badges">${composerFeeBadge(job)}</div>
+        </div>
+        <div class="job-body">
+          <div class="job-code${code ? "" : " is-ghost"}">${esc(code || "Code")}</div>
+          <div class="job-name${name ? "" : " is-ghost"}">${esc(name || "Description")}</div>
+          <div class="job-meta"><span>${esc(client || "—")}</span></div>
+        </div>
+        ${cardPhaseStrip({ phases: composerPhases(job), currentPhase: null })}
+      </div>
+    </article>`;
+}
+
+function paintComposerCard() {
+  const slot = document.getElementById("composer-preview");
+  if (!slot || !state.newJob || slot.querySelector(".is-leaving")) return;
+  slot.innerHTML = composerPreviewHtml(state.newJob);
+}
+
+/** Opens or closes the name-step note, and writes the clash into it, without rebuilding the form. */
+function paintCodeNote() {
+  const job = state.newJob;
+  const why = document.getElementById("composer-why");
+  const toggle = document.querySelector('#composer [data-action="composer-why"]');
+  if (!job || !why || !toggle) return;
+  const sentence = clashSentence(job);
+  const open = Boolean(sentence) || job.whyOpen;
+  why.hidden = !open;
+  toggle.setAttribute("aria-expanded", String(open));
+  let line = why.querySelector(".composer-clash");
+  if (!sentence) {
+    line?.remove();
+    return;
+  }
+  if (!line) {
+    line = document.createElement("p");
+    line.className = "composer-clash";
+    line.tabIndex = -1;
+    line.setAttribute("role", "alert");
+    why.appendChild(line);
+  }
+  if (line.textContent !== sentence) line.textContent = sentence;
+}
+
 const COMPOSER_COPY = [
   ["Name the job", "A code is enough to open the register. Everything after this step can be decided now or left for the job itself."],
   ["What kind of work is it?", "The type decides what lands on the job today: a copied task list and fee schedule, an empty list you write yourself, or nothing until you classify it."],
@@ -2763,40 +3243,135 @@ const COMPOSER_COPY = [
   ["Who is it for?", "Client and property are the register entry. Neither is required to create the job, and both can be filled in afterwards."],
 ];
 
+/** 1 when the next step is arriving, -1 when going back. Consumed by the next render. */
+let composerMotion = 0;
+
+function motionReduced() {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+/** Holds the step that is leaving, so it can slide out while the new one slides in. */
+function takeLeavingStep(motion) {
+  const host = el("composer");
+  host?.querySelectorAll(".composer-stage-ghost").forEach((node) => node.remove());
+  if (!motion || motionReduced()) return;
+  const stage = document.getElementById("composer-stage");
+  if (!stage || !host) return;
+  const ghost = stage.cloneNode(true);
+  ghost.removeAttribute("id");
+  ghost.querySelectorAll("[id]").forEach((node) => node.removeAttribute("id"));
+  ghost.querySelectorAll("input, select, textarea").forEach((node) => {
+    node.disabled = true;
+    node.removeAttribute("name");
+  });
+  ghost.setAttribute("aria-hidden", "true");
+  ghost.inert = true;
+  ghost.classList.remove("step-enter-next", "step-enter-prev");
+  const hostBox = host.getBoundingClientRect();
+  const box = stage.getBoundingClientRect();
+  ghost.classList.add("composer-stage-ghost", motion > 0 ? "step-leave-next" : "step-leave-prev");
+  ghost.style.top = `${box.top - hostBox.top + host.scrollTop}px`;
+  ghost.style.left = `${box.left - hostBox.left + host.scrollLeft}px`;
+  ghost.style.width = `${box.width}px`;
+  host.appendChild(ghost);
+  const drop = () => ghost.remove();
+  ghost.addEventListener("animationend", (event) => {
+    if (event.target === ghost) drop();
+  });
+  // If the animation never ends (a hidden tab, a zero duration that already
+  // finished), the leaving step must not stay and sit on top of the new one.
+  window.setTimeout(drop, 500);
+}
+
 function renderComposer() {
   const job = state.newJob;
+  const motion = motionReduced() ? 0 : composerMotion;
+  composerMotion = 0;
+  const fresh = motion > 0 ? job.step - 1 : -1;
   const [title, lead] = COMPOSER_COPY[job.step];
   const body = job.step === 0 ? composerNameStep(job)
     : job.step === 1 ? composerTypeStep(job)
       : job.step === 2 ? composerBillingStep(job)
         : composerClientStep(job);
   const last = job.step === NEW_JOB_STEPS.length - 1;
+  const clashOnly = job.error === "clash" || (job.step === 0 && /already in use/i.test(job.error || ""));
+  const enter = motion > 0 ? " step-enter-next" : motion < 0 ? " step-enter-prev" : "";
+  takeLeavingStep(motion);
   el("composer-body").innerHTML = `
-    <p class="composer-kicker">New job</p>
-    <h1 id="composer-title" tabindex="-1">${title}</h1>
-    <p class="composer-lead">${lead}</p>
-    <nav class="composer-steps" aria-label="New job steps">
-      ${NEW_JOB_STEPS.map(([id, label], index) => `
-        <button type="button" data-action="composer-step" data-step="${index}"
-                ${index > job.step ? "disabled" : ""}
-                aria-current="${index === job.step ? "step" : "false"}">${index + 1} ${label}</button>`).join("")}
-    </nav>
-    <form data-form="composer">
-      ${body}
-      ${job.error ? `<p class="composer-error">${esc(job.error)}</p>` : ""}
-      <div class="actions">
-        ${job.step ? '<button class="btn" type="button" data-action="composer-back">Back</button>' : ""}
-        <button class="btn btn-primary" type="submit"${job.saving ? " disabled" : ""}>
-          ${last ? "Create job" : "Continue"}</button>
-        <div class="spacer"></div>
-        <button class="btn" type="button" data-action="composer-cancel">Cancel</button>
+    <div class="composer-layout">
+      <div class="composer-intro">
+        <p class="composer-kicker">New job</p>
+        <h1 id="composer-title" tabindex="-1">${title}</h1>
+        <p class="composer-lead">${lead}</p>
+        <nav class="composer-steps" aria-label="New job steps">
+          <ol>
+            ${NEW_JOB_STEPS.map(([, label], index) => {
+              const done = index < job.step;
+              const current = index === job.step;
+              const tone = done ? "is-done" : current ? "is-now" : "is-later";
+              const mark = done
+                ? `<svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M2.2 6.3 4.7 8.8 9.8 3.2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+                : String(index + 1);
+              return `<li class="${tone}${index === fresh ? " is-fresh" : ""}">
+                <button type="button" data-action="composer-step" data-step="${index}"
+                        ${index > job.step ? "disabled" : ""}
+                        ${current ? 'aria-current="step"' : ""}
+                        aria-label="${esc(done ? `${label}, done` : label)}">
+                  <span class="step-mark" aria-hidden="true">${mark}</span>
+                  <span class="step-label">${esc(label)}</span>
+                </button>
+              </li>`;
+            }).join("")}
+          </ol>
+        </nav>
       </div>
-    </form>`;
-  el("composer-title")?.focus();
+      <aside class="composer-preview" id="composer-preview" aria-hidden="true">
+        ${composerPreviewHtml(job)}
+      </aside>
+      <div class="composer-stage${enter}" id="composer-stage">
+        <form data-form="composer">
+          ${body}
+          ${job.error && !clashOnly ? `<p class="composer-error">${esc(job.error)}</p>` : ""}
+          <div class="actions">
+            ${job.step ? '<button class="btn" type="button" data-action="composer-back">Back</button>' : ""}
+            <button class="btn btn-primary" type="submit"${job.saving ? " disabled" : ""}>
+              ${last ? "Create job" : "Continue"}</button>
+            <div class="spacer"></div>
+            <button class="btn" type="button" data-action="composer-cancel">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+  if (clashOnly) document.querySelector(".composer-clash")?.focus();
+  else el("composer-title")?.focus();
   if (job.step === 1) {
     paintTypeDetail();
     ensureRoadmap();
   }
+}
+
+/** How long --t-slow currently is. Reduced motion sets it near zero; the caller skips the flight then. */
+function slowDuration() {
+  const raw = getComputedStyle(document.documentElement).getPropertyValue("--t-slow");
+  const ms = parseFloat(raw);
+  return Number.isFinite(ms) ? ms : 360;
+}
+
+/** The new card shrinks toward where a Jobs card sits, then the job page opens. */
+function flyComposerCard() {
+  if (motionReduced()) return Promise.resolve();
+  const card = document.querySelector("#composer-preview .job-card");
+  if (!card) return Promise.resolve();
+  const from = card.getBoundingClientRect();
+  const scale = 232 / from.width;
+  const dx = 36 - from.left;
+  const dy = 96 - from.top;
+  card.classList.add("is-leaving");
+  const anim = card.animate([
+    { transform: "none", opacity: 1 },
+    { transform: `translate(${dx}px, ${dy}px) scale(${scale})`, opacity: 0 },
+  ], { duration: slowDuration(), easing: "cubic-bezier(.2,.7,.2,1)", fill: "forwards" });
+  return anim.finished.catch(() => {});
 }
 
 async function submitNewJob() {
@@ -2824,7 +3399,9 @@ async function submitNewJob() {
     job.saving = false;
     const message = error instanceof ApiError ? error.message : "Could not create the job";
     if (/already in use/i.test(message)) {
+      composerMotion = job.step === 0 ? 0 : -1;
       job.step = 0;
+      job.whyOpen = true;
       job.error = message;
     } else {
       job.error = message;
@@ -2832,6 +3409,8 @@ async function submitNewJob() {
     renderComposer();
     return;
   }
+  await flyComposerCard();
+  state.jobArriving = true;
   state.returnView = null;
   state.newJob = null;
   state.tab = "overview";
@@ -2958,7 +3537,8 @@ function timeHtml(project) {
           // A duration typed without clock times is the normal case.
           const broken = (entry.start && !entry.end)
             || (entry.minutes > 0 && entry.capturedAmount === 0);
-          return `<tr${broken ? ' class="flagged"' : ""}>
+          const fresh = state.freshEntryId === entry.id;
+          return `<tr class="${[broken ? "flagged" : "", fresh ? "fresh" : ""].filter(Boolean).join(" ")}">
             <td>${esc(entry.date)}</td>
             <td>${esc((entry.userEmail || "").split("@")[0])}</td>
             <td>${esc(entry.activityType)}</td>
@@ -2985,11 +3565,11 @@ function timeHtml(project) {
         attributed, and the total stops counting it. An hour already on an issued certificate
         cannot be withdrawn &mdash; that is a credit, not a deletion.</p>`
     : state.selectedPhaseRef
-      ? `<div class="empty">No time logged with a phase matching <b>${esc(state.selectedPhaseRef)}</b>.<br />
+      ? emptyBlock("clock", `No time logged with a phase matching <b>${esc(state.selectedPhaseRef)}</b>.<br />
           Time is only tagged to a phase when the Phase field on the log form matches the
-          fee schedule's label &mdash; pick it from the suggestions to be sure.</div>`
-      : `<div class="empty">No time logged against this job.<br />
-        Captured value is what the work actually cost the firm, whatever is eventually billed.</div>`}`;
+          fee schedule's label &mdash; pick it from the suggestions to be sure.`)
+      : emptyBlock("clock", `No time logged against this job.<br />
+        Captured value is what the work actually cost the firm, whatever is eventually billed.`)}`;
     })()}`;
 }
 
@@ -3017,7 +3597,7 @@ function certificatesHtml(project) {
                 data-certificate="${esc(c.id)}">${open?.id === c.id ? "Close" : "Open"}</button></td>
           </tr>`).join("")}</tbody>
       </table>`
-    : `<div class="empty">Nothing has been certified on this job.</div>`}
+    : emptyBlock("certificate", "Nothing has been certified on this job.")}
 
     ${canViewBilled() ? `
     <div class="actions">
@@ -3129,6 +3709,7 @@ function certificateHtml(certificate) {
         data-certificate="${esc(certificate.id)}">Print</button>` : ""}
     </h3>
     <article class="cert-sheet" id="cert-sheet">
+    ${state.stampId === certificate.id ? '<div class="issued-stamp no-print" aria-hidden="true">Issued</div>' : ""}
     ${certificateHeadHtml(certificate)}
     <table class="grid">
       <thead><tr>
@@ -3270,8 +3851,7 @@ function billableTasksHtml(certificate) {
         <p class="note-line">Each line is tagged with the phase it was quoted under, so the fee
           schedule can show it against that phase rather than only in the total. A task is
           billable once.</p>`
-    : `<div class="empty" style="padding:18px 12px">Every task on this job is either billed
-        already or struck. A task is billable once.</div>`}
+    : emptyBlock("ticks", "Every task on this job is either billed already or struck. A task is billable once.")}
     </form>`;
 }
 
@@ -3620,7 +4200,8 @@ function myTimeHtml() {
           <tbody>${rows.map((entry) => {
     const broken = (entry.start && !entry.end)
       || (billed && entry.minutes > 0 && entry.capturedAmount === 0);
-    return `<tr${broken ? ' class="flagged"' : ""}>
+    const fresh = state.freshEntryId === entry.id;
+    return `<tr class="${[broken ? "flagged" : "", fresh ? "fresh" : ""].filter(Boolean).join(" ")}">
             <td>${entry.start ? `${esc(String(entry.start).slice(0, 5))}&ndash;${entry.end ? esc(String(entry.end).slice(0, 5)) : "?"}` : "&mdash;"}</td>
             <td class="num">${duration(entry.minutes)}${broken ? ' <span class="pill err">broken</span>' : ""}</td>
             <td><b>${esc(entry.projectCode || "")}</b> ${esc(entry.projectName || "")}</td>
@@ -3635,7 +4216,7 @@ function myTimeHtml() {
                   data-entry="${esc(entry.id)}">Withdraw</button>`}</td>
           </tr>`;
   }).join("")}</tbody>
-        </table></div>` : `<div class="empty">Nothing logged on this day yet.</div>`}
+        </table></div>` : emptyBlock("clock", "Nothing logged on this day yet.")}
         ${open ? composer : ""}
       </section>`;
   }).join("")}`;
@@ -3667,6 +4248,7 @@ async function submitMyTime(form, values) {
     ...(asSomeoneElse ? { userId: mt.personId } : {}),
   }));
   if (!result) return;
+  state.freshEntryId = result.entry?.id || null;
 
   const burn = result.financials?.burn;
   toast(canViewBilled() && burn !== null && burn !== undefined && burn > 1
@@ -3712,7 +4294,7 @@ async function loadProjects({ initial = false } = {}) {
     if (projects.some((p) => p.id === requested)) {
       state.selectedId = requested;
       state.view = "job";
-      state.recentIds = [requested];
+      state.recentIds = [requested, ...state.recentIds.filter((id) => id !== requested)].slice(0, 8);
     } else {
       const wanted = params.get("view");
       state.view = wanted === "register" ? "register"
@@ -3728,6 +4310,48 @@ async function loadProjects({ initial = false } = {}) {
     state.selectedId = null;
   }
   state.recentIds = state.recentIds.filter((id) => projects.some((p) => p.id === id));
+  state.pins = state.pins.filter((id) => projects.some((p) => p.id === id));
+  saveGalleryPrefs();
+}
+
+/** Cards, pins and recently opened, per person and firm. Not offline_pinned_at. */
+function galleryKey() {
+  return `tsp.gallery.${state.session?.orgId || "none"}.${state.session?.userId || "none"}`;
+}
+
+function loadGalleryPrefs() {
+  let saved = {};
+  try {
+    saved = JSON.parse(localStorage.getItem(galleryKey()) || "{}");
+  } catch {
+    saved = {};
+  }
+  state.registerLayout = saved.layout === "list" ? "list" : "cards";
+  state.gallerySort = ["edited", "code", "client", "risk"].includes(saved.sort) ? saved.sort : "edited";
+  state.pins = Array.isArray(saved.pins) ? saved.pins.filter((id) => typeof id === "string") : [];
+  state.recentIds = Array.isArray(saved.recent)
+    ? saved.recent.filter((id) => typeof id === "string").slice(0, 8)
+    : [];
+}
+
+function saveGalleryPrefs() {
+  try {
+    localStorage.setItem(galleryKey(), JSON.stringify({
+      layout: state.registerLayout,
+      sort: state.gallerySort,
+      pins: state.pins,
+      recent: state.recentIds,
+    }));
+  } catch {
+    // A private window that refuses storage still works for this visit.
+  }
+}
+
+function togglePin(id) {
+  state.pins = state.pins.includes(id)
+    ? state.pins.filter((other) => other !== id)
+    : [id, ...state.pins];
+  saveGalleryPrefs();
 }
 
 /**
@@ -3749,6 +4373,10 @@ async function loadTab() {
       ? (await api.listTimeEntries({ from: monthStart(), to: today() })).entries
       : [];
     await loadPreviews();
+    return;
+  }
+  if (state.view === "register") {
+    if (state.registerLayout !== "list") await loadPreviews();
     return;
   }
   if (state.view === "time") {
@@ -3946,13 +4574,20 @@ async function jobPageAction(event) {
   }
 }
 
+function paintGateMode() {
+  const signingUp = state.signUpMode;
+  el("gate-org-field").classList.toggle("is-open", signingUp);
+  el("gate-org").disabled = !signingUp;
+  el("gate-submit").textContent = signingUp ? "Create firm" : "Sign in";
+  el("gate-toggle").textContent = signingUp ? "I have an account" : "Create a firm";
+  el("gate-title").textContent = signingUp ? "Create a firm" : "Sign in";
+  el("gate-password").autocomplete = signingUp ? "new-password" : "current-password";
+}
+
 function wireGate() {
   el("gate-toggle").addEventListener("click", () => {
     state.signUpMode = !state.signUpMode;
-    el("gate-org-field").hidden = !state.signUpMode;
-    el("gate-submit").textContent = state.signUpMode ? "Create firm" : "Sign in";
-    el("gate-toggle").textContent = state.signUpMode ? "I have an account" : "Create a firm";
-    el("gate-password").autocomplete = state.signUpMode ? "new-password" : "current-password";
+    paintGateMode();
   });
 
   el("gate-form").addEventListener("submit", async (event) => {
@@ -3965,7 +4600,7 @@ function wireGate() {
     };
     try {
       state.session = state.signUpMode ? await api.signUp(body) : await api.signIn(body);
-      await start();
+      await start({ fromGate: true });
     } catch (error) {
       el("gate-error").textContent = error instanceof ApiError
         ? error.message : "Could not reach the server";
@@ -3987,8 +4622,14 @@ function wireApp() {
     if (!action || !state.newJob) return;
     if (action.action === "composer-cancel") {
       closeNewJob();
+    } else if (action.action === "composer-why") {
+      const job = state.newJob;
+      if (clashSentence(job)) return;
+      job.whyOpen = !job.whyOpen;
+      paintCodeNote();
     } else if (action.action === "composer-back") {
       readComposerFields();
+      composerMotion = -1;
       state.newJob.step -= 1;
       state.newJob.error = "";
       renderComposer();
@@ -3996,10 +4637,18 @@ function wireApp() {
       const index = Number(action.step);
       if (index >= state.newJob.step) return;
       readComposerFields();
+      composerMotion = index - state.newJob.step;
       state.newJob.step = index;
       state.newJob.error = "";
       renderComposer();
     }
+  });
+  composer.addEventListener("input", (event) => {
+    const field = event.target?.dataset?.field;
+    if (!state.newJob || !field || event.target.type === "radio") return;
+    state.newJob[field] = event.target.value;
+    paintComposerCard();
+    if (field === "code") paintCodeNote();
   });
   composer.addEventListener("change", (event) => {
     if (!state.newJob) return;
@@ -4008,10 +4657,12 @@ function wireApp() {
       readComposerFields();
       const note = el("nj-budget-note");
       if (note) note.textContent = budgetNote(state.newJob.billingBasis);
+      paintComposerCard();
     } else if (field === "typeCode") {
       readComposerFields();
       paintTypeDetail();
       ensureRoadmap();
+      paintComposerCard();
     }
   });
   composer.addEventListener("submit", (event) => {
@@ -4028,6 +4679,7 @@ function wireApp() {
       submitNewJob();
       return;
     }
+    composerMotion = 1;
     state.newJob.step += 1;
     state.newJob.error = "";
     renderComposer();
@@ -4147,6 +4799,25 @@ function wireApp() {
   });
 
   const main = el("main");
+  let cardOpenTimer = null;
+
+  main.addEventListener("dblclick", (event) => {
+    const open = event.target.closest(".job-open");
+    if (!open) return;
+    clearTimeout(cardOpenTimer);
+    const project = state.projects.find((item) => item.id === open.dataset.project);
+    if (project?.drawingId) goToDrawing(project);
+    else openJob(open.dataset.project);
+  });
+
+  main.addEventListener("change", (event) => {
+    if (event.target.id !== "gallery-sort") return;
+    const next = event.target.value;
+    if (!["edited", "code", "client", "risk"].includes(next)) return;
+    state.gallerySort = next;
+    saveGalleryPrefs();
+    renderMain();
+  });
 
   main.addEventListener("click", async (event) => {
     // A click on a combo field should (re)open its menu even when the field
@@ -4156,9 +4827,19 @@ function wireApp() {
     if (event.target.matches("[data-combo-input]")) filterCombo(event.target);
     const tab = event.target.closest("[data-tab]");
     if (tab) {
-      state.tab = tab.dataset.tab;
-      await loadTab();
-      renderMain();
+      if (tab.dataset.tab !== state.tab) {
+        const panel = main.querySelector(".panel");
+        const leave = panel && !motionOff()
+          ? new Promise((resolve) => {
+            panel.classList.add("tab-leave");
+            setTimeout(resolve, 120);
+          })
+          : Promise.resolve();
+        state.tab = tab.dataset.tab;
+        state.panelEnter = true;
+        await Promise.all([leave, loadTab()]);
+        renderMain();
+      }
       return;
     }
     // Job-page controls, some inside a form that carries `data-project` - read
@@ -4253,8 +4934,24 @@ function wireApp() {
     // Practice tiles and register rows both reach a job or a filtered list.
     const tile = event.target.closest("[data-goto-filter]");
     if (tile) return goView("register", { filter: tile.dataset.gotoFilter });
+    const pin = event.target.closest("[data-pin]");
+    if (pin) {
+      togglePin(pin.dataset.pin);
+      renderMain();
+      return;
+    }
     const row = event.target.closest("[data-project]");
-    if (row) return openJob(row.dataset.project);
+    if (row) {
+      // A single click opens the job. A double-click on a drawing opens the
+      // plan instead, so the first click waits long enough to be cancelled.
+      if (row.classList.contains("job-open")) {
+        const id = row.dataset.project;
+        clearTimeout(cardOpenTimer);
+        cardOpenTimer = setTimeout(() => openJob(id), 280);
+        return;
+      }
+      return openJob(row.dataset.project);
+    }
     const sorter = event.target.closest("[data-sort]");
     if (sorter) {
       const column = sorter.dataset.sort;
@@ -4273,6 +4970,13 @@ function wireApp() {
     if (!action) return;
 
     if (action.action === "go-register") return goView("register");
+    if (action.action === "layout") {
+      state.registerLayout = action.layout === "list" ? "list" : "cards";
+      saveGalleryPrefs();
+      await loadTab();
+      renderMain();
+      return;
+    }
     if (action.action === "new-job-empty") return openNewJob();
     if (action.action === "phase-picker" || action.action === "phase-cancel") {
       state.phasePicker = action.action === "phase-picker";
@@ -4357,6 +5061,7 @@ function wireApp() {
       const issued = await attempt(() => api.issueCertificate(action.certificate));
       if (issued) {
         state.openCertificate = issued.certificate;
+        state.stampId = issued.certificate.id;
         toast(`Certificate ${issued.certificate.seq} issued`);
         await refresh();
       }
@@ -4502,6 +5207,7 @@ function wireApp() {
       }));
       if (!result) return;
       state.timePrefill = null;
+      state.freshEntryId = result.entry?.id || null;
       // Back to the rendered values, so the re-render does not keep this row as a draft.
       form.reset();
       const burn = result.financials.burn;
@@ -4610,12 +5316,62 @@ function paintWho() {
   who.append(email, select);
 }
 
-async function start() {
-  el("gate").hidden = true;
+const SPLASH_SEEN = "tsp-splash-seen";
+
+function splashSkipped() {
+  try { return sessionStorage.getItem(SPLASH_SEEN) === "1"; }
+  catch { return false; }
+}
+
+function markSplashSeen() {
+  try { sessionStorage.setItem(SPLASH_SEEN, "1"); }
+  catch { /* private mode: the next load will show it again */ }
+}
+
+/** Two frames, so the screen underneath has actually painted before the cover lifts. */
+function afterPaint() {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  });
+}
+
+/**
+ * Fade a full-screen cover off. Resolves when the fade ends, and also on a
+ * timer, because a reduced-motion zero-length transition does not always
+ * fire transitionend.
+ */
+function fadeCover(node) {
+  if (!node || node.hidden) return Promise.resolve();
+  node.classList.add("is-leaving");
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+    node.addEventListener("transitionend", (event) => {
+      if (event.target === node && event.propertyName === "opacity") finish();
+    });
+    setTimeout(finish, 700);
+  });
+}
+
+function dismissSplash() {
+  const splash = el("splash");
+  if (!splash) return Promise.resolve();
+  markSplashSeen();
+  return fadeCover(splash).then(() => splash.remove());
+}
+
+async function start({ fromGate = false } = {}) {
+  // The app paints underneath the gate, then the gate fades off it. A cold
+  // load never shows the gate, so there is nothing to fade.
   el("app").hidden = false;
   paintWho();
   el("admin-link").hidden = !state.session.platformAdmin;
   state.reference = await api.reference();
+  loadGalleryPrefs();
   await loadProjects({ initial: true });
   await loadTab();
   renderMain();
@@ -4628,12 +5384,25 @@ async function start() {
     history.replaceState(null, "", `${location.pathname}${rest ? `?${rest}` : ""}`);
     openNewJob();
   }
+  if (fromGate) {
+    await fadeCover(el("gate"));
+    el("gate").hidden = true;
+  }
 }
 
 async function boot() {
   wireGate();
   wireApp();
-  const session = await api.session().catch(() => ({ signedIn: false }));
+  if (splashSkipped()) el("splash")?.remove();
+
+  // The splash stays up for the session check, the fonts, and at least long
+  // enough that it does not flash. A reload in this tab has already removed it.
+  const session = await Promise.all([
+    api.session().catch(() => ({ signedIn: false })),
+    document.fonts?.ready ?? Promise.resolve(),
+    splashSkipped() ? Promise.resolve() : new Promise((resolve) => setTimeout(resolve, 600)),
+  ]).then(([found]) => found);
+
   if (session.signedIn) {
     state.session = session;
     // An operator with no firm of their own has nothing to open here.
@@ -4641,10 +5410,20 @@ async function boot() {
       location.replace("/admin/");
       return;
     }
-    await start();
-  } else {
-    el("gate").hidden = false;
+    try {
+      await start();
+      await afterPaint();
+    } finally {
+      await dismissSplash();
+    }
+    return;
   }
+
+  // Same ink ground as the splash, shown before the splash fades, so the
+  // arrival is a cross-fade onto the sign-in rather than a drop to cream.
+  el("gate").hidden = false;
+  await afterPaint();
+  await dismissSplash();
 }
 
 boot();

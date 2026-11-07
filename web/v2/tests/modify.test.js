@@ -12,6 +12,9 @@ import {
   joinSelection,
   mergeSelection,
   mirrorSelection,
+  captureWallJoins,
+  dropBrokenJoins,
+  holdWallJoins,
   moveWallEnd,
   realignWallFaces,
   shiftJoinedEnds,
@@ -144,6 +147,17 @@ test("copy offsets clear of the original and gives the copy a new id", () => {
 
 // An opening's position is a parameter on a host wall, so duplicating it would
 // put two doors in the same hole.
+test("copy with an offset lands the copy at that distance", () => {
+  const doc = docWith({ rooms: [room("a", 1, 2, 4, 3)] });
+  const result = copySelection(doc, [ref("room", "a")], { dx: 10, dy: -1 });
+  assert.equal(result.ok, true);
+  const placed = shapeRects(doc.rooms[1].shape)[0];
+  assert.equal(placed.x, 11);
+  assert.equal(placed.y, 1);
+  assert.equal(placed.w, 4);
+  assert.equal(placed.h, 3);
+});
+
 test("copying an opening on its own is refused with a reason", () => {
   const doc = docWith({ openings: [{ id: "o1", sku: "D1", wallId: "w1", t: 0.5, status: "planned" }] });
   const result = copySelection(doc, [ref("opening", "o1")]);
@@ -738,4 +752,186 @@ test("detach says so when nothing selected is attached", () => {
   const result = detachSelection(doc, [ref("segment", "w1")], { pack });
   assert.equal(result.ok, false);
   assert.match(result.message, /not attached|Nothing selected is attached/);
+});
+
+function shiftSeg(seg, dx, dy) {
+  seg.x1 += dx;
+  seg.y1 += dy;
+  seg.x2 += dx;
+  seg.y2 += dy;
+}
+
+test("a wall teed into the middle of another stays on it when moved sideways", () => {
+  const doc = docWith({
+    segments: [wall("branch", 0, 0, 4, 0, "T220"), wall("host", 0, -2, 0, 2, "T220")],
+  });
+  const joins = captureWallJoins(doc, [ref("segment", "branch")], { skuById: snapSku });
+  assert.equal(joins.length, 1);
+  assert.equal(joins[0].end, 1);
+  assert.equal(joins[0].hostId, "host");
+  assert.equal(joins[0].atHostEnd, false);
+  shiftSeg(doc.segments[0], 0, 1);
+  const held = holdWallJoins(doc, joins, { skuById: snapSku });
+  assert.equal(held.broken.length, 0);
+  const branch = doc.segments[0];
+  assert.ok(Math.abs(branch.x1) < 1e-9 && Math.abs(branch.y1 - 1) < 1e-9, `end slid to ${branch.x1},${branch.y1}`);
+  assert.ok(Math.abs(branch.x2 - 4) < 1e-9 && Math.abs(branch.y2 - 1) < 1e-9);
+  assert.ok(Math.abs(Math.hypot(branch.x2 - branch.x1, branch.y2 - branch.y1) - 4) < 1e-9);
+  assert.equal(doc.segments[1].y1, -2, "the host does not move");
+});
+
+test("pulling a teed wall along itself stretches it and keeps the join", () => {
+  const doc = docWith({
+    segments: [wall("branch", 0, 0, 4, 0, "T220"), wall("host", 0, -2, 0, 2, "T220")],
+  });
+  const joins = captureWallJoins(doc, [ref("segment", "branch")], { skuById: snapSku });
+  shiftSeg(doc.segments[0], 1.5, 0);
+  holdWallJoins(doc, joins, { skuById: snapSku });
+  const branch = doc.segments[0];
+  assert.ok(Math.abs(branch.x1) < 1e-9 && Math.abs(branch.y1) < 1e-9);
+  assert.ok(Math.abs(branch.x2 - 5.5) < 1e-9);
+});
+
+test("a wall joined at both ends does not move along itself", () => {
+  const doc = docWith({
+    segments: [
+      wall("span", 0, 0, 4, 0, "T220"),
+      wall("left", 0, -2, 0, 2, "T220"),
+      wall("right", 4, -2, 4, 2, "T220"),
+    ],
+  });
+  const joins = captureWallJoins(doc, [ref("segment", "span")], { skuById: snapSku });
+  assert.equal(joins.length, 2);
+  shiftSeg(doc.segments[0], 1, 0);
+  holdWallJoins(doc, joins, { skuById: snapSku });
+  const span = doc.segments[0];
+  assert.ok(Math.abs(span.x1) < 1e-9 && Math.abs(span.x2 - 4) < 1e-9);
+  assert.ok(Math.abs(span.y1) < 1e-9 && Math.abs(span.y2) < 1e-9);
+});
+
+test("a wall joined at both ends still slides sideways", () => {
+  const doc = docWith({
+    segments: [
+      wall("span", 0, 0, 4, 0, "T220"),
+      wall("left", 0, -2, 0, 2, "T220"),
+      wall("right", 4, -2, 4, 2, "T220"),
+    ],
+  });
+  const joins = captureWallJoins(doc, [ref("segment", "span")], { skuById: snapSku });
+  shiftSeg(doc.segments[0], 0, 1);
+  holdWallJoins(doc, joins, { skuById: snapSku });
+  const span = doc.segments[0];
+  assert.ok(Math.abs(span.x1) < 1e-9 && Math.abs(span.y1 - 1) < 1e-9);
+  assert.ok(Math.abs(span.x2 - 4) < 1e-9 && Math.abs(span.y2 - 1) < 1e-9);
+});
+
+test("a face offset at a corner survives the move", () => {
+  const doc = docWith({
+    segments: [wall("branch", 0, 0, 3.89, 0, "T220"), wall("host", 4, -1, 4, 3, "T220")],
+  });
+  const joins = captureWallJoins(doc, [ref("segment", "branch")], { skuById: snapSku });
+  assert.equal(joins.length, 1);
+  assert.ok(Math.abs(joins[0].slack + 0.11) < 1e-6, `slack ${joins[0].slack}`);
+  shiftSeg(doc.segments[0], 0, 1);
+  holdWallJoins(doc, joins, { skuById: snapSku });
+  assert.ok(Math.abs(doc.segments[0].x2 - 3.89) < 1e-6, `end at ${doc.segments[0].x2}`);
+  assert.ok(Math.abs(doc.segments[0].y2 - 1) < 1e-6);
+});
+
+test("sliding off the end of a tee breaks the join and leaves the host", () => {
+  const doc = docWith({
+    segments: [wall("branch", 0, 0, 4, 0, "T220"), wall("host", 0, -1, 0, 1, "T220")],
+  });
+  const joins = captureWallJoins(doc, [ref("segment", "branch")], { skuById: snapSku });
+  shiftSeg(doc.segments[0], 0, 3);
+  const held = holdWallJoins(doc, joins, { skuById: snapSku });
+  assert.equal(held.broken.length, 1);
+  assert.match(held.broken[0].message, /no longer reaches/);
+  assert.ok(Math.abs(doc.segments[0].y1 - 3) < 1e-9, "the end stays where the drag put it");
+  assert.equal(doc.segments[1].y2, 1);
+  const again = holdWallJoins(doc, dropBrokenJoins(joins, held.broken), { skuById: snapSku });
+  assert.equal(again.held.length, 0);
+  assert.ok(Math.abs(doc.segments[0].y1 - 3) < 1e-9, "a broken join stays broken");
+});
+
+test("a corner moved far keeps meeting, and the other wall stretches", () => {
+  const doc = docWith({
+    segments: [wall("arm", 0, 0, 4, 0, "T220"), wall("leg", 4, 0, 4, 3, "T220")],
+  });
+  const joins = captureWallJoins(doc, [ref("segment", "arm")], { skuById: snapSku });
+  assert.equal(joins[0].atHostEnd, true);
+  const old = { x1: 0, y1: 0, x2: 4, y2: 0 };
+  shiftSeg(doc.segments[0], 0, 5);
+  const held = holdWallJoins(doc, joins, { skuById: snapSku });
+  assert.equal(held.broken.length, 0);
+  shiftJoinedEnds(doc, [{
+    id: "arm",
+    level: null,
+    old,
+    next: { x1: doc.segments[0].x1, y1: doc.segments[0].y1, x2: doc.segments[0].x2, y2: doc.segments[0].y2 },
+  }], { skuById: snapSku });
+  assert.ok(Math.abs(doc.segments[0].x2 - 4) < 1e-9 && Math.abs(doc.segments[0].y2 - 5) < 1e-9);
+  assert.ok(Math.abs(doc.segments[1].y1 - 5) < 1e-9, `leg follows to ${doc.segments[1].y1}`);
+});
+
+test("walls moved together are not held to each other", () => {
+  const doc = docWith({
+    segments: [wall("arm", 0, 0, 4, 0, "T220"), wall("leg", 4, 0, 4, 3, "T220")],
+  });
+  const joins = captureWallJoins(doc, [ref("segment", "arm"), ref("segment", "leg")], { skuById: snapSku });
+  assert.equal(joins.length, 0);
+});
+
+test("a collinear run is not a held join", () => {
+  const doc = docWith({
+    segments: [wall("a", 0, 0, 3, 0, "T220"), wall("b", 3, 0, 6, 0, "T220")],
+  });
+  assert.equal(captureWallJoins(doc, [ref("segment", "a")], { skuById: snapSku }).length, 0);
+});
+
+test("a join on another level is ignored", () => {
+  const doc = docWith({
+    segments: [
+      wall("branch", 0, 0, 4, 0, "T220"),
+      { ...wall("host", 0, -2, 0, 2, "T220"), level: "up" },
+    ],
+  });
+  assert.equal(captureWallJoins(doc, [ref("segment", "branch")], { skuById: snapSku }).length, 0);
+});
+
+test("a door stays on the plan when the wall stretches, and a hold that would push it off breaks", () => {
+  const stretched = docWith({
+    segments: [wall("branch", 0, 0, 4, 0, "T220"), wall("host", 0, -2, 0, 2, "T220")],
+    openings: [{ id: "d1", sku: "D1", wallId: "branch", t: 0.8, status: "planned" }],
+  });
+  const joins = captureWallJoins(stretched, [ref("segment", "branch")], { skuById: snapSku });
+  shiftSeg(stretched.segments[0], 2, 0);
+  holdWallJoins(stretched, joins, { skuById: snapSku });
+  assert.ok(Math.abs(stretched.segments[0].x1) < 1e-9);
+  assert.ok(Math.abs(stretched.segments[0].x2 - 6) < 1e-9);
+  assert.ok(Math.abs(stretched.openings[0].t - (5.2 / 6)) < 1e-6, `door stays at its plan point, t ${stretched.openings[0].t}`);
+
+  const pushed = docWith({
+    segments: [wall("branch", 0, 0, 4, 0, "T220"), wall("host", 0, -2, 0, 2, "T220")],
+    openings: [{ id: "d1", sku: "D1", wallId: "branch", t: 0.025, status: "planned" }],
+  });
+  const off = captureWallJoins(pushed, [ref("segment", "branch")], { skuById: snapSku });
+  shiftSeg(pushed.segments[0], -0.25, 0);
+  const held = holdWallJoins(pushed, off, { skuById: snapSku });
+  assert.equal(held.broken.length, 1);
+  assert.match(held.broken[0].message, /door/);
+  assert.ok(Math.abs(pushed.segments[0].x1 + 0.25) < 1e-9, "the wall is left where the drag put it");
+  assert.equal(pushed.openings[0].t, 0.025);
+});
+
+test("holding a join that would leave the wall too short gives up", () => {
+  const doc = docWith({
+    segments: [wall("branch", 0, 0, 4, 0, "T220"), wall("host", 0, -2, 0, 2, "T220")],
+  });
+  const joins = captureWallJoins(doc, [ref("segment", "branch")], { skuById: snapSku });
+  shiftSeg(doc.segments[0], -3.8, 0);
+  const held = holdWallJoins(doc, joins, { skuById: snapSku });
+  assert.equal(held.broken.length, 1);
+  assert.match(held.broken[0].message, /too short/);
+  assert.ok(Math.abs(doc.segments[0].x1 + 3.8) < 1e-9);
 });

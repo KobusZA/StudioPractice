@@ -19,6 +19,7 @@ import {
   categoriesForSurface,
   createFinishRegion,
   createFinishRun,
+  faceArcScale,
   materializeFinishRing,
   dependentsOfWalls,
   finishBillNote,
@@ -31,7 +32,7 @@ import {
   libraryLine,
   savePreset,
 } from "../finish-model.js";
-import { RIBBON, SIMPLE_TABS } from "../ribbon.js";
+import { RIBBON } from "../ribbon.js";
 import { faceFinishHtml, finishCalloutHtml, openingCalloutHtml, productsHtml, roomFinishHtml, slabFinishHtml } from "../finish-panel.js";
 
 const pack = normalizePackUnits(
@@ -592,7 +593,7 @@ test("floor coverage reports bare floor and overlap, including a concave outline
   assert.equal(side.overlapCount, 0);
 });
 
-test("Rooms sit between Walls and Finishes on Build and on simple Draw", () => {
+test("Rooms sit between Walls and Finishes on Build", () => {
   const build = RIBBON.find((t) => t.id === "build");
   const names = build.groups.map((g) => g.label);
   assert.equal(names[names.indexOf("Walls") + 1], "Rooms");
@@ -604,15 +605,6 @@ test("Rooms sit between Walls and Finishes on Build and on simple Draw", () => {
   assert.equal(document.groups.find((g) => g.label === "Rooms"), undefined);
   const project = document.groups.find((g) => g.label === "Project");
   assert.deepEqual(project.items.map((i) => i.id), ["project-info"]);
-  const draw = SIMPLE_TABS.find((t) => t.id === "draw");
-  const simpleNames = draw.groups.map((g) => g.label);
-  assert.equal(simpleNames[simpleNames.indexOf("Walls") + 1], "Rooms");
-  assert.equal(simpleNames[simpleNames.indexOf("Rooms") + 1], "Finishes");
-  assert.deepEqual(draw.groups.find((g) => g.label === "Rooms").items, ["rooms", "room-sep"]);
-  assert.deepEqual(draw.groups.find((g) => g.label === "Finishes").items, ["wall-finishes", "finishes"]);
-  const annotate = SIMPLE_TABS.find((t) => t.id === "annotate");
-  assert.equal(annotate.groups.find((g) => g.label === "Rooms"), undefined);
-  assert.ok(annotate.groups.some((g) => g.items.includes("dimensions")));
   const views = document.groups.find((g) => g.label === "Views");
   assert.equal(views.items.find((i) => i.id === "elevation")?.label, "Elevation");
 });
@@ -874,6 +866,44 @@ test("a taller finish wins a shared stretch, and a skirting sits beside it", () 
   const skirts = marks.filter((m) => m.skirting);
   assert.ok(faces.length > 0 && faces.every((m) => m.category === "paint"));
   assert.ok(skirts.length === faces.length && skirts.every((m) => m.beside && m.label === "Skirting"));
+});
+
+test("a finish on a curved wall follows the arc, not the chord", () => {
+  const doc = normalizeDoc({
+    segments: [{ id: "w1", sku: "TSP_MAS009", level: "01 GFL", x1: 0, y1: 0, x2: 6, y2: 0, arc: { radius: 5, side: 1 } }],
+  });
+  const wall = deriveWalls(doc, pack).find((w) => w.id === "w1");
+  assert.ok(wall.length > 6, "the wall is the unrolled length");
+  createFinishRun(doc, wall, 1, { category: "paint" });
+  const mark = planWallFinishMarks(doc, pack, deriveWalls(doc, pack)).find((m) => m.category === "paint");
+  assert.ok(mark.arc, "the plan mark carries the curve");
+  assert.ok(Math.abs(mark.arc.radius - 5) < 1e-6);
+  assert.ok(Math.abs(Math.abs(mark.arc.sweep) - wall.length / 5) < 1e-6, "the whole face takes the whole sweep");
+  const mid = mark.arc.a0 + mark.arc.sweep / 2;
+  const crownY = mark.arc.cy + Math.sin(mid) * mark.arc.radius;
+  assert.ok(Math.abs(crownY) > 0.2, "the stripe leaves the straight chord");
+
+  const half = normalizeDoc({
+    segments: [{ id: "w1", sku: "TSP_MAS009", level: "01 GFL", x1: 0, y1: 0, x2: 6, y2: 0, arc: { radius: 5, side: 1 } }],
+  });
+  const halfWall = deriveWalls(half, pack).find((w) => w.id === "w1");
+  createFinishRun(half, halfWall, 1, { category: "paint", from: 0, to: halfWall.length / 2 });
+  const part = planWallFinishMarks(half, pack, deriveWalls(half, pack)).find((m) => m.category === "paint");
+  assert.ok(Math.abs(Math.abs(part.arc.sweep) * 2 - Math.abs(mark.arc.sweep)) < 1e-6, "half the wall is half the sweep");
+
+  const both = normalizeDoc({
+    segments: [{ id: "w1", sku: "TSP_MAS009", level: "01 GFL", x1: 0, y1: 0, x2: 6, y2: 0, arc: { radius: 5, side: 1 } }],
+  });
+  const curved = deriveWalls(both, pack).find((w) => w.id === "w1");
+  createFinishRun(both, curved, curved.arc.side, { category: "paint" });
+  createFinishRun(both, curved, -curved.arc.side, { category: "paint" });
+  const paints = resolveFinishes(both, pack, deriveWalls(both, pack)).bands.filter((b) => b.category === "paint");
+  const inner = paints.find((b) => b.side === curved.arc.side);
+  const outer = paints.find((b) => b.side === -curved.arc.side);
+  const centre = (b) => (b.to - b.from) * (b.top - b.bottom);
+  assert.ok(Math.abs(inner.quantity - centre(inner) * faceArcScale(curved, curved.arc.side)) < 1e-6);
+  assert.ok(Math.abs(outer.quantity - centre(outer) * faceArcScale(curved, -curved.arc.side)) < 1e-6);
+  assert.ok(outer.quantity > inner.quantity, "the outside face takes more paint");
 });
 
 test("a finish run marks only the stretch it covers", () => {

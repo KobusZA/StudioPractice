@@ -294,7 +294,9 @@ test("the ribbon reproduces the customer's four toolbars plus Check", () => {
 
 test("every function is exactly one of categories, command or todo", () => {
   for (const [id, item] of ribbonItems()) {
+    // A bare `tool` (Roof cut, the trims) arms a drawing tool with no catalog behind it.
     const kinds = ["categories", "command", "todo"].filter((k) => item[k]);
+    if (!kinds.length && item.tool) kinds.push("tool");
     assert.equal(kinds.length, 1, `${id} declares ${kinds.length} kinds: ${kinds}`);
   }
 });

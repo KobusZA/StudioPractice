@@ -1267,6 +1267,7 @@ export function openStore(queryable, { orgId, userId, role }) {
            left join drawing d on d.project_id = p.id and d.deleted_at is null
            ${FINANCIAL_LATERALS}
            ${PHASE_LATERAL}
+           ${PHASE_LIST_LATERAL}
            ${LAST_CERTIFICATE_LATERAL}
           where p.org_id = $1
             and ($2 or p.deleted_at is null)
@@ -1283,6 +1284,7 @@ export function openStore(queryable, { orgId, userId, role }) {
            left join drawing d on d.project_id = p.id and d.deleted_at is null
            ${FINANCIAL_LATERALS}
            ${PHASE_LATERAL}
+           ${PHASE_LIST_LATERAL}
            ${LAST_CERTIFICATE_LATERAL}
           where p.id = $2 and p.org_id = $1 and p.deleted_at is null`,
         [orgId, projectId],
@@ -2627,18 +2629,60 @@ const PHASE_LATERAL = `
   ) phase on true
 `;
 
+/**
+ * Every phase of the job, in the same order the job page lists them: the fee
+ * schedule first, then any task phase the schedule does not already name.
+ * One aggregate per row, so the cards can draw a strip without a request per
+ * job. An empty list is "this job has no phase list", which is different from
+ * a list nobody has stepped onto yet.
+ */
+const PHASE_LIST_LATERAL = `
+  left join lateral (
+    select coalesce((
+      select jsonb_agg(ph.ref order by ph.seq)
+        from (
+          select min(fsl.label) as ref, min(fsl.seq) as seq
+            from fee_schedule_line fsl
+           where fsl.project_id = p.id and fsl.deleted_at is null
+           group by upper(btrim(fsl.label))
+          union all
+          select min(pt.phase_label), 1000000 + min(pt.seq)
+            from project_task pt
+           where pt.project_id = p.id and pt.deleted_at is null
+             and pt.phase_label is not null and btrim(pt.phase_label) <> ''
+             and not exists (
+               select 1 from fee_schedule_line fsl
+                where fsl.project_id = p.id and fsl.deleted_at is null
+                  and upper(btrim(fsl.label)) = upper(btrim(pt.phase_label))
+             )
+           group by upper(btrim(pt.phase_label))
+        ) ph
+    ), '[]'::jsonb) as phase_refs
+  ) phase_list on true
+`;
+
 const REGISTER_COLUMNS = `
   p.id, p.code, p.name, p.client_name, p.client_email, p.client_cell,
   p.client_address, p.property_description, p.type_code, p.budget_estimate,
   p.projected_cost, p.template_quote, p.billing_basis, p.fee_ceiling, p.lead_user_id,
   p.rate_book_id, p.status, p.opened_at, p.updated_at,
   p.created_at, p.deleted_at, d.id as drawing_id,
+  -- Logging time does not touch the project row, and editing the drawing
+  -- does not either. "Date edited" is the latest of the three, or it would
+  -- leave a job that only had hours logged sitting where it was opened.
+  greatest(
+    p.updated_at,
+    d.updated_at,
+    (select max(te.created_at) from time_entry te
+      where te.project_id = p.id and te.deleted_at is null)
+  ) as last_edited_at,
   time_totals.captured, time_totals.captured_minutes,
   time_totals.uncertified_captured, time_totals.broken_rows,
   lines.certified_gross, lines.draft_gross,
   wds.written_down, wds.unexplained_written_down, wds.written_down_by_reason,
   schedule.scheduled, schedule.schedule_lines,
   phase.phase_ref as current_phase, phase.entered_at as phase_since,
+  phase_list.phase_refs,
   last_cert.seq as last_certificate_seq,
   last_cert.period_end as last_certificate_period_end,
   last_cert.issued_at as last_certificate_issued_at
@@ -2899,6 +2943,10 @@ function registerRow(row, capabilities = capabilitiesFor("owner")) {
     // Null is "nobody has said", not "phase one". The register shows the gap.
     currentPhase: row.current_phase ?? null,
     phaseSince: row.phase_since ?? null,
+    // Names only, in order. Empty when the job has neither a fee schedule nor
+    // a task list, so the card draws no strip rather than inventing stages.
+    phases: Array.isArray(row.phase_refs) ? row.phase_refs.map((ref) => String(ref)) : [],
+    lastEditedAt: row.last_edited_at ?? null,
     // The last certificate that went out, which is where the next one's period
     // starts. Dates and a sequence number, not money, so it reads for every
     // role - an employee can already see that a certificate exists.

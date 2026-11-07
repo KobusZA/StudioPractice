@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import { createFinishRegion } from "../finish-model.js";
 import { floorOpenHtml } from "../finish-panel.js";
 import { pointInPoly } from "../geom.js";
-import { alignFloorPoint, faceToPlan, floorFaceOf, floorPictureSvg, planToFace, resolveFloorFinishOpen } from "../floor-picture.js";
+import { alignFloorPoint, faceToPlan, floorBox, floorFaceOf, floorFrameFromHold, floorHoldCentered, floorPictureSvg, planToFace, resolveFloorFinishOpen, trackFloorHold } from "../floor-picture.js";
 import { clampElevationView, finishLocate, zoomElevationView } from "../wall-elevation-render.js";
 import { applyTypedGap } from "../wall-elevation.js";
 import { normalizeDoc, polyShape, roomPolygon } from "../model.js";
@@ -142,6 +142,59 @@ test("zoom stays on the floor when the room is far from the plan origin", () => 
   assert.ok(right > 16 && left < 640 - 16, "part of the floor stays in the picture");
 });
 
+function outlinePoints(svg) {
+  const match = svg.match(/<polygon points="([^"]+)" fill="none" class="elev-floor-outline"/);
+  assert.ok(match, "floor outline");
+  return match[1].trim().split(/\s+/).map((pair) => pair.split(",").map(Number));
+}
+
+test("the open floor uses the plan scale and sits on the frame", () => {
+  const host = [[10, 20], [16, 20], [16, 24], [10, 24]];
+  const frame = { scale: 20, originX: 80, originY: 50 };
+  const drawn = floorPictureSvg({ width: 640, height: 280, host, frame });
+  assert.ok(Math.abs(drawn.scaleX - 20) < 1e-6, "width uses the plan scale");
+  assert.ok(Math.abs(drawn.scaleY - 20) < 1e-6, "height uses the same scale");
+  const pts = outlinePoints(drawn.svg);
+  const left = Math.min(...pts.map((p) => p[0]));
+  const right = Math.max(...pts.map((p) => p[0]));
+  const top = Math.min(...pts.map((p) => p[1]));
+  const bottom = Math.max(...pts.map((p) => p[1]));
+  assert.ok(Math.abs(left - 80) < 1e-6, "the left of the floor sits on the frame");
+  assert.ok(Math.abs(top - 50) < 1e-6, "the top of the floor sits on the frame");
+  assert.ok(Math.abs(right - left - 6 * 20) < 1e-6, "six metres stay six metres");
+  assert.ok(Math.abs(bottom - top - 4 * 20) < 1e-6, "four metres stay four metres");
+
+  const px = 140;
+  const py = 90;
+  const planX = drawn.minX + (px - drawn.originX) / drawn.scaleX;
+  const planY = (py - drawn.originY) / drawn.scaleY;
+  const view = zoomElevationView(drawn.fit, { zoom: 1, panX: 0, panY: 0 }, px, py, 2);
+  const zoomed = floorPictureSvg({ width: 640, height: 280, host, frame, view });
+  const x = zoomed.originX + (planX - zoomed.minX) * zoomed.scaleX;
+  const y = zoomed.originY + planY * zoomed.scaleY;
+  assert.ok(Math.abs(x - px) < 1e-6, "zooming keeps the point under the cursor");
+  assert.ok(Math.abs(y - py) < 1e-6, "zooming keeps the point's height");
+  assert.ok(view.zoom > 1 && view.zoom < 16, "the picture can zoom in past the strip");
+  const out = zoomElevationView(drawn.fit, { zoom: 1, panX: 0, panY: 0 }, px, py, 1 / 4);
+  assert.ok(out.zoom < 1, "the picture can zoom out past the plan match");
+});
+
+test("moving the floor carries the picture, and align puts its centre back", () => {
+  const box = floorBox([[0, 0], [6, 0], [6, 4], [0, 4]]);
+  const hold = trackFloorHold(null, box, 10, { x: 200, y: 120 });
+  const moved = floorBox([[2, -1], [8, -1], [8, 3], [2, 3]]);
+  const next = trackFloorHold(hold, moved, 10);
+  assert.ok(Math.abs(next.centerX - 220) < 1e-6, "a move to the right moves the picture");
+  assert.ok(Math.abs(next.centerY - 110) < 1e-6, "a move up the plan moves the picture up");
+  const parked = trackFloorHold(next, moved, 10);
+  assert.ok(Math.abs(parked.centerX - next.centerX) < 1e-6, "panning the plan is not a move of the floor");
+
+  const centered = floorHoldCentered(moved, 10, 2, 400, 200);
+  const frame = floorFrameFromHold(moved, 10, centered);
+  const halfW = moved.spanX / 2 * 10;
+  assert.ok(Math.abs(frame.originX + halfW * 2 - 200) < 1e-6, "align keeps the centre at this zoom");
+});
+
 test("growing the floor shifts the sample the opposite way from shrinking it", () => {
   const inner = [[2, 1], [4, 1], [4, 3], [2, 3]];
   const picture = (host) => floorPictureSvg({
@@ -159,6 +212,18 @@ test("growing the floor shifts the sample the opposite way from shrinking it", (
   assert.ok(screenX(bigger, 3) < at - 1, "a bigger floor moves it the other way");
 });
 
+test("opening the floor frames the plan that the strip leaves clear", () => {
+  const src = readFileSync(new URL("../ui.js", import.meta.url), "utf8");
+  const start = src.indexOf("function visiblePlanRect(");
+  const end = src.indexOf("function heldFloorFrame(");
+  assert.ok(start >= 0 && end > start);
+  const body = src.slice(start, end);
+  assert.match(body, /canvasWrap \|\| el\.canvas/);
+  assert.match(body, /function visiblePlanRect\(\)/);
+  assert.doesNotMatch(body, /el\.canvas\.getBoundingClientRect\(\)/);
+  assert.match(body, /fitCam/);
+});
+
 test("the open picture redraws when the floor outline changes and the finishes do not", () => {
   const src = readFileSync(new URL("../ui.js", import.meta.url), "utf8");
   const start = src.indexOf("function syncFloorPictureDock()");
@@ -169,6 +234,24 @@ test("the open picture redraws when the floor outline changes and the finishes d
   assert.ok(keyAt >= 0);
   const key = body.slice(keyAt, body.indexOf("`;", keyAt));
   assert.match(key, /JSON\.stringify\(poly\)/);
+  assert.match(key, /frameKey/);
+  assert.match(body, /heldFloorFrame\(poly\)/);
+  assert.match(body, /heldScreenFloorFrame\(poly\)/);
+  assert.match(body, /syncElevationAlignState\(true\)/);
+  assert.match(body, /v2-elev-second-screen|el\.elevSecondScreen/);
+  assert.match(body, /frame,/);
+  assert.doesNotMatch(body, /setHidden\(el\.elevAlign, true\)/);
+});
+
+test("the floor picture uses the second screen when that window is the host", () => {
+  const src = readFileSync(new URL("../ui.js", import.meta.url), "utf8");
+  const start = src.indexOf("if (floorPicture) {");
+  const end = src.indexOf("const leavingFloor");
+  assert.ok(start >= 0 && end > start);
+  const body = src.slice(start, end);
+  assert.match(body, /placeFaceParts\(inScreen\)/);
+  assert.doesNotMatch(body, /placeFaceParts\(false\)/);
+  assert.match(body, /syncFloorPictureDock\(\)/);
 });
 
 test("Floor finishes opens the picture and does not open the floor-type palette", () => {
@@ -241,8 +324,11 @@ test("the open floor inspector is one line per finish, with level behind one row
 test("the floor list stays while the strip is closed, and a finish on the card opens that finish", () => {
   const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   assert.match(html, /id="v2-ctx-floor"/);
+  assert.match(html, /id="v2-ctx-floor-screen"/);
+  assert.match(html, /Open this floor on the second screen/);
   assert.match(html, /Open floor/);
   const src = readFileSync(new URL("../ui.js", import.meta.url), "utf8");
+  assert.match(src, /function openFloorPreviewOnSecondScreen/);
   const click = src.slice(src.indexOf("el.ctxFloor?.addEventListener(\"click\""), src.indexOf("el.elevInfoDismiss"));
   assert.match(click, /openFloorPicture\(picked\.host\)/);
   assert.match(click, /data-floor-fill/);
@@ -273,7 +359,7 @@ test("a selected finish keeps the floor outline still, and Delete follows that f
   assert.match(src, /function floorFinishDeletePrompt/);
   assert.match(src, /Delete removes this finish\. The floor stays/);
   assert.match(src, /Corner selected\. Delete removes this corner/);
-  const hit = src.slice(src.indexOf("const hit = hitTest(wx, wy);"), src.indexOf("const hit = hitTest(wx, wy);") + 500);
+  const hit = src.slice(src.indexOf("const hit = hitTest(wx, wy);"), src.indexOf("const hit = hitTest(wx, wy);") + 800);
   assert.match(hit, /editingFinishRegion\(\)/);
   assert.match(hit, /selectFloorHost\(\)/);
 });

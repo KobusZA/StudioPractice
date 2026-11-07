@@ -18,6 +18,7 @@
 // Heights are metres above the wall's base; offsets are metres from the
 // wall's first end (the elevation view converts to viewing order).
 
+import { arcFromRadius } from "./click-draw.js";
 import { area as polyArea, clipPolygon, distToSeg, pointInPoly } from "./geom.js";
 import { effectiveLevel, finishRegionPolygon, finishRegionSlab, polyShape, roomArea, roomPolygon, shapeAsPoly } from "./model.js";
 import { archRise, archVoidPolygon } from "./arch-head.js";
@@ -36,6 +37,21 @@ export { FINISH_CATEGORIES, FINISH_CATEGORY_IDS, categoriesForSurface };
 
 const EPS = 1e-6;
 const DEFAULT_WINDOW_SILL = 0.9;
+
+/**
+ * Developed length of one face, divided by the centreline length.
+ * A straight wall is 1. On a curve the face toward the arc centre is shorter
+ * and the face away from it is longer, each by half the wall thickness.
+ */
+export function faceArcScale(wall, side) {
+  const radius = wall?.arc?.radius;
+  if (!(radius > 0)) return 1;
+  const half = (wall.thickness || 0) / 2;
+  const towardCentre = side === wall.arc.side;
+  const faceRadius = towardCentre ? radius - half : radius + half;
+  if (!(faceRadius > 0)) return 1;
+  return faceRadius / radius;
+}
 
 export function finishProductById(doc, id) {
   return id ? (doc?.finishProducts || []).find((p) => p.id === id) || null : null;
@@ -697,7 +713,7 @@ export function resolveFinishes(doc, pack, walls, { wallBases = null, onlyWallId
         quantity -= pieceArea(clipPolygon(voidPoly(o), bandPoly));
       }
     }
-    quantity = Math.max(0, quantity);
+    quantity = Math.max(0, quantity) * faceArcScale(wall, band.side);
     band.quantity = quantity;
     band.unit = spec.unit;
     bands.push(band);
@@ -948,10 +964,31 @@ function sweepFinishSpans(bands, doc) {
   return out;
 }
 
+/**
+ * The centreline arc of one finish stretch. Stations run along the unrolled
+ * wall, so a finish on part of the curve is that fraction of the sweep.
+ * Null on a straight wall.
+ */
+function finishMarkArc(wall, from, to) {
+  if (!wall?.arc || !(to > from)) return null;
+  const arc = arcFromRadius(wall.x1, wall.y1, wall.x2, wall.y2, wall.arc.radius, wall.arc.side, wall.arc.major === true);
+  const len = wall.length || arc?.length;
+  if (!arc || !(len > 0)) return null;
+  return {
+    cx: arc.cx,
+    cy: arc.cy,
+    radius: arc.radius,
+    a0: arc.a0 + arc.sweep * (from / len),
+    sweep: arc.sweep * ((to - from) / len),
+    side: arc.side,
+  };
+}
+
 function finishMark(wall, side, len, span, roomIds, skirting, beside) {
   const n = wallNormal(wall, side);
   const a = pointOnWall(wall, span.from / len);
   const b = pointOnWall(wall, span.to / len);
+  const arc = finishMarkArc(wall, span.from, span.to);
   return {
     wallId: wall.id,
     side,
@@ -968,6 +1005,7 @@ function finishMark(wall, side, len, span, roomIds, skirting, beside) {
     y2: b.y,
     nx: n.x,
     ny: n.y,
+    ...(arc ? { arc } : {}),
   };
 }
 

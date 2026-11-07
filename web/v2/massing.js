@@ -1020,12 +1020,9 @@ function pushRoofShell(faces, form, z0, id, status) {
       quad(r0, r1, c, d, fillB);
       quad(drop(a), drop(r0), drop(r1), drop(b), side);
       quad(drop(d), drop(c), drop(r1), drop(r0), side);
-      // The gable end is wall, not roof: it takes the wall colour for this
-      // status, so the triangle reads as the wall running up to the ridge.
-      tri(a, d, r0, side, "wall");
-      tri(drop(a), drop(r0), drop(d), side, "wall");
-      tri(b, r1, c, side, "wall");
-      tri(drop(b), drop(c), drop(r1), side, "wall");
+      // No gable-end board here. The walls under the plate run up to the
+      // ridge, and a board on the roof outline sits out on the overhang,
+      // in the wall colour, clear of those walls.
       quad(a, b, drop(b), drop(a), side);
       quad(d, drop(d), drop(c), c, side);
     } else {
@@ -1040,10 +1037,6 @@ function pushRoofShell(faces, form, z0, id, status) {
       quad(r0, b, c, r1, fillB);
       quad(drop(a), drop(d), drop(r1), drop(r0), side);
       quad(drop(r0), drop(r1), drop(c), drop(b), side);
-      tri(a, b, r0, side, "wall");
-      tri(drop(a), drop(r0), drop(b), side, "wall");
-      tri(d, r1, c, side, "wall");
-      tri(drop(d), drop(c), drop(r1), side, "wall");
       quad(a, d, drop(d), drop(a), side);
       quad(b, drop(b), drop(c), c, side);
     }
@@ -1180,6 +1173,13 @@ function pushFormFaces(faces, form, openings) {
 
 /** A wall whose top is within this of a roof's plate follows that roof. */
 const ROOF_ATTACH_TOL = 0.25;
+/**
+ * A wall is drawn on its centreline, so one face sits just outside the roof
+ * outline. Sample the roof that far past the plate, and past a hole, or the
+ * outside face stays a flat rectangle and the gable triangle floats in front
+ * of it. Wide enough for a thick masonry wall, short of the next wall over.
+ */
+const ROOF_EDGE_MARGIN = 0.35;
 
 /** Where a roof's slope changes, so a wall top can bend there. */
 function roofModel(form) {
@@ -1223,16 +1223,46 @@ function roofModel(form) {
       kinks.push([e, f], [[x, y], e], [[x, y + h], f], [[x + w, y], e], [[x + w, y + h], f]);
     }
   }
-  return { rect, shape, tan, alongX, eave, holes, kinks };
+  // The break has to cross the face that sits just outside the outline.
+  return { rect, shape, tan, alongX, eave, holes, kinks: kinks.map((seg) => extendKink(seg[0], seg[1], ROOF_EDGE_MARGIN)) };
 }
 
-/** Top of the roof surface at a plan point, or null outside it (and inside a hole). */
-function roofSurfaceZ(model, x, y) {
-  const { rect, shape, tan, eave, holes } = model;
-  if (x < rect.x - 1e-4 || y < rect.y - 1e-4 || x > rect.x + rect.w + 1e-4 || y > rect.y + rect.h + 1e-4) return null;
-  for (const hole of holes) {
-    if (pointInPoly(x, y, hole)) return null;
+function extendKink(a, b, extra) {
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  const len = Math.hypot(dx, dy) || 1;
+  return [
+    [a[0] - (dx / len) * extra, a[1] - (dy / len) * extra],
+    [b[0] + (dx / len) * extra, b[1] + (dy / len) * extra],
+  ];
+}
+
+function closestOnRing(ring, x, y) {
+  let bestX = x;
+  let bestY = y;
+  let bestD = Infinity;
+  for (let i = 0; i < ring.length; i += 1) {
+    const a = ring[i];
+    const b = ring[(i + 1) % ring.length];
+    const abx = b[0] - a[0];
+    const aby = b[1] - a[1];
+    const ab2 = abx * abx + aby * aby;
+    const t = ab2 < 1e-12 ? 0 : Math.min(1, Math.max(0, ((x - a[0]) * abx + (y - a[1]) * aby) / ab2));
+    const px = a[0] + abx * t;
+    const py = a[1] + aby * t;
+    const d = Math.hypot(px - x, py - y);
+    if (d < bestD) {
+      bestD = d;
+      bestX = px;
+      bestY = py;
+    }
   }
+  return { x: bestX, y: bestY, d: bestD };
+}
+
+/** Roof height at a plan point already known to lie on the roof. */
+function roofHeightAt(model, x, y) {
+  const { rect, shape, tan, eave } = model;
   if (shape === "shed") {
     if (model.alongX) return eave + (rect.y + rect.h - y) * tan;
     return eave + (rect.x + rect.w - x) * tan;
@@ -1248,6 +1278,35 @@ function roofSurfaceZ(model, x, y) {
     return eave + tan * Math.min(dx, dy, inset);
   }
   return eave;
+}
+
+/** Top of the roof surface at a plan point, or null off the roof.
+ *  A point just outside the outline, or just inside a hole, takes the
+ *  height on the nearest plate so a wall face there follows the slope. */
+function roofSurfaceZ(model, x, y) {
+  const { rect, holes } = model;
+  const outline = [
+    [rect.x, rect.y],
+    [rect.x + rect.w, rect.y],
+    [rect.x + rect.w, rect.y + rect.h],
+    [rect.x, rect.y + rect.h],
+  ];
+  let sx = x;
+  let sy = y;
+  if (x < rect.x - 1e-4 || y < rect.y - 1e-4 || x > rect.x + rect.w + 1e-4 || y > rect.y + rect.h + 1e-4) {
+    const near = closestOnRing(outline, x, y);
+    if (near.d > ROOF_EDGE_MARGIN) return null;
+    sx = near.x;
+    sy = near.y;
+  }
+  for (const hole of holes) {
+    if (!pointInPoly(sx, sy, hole)) continue;
+    const near = closestOnRing(hole, sx, sy);
+    if (near.d > ROOF_EDGE_MARGIN) return null;
+    sx = near.x;
+    sy = near.y;
+  }
+  return roofHeightAt(model, sx, sy);
 }
 
 function segmentCrossT(a, b, c, d) {
@@ -1307,14 +1366,13 @@ function moveFacePoint(face, index, z) {
 /**
  * Walls that reach a roof's plate follow its surface, up into a gable and
  * down where they would otherwise stick through. A low wall is only cut,
- * never stretched up to the roof.
+ * never stretched up to the roof. Both faces follow, including the one that
+ * sits just outside the roof outline.
  */
 function conformWallsToRoofs(faces, forms) {
   const roofs = (forms || []).filter((form) => (form.kind || "").toLowerCase() === "roof").map(roofModel).filter(Boolean);
   if (!roofs.length) return;
   const kinks = roofs.flatMap((roof) => roof.kinks);
-  // A gable end is drawn with the roof and tagged as a wall so it takes the
-  // wall colour. It already follows the slope, and it is not a wall to cut.
   const wallIds = new Set(
     (forms || []).filter((form) => (form.kind || "").toLowerCase() === "wall").map((form) => form.elementId),
   );
@@ -1999,7 +2057,20 @@ export function createMassingView({ canvas, emptyEl, hintEl, titleEl, onDraw }) 
     // Every mode stores depth as "larger = farther" (orbit: projectPoint;
     // look: distance along the gaze; section/elevation: along the look
     // vector). Draw far faces first so a window's near leaf stays in front.
-    projected.sort((a, b) => massingLayer(a.face) - massingLayer(b.face) || b.depth - a.depth);
+    // In orbit and look, the roof is one big plane whose average depth loses
+    // to a wall under it, so the wall is painted over the slope. Draw the
+    // roof after the walls and it covers them. A section keeps depth order,
+    // because the cut face has to stay in front of what is behind it.
+    const cover = (face) => (face?.kind === "roof" ? 1 : 0);
+    projected.sort((a, b) => {
+      const layer = massingLayer(a.face) - massingLayer(b.face);
+      if (layer) return layer;
+      if (!isCutView) {
+        const over = cover(a.face) - cover(b.face);
+        if (over) return over;
+      }
+      return b.depth - a.depth;
+    });
 
     const picking = highlight.size > 0;
     highlightHits = 0;

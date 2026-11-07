@@ -82,6 +82,27 @@ const GLYPHS = {
   split: '<path d="M12 4v16M6 9l6 3 6-3M6 15l6-3 6 3"/>',
   cut: '<path d="M5 5l14 14M9 15a3 3 0 11-4 4 3 3 0 014-4zM19 5a3 3 0 11-4 4 3 3 0 014-4z"/>',
   join: '<path d="M5 12h14M8 8l-3 4 3 4M16 8l3 4-3 4"/>',
+  "split-wall": '<path d="M12 4v16M6 9l6 3 6-3M6 15l6-3 6 3"/>',
+  // Contextual-tab commands. Same 24x24 stroked style as the rest.
+  snap: '<path d="M4 12h7"/><circle cx="14" cy="12" r="2.4"/><path d="M20 6v12M17 9l3-3 3 3"/>',
+  "edit-face": '<rect x="5" y="6" width="14" height="13" rx="1"/><path d="M5 11h14M9 6v13"/>',
+  "flip-face": '<path d="M12 4v16"/><path d="M8 8L4 12l4 4M16 8l4 4-4 4"/>',
+  "second-screen": '<rect x="3" y="6" width="10" height="8" rx="1"/><rect x="14" y="10" width="7" height="8" rx="1"/><path d="M6 18h4"/>',
+  "flip-hinge": '<path d="M5 4v16"/><path d="M5 5h10a4 4 0 014 4v6"/><path d="M16 12l3 3 3-3"/>',
+  "flip-swing": '<path d="M4 12h16"/><path d="M8 12a6 6 0 016-6M8 12a6 6 0 006 6"/><path d="M14 3l2 3-3 1M14 21l2-3-3-1"/>',
+  "roof-cut": '<path d="M3 13l9-8 9 8"/><rect x="9" y="10" width="6" height="5" stroke-dasharray="2 2"/>',
+  "roof-cut-here": '<path d="M3 13l9-8 9 8"/><rect x="9" y="10" width="6" height="5" stroke-dasharray="2 2"/>',
+  "edit-poly": '<path d="M5 17l3-10 9 2 2 8z"/><circle cx="5" cy="17" r="1.4"/><circle cx="8" cy="7" r="1.4"/><circle cx="17" cy="9" r="1.4"/><circle cx="19" cy="17" r="1.4"/>',
+  "follow-walls": '<rect x="4" y="4" width="16" height="16" rx="1"/><rect x="8" y="8" width="8" height="8" stroke-dasharray="2 2"/><path d="M10 12h4"/>',
+  "mark-existing": '<rect x="5" y="5" width="14" height="14" rx="1"/><path d="M8 12.5l2.5 2.5 5.5-6"/>',
+  "mark-proposed": '<rect x="5" y="5" width="14" height="14" rx="1" stroke-dasharray="3 2"/><path d="M8 12h8"/>',
+  "select-similar": '<rect x="4" y="5" width="7" height="7"/><rect x="13" y="12" width="7" height="7"/><path d="M13 8h4M7 15v4"/>',
+  "trim-corner": '<path d="M5 5v14h14"/><path d="M5 19L19 5" stroke-dasharray="2 2"/>',
+  "trim-single": '<path d="M4 12h16"/><path d="M12 12v8"/><path d="M12 4v5" stroke-dasharray="2 2"/>',
+  "trim-circle": '<circle cx="12" cy="12" r="6" stroke-dasharray="3 2"/><path d="M4 12h16M12 4v16"/>',
+  attach: '<path d="M4 20h16"/><rect x="7" y="10" width="10" height="6"/><path d="M12 4v6M9 7l3-3 3 3"/>',
+  detach: '<path d="M4 20h16"/><rect x="7" y="6" width="10" height="6"/><path d="M12 14v4M9 15l3 3 3-3"/>',
+  "wall-finishes": '<path d="M4 18h16M6 18V6h12v12"/><path d="M9 9h6M9 12h6M9 15h6"/>',
   group: '<rect x="4" y="6" width="7" height="12"/><rect x="13" y="6" width="7" height="12"/>',
   ungroup: '<rect x="3" y="7" width="7" height="10"/><rect x="14" y="7" width="7" height="10"/>',
   undo: '<path d="M9 13H5V9"/><path d="M5 13a8 8 0 111.5 4.5"/>',
@@ -135,7 +156,7 @@ export function closeOverflowMenus(except) {
  */
 export function decorateRibbon(functionsEl) {
   if (!functionsEl) return;
-  for (const group of functionsEl.querySelectorAll(":scope > .ribbon-group")) {
+  for (const group of functionsEl.querySelectorAll(":scope > .ribbon-group:not(.ribbon-settings)")) {
     for (const btn of group.querySelectorAll(".ribbon-item")) {
       if (btn.querySelector(".glyph")) continue;
       const id = btn.dataset.function || "generic";
@@ -316,7 +337,11 @@ function overflowing(el) {
 export function fitRibbon(el) {
   if (!el || el.hidden || !el.offsetParent) return;
   closeOverflowMenus();
-  const groups = [...el.querySelectorAll(":scope > .ribbon-group")];
+  // A Settings group is a fixed strip of the running command's controls. It
+  // does not shrink; the other groups give up width around it. Overflow is
+  // still measured against the last group, which is the settings strip when
+  // one is open, so the row accounts for it.
+  const groups = [...el.querySelectorAll(":scope > .ribbon-group")].filter((g) => g.dataset.fit !== "fixed");
   if (!groups.length) return;
   const plan = groups.map((g) => ({ kind: g.dataset.kind || "stack", prio: Number(g.dataset.prio) || 0 }));
   const fits = (steps) => {

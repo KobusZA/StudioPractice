@@ -125,7 +125,19 @@ export function planFaceFrame(wall, cam, shiftX = 0) {
   const shift = useY ? 0 : (Number(shiftX) || 0);
   const start = (useY ? sy0 : sx0) + shift;
   const end = (useY ? sy1 : sx1) + shift;
-  return { scale, originX: start, dir: end - start >= 0 ? 1 : -1, vertical: useY };
+  // `span` is the signed screen distance from the viewing start to the other
+  // end: the chord, once the wall is a curve.
+  return { scale, originX: start, dir: end - start >= 0 ? 1 : -1, vertical: useY, span: end - start };
+}
+
+/**
+ * Strip position of the centre the plan and the unrolled face share.
+ * `span` is the signed screen distance from the viewing start to the other
+ * end. A curve unrolls longer than that span; the extra length hangs equally
+ * off both sides of this centre, rather than growing from the start.
+ */
+export function faceScreenCenter(originX, span) {
+  return originX + span / 2;
 }
 
 /**
@@ -196,6 +208,11 @@ function esc(text) {
 
 function mm(metres) {
   return `${Math.round(metres * 1000)}`;
+}
+
+/** Centreline stations become metres along this face. A straight wall is 1. */
+function faceScaleOf(model) {
+  return model?.faceScale > 0 ? model.faceScale : 1;
 }
 
 /** The resize arrow for pushing an edge sideways, the same cursors as a wall top.
@@ -420,7 +437,7 @@ function locateTick(parts, x, y) {
 
 /** Horizontal clearance, in the gap beside the finish. */
 function locateSide(parts, model, side, xOf, yOf, W, H, typing, typeable) {
-  const metres = side.s1 - side.s0;
+  const metres = (side.s1 - side.s0) * faceScaleOf(model);
   if (!(side.pinned || metres > LOCATE_GAP)) return;
   const x1 = xOf(side.s0);
   const x2 = xOf(side.s1);
@@ -770,6 +787,10 @@ export function elevationSvg(model, { width, height, interactive = false, select
   const x1 = W - PAD / 2;
   const planScale = Number(frame?.scale);
   const locked = planScale > 0 && Number.isFinite(Number(frame?.originX));
+  // A curved face is longer or shorter than the centreline. Stations stay on
+  // the centreline; the horizontal scale turns them into face metres, so a
+  // pointer that divides by scaleX still gets a centreline station.
+  const faceScale = faceScaleOf(model);
   let fit;
   if (locked) {
     // The floor is the anchor. A footing under it keeps its own height, and
@@ -782,12 +803,12 @@ export function elevationSvg(model, { width, height, interactive = false, select
     let originY = H - PAD - footing * planScale;
     if (originY < PAD) originY = H - PAD;
     fit = {
-      scaleX: planScale,
+      scaleX: planScale * faceScale,
       scaleY: planScale,
       originX: Number(frame.originX),
       originY,
       top: originY - (zHi - model.base) * planScale,
-      spanX: model.length * planScale,
+      spanX: model.length * planScale * faceScale,
       spanY: Math.max(model.height, zHi - zLo) * planScale,
       dir: frame.dir < 0 ? -1 : 1,
     };
@@ -1087,7 +1108,7 @@ export function elevationSvg(model, { width, height, interactive = false, select
     for (let i = 1; i < draft.points.length; i += 1) {
       const a = draft.points[i - 1];
       const b = draft.points[i];
-      measureLabel(parts, xOf(a.s), yOf(model.base + a.z), xOf(b.s), yOf(model.base + b.z), Math.hypot(b.s - a.s, b.z - a.z));
+      measureLabel(parts, xOf(a.s), yOf(model.base + a.z), xOf(b.s), yOf(model.base + b.z), Math.hypot((b.s - a.s) * faceScale, b.z - a.z));
     }
     if (draft.hover) {
       const last = draft.points[draft.points.length - 1];
@@ -1095,7 +1116,7 @@ export function elevationSvg(model, { width, height, interactive = false, select
         parts,
         xOf(last.s), yOf(model.base + last.z),
         xOf(draft.hover.s), yOf(model.base + draft.hover.z),
-        Math.hypot(draft.hover.s - last.s, draft.hover.z - last.z),
+        Math.hypot((draft.hover.s - last.s) * faceScale, draft.hover.z - last.z),
       );
     }
     for (const p of draft.points) parts.push(`<circle cx="${xOf(p.s)}" cy="${yOf(model.base + p.z)}" r="3.5" class="elev-draft-pt"/>`);
@@ -1106,10 +1127,11 @@ export function elevationSvg(model, { width, height, interactive = false, select
   // label with a caret is the one being typed into.
   drawFinishLocate(parts, model, locate, xOf, yOf, W, H);
 
+  const shownLength = (faceTo - faceFrom) * faceScale;
   if (interactive) {
     let below = yOf(offer ? offer.base : model.base);
     for (const f of model.foundations || []) below = Math.max(below, yOf(f.base));
-    parts.push(`<text x="${wx + ww / 2}" y="${Math.min(H - 3, below + 12)}" text-anchor="middle" class="elev-dim">${mm(model.length)}</text>`);
+    parts.push(`<text x="${wx + ww / 2}" y="${Math.min(H - 3, below + 12)}" text-anchor="middle" class="elev-dim">${mm(shownLength)}</text>`);
   }
   if (interactive) {
     parts.push(`<text x="${wx - 4}" y="${wy + wh / 2}" text-anchor="end" class="elev-dim">${mm(model.height)}</text>`);
@@ -1125,7 +1147,7 @@ export function elevationSvg(model, { width, height, interactive = false, select
   const footing = model.foundations?.length
     ? `, ${model.foundations.length} foundation${model.foundations.length === 1 ? "" : "s"} below`
     : "";
-  const label = `Wall elevation, ${mm(model.length)} long, ${mm(model.height)} high, ${model.openings.length} opening${model.openings.length === 1 ? "" : "s"}${footing}`;
+  const label = `Wall elevation, ${mm(shownLength)} long, ${mm(model.height)} high, ${model.openings.length} opening${model.openings.length === 1 ? "" : "s"}${footing}`;
   return {
     svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}" class="elev-svg${selectedId ? " elev-host" : ""}">${parts.join("")}</svg>`,
     scale,
