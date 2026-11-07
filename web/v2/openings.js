@@ -14,6 +14,9 @@ import {
   segNormal,
 } from "./geom.js";
 import { roomPolygon } from "./model.js";
+import { archRadius, archRise, archSegmentArea, archVoidPolygon, fitArchSize } from "./arch-head.js";
+
+export { archRadius, archRise, archVoidPolygon, fitArchSize };
 
 export function skuById(pack, id) {
   return pack?.skus?.find((s) => s.id === id) || null;
@@ -23,7 +26,8 @@ export function skuById(pack, id) {
  * An opening's size on this job: its own sill, width and height where it has
  * set them, otherwise its type's. `nonStandard` is true when a window has been
  * resized to a width x height that matches no window type in the pack, so the
- * firm must confirm it (made to order, not a catalogue size).
+ * firm must confirm it (made to order, not a catalogue size). An arch's `rise`
+ * is the crown above the spring; omitted, it is a semicircle.
  */
 export function openingSize(pack, opening) {
   const sku = skuById(pack, opening?.sku);
@@ -38,10 +42,12 @@ export function openingSize(pack, opening) {
       && Math.abs((s.geometry?.width ?? -1) - width) < 0.0005
       && Math.abs((s.geometry?.height ?? -1) - height) < 0.0005);
   }
-  return { width, height, sill, nonStandard };
+  const size = { width, height, sill, nonStandard };
+  if (isArchHead(sku)) size.rise = archRise(width, opening?.rise);
+  return size;
 }
 
-/** A hole with no leaf. An arch is the same hole with a semicircular head. */
+/** A hole with no leaf. An arch is the same hole with a circular head. */
 export function isPlainOpening(sku) {
   return sku?.category === "opening";
 }
@@ -50,55 +56,16 @@ export function isArchHead(sku) {
   return isPlainOpening(sku) && sku?.geometry?.head === "arch";
 }
 
-/** Rise of a semicircular head, metres. The diameter is the opening width. */
-export function archRise(width) {
-  return Math.max(0, Number(width) || 0) / 2;
-}
-
-/** The height stays at least the rise, so the head remains a semicircle. */
-export function fitArchSize(width, height) {
-  const w = Math.max(0, Number(width) || 0);
-  const rise = archRise(w);
-  return { width: w, height: Math.max(Number(height) || 0, rise) };
-}
-
 /**
  * Area of the void. A rectangular hole is width × height. An arch drops the
- * two spandrels above the springing line.
+ * two spandrels above the springing line. `rise` omitted is a semicircle.
  */
-export function openingVoidArea(width, height, sku) {
+export function openingVoidArea(width, height, sku, riseAsked) {
   const w = Math.max(0, Number(width) || 0);
   const h = Math.max(0, Number(height) || 0);
   if (!isArchHead(sku) || !(w > 0) || !(h > 0)) return w * h;
-  const rise = Math.min(archRise(w), h);
-  return w * (h - rise) + (Math.PI * rise * rise) / 2;
-}
-
-/**
- * The void of an arched opening. `rect` is `{ from, to, bottom, top }` in
- * wall coordinates. The head is a semicircle of diameter `to - from`.
- */
-export function archVoidPolygon(rect, steps = 8) {
-  const from = rect.from;
-  const to = rect.to;
-  const bottom = rect.bottom;
-  const top = rect.top;
-  const width = Math.max(0, to - from);
-  const rise = Math.min(archRise(width), Math.max(0, top - bottom));
-  const spring = top - rise;
-  const cx = (from + to) / 2;
-  const r = width / 2;
-  const pts = [];
-  if (spring - bottom > 1e-6) pts.push([from, bottom]);
-  pts.push([from, spring]);
-  const n = Math.max(2, steps);
-  for (let i = 1; i < n; i += 1) {
-    const a = Math.PI - (Math.PI * i) / n;
-    pts.push([cx + r * Math.cos(a), spring + r * Math.sin(a)]);
-  }
-  pts.push([to, spring]);
-  if (spring - bottom > 1e-6) pts.push([to, bottom]);
-  return pts;
+  const rise = Math.min(archRise(w, riseAsked), h);
+  return w * (h - rise) + archSegmentArea(w, rise);
 }
 
 /**

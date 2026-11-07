@@ -9,9 +9,11 @@ import {
   recentDoorSkus,
   rememberFunctionSku,
   skuForArmedFunction,
+  joinedWallPolygon,
   wallFootprint,
   wallPlanColour,
   WALL_EXISTING,
+  WALL_EXISTING_EDGE,
   WALL_NEW,
 } from "../drawing-defaults.js";
 
@@ -55,11 +57,11 @@ test("a door stays armed and recent doors sit beside the library, newest first",
   assert.deepEqual(recentDoorSkus(skus, ["missing", "d2"]).map((sku) => sku.id), ["d2"]);
 });
 
-test("new walls are red and existing walls are white; other statuses are left alone", () => {
+test("new walls are red and existing walls are white; both have the dark edge", () => {
   assert.equal(wallPlanColour("planned").stroke, WALL_NEW);
-  assert.equal(wallPlanColour("planned").edge, null);
+  assert.equal(wallPlanColour("planned").edge, WALL_EXISTING_EDGE);
   assert.equal(wallPlanColour("existing").stroke, WALL_EXISTING);
-  assert.ok(wallPlanColour("existing").edge);
+  assert.equal(wallPlanColour("existing").edge, WALL_EXISTING_EDGE);
   assert.equal(wallPlanColour("mixed"), null);
 });
 
@@ -71,4 +73,34 @@ test("sheet and model swap, and a wall footprint is the thickness around the cen
   const ys = poly.map((p) => p.y);
   assert.ok(ys.some((y) => Math.abs(y - 0.11) < 1e-9));
   assert.ok(ys.some((y) => Math.abs(y + 0.11) < 1e-9));
+});
+
+function near(p, x, y) {
+  return Math.hypot(p.x - x, p.y - y) < 1e-6;
+}
+
+test("two walls that meet mitre into one corner, and a straight join stays square", () => {
+  const a = { id: "a", x1: 0, y1: 0, x2: 4, y2: 0, thickness: 0.2 };
+  const b = { id: "b", x1: 4, y1: 0, x2: 4, y2: 3, thickness: 0.2 };
+  const poly = joinedWallPolygon(a, [a, b]);
+  assert.ok(poly.some((p) => near(p, 3.9, 0.1)), "inner corner");
+  assert.ok(poly.some((p) => near(p, 4.1, -0.1)), "outer corner");
+  // Drawn "against": the ends sit a thickness apart but the corner is still one.
+  const a2 = { id: "a", x1: 0, y1: 0, x2: 3.9, y2: 0, thickness: 0.2 };
+  const b2 = { id: "b", x1: 4, y1: -0.1, x2: 4, y2: 3, thickness: 0.2 };
+  const apart = joinedWallPolygon(a2, [a2, b2]);
+  assert.ok(apart.some((p) => near(p, 3.9, 0.1)), "inner corner");
+  assert.ok(apart.some((p) => near(p, 4.1, -0.1)), "outer corner");
+  // An obtuse corner: faces still pair inside-to-inside.
+  const c1 = { id: "c1", x1: 0, y1: 0, x2: 4, y2: 0, thickness: 0.2 };
+  const c2 = { id: "c2", x1: 4, y1: 0, x2: 6, y2: 2, thickness: 0.2 };
+  const obtuse = joinedWallPolygon(c1, [c1, c2]);
+  const inner = obtuse.find((p) => p.y > 0 && p.x > 3);
+  const outer = obtuse.find((p) => p.y < 0 && p.x > 3);
+  assert.ok(inner.x < 4 && inner.x > 3.6, `inner at ${inner.x}`);
+  assert.ok(outer.x > 4 && outer.x < 4.3, `outer at ${outer.x}`);
+  const straight = { id: "c", x1: 4, y1: 0, x2: 8, y2: 0, thickness: 0.2 };
+  const butt = joinedWallPolygon(a, [a, straight]);
+  assert.ok(butt.some((p) => near(p, 4, 0.1)));
+  assert.ok(butt.some((p) => near(p, 4, -0.1)));
 });

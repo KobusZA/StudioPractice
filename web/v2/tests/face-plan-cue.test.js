@@ -8,6 +8,7 @@ import {
   FACE_CUE_TARGET_PX,
   faceCornerMarks,
   faceCueZoom,
+  faceFrameShift,
 } from "../face-plan-cue.js";
 
 test("a face already long enough is not zoomed", () => {
@@ -56,4 +57,40 @@ test("a short face clamps the travel so the corners do not cross", () => {
 
 test("a face shorter than a pixel has no corners", () => {
   assert.deepEqual(faceCornerMarks(5, 5, 5.2, 5, 1, 0, 1), []);
+});
+
+test("a face already inside the clear plan is not moved", () => {
+  const view = { w: 800, h: 300 };
+  assert.deepEqual(faceFrameShift({ minX: 200, maxX: 500, minY: 100, maxY: 140 }, view), { dx: 0, dy: 0 });
+});
+
+test("a face under the strip is centred in the clear area, and only on that axis", () => {
+  const view = { w: 800, h: 300 };
+  const { dx, dy } = faceFrameShift({ minX: 200, maxX: 500, minY: 400, maxY: 440 }, view);
+  assert.equal(dx, 0);
+  assert.equal(dy, 150 - 420);
+});
+
+test("a face half under the strip is not treated as visible", () => {
+  const view = { w: 800, h: 300 };
+  const { dy } = faceFrameShift({ minX: 200, maxX: 500, minY: 280, maxY: 330 }, view);
+  assert.equal(dy, 150 - 305);
+});
+
+test("a face wider than the area is centred on its middle, not zoomed", () => {
+  const view = { w: 400, h: 300 };
+  const { dx } = faceFrameShift({ minX: 500, maxX: 1700, minY: 100, maxY: 140 }, view);
+  assert.equal(dx, 200 - 1100);
+  assert.equal(faceFrameShift({ minX: -300, maxX: 900, minY: 100, maxY: 140 }, view).dx, 0);
+});
+
+test("rescue moves only a face with nothing left in the area", () => {
+  const view = { w: 800, h: 300 };
+  assert.deepEqual(faceFrameShift({ minX: 200, maxX: 500, minY: 280, maxY: 330 }, view, "rescue"), { dx: 0, dy: 0 });
+  assert.equal(faceFrameShift({ minX: 200, maxX: 500, minY: 320, maxY: 360 }, view, "rescue").dy, 150 - 340);
+});
+
+test("an empty area or no bounds moves nothing", () => {
+  assert.deepEqual(faceFrameShift(null, { w: 10, h: 10 }), { dx: 0, dy: 0 });
+  assert.deepEqual(faceFrameShift({ minX: 0, maxX: 1, minY: 0, maxY: 1 }, { w: 0, h: 10 }), { dx: 0, dy: 0 });
 });

@@ -24,6 +24,8 @@
 //    compile() instead stamps each form with its own `elevation` (added
 //    alongside this file), so every kind is walked once, keyed by its own z0.
 
+import { archRise, archVoidPolygon } from "./arch-head.js";
+import { clipPolygon, pointInPoly } from "./geom.js";
 import { roofRidgeAlongX } from "./roof.js";
 import {
   SECTION_FAR_M,
@@ -44,6 +46,28 @@ export const MASSING_PITCH_MIN = 0.12;
 export const MASSING_PITCH_MAX = 1.52;
 export const MASSING_PITCH_DEFAULT = 0.95;
 export const MASSING_YAW_DEFAULT = 0.95;
+
+/** Higher orbit used as a roof reference. Near the top-down limit already,
+ *  and the shot would repeat the camera the customer framed. */
+const REFERENCE_ROOF_PITCH = 1.28;
+const REFERENCE_ROOF_GAP = 0.2;
+
+/**
+ * The two extra orbit cameras Generate sends with the view on screen.
+ * Opposite is the same pitch, half a turn away. Roof is a higher look
+ * down the same yaw, omitted when the current pitch is already that high.
+ * Section, elevation and a standing camera are not orbit, so they get none.
+ */
+export function orbitReferenceCameras(cam) {
+  if (!cam || cam.mode !== "orbit") return [];
+  const yaw = Number(cam.yaw);
+  const pitch = Number(cam.pitch);
+  if (!Number.isFinite(yaw) || !Number.isFinite(pitch)) return [];
+  const shots = [{ role: "opposite", yaw: yaw + Math.PI, pitch }];
+  const roofPitch = Math.min(MASSING_PITCH_MAX - 0.06, Math.max(REFERENCE_ROOF_PITCH, pitch + 0.35));
+  if (roofPitch - pitch >= REFERENCE_ROOF_GAP) shots.push({ role: "roof", yaw, pitch: roofPitch });
+  return shots;
+}
 
 /** Standing eye height above the active storey datum. A viewing parameter,
  *  not a building fact: the plan already sits on that datum, and 1.6 m is
@@ -76,6 +100,39 @@ export function frameCamera(cam, bounds) {
   cam.scale = 18;
   cam.yaw = dy > dx + 0.05 ? MASSING_YAW_DEFAULT - Math.PI / 2 : MASSING_YAW_DEFAULT;
   return cam;
+}
+
+/** A plate step, not the next storey. Eaves further apart than this are
+ *  left unlabeled. */
+const PLATE_STEP_MAX_M = 1.2;
+
+/**
+ * Roofs whose eaves differ by a step. The lowest plate in a cluster is
+ * unlabeled; each higher one reads "Plate +150 mm". A storey apart is not
+ * a step, and a difference under 20 mm is not worth a label.
+ */
+export function plateCallouts(roofs) {
+  const byId = new Map();
+  for (const roof of roofs || []) {
+    if (!roof?.id || !Number.isFinite(roof.eaveZ)) continue;
+    if (!byId.has(roof.id)) byId.set(roof.id, roof.eaveZ);
+  }
+  const list = [...byId.entries()]
+    .map(([id, eaveZ]) => ({ id, eaveZ }))
+    .sort((a, b) => a.eaveZ - b.eaveZ || String(a.id).localeCompare(String(b.id)));
+  const out = [];
+  let i = 0;
+  while (i < list.length) {
+    const base = list[i].eaveZ;
+    let k = i + 1;
+    while (k < list.length && list[k].eaveZ - base <= PLATE_STEP_MAX_M) k += 1;
+    for (let n = i + 1; n < k; n += 1) {
+      const mm = Math.round((list[n].eaveZ - base) * 1000);
+      if (mm >= 20) out.push({ id: list[n].id, text: `Plate +${mm} mm` });
+    }
+    i = Math.max(k, i + 1);
+  }
+  return out;
 }
 
 /**
@@ -160,7 +217,101 @@ function openingMetrics(form) {
   const isWindow = kind.includes("window");
   const height = Number(form.depth) > 0 ? Number(form.depth) : (isWindow ? 1.2 : 2.1);
   const sill = Number.isFinite(Number(form.sill)) ? Number(form.sill) : (isWindow ? 0.9 : 0);
-  return { isWindow, height, sill, head: sill + height };
+  const arch = form.head === "arch";
+  const asked = Number(form.rise);
+  return {
+    isWindow,
+    height,
+    sill,
+    head: sill + height,
+    arch,
+    rise: arch && Number.isFinite(asked) && asked > 0 ? asked : 0,
+  };
+}
+
+/** Points of the circular head, from the left spring to the right spring. */
+function archCurve(profile, t0, t1, spring) {
+  const left = profile.findIndex((p) => Math.abs(p[0] - t0) < 1e-4 && Math.abs(p[1] - spring) < 1e-3);
+  let right = -1;
+  for (let i = profile.length - 1; i > left; i -= 1) {
+    if (Math.abs(profile[i][0] - t1) < 1e-4 && Math.abs(profile[i][1] - spring) < 1e-3) {
+      right = i;
+      break;
+    }
+  }
+  if (left < 0 || right <= left) return null;
+  return profile.slice(left, right + 1);
+}
+
+/**
+ * The wall left above an arched opening: a flat top at the head, sides down
+ * to the springs, and the arc between them. The rectangular body below the
+ * spring is cut by the ordinary opening grid.
+ */
+function pushArchHead(faces, corner, z0, arch, wallLen, wallTop, id, fill, stroke, status, finish) {
+  const curve = archCurve(arch.profile, arch.t0, arch.t1, arch.springLocal);
+  if (!curve || curve.length < 3) return;
+  const ring = [
+    [arch.t0, arch.springLocal],
+    [arch.t0, arch.headLocal],
+    [arch.t1, arch.headLocal],
+    [arch.t1, arch.springLocal],
+    ...curve.slice(1, -1).reverse(),
+  ];
+  const sideFace = (side) => {
+    const pts = ring.map(([t, y]) => corner(t, side, z0 + y));
+    const bare = [];
+    if (arch.t0 > 1e-3) bare.push([pts[0], pts[1]]);
+    if (arch.head < wallTop - 1e-3) bare.push([pts[1], pts[2]]);
+    if (arch.t1 < wallLen - 1e-3) bare.push([pts[2], pts[3]]);
+    return { pts, bare };
+  };
+  const front = sideFace(1);
+  pushQuad(faces, front.pts, front.bare, id, fill, stroke, status, finish);
+  const backPts = [...ring].reverse().map(([t, y]) => corner(t, -1, z0 + y));
+  const backBare = [];
+  const n = backPts.length;
+  if (arch.t0 > 1e-3) backBare.push([backPts[n - 2], backPts[n - 1]]);
+  if (arch.head < wallTop - 1e-3) backBare.push([backPts[n - 3], backPts[n - 2]]);
+  if (arch.t1 < wallLen - 1e-3) backBare.push([backPts[n - 4], backPts[n - 3]]);
+  pushQuad(faces, backPts, backBare, id, fill, stroke, status, finish);
+  for (let i = 0; i < curve.length - 1; i += 1) {
+    const a = curve[i];
+    const b = curve[i + 1];
+    const a1 = corner(a[0], 1, z0 + a[1]);
+    const b1 = corner(b[0], 1, z0 + b[1]);
+    const b2 = corner(b[0], -1, z0 + b[1]);
+    const a2 = corner(a[0], -1, z0 + a[1]);
+    const bare = [];
+    if (i > 0) bare.push([a1, a2]);
+    if (i < curve.length - 2) bare.push([b1, b2]);
+    pushQuad(faces, [a1, b1, b2, a2], bare, id, fill, stroke, status, finish);
+  }
+}
+
+/** An opening solid whose outline is the arched void, not its bounding box. */
+function pushProfileSolid(faces, place, profile, id, kind, fill, stroke, status) {
+  faces.push({
+    pts: profile.map(([t, z]) => place(t, 1, z)),
+    id, kind, fill, stroke, status,
+  });
+  faces.push({
+    pts: [...profile].reverse().map(([t, z]) => place(t, -1, z)),
+    id, kind, fill, stroke, status,
+  });
+  for (let i = 0; i < profile.length; i += 1) {
+    const a = profile[i];
+    const b = profile[(i + 1) % profile.length];
+    const a1 = place(a[0], 1, a[1]);
+    const b1 = place(b[0], 1, b[1]);
+    const b2 = place(b[0], -1, b[1]);
+    const a2 = place(a[0], -1, a[1]);
+    faces.push({
+      pts: [a1, b1, b2, a2],
+      bare: [[a1, a2], [b1, b2]],
+      id, kind, fill, stroke, status,
+    });
+  }
 }
 
 function resolvedStatus(status) {
@@ -199,7 +350,7 @@ function openingsOnWall(start, end, openings) {
   return hits;
 }
 
-function pushWallPrism(faces, start, end, z0, z1, thick, id, kind, fill, stroke, status) {
+function pushWallPrism(faces, start, end, z0, z1, thick, id, kind, fill, stroke, status, opts = {}) {
   const dx = end[0] - start[0];
   const dy = end[1] - start[1];
   const len = Math.hypot(dx, dy) || 1;
@@ -212,19 +363,38 @@ function pushWallPrism(faces, start, end, z0, z1, thick, id, kind, fill, stroke,
     [start[0] - nx, start[1] - ny, z0],
   ];
   const q = p.map(([x, y]) => [x, y, z1]);
-  const quads = [
-    [q[0], q[1], q[2], q[3]],
-    [p[0], p[1], q[1], q[0]],
-    [p[1], p[2], q[2], q[1]],
-    [p[2], p[3], q[3], q[2]],
-    [p[3], p[0], q[0], q[3]],
-  ];
-  for (const quad of quads) faces.push({ pts: quad, id, fill, stroke, kind, status });
+  const front = opts.fillFront || fill;
+  const back = opts.fillBack || fill;
+  const edge = opts.fillFront || opts.fillBack || fill;
+  const finish = !!(opts.fillFront || opts.fillBack);
+  const put = (pts, faceFill, bare) => {
+    const face = { pts, id, fill: faceFill, stroke, kind, status };
+    if (bare && bare.length) face.bare = bare;
+    if (finish && kind === "wall") face.finish = true;
+    faces.push(face);
+  };
+  // A shallow turn (a curve's next facet) is the same surface, so the joint
+  // cap is left out and the two vertical edges are not stroked.
+  const topBare = [];
+  if (opts.softEnd) topBare.push([q[1], q[2]]);
+  if (opts.softStart) topBare.push([q[3], q[0]]);
+  put([q[0], q[1], q[2], q[3]], edge, topBare);
+  const frontBare = [];
+  if (opts.softEnd) frontBare.push([p[1], q[1]]);
+  if (opts.softStart) frontBare.push([q[0], p[0]]);
+  put([p[0], p[1], q[1], q[0]], front, frontBare);
+  if (!opts.softEnd) put([p[1], p[2], q[2], q[1]], edge);
+  const backBare = [];
+  if (opts.softEnd) backBare.push([p[2], q[2]]);
+  if (opts.softStart) backBare.push([q[3], p[3]]);
+  put([p[2], p[3], q[3], q[2]], back, backBare);
+  if (!opts.softStart) put([p[3], p[0], q[0], q[3]], edge);
 }
 
-function pushQuad(faces, pts, bare, id, fill, stroke, status) {
+function pushQuad(faces, pts, bare, id, fill, stroke, status, finish) {
   const face = { pts, id, fill, stroke, kind: "wall", status };
   if (bare && bare.length) face.bare = bare;
+  if (finish) face.finish = true;
   faces.push(face);
 }
 
@@ -258,7 +428,7 @@ function indexRuns(count, pred) {
  * skips it. The only stroked lines are real corners: wall ends, the opening,
  * and the glass.
  */
-function pushOpenedWall(faces, start, end, z0, height, thick, id, hits, fill, stroke, status) {
+function pushOpenedWall(faces, start, end, z0, height, thick, id, hits, fill, stroke, status, opts = {}) {
   const dx = end[0] - start[0];
   const dy = end[1] - start[1];
   const len = Math.hypot(dx, dy) || 1;
@@ -272,20 +442,48 @@ function pushOpenedWall(faces, start, end, z0, height, thick, id, hits, fill, st
     return [p[0] + nx * side, p[1] + ny * side, z];
   };
   const cuts = [];
+  const arches = [];
   for (const hit of hits) {
     const t0 = Math.max(0, hit.t0);
     const t1 = Math.min(len, hit.t1);
     const sill = Math.min(height, Math.max(0, hit.sill));
     const head = Math.min(height, Math.max(0, hit.head));
     if (t1 - t0 <= 0.02 || head - sill <= 0.02) continue;
+    if (hit.arch) {
+      const rise = Math.min(archRise(t1 - t0, hit.rise), head - sill);
+      if (rise > 0.02) {
+        const spring = head - rise;
+        arches.push({
+          t0,
+          t1,
+          spring: z0 + spring,
+          head: z0 + head,
+          springLocal: spring,
+          headLocal: head,
+          profile: archVoidPolygon({ from: t0, to: t1, bottom: sill, top: head, rise }, 16),
+        });
+        if (spring - sill > 0.02) cuts.push({ t0, t1, sill, head: spring });
+        continue;
+      }
+    }
     cuts.push({ t0, t1, sill, head });
   }
-  if (!cuts.length) {
+  if (!cuts.length && !arches.length) {
     pushWallPrism(faces, start, end, z0, z0 + height, thick, id, "wall", fill, stroke, status);
     return;
   }
-  const ts = stationsOf([0, len, ...cuts.flatMap((cut) => [cut.t0, cut.t1])]);
-  const zs = stationsOf([z0, z0 + height, ...cuts.flatMap((cut) => [z0 + cut.sill, z0 + cut.head])]);
+  const ts = stationsOf([
+    0,
+    len,
+    ...cuts.flatMap((cut) => [cut.t0, cut.t1]),
+    ...arches.flatMap((arch) => [arch.t0, arch.t1]),
+  ]);
+  const zs = stationsOf([
+    z0,
+    z0 + height,
+    ...cuts.flatMap((cut) => [z0 + cut.sill, z0 + cut.head]),
+    ...arches.flatMap((arch) => [arch.spring, arch.head]),
+  ]);
   const nT = ts.length - 1;
   const nZ = zs.length - 1;
   const solid = Array.from({ length: nT }, () => Array(nZ).fill(false));
@@ -297,11 +495,23 @@ function pushOpenedWall(faces, start, end, z0, height, thick, id, hits, fill, st
       solid[i][j] = !hole;
     }
   }
-  const quad = (pts, bare) => pushQuad(faces, pts, bare, id, fill, stroke, status);
+  const finished = !!(opts.fillFront || opts.fillBack);
+  const frontFill = opts.fillFront || fill;
+  const backFill = opts.fillBack || fill;
+  const quad = (pts, bare, faceFill) => pushQuad(faces, pts, bare, id, faceFill || frontFill, stroke, status, finished);
+  const inArchBand = (i, j) => {
+    const tm = (ts[i] + ts[i + 1]) / 2;
+    const zm = (zs[j] + zs[j + 1]) / 2;
+    return arches.some((arch) => tm > arch.t0 && tm < arch.t1 && zm > arch.spring && zm < arch.head);
+  };
+  const closesArch = (i0, i1, z) => {
+    const tm = (ts[i0] + ts[i1]) / 2;
+    return arches.some((arch) => Math.abs(z - arch.spring) < 1e-3 && tm > arch.t0 && tm < arch.t1);
+  };
 
   for (let i = 0; i < nT; i += 1) {
     for (let j = 0; j < nZ; j += 1) {
-      if (!solid[i][j]) continue;
+      if (!solid[i][j] || inArchBand(i, j)) continue;
       const seamL = i > 0 && solid[i - 1][j];
       const seamR = i + 1 < nT && solid[i + 1][j];
       const seamB = j > 0 && solid[i][j - 1];
@@ -319,7 +529,9 @@ function pushOpenedWall(faces, start, end, z0, height, thick, id, hits, fill, st
       if (seamR) frontBare.push([frb, frt]);
       if (seamT) frontBare.push([frt, flt]);
       if (seamL) frontBare.push([flt, flb]);
-      quad([flb, frb, frt, flt], frontBare);
+      if (opts.softEnd && Math.abs(tB - len) < 1e-4) frontBare.push([frb, frt]);
+      if (opts.softStart && tA < 1e-4) frontBare.push([flt, flb]);
+      quad([flb, frb, frt, flt], frontBare, frontFill);
       const blb = corner(tB, -1, zA);
       const brb = corner(tA, -1, zA);
       const brt = corner(tA, -1, zB);
@@ -329,34 +541,46 @@ function pushOpenedWall(faces, start, end, z0, height, thick, id, hits, fill, st
       if (seamL) backBare.push([brb, brt]);
       if (seamT) backBare.push([brt, blt]);
       if (seamR) backBare.push([blt, blb]);
-      quad([blb, brb, brt, blt], backBare);
+      if (opts.softEnd && Math.abs(tB - len) < 1e-4) backBare.push([blb, blt]);
+      if (opts.softStart && tA < 1e-4) backBare.push([brb, brt]);
+      quad([blb, brb, brt, blt], backBare, backFill);
     }
+  }
+  for (const arch of arches) {
+    pushArchHead(faces, corner, z0, arch, len, z0 + height, id, frontFill, stroke, status, finished);
   }
 
   for (const [i0, i1] of indexRuns(nT, (i) => solid[i][nZ - 1])) {
     const z = zs[nZ];
+    const bare = [];
+    if (opts.softStart && ts[i0] < 1e-4) bare.push([corner(ts[i0], 1, z), corner(ts[i0], -1, z)]);
+    if (opts.softEnd && Math.abs(ts[i1] - len) < 1e-4) bare.push([corner(ts[i1], 1, z), corner(ts[i1], -1, z)]);
     quad([
       corner(ts[i0], 1, z),
       corner(ts[i1], 1, z),
       corner(ts[i1], -1, z),
       corner(ts[i0], -1, z),
-    ]);
+    ], bare);
   }
-  for (const [j0, j1] of indexRuns(nZ, (j) => solid[0][j])) {
-    quad([
-      corner(0, -1, zs[j0]),
-      corner(0, 1, zs[j0]),
-      corner(0, 1, zs[j1]),
-      corner(0, -1, zs[j1]),
-    ]);
+  if (!opts.softStart) {
+    for (const [j0, j1] of indexRuns(nZ, (j) => solid[0][j])) {
+      quad([
+        corner(0, -1, zs[j0]),
+        corner(0, 1, zs[j0]),
+        corner(0, 1, zs[j1]),
+        corner(0, -1, zs[j1]),
+      ]);
+    }
   }
-  for (const [j0, j1] of indexRuns(nZ, (j) => solid[nT - 1][j])) {
-    quad([
-      corner(len, 1, zs[j0]),
-      corner(len, -1, zs[j0]),
-      corner(len, -1, zs[j1]),
-      corner(len, 1, zs[j1]),
-    ]);
+  if (!opts.softEnd) {
+    for (const [j0, j1] of indexRuns(nZ, (j) => solid[nT - 1][j])) {
+      quad([
+        corner(len, 1, zs[j0]),
+        corner(len, -1, zs[j0]),
+        corner(len, -1, zs[j1]),
+        corner(len, 1, zs[j1]),
+      ]);
+    }
   }
   for (let k = 1; k < ts.length - 1; k += 1) {
     const t = ts[k];
@@ -388,6 +612,7 @@ function pushOpenedWall(faces, start, end, z0, height, thick, id, hits, fill, st
       ]);
     }
     for (const [i0, i1] of indexRuns(nT, (i) => !solid[i][m - 1] && solid[i][m])) {
+      if (closesArch(i0, i1, z)) continue;
       quad([
         corner(ts[i0], 1, z),
         corner(ts[i0], -1, z),
@@ -398,15 +623,15 @@ function pushOpenedWall(faces, start, end, z0, height, thick, id, hits, fill, st
   }
 }
 
-function pushWallBox(faces, start, end, z0, height, thick, id, openings, status) {
+function pushWallBox(faces, start, end, z0, height, thick, id, openings, status, opts = {}) {
   const hits = openingsOnWall(start, end, openings);
   const wallFill = "rgba(26,22,18,0.45)";
-  const wallStroke = "#1a1612";
+  const wallStroke = opts.fillFront || opts.fillBack ? "#4a433c" : "#1a1612";
   if (!hits.length) {
-    pushWallPrism(faces, start, end, z0, z0 + height, thick, id, "wall", wallFill, wallStroke, status);
+    pushWallPrism(faces, start, end, z0, z0 + height, thick, id, "wall", wallFill, wallStroke, status, opts);
     return;
   }
-  pushOpenedWall(faces, start, end, z0, height, thick, id, hits, wallFill, wallStroke, status);
+  pushOpenedWall(faces, start, end, z0, height, thick, id, hits, wallFill, wallStroke, status, opts);
 }
 
 function pushOpeningFaces(faces, form, z0, id, status) {
@@ -426,6 +651,29 @@ function pushOpeningFaces(faces, form, z0, id, status) {
   const fill = metrics.isWindow ? "rgba(90,150,180,0.45)" : "rgba(139,90,43,0.92)";
   const stroke = metrics.isWindow ? "#3a5f7a" : "#5c3b1a";
   const kind = metrics.isWindow ? "window" : "door";
+  if (metrics.arch) {
+    const dx = line.end[0] - line.start[0];
+    const dy = line.end[1] - line.start[1];
+    const span = Math.hypot(dx, dy) || 1;
+    const ux = dx / span;
+    const uy = dy / span;
+    const nx = (-dy / span) * (thick / 2);
+    const ny = (dx / span) * (thick / 2);
+    const profile = archVoidPolygon({
+      from: 0,
+      to: span,
+      bottom: metrics.sill,
+      top: metrics.head,
+      rise: metrics.rise,
+    }, 16);
+    const place = (t, side, z) => [
+      line.start[0] + ux * t + nx * side,
+      line.start[1] + uy * t + ny * side,
+      z0 + z,
+    ];
+    pushProfileSolid(faces, place, profile, id, kind, fill, stroke, status);
+    return;
+  }
   pushWallPrism(faces, line.start, line.end, z0 + metrics.sill, z0 + metrics.head, thick, id, kind, fill, stroke, status);
 }
 
@@ -473,7 +721,229 @@ function roofRectFromForm(form) {
   return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
 }
 
+function planRingArea(pts) {
+  let sum = 0;
+  for (let i = 0; i < pts.length; i += 1) {
+    const a = pts[i];
+    const b = pts[(i + 1) % pts.length];
+    sum += a[0] * b[1] - b[0] * a[1];
+  }
+  return sum / 2;
+}
+
+function baryZ(tri, x, y) {
+  const [a, b, c] = tri;
+  const den = (b[1] - c[1]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[1] - c[1]);
+  if (Math.abs(den) < 1e-12) return a[2];
+  const w0 = ((b[1] - c[1]) * (x - c[0]) + (c[0] - b[0]) * (y - c[1])) / den;
+  const w1 = ((c[1] - a[1]) * (x - c[0]) + (a[0] - c[0]) * (y - c[1])) / den;
+  const w2 = 1 - w0 - w1;
+  return w0 * a[2] + w1 * b[2] + w2 * c[2];
+}
+
+function dedupeRing(pts) {
+  const out = [];
+  for (const p of pts) {
+    const prev = out[out.length - 1];
+    if (prev && Math.hypot(prev[0] - p[0], prev[1] - p[1], prev[2] - p[2]) < 1e-6) continue;
+    out.push(p);
+  }
+  if (out.length > 1) {
+    const a = out[0];
+    const b = out[out.length - 1];
+    if (Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) < 1e-6) out.pop();
+  }
+  return out;
+}
+
+function segHit(a, b, c, d) {
+  const rx = b[0] - a[0];
+  const ry = b[1] - a[1];
+  const sx = d[0] - c[0];
+  const sy = d[1] - c[1];
+  const den = rx * sy - ry * sx;
+  if (Math.abs(den) < 1e-12) return null;
+  const qx = c[0] - a[0];
+  const qy = c[1] - a[1];
+  const t = (qx * sy - qy * sx) / den;
+  const u = (qx * ry - qy * rx) / den;
+  if (t < -1e-8 || t > 1 + 1e-8 || u < -1e-8 || u > 1 + 1e-8) return null;
+  return { t, u, x: a[0] + t * rx, y: a[1] + t * ry };
+}
+
+function holeCrossings(a, b, hole) {
+  const hits = [];
+  for (let i = 0; i < hole.length; i += 1) {
+    const c = hole[i];
+    const d = hole[(i + 1) % hole.length];
+    const hit = segHit(a, b, c, d);
+    if (!hit) continue;
+    if (hits.some((other) => Math.abs(other.t - hit.t) < 1e-6)) continue;
+    hits.push({ ...hit, edge: i });
+  }
+  hits.sort((p, q) => p.t - q.t);
+  return hits;
+}
+
+/** Hole vertices that lie inside the face, from where the face entered to where it left. */
+function holeChain(hole, plane, entry, exit, face) {
+  const m = hole.length;
+  const inside = (v) => pointInPoly(v[0], v[1], face);
+  const walk = (step) => {
+    const pts = [];
+    let e = entry.edge;
+    for (let k = 0; k < m + 1; k += 1) {
+      if (e === exit.edge) break;
+      const v = hole[step === 1 ? (e + 1) % m : e];
+      if (inside(v)) pts.push([v[0], v[1], baryZ(plane, v[0], v[1])]);
+      e = (e + step + m) % m;
+    }
+    return pts;
+  };
+  const forward = walk(1);
+  const back = walk(-1);
+  if (!forward.length) return back;
+  if (!back.length) return forward;
+  return forward.length <= back.length ? forward : back;
+}
+
+/**
+ * Face minus hole, as one ring. A hole that covers a corner (the pyramid
+ * point over a court) drops that corner. A hole fully inside the face is
+ * a seam around the opening.
+ */
+function outsideRing(face, hole, plane) {
+  const n = face.length;
+  const inHole = (p) => pointInPoly(p[0], p[1], hole);
+  const flat = face.map((p) => [p[0], p[1]]);
+  const out = [];
+  let entered = null;
+  for (let i = 0; i < n; i += 1) {
+    const a = face[i];
+    const b = face[(i + 1) % n];
+    const hits = holeCrossings(a, b, hole);
+    let cursorIn = inHole(a);
+    if (!cursorIn) out.push(a);
+    for (const hit of hits) {
+      const p = [hit.x, hit.y, baryZ(plane, hit.x, hit.y)];
+      if (!cursorIn) {
+        out.push(p);
+        entered = hit;
+        cursorIn = true;
+      } else if (entered) {
+        out.push(...holeChain(hole, plane, entered, hit, flat));
+        out.push(p);
+        entered = null;
+        cursorIn = false;
+      }
+    }
+  }
+  if (entered) {
+    // Left through a vertex the walk did not pair. Close along the hole.
+    const exit = { edge: entered.edge, x: entered.x, y: entered.y };
+    out.push(...holeChain(hole, plane, entered, exit, flat));
+  }
+  return dedupeRing(out);
+}
+
+/** One simple ring: the face boundary, out along a seam, around the hole, back. */
+function bridgeHole(outer, hole) {
+  const n = outer.length;
+  const m = hole.length;
+  let bi = 0;
+  let bj = 0;
+  let best = Infinity;
+  for (let i = 0; i < n; i += 1) {
+    for (let j = 0; j < m; j += 1) {
+      const d = (outer[i][0] - hole[j][0]) ** 2 + (outer[i][1] - hole[j][1]) ** 2;
+      if (d < best) {
+        best = d;
+        bi = i;
+        bj = j;
+      }
+    }
+  }
+  const sameWay = Math.sign(planRingArea(hole)) === Math.sign(planRingArea(outer) || 1);
+  const step = sameWay ? -1 : 1;
+  const out = [];
+  for (let k = 0; k <= n; k += 1) out.push(outer[(bi + k) % n]);
+  for (let k = 0; k <= m; k += 1) {
+    const j = bj + step * k;
+    out.push(hole[((j % m) + m) % m]);
+  }
+  return dedupeRing(out);
+}
+
+function subtractHole(poly, hole, plane) {
+  const flat = poly.map((p) => [p[0], p[1]]);
+  const parts = clipPolygon(flat, hole).filter((part) => Math.abs(planRingArea(part)) > 1e-8);
+  if (!parts.length) return [poly];
+  const whole = Math.abs(planRingArea(flat));
+  const covered = parts.reduce((sum, part) => sum + Math.abs(planRingArea(part)), 0);
+  if (whole <= 1e-8 || covered >= whole - 1e-6) return [];
+  const vertexInside = poly.some((p) => pointInPoly(p[0], p[1], hole));
+  if (!vertexInside) {
+    let pieces = [poly];
+    for (const part of parts) {
+      const lifted = part.map((p) => [p[0], p[1], baryZ(plane, p[0], p[1])]);
+      const next = [];
+      for (const piece of pieces) next.push(bridgeHole(piece, lifted));
+      pieces = next;
+    }
+    return pieces.filter((pts) => pts.length >= 3 && Math.abs(planRingArea(pts)) > 1e-6);
+  }
+  const ring = outsideRing(poly, hole, plane);
+  return ring.length >= 3 && Math.abs(planRingArea(ring)) > 1e-6 ? [ring] : [];
+}
+
+function faceTriangles(face) {
+  const pts = face.pts || [];
+  if (pts.length < 3) return [];
+  if (pts.length === 3) return [pts];
+  const tris = [];
+  for (let i = 1; i < pts.length - 1; i += 1) tris.push([pts[0], pts[i], pts[i + 1]]);
+  return tris;
+}
+
+/**
+ * A roof cut is a vertical hole through the slopes. The plan rectangle is
+ * the opening; points on its edge take the height of the slope they cut.
+ * Faces that are edge-on in plan (fascia, soffit edge) are left alone.
+ */
+function openRoofHoles(faces, start, cuts) {
+  const holes = (cuts || []).filter((poly) => poly && poly.length >= 3);
+  if (!holes.length) return;
+  const added = faces.splice(start);
+  for (const face of added) {
+    const tris = faceTriangles(face);
+    const kept = [];
+    for (const tri of tris) {
+      if (Math.abs(planRingArea(tri)) < 1e-4) {
+        kept.push(tri);
+        continue;
+      }
+      let pieces = [tri];
+      for (const hole of holes) {
+        const next = [];
+        for (const poly of pieces) next.push(...subtractHole(poly, hole, tri));
+        pieces = next;
+      }
+      kept.push(...pieces);
+    }
+    for (const pts of kept) {
+      if (pts.length >= 3) faces.push({ ...face, pts });
+    }
+  }
+}
+
 function pushRoofFaces(faces, form, z0, id, status) {
+  const start = faces.length;
+  pushRoofShell(faces, form, z0, id, status);
+  openRoofHoles(faces, start, form.roofCuts);
+  for (let i = start; i < faces.length; i += 1) faces[i].eaveZ = z0;
+}
+
+function pushRoofShell(faces, form, z0, id, status) {
   const shape = String(form.roofForm || "flat").toLowerCase();
   if (shape === "flat" || !shape) {
     pushExtrusionFaces(faces, form, z0, id, status);
@@ -495,7 +965,7 @@ function pushRoofFaces(faces, form, z0, id, status) {
   const thick = Math.max(0.08, Number(form.depth) || 0.125);
   const pt = (x, y, z) => [x, y, z];
   const quad = (a, b, c, d, color) => faces.push({ pts: [a, b, c, d], id, fill: color, stroke, kind: "roof", status });
-  const tri = (a, b, c, color) => faces.push({ pts: [a, b, c], id, fill: color, stroke, kind: "roof", status });
+  const tri = (a, b, c, color, k = "roof") => faces.push({ pts: [a, b, c], id, fill: color, stroke, kind: k, status });
 
   const x0 = rect.x;
   const y0 = rect.y;
@@ -550,10 +1020,12 @@ function pushRoofFaces(faces, form, z0, id, status) {
       quad(r0, r1, c, d, fillB);
       quad(drop(a), drop(r0), drop(r1), drop(b), side);
       quad(drop(d), drop(c), drop(r1), drop(r0), side);
-      tri(a, d, r0, side);
-      tri(drop(a), drop(r0), drop(d), side);
-      tri(b, r1, c, side);
-      tri(drop(b), drop(c), drop(r1), side);
+      // The gable end is wall, not roof: it takes the wall colour for this
+      // status, so the triangle reads as the wall running up to the ridge.
+      tri(a, d, r0, side, "wall");
+      tri(drop(a), drop(r0), drop(d), side, "wall");
+      tri(b, r1, c, side, "wall");
+      tri(drop(b), drop(c), drop(r1), side, "wall");
       quad(a, b, drop(b), drop(a), side);
       quad(d, drop(d), drop(c), c, side);
     } else {
@@ -568,10 +1040,10 @@ function pushRoofFaces(faces, form, z0, id, status) {
       quad(r0, b, c, r1, fillB);
       quad(drop(a), drop(d), drop(r1), drop(r0), side);
       quad(drop(r0), drop(r1), drop(c), drop(b), side);
-      tri(a, b, r0, side);
-      tri(drop(a), drop(r0), drop(b), side);
-      tri(d, r1, c, side);
-      tri(drop(d), drop(c), drop(r1), side);
+      tri(a, b, r0, side, "wall");
+      tri(drop(a), drop(r0), drop(b), side, "wall");
+      tri(d, r1, c, side, "wall");
+      tri(drop(d), drop(c), drop(r1), side, "wall");
       quad(a, d, drop(d), drop(a), side);
       quad(b, drop(b), drop(c), c, side);
     }
@@ -613,7 +1085,38 @@ function pushRoofFaces(faces, form, z0, id, status) {
       tri(a, b, e, fillA);
       tri(d, f, c, fillB);
     }
+    // Fascia: the roof has a visible edge at the eave, as the gable does.
+    const down = ([x, y, z]) => pt(x, y, z - thick);
+    quad(a, b, down(b), down(a), side);
+    quad(b, c, down(c), down(b), side);
+    quad(c, d, down(d), down(c), side);
+    quad(d, a, down(a), down(d), side);
   }
+}
+
+/** A curve facet joins the next one when they meet and the turn is shallow. */
+const SOFT_TURN = Math.cos((22 * Math.PI) / 180);
+
+function curvesMeet(a, b) {
+  if (!a?.end || !b?.start) return false;
+  return Math.hypot(a.end[0] - b.start[0], a.end[1] - b.start[1]) < 0.02;
+}
+
+function softTurn(a, b) {
+  const ax = a.end[0] - a.start[0];
+  const ay = a.end[1] - a.start[1];
+  const bx = b.end[0] - b.start[0];
+  const by = b.end[1] - b.start[1];
+  const al = Math.hypot(ax, ay) || 1;
+  const bl = Math.hypot(bx, by) || 1;
+  return (ax / al) * (bx / bl) + (ay / al) * (by / bl) > SOFT_TURN;
+}
+
+function finishRgba(hex) {
+  const match = /^#([0-9a-f]{6})$/i.exec(hex || "");
+  if (!match) return null;
+  const n = parseInt(match[1], 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},0.92)`;
 }
 
 function pushFormFaces(faces, form, openings) {
@@ -643,10 +1146,19 @@ function pushFormFaces(faces, form, openings) {
     const height = form.depth || 2.8;
     const thick = Number(form.thickness) > 0 ? Number(form.thickness) : 0.22;
     const nearby = openings.filter((o) => Math.abs((Number(o.elevation) || 0) - z0) < 0.05);
+    const sides = form.faceFills || {};
+    const fillFront = finishRgba(sides[1] ?? sides["1"]);
+    const fillBack = finishRgba(sides[-1] ?? sides["-1"]);
     for (const loop of form.profileLoops || []) {
-      for (const curve of loop.curves || []) {
-        if (!curve.start || !curve.end) continue;
-        pushWallBox(faces, curve.start, curve.end, z0, height, thick, form.elementId, nearby, status);
+      const curves = (loop.curves || []).filter((curve) => curve.start && curve.end);
+      for (let i = 0; i < curves.length; i += 1) {
+        const curve = curves[i];
+        pushWallBox(faces, curve.start, curve.end, z0, height, thick, form.elementId, nearby, status, {
+          fillFront,
+          fillBack,
+          softStart: curvesMeet(curves[i - 1], curve) && softTurn(curves[i - 1], curve),
+          softEnd: curvesMeet(curve, curves[i + 1]) && softTurn(curve, curves[i + 1]),
+        });
       }
     }
     return;
@@ -666,12 +1178,196 @@ function pushFormFaces(faces, form, openings) {
   pushExtrusionFaces(faces, form, z0, form.elementId, status);
 }
 
+/** A wall whose top is within this of a roof's plate follows that roof. */
+const ROOF_ATTACH_TOL = 0.25;
+
+/** Where a roof's slope changes, so a wall top can bend there. */
+function roofModel(form) {
+  const rect = roofRectFromForm(form);
+  if (!rect || rect.w < 0.2 || rect.h < 0.2) return null;
+  const shape = String(form.roofForm || "flat").toLowerCase();
+  const pitch = Number(form.roofPitch);
+  const deg = shape === "flat" ? 0 : (Number.isFinite(pitch) ? Math.min(60, Math.max(5, pitch)) : 30);
+  const tan = Math.tan((deg * Math.PI) / 180);
+  const alongX = roofRidgeAlongX(rect, form.roofRidge);
+  const eave = Number(form.elevation) || 0;
+  const holes = (form.roofCuts || []).filter((ring) => ring.length >= 3);
+  const { x, y, w, h } = rect;
+  const kinks = [
+    [[x, y], [x + w, y]],
+    [[x + w, y], [x + w, y + h]],
+    [[x + w, y + h], [x, y + h]],
+    [[x, y + h], [x, y]],
+  ];
+  for (const hole of holes) {
+    for (let i = 0; i < hole.length; i += 1) kinks.push([hole[i], hole[(i + 1) % hole.length]]);
+  }
+  const inset = Math.min(w, h) / 2;
+  if (shape === "gable") {
+    if (alongX) kinks.push([[x, y + h / 2], [x + w, y + h / 2]]);
+    else kinks.push([[x + w / 2, y], [x + w / 2, y + h]]);
+  } else if (shape === "hip") {
+    const pyramid = Math.min(w, h) - inset * 2 < 0.08;
+    if (pyramid) {
+      const apex = [x + w / 2, y + h / 2];
+      kinks.push([[x, y], apex], [[x + w, y], apex], [[x + w, y + h], apex], [[x, y + h], apex]);
+    } else if (alongX) {
+      const mid = y + h / 2;
+      const e = [x + inset, mid];
+      const f = [x + w - inset, mid];
+      kinks.push([e, f], [[x, y], e], [[x + w, y], f], [[x, y + h], e], [[x + w, y + h], f]);
+    } else {
+      const mid = x + w / 2;
+      const e = [mid, y + inset];
+      const f = [mid, y + h - inset];
+      kinks.push([e, f], [[x, y], e], [[x, y + h], f], [[x + w, y], e], [[x + w, y + h], f]);
+    }
+  }
+  return { rect, shape, tan, alongX, eave, holes, kinks };
+}
+
+/** Top of the roof surface at a plan point, or null outside it (and inside a hole). */
+function roofSurfaceZ(model, x, y) {
+  const { rect, shape, tan, eave, holes } = model;
+  if (x < rect.x - 1e-4 || y < rect.y - 1e-4 || x > rect.x + rect.w + 1e-4 || y > rect.y + rect.h + 1e-4) return null;
+  for (const hole of holes) {
+    if (pointInPoly(x, y, hole)) return null;
+  }
+  if (shape === "shed") {
+    if (model.alongX) return eave + (rect.y + rect.h - y) * tan;
+    return eave + (rect.x + rect.w - x) * tan;
+  }
+  if (shape === "gable") {
+    if (model.alongX) return eave + (rect.h / 2 - Math.abs(y - (rect.y + rect.h / 2))) * tan;
+    return eave + (rect.w / 2 - Math.abs(x - (rect.x + rect.w / 2))) * tan;
+  }
+  if (shape === "hip") {
+    const inset = Math.min(rect.w, rect.h) / 2;
+    const dx = Math.min(x - rect.x, rect.x + rect.w - x);
+    const dy = Math.min(y - rect.y, rect.y + rect.h - y);
+    return eave + tan * Math.min(dx, dy, inset);
+  }
+  return eave;
+}
+
+function segmentCrossT(a, b, c, d) {
+  const rx = b[0] - a[0];
+  const ry = b[1] - a[1];
+  const sx = d[0] - c[0];
+  const sy = d[1] - c[1];
+  const den = rx * sy - ry * sx;
+  if (Math.abs(den) < 1e-9) return null;
+  const t = ((c[0] - a[0]) * sy - (c[1] - a[1]) * sx) / den;
+  const u = ((c[0] - a[0]) * ry - (c[1] - a[1]) * rx) / den;
+  if (t <= 0.02 || t >= 0.98 || u < -0.001 || u > 1.001) return null;
+  return t;
+}
+
+function splitFaceAtKinks(face, kinks) {
+  if (!kinks.length) return;
+  const src = face.pts;
+  const out = [];
+  for (let i = 0; i < src.length; i += 1) {
+    const a = src[i];
+    const b = src[(i + 1) % src.length];
+    out.push(a);
+    const ts = [];
+    for (const [c, d] of kinks) {
+      const t = segmentCrossT(a, b, c, d);
+      if (t != null) ts.push(t);
+    }
+    ts.sort((p, q) => p - q);
+    let last = 0;
+    for (const t of ts) {
+      if (t - last < 0.02) continue;
+      last = t;
+      out.push([
+        a[0] + (b[0] - a[0]) * t,
+        a[1] + (b[1] - a[1]) * t,
+        a[2] + (b[2] - a[2]) * t,
+      ]);
+    }
+  }
+  face.pts = out;
+}
+
+function samePoint(a, b) {
+  return Math.abs(a[0] - b[0]) < 1e-6 && Math.abs(a[1] - b[1]) < 1e-6 && Math.abs(a[2] - b[2]) < 1e-6;
+}
+
+function moveFacePoint(face, index, z) {
+  const old = face.pts[index];
+  const next = [old[0], old[1], z];
+  for (const seg of face.bare || []) {
+    for (let k = 0; k < 2; k += 1) if (samePoint(seg[k], old)) seg[k] = next;
+  }
+  face.pts[index] = next;
+}
+
+/**
+ * Walls that reach a roof's plate follow its surface, up into a gable and
+ * down where they would otherwise stick through. A low wall is only cut,
+ * never stretched up to the roof.
+ */
+function conformWallsToRoofs(faces, forms) {
+  const roofs = (forms || []).filter((form) => (form.kind || "").toLowerCase() === "roof").map(roofModel).filter(Boolean);
+  if (!roofs.length) return;
+  const kinks = roofs.flatMap((roof) => roof.kinks);
+  // A gable end is drawn with the roof and tagged as a wall so it takes the
+  // wall colour. It already follows the slope, and it is not a wall to cut.
+  const wallIds = new Set(
+    (forms || []).filter((form) => (form.kind || "").toLowerCase() === "wall").map((form) => form.elementId),
+  );
+  const groups = new Map();
+  for (const face of faces) {
+    if (face.kind !== "wall" || !wallIds.has(face.id) || !face.pts?.length) continue;
+    if (!groups.has(face.id)) groups.set(face.id, []);
+    groups.get(face.id).push(face);
+  }
+  for (const group of groups.values()) {
+    let zTop = -Infinity;
+    let zBase = Infinity;
+    for (const face of group) {
+      for (const p of face.pts) {
+        if (p[2] > zTop) zTop = p[2];
+        if (p[2] < zBase) zBase = p[2];
+      }
+    }
+    if (!(zTop > zBase + 0.05)) continue;
+    for (const face of group) splitFaceAtKinks(face, kinks);
+    for (const face of group) {
+      for (let i = 0; i < face.pts.length; i += 1) {
+        const p = face.pts[i];
+        const onTop = p[2] >= zTop - 0.04;
+        let result = p[2];
+        let set = false;
+        for (const roof of roofs) {
+          const s = roofSurfaceZ(roof, p[0], p[1]);
+          if (s == null) continue;
+          const attaches = zTop >= roof.eave - ROOF_ATTACH_TOL;
+          if (attaches && onTop) {
+            result = set ? Math.min(result, s) : s;
+            set = true;
+          } else if ((set ? result : p[2]) > s + 0.005) {
+            result = Math.min(set ? result : p[2], s);
+            set = true;
+          }
+        }
+        if (!set) continue;
+        const z = Math.max(zBase + 0.02, result);
+        if (Math.abs(z - p[2]) > 1e-3) moveFacePoint(face, i, z);
+      }
+    }
+  }
+}
+
 /** Build the extruded face list for one compiled payload, filtered by status. */
 export function facesFromPayload(payload, statusFilter = "both") {
   const forms = (payload?.sketchForms || []).filter((form) => statusVisible(form.status, statusFilter));
   const openings = forms.filter(isOpeningForm);
   const faces = [];
   for (const form of forms) pushFormFaces(faces, form, openings);
+  conformWallsToRoofs(faces, forms);
   return faces;
 }
 
@@ -920,7 +1616,7 @@ export function strokeFaceEdges(ctx, projected, face) {
  * `facesFromPayload()`/`clipFacesForSection()` produce without a second copy
  * of these rules. */
 export function faceStyle(face) {
-  if (face.kind === "ground") return { fill: face.fill, stroke: face.stroke };
+  if (face.kind === "ground" || face.finish) return { fill: face.fill, stroke: face.stroke };
   const status = resolvedStatus(face.status);
   if (status === "planned" && (face.kind === "wall" || face.kind === "room")) {
     return { fill: face.kind === "wall" ? "rgba(178,69,30,0.38)" : "rgba(178,69,30,0.32)", stroke: "#b2451e" };
@@ -932,6 +1628,59 @@ export function faceStyle(face) {
     return { fill: face.kind === "wall" ? "rgba(90,84,76,0.42)" : "rgba(92,83,72,0.28)", stroke: "#5c5348" };
   }
   return { fill: face.fill, stroke: face.stroke };
+}
+
+const PAPER_RGB = [248, 241, 229];
+/** Sun from the upper left, a little behind the viewer, in plan x/y/z. */
+const SUN = (() => {
+  const v = [-0.45, -0.55, 0.7];
+  const n = Math.hypot(...v);
+  return v.map((c) => c / n);
+})();
+
+/** Unit normal of a face in model space, or null for a sliver. */
+export function faceNormal(pts) {
+  if (!pts || pts.length < 3) return null;
+  let nx = 0;
+  let ny = 0;
+  let nz = 0;
+  for (let i = 0; i < pts.length; i += 1) {
+    const a = pts[i];
+    const b = pts[(i + 1) % pts.length];
+    nx += (a[1] - b[1]) * (a[2] + b[2]);
+    ny += (a[2] - b[2]) * (a[0] + b[0]);
+    nz += (a[0] - b[0]) * (a[1] + b[1]);
+  }
+  const len = Math.hypot(nx, ny, nz);
+  return len < 1e-9 ? null : [nx / len, ny / len, nz / len];
+}
+
+/**
+ * An opaque, lit version of a face's fill. The translucent fills in
+ * faceStyle() are right for a cut section but turn an orbit view into a
+ * stack of ghosts: the far wall, the roof underside and the ground all show
+ * through. Here the colour is flattened onto the paper, so whatever is
+ * behind a face is hidden, and shaded by the face's angle to the sun so a
+ * wall and a roof slope read as different planes. Faces are single-sided
+ * with no reliable winding, so the normal is taken as facing the sun.
+ */
+export function opaqueFill(face, fill) {
+  const m = /rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*(?:,\s*([\d.]+)\s*)?\)/.exec(fill || "");
+  if (!m) return fill;
+  const alpha = m[4] === undefined ? 1 : Number(m[4]);
+  // Lift faint fills so a thin extrusion or glass pane still reads.
+  const a = Math.min(1, Math.max(alpha, face?.kind === "ground" ? 0.5 : 0.55) * (face?.kind === "ground" ? 1 : 1.15));
+  const n = faceNormal(face?.pts);
+  let light = 1;
+  if (n && face?.kind !== "ground") {
+    const d = Math.abs(n[0] * SUN[0] + n[1] * SUN[1] + n[2] * SUN[2]);
+    light = 0.78 + 0.3 * d;
+  }
+  const ch = [1, 2, 3].map((i, k) => {
+    const mixed = Number(m[i]) * a + PAPER_RGB[k] * (1 - a);
+    return Math.max(0, Math.min(255, Math.round(mixed * light)));
+  });
+  return `rgb(${ch[0]},${ch[1]},${ch[2]})`;
 }
 
 /**
@@ -973,18 +1722,62 @@ export function hatchPolygon(ctx, pts, stroke) {
   ctx.restore();
 }
 
+function paintPlateCallouts(ctx, projected, width, height) {
+  const seen = new Map();
+  for (const item of projected) {
+    const z = item.face?.eaveZ;
+    const id = item.face?.id;
+    if (!id || !Number.isFinite(z)) continue;
+    let rec = seen.get(id);
+    if (!rec) {
+      rec = { id, eaveZ: z, sx: 0, sy: 0, n: 0 };
+      seen.set(id, rec);
+    }
+    for (const p of item.pts) {
+      rec.sx += p[0];
+      rec.sy += p[1];
+      rec.n += 1;
+    }
+  }
+  const labels = plateCallouts([...seen.values()]);
+  if (!labels.length) return;
+  ctx.save();
+  ctx.font = "600 12px 'Source Sans 3', sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  for (const label of labels) {
+    const rec = seen.get(label.id);
+    if (!rec?.n) continue;
+    const x = Math.min(width - 8 - ctx.measureText(label.text).width / 2, Math.max(8 + ctx.measureText(label.text).width / 2, rec.sx / rec.n));
+    const y = Math.min(height - 20, Math.max(16, rec.sy / rec.n - 18));
+    const w = ctx.measureText(label.text).width + 12;
+    const h = 18;
+    ctx.fillStyle = "rgba(244, 237, 225, 0.94)";
+    ctx.strokeStyle = "#243044";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.rect(x - w / 2, y - h / 2, w, h);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#243044";
+    ctx.fillText(label.text, x, y);
+  }
+  ctx.restore();
+}
+
 /**
  * Wire an orbiting canvas view. Call `setPayload` whenever the document
  * changes, `resize` when the wrap is shown or resized, and `draw` to
  * re-render without changing anything (e.g. after a status filter click).
  */
-export function createMassingView({ canvas, emptyEl, captionEl, titleEl, onDraw }) {
+export function createMassingView({ canvas, emptyEl, hintEl, titleEl, onDraw }) {
   const ctx = canvas.getContext("2d");
   const cam = createCamera();
   let statusFilter = "both";
   let payload = null;
   let serviceRoutes = [];
-  let showServices = true;
+  let showServices = false;
+  let hintDismissed = false;
   let drag = null;
   let reframe = true;
   // Element ids to pick out (BOQ "Show in 3D"). Empty = draw normally; set =
@@ -1093,73 +1886,86 @@ export function createMassingView({ canvas, emptyEl, captionEl, titleEl, onDraw 
     }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, width, height);
+    paintScene(ctx, width, height, cam, true);
+  }
 
-    const isLook = cam.mode === "look";
-    const isSection = cam.mode === "section";
-    const isElevation = cam.mode === "elevation";
+  // `live` updates the overlay (title, empty state, the framed camera).
+  // A reference shot passes a copy of the camera and leaves the view alone.
+  function paintScene(viewCtx, width, height, viewCam, live) {
+    const isLook = viewCam.mode === "look";
+    const isSection = viewCam.mode === "section";
+    const isElevation = viewCam.mode === "elevation";
     // A section and an elevation share every projection/orthographic detail
     // below except clipping and the poché hatch, which stay section-only.
     const isCutView = isSection || isElevation;
-    if (titleEl) {
-      titleEl.textContent = isLook ? "Look" : isSection ? "Section" : isElevation ? `${cam.label || "Elevation"} elevation` : "3D massing";
+    if (live && titleEl) {
+      titleEl.textContent = isLook ? "Look" : isSection ? "Section" : isElevation ? `${viewCam.label || "Elevation"} elevation` : "3D";
     }
 
     const allFaces = facesFromPayload(payload, statusFilter);
-    const faces = flat && cam.mode === "orbit"
+    const faces = flat && viewCam.mode === "orbit"
       ? allFaces.filter((face) => face.kind !== "roof" || highlight.has(face.id))
       : allFaces;
-    const routes = showServices ? serviceRoutesInView(serviceRoutes, statusFilter, cam) : [];
+    const routes = showServices ? serviceRoutesInView(serviceRoutes, statusFilter, viewCam) : [];
     if (!faces.length && !routes.length) {
-      if (emptyEl) emptyEl.hidden = false;
-      if (captionEl) captionEl.textContent = "Draw a room, wall, roof, floor, door or window, then open 3D again.";
-      if (typeof onDraw === "function") onDraw(cam, payload);
-      return;
+      if (live) {
+        if (emptyEl) emptyEl.hidden = false;
+        if (hintEl) hintEl.hidden = true;
+        if (typeof onDraw === "function") onDraw(viewCam, payload);
+      }
+      return false;
     }
-    if (emptyEl) emptyEl.hidden = true;
-    if (captionEl) {
-      captionEl.textContent = isLook
-        ? `Standing ${Math.round(EYE_HEIGHT_M * 1000)} mm · drag to look around · scroll to zoom`
-        : isSection
-          ? "Cut looking left of the line · drag to pan · scroll to zoom"
-          : isElevation
-            ? "Orthographic, no perspective · drag to pan · scroll to zoom"
-            : "Drag to orbit · scroll to zoom · hatched plane is ground floor (0 mm)";
+    if (live && emptyEl) emptyEl.hidden = true;
+    if (live && hintEl) {
+      if (hintDismissed || flat) hintEl.hidden = true;
+      else {
+        hintEl.hidden = false;
+        hintEl.textContent = isLook
+          ? "Drag to look around · scroll to zoom"
+          : isCutView
+            ? "Drag to pan · scroll to zoom"
+            : "Drag to turn · scroll to zoom";
+      }
     }
 
     const bounds = unionBounds(
       boundsOfFaces(faces),
       boundsOfPoints(routes.flatMap((route) => [route.a, route.b])),
     );
-    if (reframe && !isLook && !isCutView && bounds) {
-      frameCamera(cam, bounds);
+    if (live && reframe && !isLook && !isCutView && bounds) {
+      frameCamera(viewCam, bounds);
       reframe = false;
     }
-    if (flat && cam.mode === "orbit") {
-      cam.pitch = Math.PI / 2 - 0.0001;
-      cam.yaw = 0;
+    if (live && flat && viewCam.mode === "orbit") {
+      viewCam.pitch = Math.PI / 2 - 0.0001;
+      viewCam.yaw = 0;
     }
     const withGround = [...faces, ...groundFacesFromBounds(bounds)];
     // Only a section clips: an elevation is viewed from outside the whole
     // model, so nothing needs to be cut away for it to make sense.
-    const cutFaces = isSection ? clipFacesForSection(withGround, cam) : withGround;
+    const cutFaces = isSection ? clipFacesForSection(withGround, viewCam) : withGround;
     if (isSection && !cutFaces.length && !routes.length) {
-      if (emptyEl) emptyEl.hidden = false;
-      if (captionEl) captionEl.textContent = "That cut does not hit the building. Draw the line through the plan.";
-      if (typeof onDraw === "function") onDraw(cam, payload);
-      return;
+      if (live) {
+        if (emptyEl) emptyEl.hidden = false;
+        if (hintEl) hintEl.hidden = true;
+        if (typeof onDraw === "function") onDraw(viewCam, payload, { note: "That cut does not hit the building. Draw the line through the plan." });
+      }
+      return false;
     }
-    if (isCutView && reframe) {
+    if (live && isCutView && reframe) {
       const frameFaces = routes.length
         ? [...cutFaces, { pts: routes.flatMap((route) => [route.a, route.b]) }]
         : cutFaces;
-      const framed = sectionFrame(frameFaces, cam);
-      cam.sectionOu = framed.originU;
-      cam.sectionOv = framed.originV;
-      cam.sectionScale = Math.min(width, height) / (framed.span * 1.35);
+      const framed = sectionFrame(frameFaces, viewCam);
+      viewCam.sectionOu = framed.originU;
+      viewCam.sectionOv = framed.originV;
+      viewCam.sectionScale = Math.min(width, height) / (framed.span * 1.35);
       reframe = false;
     }
 
-    const framed = boundsOfFaces(withGround);
+    // Frame the building. The ground tiles extend past it and would shrink
+    // the house into the corner of its own site.
+    const framed = finiteBounds(bounds) ? bounds : boundsOfFaces(withGround);
     const origin = [
       (framed.minX + framed.maxX) / 2,
       (framed.minY + framed.maxY) / 2,
@@ -1171,18 +1977,21 @@ export function createMassingView({ canvas, emptyEl, captionEl, titleEl, onDraw 
       framed.maxZ - framed.minZ,
       1,
     );
-    const scale = cam.scale * Math.min(width, height) / (span * 28);
+    // 18 here matches the camera's default scale, so the long side of the
+    // building fills the shorter side of the canvas. Wheel zoom still
+    // multiplies cam.scale on top of this.
+    const scale = viewCam.scale * Math.min(width, height) / (span * 18);
     const cx = width / 2;
-    const cy = height / 2 + (isLook || isCutView ? 0 : 20);
-    const sectionScale = Number(cam.sectionScale) > 0 ? cam.sectionScale : scale;
+    const cy = height / 2 - (isLook || isCutView ? 0 : 16);
+    const sectionScale = Number(viewCam.sectionScale) > 0 ? viewCam.sectionScale : scale;
 
     const projected = [];
     for (const face of cutFaces) {
       const pts = face.pts.map((p) => (isLook
-        ? projectLookPoint(p[0], p[1], p[2], cam, cx, cy, height)
+        ? projectLookPoint(p[0], p[1], p[2], viewCam, cx, cy, height)
         : isCutView
-          ? projectSectionPoint(p[0], p[1], p[2], cam, cam.sectionOu, cam.sectionOv, sectionScale, cx, cy)
-          : projectPoint(p[0], p[1], p[2], origin, cx, cy, scale, cam)));
+          ? projectSectionPoint(p[0], p[1], p[2], viewCam, viewCam.sectionOu, viewCam.sectionOv, sectionScale, cx, cy)
+          : projectPoint(p[0], p[1], p[2], origin, cx, cy, scale, viewCam)));
       const depth = pts.reduce((s, p) => s + p[2], 0) / pts.length;
       if (isLook && depth < LOOK_NEAR) continue;
       projected.push({ face, pts, depth });
@@ -1196,25 +2005,25 @@ export function createMassingView({ canvas, emptyEl, captionEl, titleEl, onDraw 
     highlightHits = 0;
     const drawFace = (item, picked) => {
       const style = faceStyle(item.face);
-      ctx.beginPath();
-      item.pts.forEach((p, i) => (i === 0 ? ctx.moveTo(p[0], p[1]) : ctx.lineTo(p[0], p[1])));
-      ctx.closePath();
+      viewCtx.beginPath();
+      item.pts.forEach((p, i) => (i === 0 ? viewCtx.moveTo(p[0], p[1]) : viewCtx.lineTo(p[0], p[1])));
+      viewCtx.closePath();
       if (picked) {
-        ctx.fillStyle = "rgba(255,170,0,0.78)";
-        ctx.strokeStyle = "#c2410c";
-        ctx.lineWidth = 1.4;
-        ctx.fill();
-        strokeFaceEdges(ctx, item.pts, item.face);
+        viewCtx.fillStyle = "rgba(255,170,0,0.78)";
+        viewCtx.strokeStyle = "#c2410c";
+        viewCtx.lineWidth = 1.4;
+        viewCtx.fill();
+        strokeFaceEdges(viewCtx, item.pts, item.face);
         return;
       }
-      ctx.fillStyle = item.face.cut
+      viewCtx.fillStyle = item.face.cut
         ? (item.face.kind === "wall" ? "rgba(90,84,76,0.72)" : style.fill)
-        : style.fill;
-      ctx.strokeStyle = style.stroke;
-      ctx.lineWidth = projected.length > 8000 ? 0.2 : (item.face.cut ? 0.9 : 0.45);
-      ctx.fill();
-      if (item.face.cut) hatchPolygon(ctx, item.pts, style.stroke);
-      if (projected.length < 25000) strokeFaceEdges(ctx, item.pts, item.face);
+        : (isCutView ? style.fill : opaqueFill(item.face, style.fill));
+      viewCtx.strokeStyle = style.stroke;
+      viewCtx.lineWidth = projected.length > 8000 ? 0.2 : (item.face.cut ? 0.9 : (isCutView ? 0.45 : 0.8));
+      viewCtx.fill();
+      if (item.face.cut) hatchPolygon(viewCtx, item.pts, style.stroke);
+      if (projected.length < 25000) strokeFaceEdges(viewCtx, item.pts, item.face);
     };
     const pickedItems = [];
     for (const item of projected) {
@@ -1224,22 +2033,22 @@ export function createMassingView({ canvas, emptyEl, captionEl, titleEl, onDraw 
         highlightHits += 1;
         continue;
       }
-      if (picking) ctx.globalAlpha = 0.2;
+      if (picking) viewCtx.globalAlpha = 0.2;
       drawFace(item, false);
-      ctx.globalAlpha = 1;
+      viewCtx.globalAlpha = 1;
     }
     // Picked faces go on top of the faded building, so a hit is never hidden
     // behind a wall that merely happens to be nearer the camera.
     for (const item of pickedItems) drawFace(item, true);
     const projectRoute = (point) => (isLook
-      ? projectLookPoint(point[0], point[1], point[2], cam, cx, cy, height)
+      ? projectLookPoint(point[0], point[1], point[2], viewCam, cx, cy, height)
       : isCutView
-        ? projectSectionPoint(point[0], point[1], point[2], cam, cam.sectionOu, cam.sectionOv, sectionScale, cx, cy)
-        : projectPoint(point[0], point[1], point[2], origin, cx, cy, scale, cam));
+        ? projectSectionPoint(point[0], point[1], point[2], viewCam, viewCam.sectionOu, viewCam.sectionOv, sectionScale, cx, cy)
+        : projectPoint(point[0], point[1], point[2], origin, cx, cy, scale, viewCam));
     const routePx = (pa, pb) => {
       if (isLook) {
         const depth = Math.max(LOOK_NEAR, ((pa[2] + pb[2]) / 2));
-        const fov = Number(cam.fov) > 0 ? cam.fov : LOOK_FOV_DEFAULT;
+        const fov = Number(viewCam.fov) > 0 ? viewCam.fov : LOOK_FOV_DEFAULT;
         return ((height / 2) / Math.tan(fov / 2)) / depth;
       }
       return isCutView ? sectionScale : scale;
@@ -1252,30 +2061,30 @@ export function createMassingView({ canvas, emptyEl, captionEl, titleEl, onDraw 
     const paintPickedNodes = () => {
       if (!pickedNodes.length) return;
       const t = (performance.now() - flashStart) / NODE_FLASH_MS;
-      ctx.save();
+      viewCtx.save();
       for (const n of pickedNodes) {
         const p = projectRoute(n.p);
         if (isLook && p[2] < LOOK_NEAR) continue;
-        ctx.beginPath();
-        ctx.arc(p[0], p[1], 5, 0, Math.PI * 2);
-        ctx.fillStyle = "#ea580c";
-        ctx.strokeStyle = "#fffdf8";
-        ctx.lineWidth = 2;
-        ctx.fill();
-        ctx.stroke();
+        viewCtx.beginPath();
+        viewCtx.arc(p[0], p[1], 5, 0, Math.PI * 2);
+        viewCtx.fillStyle = "#ea580c";
+        viewCtx.strokeStyle = "#fffdf8";
+        viewCtx.lineWidth = 2;
+        viewCtx.fill();
+        viewCtx.stroke();
         if (t < 1) {
           const pulse = Math.abs(Math.sin(t * Math.PI * 3));
-          ctx.beginPath();
-          ctx.arc(p[0], p[1], 9 + 18 * pulse, 0, Math.PI * 2);
-          ctx.strokeStyle = "#ea580c";
-          ctx.globalAlpha = (1 - t) * (0.4 + 0.6 * pulse);
-          ctx.lineWidth = 2.4;
-          ctx.stroke();
-          ctx.globalAlpha = 1;
+          viewCtx.beginPath();
+          viewCtx.arc(p[0], p[1], 9 + 18 * pulse, 0, Math.PI * 2);
+          viewCtx.strokeStyle = "#ea580c";
+          viewCtx.globalAlpha = (1 - t) * (0.4 + 0.6 * pulse);
+          viewCtx.lineWidth = 2.4;
+          viewCtx.stroke();
+          viewCtx.globalAlpha = 1;
         }
       }
-      ctx.restore();
-      if (t < 1 && !flashRaf) {
+      viewCtx.restore();
+      if (live && t < 1 && !flashRaf) {
         flashRaf = requestAnimationFrame(() => { flashRaf = 0; draw(); });
       }
     };
@@ -1283,15 +2092,40 @@ export function createMassingView({ canvas, emptyEl, captionEl, titleEl, onDraw 
     if (picking) {
       const pickedRoutes = routes.filter((route) => highlight.has(route.id));
       highlightHits += pickedRoutes.length;
-      ctx.globalAlpha = 0.2;
-      paintServiceRoutes(ctx, routes.filter((route) => !highlight.has(route.id)), projectRoute, routePx, isLook);
-      ctx.globalAlpha = 1;
-      paintServiceRoutes(ctx, pickedRoutes.map((route) => ({ ...route, colour: "#ea580c", dash: null, diameter: 0.08 })), projectRoute, routePx, isLook);
+      viewCtx.globalAlpha = 0.2;
+      paintServiceRoutes(viewCtx, routes.filter((route) => !highlight.has(route.id)), projectRoute, routePx, isLook);
+      viewCtx.globalAlpha = 1;
+      paintServiceRoutes(viewCtx, pickedRoutes.map((route) => ({ ...route, colour: "#ea580c", dash: null, diameter: 0.08 })), projectRoute, routePx, isLook);
     } else {
-      paintServiceRoutes(ctx, routes, projectRoute, routePx, isLook);
+      paintServiceRoutes(viewCtx, routes, projectRoute, routePx, isLook);
     }
     paintPickedNodes();
-    if (typeof onDraw === "function") onDraw(cam, payload);
+    if (!isLook && !flat) paintPlateCallouts(viewCtx, projected, width, height);
+    if (live && typeof onDraw === "function") onDraw(viewCam, payload);
+    return true;
+  }
+
+  // Opposite side and a higher roof view, for Generate. Same pixels as the
+  // canvas on screen, without moving it. Empty outside an orbit view.
+  function referenceCanvases() {
+    if (cam.mode !== "orbit" || flat) return [];
+    const width = canvas.clientWidth;
+    const height = canvas.clientHeight;
+    if (!width || !height || !canvas.width || !canvas.height) return [];
+    const dpr = window.devicePixelRatio || 1;
+    const shots = [];
+    for (const shot of orbitReferenceCameras(cam)) {
+      const off = document.createElement("canvas");
+      off.width = canvas.width;
+      off.height = canvas.height;
+      const offCtx = off.getContext("2d");
+      offCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      offCtx.clearRect(0, 0, width, height);
+      const viewCam = { ...cam, mode: "orbit", yaw: shot.yaw, pitch: shot.pitch };
+      if (!paintScene(offCtx, width, height, viewCam, false)) continue;
+      shots.push({ role: shot.role, canvas: off });
+    }
+    return shots;
   }
 
   canvas.addEventListener("pointerdown", (event) => {
@@ -1308,6 +2142,9 @@ export function createMassingView({ canvas, emptyEl, captionEl, titleEl, onDraw 
   });
   canvas.addEventListener("pointermove", (event) => {
     if (!drag) return;
+    if (!hintDismissed && (Math.abs(event.clientX - drag.x) > 4 || Math.abs(event.clientY - drag.y) > 4)) {
+      hintDismissed = true;
+    }
     if (cam.mode === "look") {
       cam.yaw = drag.yaw + (event.clientX - drag.x) * 0.008;
       cam.pitch = Math.min(LOOK_PITCH_MAX, Math.max(LOOK_PITCH_MIN, drag.pitch - (event.clientY - drag.y) * 0.008));
@@ -1350,6 +2187,8 @@ export function createMassingView({ canvas, emptyEl, captionEl, titleEl, onDraw 
     setOrbit,
     draw,
     resize: draw,
+    mode: () => cam.mode,
+    referenceCanvases,
   };
 }
 

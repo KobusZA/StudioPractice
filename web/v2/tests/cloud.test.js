@@ -350,9 +350,25 @@ test("the deleted jobs a restore needs are asked for explicitly", async () => {
 test("visualize posts the massing snapshot and returns the rendered image", async () => {
   const fetch = fakeFetch(() => response(200, { image: "data:image/png;base64,abc" }));
   const cloud = createCloud({ fetch });
-  const image = await cloud.visualize({ image: "data:image/png;base64,src" });
+  const image = await cloud.visualize({ image: "data:image/png;base64,src", prompt: "Face brick walls." });
   assert.equal(image, "data:image/png;base64,abc");
   assert.equal(fetch.calls[0].method, "POST");
   assert.equal(fetch.calls[0].url, "/api/visualize");
-  assert.deepEqual(fetch.calls[0].body, { image: "data:image/png;base64,src" });
+  assert.deepEqual(fetch.calls[0].body, { image: "data:image/png;base64,src", prompt: "Face brick walls." });
+});
+
+test("visualize posts the extra massing views with the camera", async () => {
+  const fetch = fakeFetch(() => response(200, { image: "data:image/png;base64,abc" }));
+  const cloud = createCloud({ fetch });
+  await cloud.visualize({
+    images: [
+      { role: "camera", image: "data:image/png;base64,a" },
+      { role: "opposite", image: "data:image/png;base64,b" },
+      { role: "roof", image: "data:image/png;base64,c" },
+    ],
+    prompt: "Face brick.",
+  });
+  assert.deepEqual(fetch.calls[0].body.images.map((item) => item.role), ["camera", "opposite", "roof"]);
+  assert.equal(fetch.calls[0].body.prompt, "Face brick.");
+  assert.equal(fetch.calls[0].body.image, undefined);
 });

@@ -32,6 +32,7 @@ import { knownConvention } from "./region.js";
 import { normalizeSatelliteUnderlay } from "./satellite.js";
 import { normalizeSheetSet } from "./sheet-set.js";
 import { expandServiceRefs, normalizeServices } from "./service-model.js";
+import { normalizeWallArc, normalizeWallLocation } from "./click-draw.js";
 
 export const DOC_SCHEMA = "sp.doc/2";
 export const DOC_STORE_KEY = "sp-planner-document-v2";
@@ -1117,18 +1118,24 @@ export function normalizeDoc(raw) {
   }));
 
   // v1 called drawn walls "traces".
-  doc.segments = (raw.segments || raw.traces || []).map((seg) => ({
-    id: seg.id || nid("s"),
-    sku: seg.sku,
-    level: seg.level ?? null,
-    x1: seg.x1,
-    y1: seg.y1,
-    x2: seg.x2,
-    y2: seg.y2,
-    status: seg.status === "existing" ? "existing" : "planned",
-    top: seg.top === "level-above" ? "level-above" : null,
-    ...baseAttachFields(seg),
-  }));
+  doc.segments = (raw.segments || raw.traces || []).map((seg) => {
+    const location = normalizeWallLocation(seg.location);
+    const arc = normalizeWallArc(seg.arc, seg.x1, seg.y1, seg.x2, seg.y2);
+    return {
+      id: seg.id || nid("s"),
+      sku: seg.sku,
+      level: seg.level ?? null,
+      x1: seg.x1,
+      y1: seg.y1,
+      x2: seg.x2,
+      y2: seg.y2,
+      status: seg.status === "existing" ? "existing" : "planned",
+      top: seg.top === "level-above" ? "level-above" : null,
+      ...(location === "exterior" || location === "interior" ? { location } : {}),
+      ...(arc ? { arc } : {}),
+      ...baseAttachFields(seg),
+    };
+  });
 
   const mapShaped = (rows, prefix) => (rows || []).map((row) => ({
     ...row,
@@ -1402,6 +1409,9 @@ export function migrateOpening(o) {
   row.sill = Number.isFinite(row.sill) && row.sill >= 0 ? row.sill : null;
   row.width = Number.isFinite(row.width) && row.width > 0 ? row.width : null;
   row.height = Number.isFinite(row.height) && row.height > 0 ? row.height : null;
+  // A missing rise is a semicircle. A stored rise may be taller than half the
+  // current width; drawing caps it, and a later widening brings it back.
+  row.rise = Number.isFinite(row.rise) && row.rise > 0 ? row.rise : null;
   return row;
 }
 

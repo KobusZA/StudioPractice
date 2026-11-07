@@ -20,13 +20,15 @@
 
 import { area as polyArea, clipPolygon, distToSeg, pointInPoly } from "./geom.js";
 import { effectiveLevel, finishRegionPolygon, finishRegionSlab, polyShape, roomArea, roomPolygon, shapeAsPoly } from "./model.js";
-import { archVoidPolygon, isArchHead, openingOnWall, openingSize, pointOnWall, skuById, wallForOpening, wallNormal } from "./openings.js";
+import { archRise, archVoidPolygon } from "./arch-head.js";
+import { isArchHead, openingOnWall, openingSize, pointOnWall, skuById, wallForOpening, wallNormal } from "./openings.js";
 import { deriveWalls, isExternalWall } from "./walls.js";
 import {
   FINISH_CATEGORIES,
   FINISH_CATEGORY_IDS,
   categoriesForSurface,
   finishId,
+  finishSwatch,
   normalizeFinishPresets,
 } from "./finish-data.js";
 
@@ -136,6 +138,7 @@ export function wallOpeningRects(doc, pack, walls, wall) {
       // hole reaches the floor. A raised opening leaves the skirting.
       cutsSkirting: sku?.category === "door" || (sku?.category === "opening" && sill <= 0.02),
       arch: isArchHead(sku),
+      rise: isArchHead(sku) ? archRise(placed.width, opening.rise) : null,
       from,
       to: from + placed.width,
       bottom: sill,
@@ -486,7 +489,7 @@ function rectPoly(rect) {
   return [[rect.from, rect.bottom], [rect.to, rect.bottom], [rect.to, rect.top], [rect.from, rect.top]];
 }
 
-/** The void, as a polygon. An arch is the rectangle under a semicircular head. */
+/** The void, as a polygon. An arch is the rectangle under a circular head. */
 function voidPoly(opening) {
   return opening.arch ? archVoidPolygon(opening) : rectPoly(opening);
 }
@@ -790,6 +793,34 @@ function finishRow({ doc, spec, product, category, quantity, elementId, level, s
   }
   void doc;
   return row;
+}
+
+/**
+ * One colour per wall side, for the 3D view. A face takes the finish that
+ * covers the most of it, so a small patch does not recolour the whole wall.
+ * Skirting is a line, not a face colour. Paint uses the product's swatch;
+ * everything else uses the category colour the elevation already uses.
+ */
+export function wallFaceFills(doc, bands) {
+  const best = new Map();
+  for (const band of bands || []) {
+    const spec = FINISH_CATEGORIES[band.category];
+    if (!spec || spec.unit === "m" || band.category === "none") continue;
+    const area = Math.max(0, (band.to - band.from) * (band.top - band.bottom));
+    if (area < EPS) continue;
+    const key = `${band.wallId}:${band.side}`;
+    const prev = best.get(key);
+    if (prev && prev.area >= area) continue;
+    const product = finishProductById(doc, band.productId);
+    const swatch = band.category === "paint" && product?.swatch ? product.swatch : finishSwatch(band.category);
+    best.set(key, { area, swatch, wallId: band.wallId, side: band.side });
+  }
+  const out = new Map();
+  for (const rec of best.values()) {
+    if (!out.has(rec.wallId)) out.set(rec.wallId, {});
+    out.get(rec.wallId)[rec.side] = rec.swatch;
+  }
+  return out;
 }
 
 /**

@@ -18,7 +18,7 @@ import {
   objectLabel,
   resolvedBase,
 } from "./compile.js";
-import { MIN_TRACE, centerlineFromLocation, locationLineOf, mirroredWallLocation, normalizeWallLocation, realignAboutLocation, rethickenAboutLocation } from "./click-draw.js?v=20261103-bos10";
+import { MIN_TRACE, centerlineFromLocation, fitWallArc, locationLineOf, mirroredWallLocation, normalizeWallLocation, realignAboutLocation, rethickenAboutLocation } from "./click-draw.js?v=20261107-arc2";
 import { bbox, roundGrid } from "./geom.js";
 import {
   ATTACHABLE_KINDS,
@@ -37,7 +37,7 @@ import {
 } from "./model.js";
 import { finishId } from "./finish-data.js";
 import { reanchorRun } from "./finish-model.js";
-import { CORNER_JOIN_TOL, drawnWallThickness } from "./walls.js";
+import { CORNER_JOIN_TOL, drawnWallThickness, wallCornerNeighbors } from "./walls.js";
 import { rehostSocketsAfterSplit, transformFloorSockets, translateFloorSockets } from "./socket-host.js";
 
 const SHAPED = new Set(["room", "slab", "roof", "region"]);
@@ -507,6 +507,8 @@ export function splitWallAt(doc, ref, point, { skuById = () => null } = {}) {
   tail.y1 = cutPt.y;
   obj.x2 = cutPt.x;
   obj.y2 = cutPt.y;
+  delete obj.arc;
+  delete tail.arc;
   if (Number.isFinite(obj.length)) obj.length = cut;
   if (Number.isFinite(tail.length)) tail.length = len - cut;
   collectionFor(doc, ref.kind).push(tail);
@@ -996,13 +998,16 @@ function retargetOpening(opening, oldSeg, seg) {
 }
 
 /**
- * Move one end of a wall's location line onto a point, and store the
- * centreline that location line implies. A neighbour whose centreline end
- * met the old end moves to the new centreline end. Doors and windows keep
- * their place on the plan. The edit is refused, and nothing is written,
- * when one of them would no longer lie on its wall.
+ * Move one end of a wall onto a point. By default the point is on the location
+ * line, and the stored centreline is the one that location line implies.
+ * `space: "centre"` means the point and the fixed end are centreline points,
+ * which is what a corner trim needs: the centrelines meet, and a face-drawn
+ * wall keeps its offset. A neighbour that shared the corner stays where it
+ * is, so the corner can be pulled off the join. Doors and windows on this
+ * wall keep their place on the plan. The edit is refused, and nothing is
+ * written, when one of them would no longer lie on the wall.
  */
-export function moveWallEnd(doc, ref, end, point, { skuById = () => null, tol = CORNER_JOIN_TOL } = {}) {
+export function moveWallEnd(doc, ref, end, point, { skuById = () => null, space = "location" } = {}) {
   if (!ref || ref.kind !== "segment") return fail("Select a wall to move an end.");
   const obj = objectByRef(doc, ref);
   if (!obj) return fail("Select a wall to move an end.");
@@ -1010,40 +1015,19 @@ export function moveWallEnd(doc, ref, end, point, { skuById = () => null, tol = 
   if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return fail("Click where this end should meet.");
 
   const thickness = faceThickness(obj, skuById);
-  const line = locationLineOf(obj, thickness);
+  const onCentre = space === "centre" || space === "center";
+  const line = onCentre
+    ? { x1: obj.x1, y1: obj.y1, x2: obj.x2, y2: obj.y2 }
+    : locationLineOf(obj, thickness);
   const start = end === 1 ? { x: point.x, y: point.y } : { x: line.x1, y: line.y1 };
   const finish = end === 2 ? { x: point.x, y: point.y } : { x: line.x2, y: line.y2 };
   if (Math.hypot(finish.x - start.x, finish.y - start.y) < MIN_TRACE) return fail("That would make the wall too short.");
 
-  const center = centerlineFromLocation(start, finish, thickness, obj.location);
+  const center = onCentre
+    ? { x1: start.x, y1: start.y, x2: finish.x, y2: finish.y }
+    : centerlineFromLocation(start, finish, thickness, obj.location);
   const old = endsOf(obj);
-  const oldEnd = end === 1 ? { x: old.x1, y: old.y1 } : { x: old.x2, y: old.y2 };
-  const newEnd = end === 1 ? { x: center.x1, y: center.y1 } : { x: center.x2, y: center.y2 };
   const plans = [{ seg: obj, old, next: center }];
-
-  for (const other of doc.segments || []) {
-    if (!other || other.id === obj.id || !sameLevel(other, obj)) continue;
-    let x1 = other.x1;
-    let y1 = other.y1;
-    let x2 = other.x2;
-    let y2 = other.y2;
-    let touched = false;
-    if (endsMeet(other.x1, other.y1, oldEnd.x, oldEnd.y, tol)) {
-      x1 = newEnd.x;
-      y1 = newEnd.y;
-      touched = true;
-    }
-    if (endsMeet(other.x2, other.y2, oldEnd.x, oldEnd.y, tol)) {
-      x2 = newEnd.x;
-      y2 = newEnd.y;
-      touched = true;
-    }
-    if (!touched) continue;
-    // A collinear neighbour is a split, not a corner. Its end stays where it is.
-    if (runsCollinear(obj, other)) continue;
-    if (Math.hypot(x2 - x1, y2 - y1) < MIN_TRACE) return fail("That would make the wall too short.");
-    plans.push({ seg: other, old: endsOf(other), next: { x1, y1, x2, y2 } });
-  }
 
   for (const plan of plans) {
     const host = { id: plan.seg.id, ...plan.old };
@@ -1061,6 +1045,7 @@ export function moveWallEnd(doc, ref, end, point, { skuById = () => null, tol = 
     if (Number.isFinite(plan.seg.length)) {
       plan.seg.length = Math.hypot(plan.next.x2 - plan.next.x1, plan.next.y2 - plan.next.y1);
     }
+    fitWallArc(plan.seg);
   }
 
   const drop = new Set();
@@ -1078,6 +1063,102 @@ export function moveWallEnd(doc, ref, end, point, { skuById = () => null, tol = 
   if (drop.size) doc.finishRuns = (doc.finishRuns || []).filter((run) => !drop.has(run.id));
 
   return done("End moved.", [ref]);
+}
+
+/** Where the infinite lines through two centrelines cross, or null when parallel. */
+function lineCross(a, b) {
+  const ax = a.x2 - a.x1;
+  const ay = a.y2 - a.y1;
+  const bx = b.x2 - b.x1;
+  const by = b.y2 - b.y1;
+  const den = ax * by - ay * bx;
+  if (Math.abs(den) < 1e-12) return null;
+  const t = ((b.x1 - a.x1) * by - (b.y1 - a.y1) * bx) / den;
+  return { x: a.x1 + t * ax, y: a.y1 + t * ay };
+}
+
+/**
+ * After walls have been translated, keep every wall that shared an end on
+ * that corner. `moves` lists each wall that translated: the centreline it
+ * had (`old`) and the one it has now (`next`). A wall in that list is left
+ * to its own translation. A neighbour is joined when its centreline crosses
+ * the moved wall's near the ends of both, however the corner was drawn. Its
+ * end then slides along its own line to the new crossing, so it keeps its
+ * direction and stretches or shortens. An opening or finish on a wall that
+ * only stretched keeps its place on the plan. A neighbour that would become
+ * too short, or would drop a door or window off itself, stays put.
+ */
+export function shiftJoinedEnds(doc, moves, { skuById = () => null, tol = CORNER_JOIN_TOL } = {}) {
+  const moving = new Set((moves || []).map((move) => move.id));
+  const changed = [];
+  const thickOf = (seg) => {
+    const sku = seg ? skuById(seg.sku) : null;
+    return sku ? drawnWallThickness(sku) : 0;
+  };
+  for (const other of doc.segments || []) {
+    if (!other || moving.has(other.id)) continue;
+    const next = { x1: other.x1, y1: other.y1, x2: other.x2, y2: other.y2 };
+    const here = { id: other.id, thickness: thickOf(other), ...endsOf(other) };
+    let touched = false;
+    for (const end of [1, 2]) {
+      for (const move of moves || []) {
+        if (!move?.old || !move.next || !sameLevel(other, move)) continue;
+        const was = { id: move.id, thickness: thickOf(doc.segments.find((s) => s.id === move.id)), ...move.old };
+        const hit = wallCornerNeighbors(here, end, [was], { thicknessOf: (w) => w.thickness || 0, tol })[0];
+        if (!hit) continue;
+        let dx;
+        let dy;
+        if (hit.x === null) {
+          // The same line carries on: the end goes where the moved end went.
+          dx = (hit.end === 1 ? move.next.x1 - move.old.x1 : move.next.x2 - move.old.x2);
+          dy = (hit.end === 1 ? move.next.y1 - move.old.y1 : move.next.y2 - move.old.y2);
+        } else {
+          // A corner: the end slides along its own wall to where that wall
+          // now crosses the moved one, so its direction is kept.
+          const now = lineCross(here, move.next);
+          if (!now) continue;
+          dx = now.x - hit.x;
+          dy = now.y - hit.y;
+        }
+        if (Math.abs(dx) < 1e-12 && Math.abs(dy) < 1e-12) continue;
+        if (end === 1) { next.x1 += dx; next.y1 += dy; }
+        else { next.x2 += dx; next.y2 += dy; }
+        touched = true;
+        break;
+      }
+    }
+    if (!touched) continue;
+    if (Math.hypot(next.x2 - next.x1, next.y2 - next.y1) < MIN_TRACE) continue;
+    const old = endsOf(other);
+    const host = { id: other.id, ...old };
+    const nextSeg = { id: other.id, ...next };
+    let blocked = false;
+    for (const opening of doc.openings || []) {
+      if (openingLeaves(host, nextSeg, opening)) { blocked = true; break; }
+    }
+    if (blocked) continue;
+    const rigid = Math.abs((next.x1 - old.x1) - (next.x2 - old.x2)) < 1e-9
+      && Math.abs((next.y1 - old.y1) - (next.y2 - old.y2)) < 1e-9;
+    other.x1 = next.x1;
+    other.y1 = next.y1;
+    other.x2 = next.x2;
+    other.y2 = next.y2;
+    if (Number.isFinite(other.length)) other.length = Math.hypot(next.x2 - next.x1, next.y2 - next.y1);
+    if (!rigid) {
+      for (const opening of doc.openings || []) {
+        if (opening.wallId !== other.id || !Number.isFinite(Number(opening.t))) continue;
+        retargetOpening(opening, host, other);
+      }
+      const drop = [];
+      for (const run of doc.finishRuns || []) {
+        if (run.wallId !== other.id) continue;
+        if (!retargetFinish(run, host, other, skuById)) drop.push(run.id);
+      }
+      if (drop.length) doc.finishRuns = (doc.finishRuns || []).filter((run) => !drop.includes(run.id));
+    }
+    changed.push(other.id);
+  }
+  return changed;
 }
 
 // --- attach base -----------------------------------------------------------

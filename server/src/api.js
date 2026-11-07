@@ -962,24 +962,33 @@ async function handleIssueCertificate({ req, res, pool, params }) {
 async function handleVisualize({ req, res, pool, rateLimiter, openaiApiKey, openaiFetch }) {
   const session = await requireSession(pool, req);
   if (!String(openaiApiKey || "").trim()) {
-    throw new HttpError(503, "Visualization is not configured");
+    throw new HttpError(503, "Generate model needs an OpenAI API key. Set OPENAI_API_KEY on the server and restart.");
   }
   if (!rateLimiter.check(`visualize|${session.userId}`)) {
     throw new AuthError(429, "Too many visualization requests. Try again shortly.");
   }
-  const body = (await readJsonBody(req)) || {};
+  // Three massing PNGs, base64, plus the prompt. The usual 8 MB cap is the drawing.
+  const body = (await readJsonBody(req, { limit: 32 * 1024 * 1024 })) || {};
   try {
     const image = await generateVisualization({
       apiKey: openaiApiKey,
       image: body.image,
+      images: body.images,
+      prompt: body.prompt,
       fetch: openaiFetch,
     });
     sendJson(res, 200, { image });
   } catch (error) {
-    if (error.status === 400) throw new HttpError(400, "A drawing image is required");
-    if (error.status === 503) throw new HttpError(503, "Visualization is not configured");
+    if (error.status === 400) throw new HttpError(400, error.message || "A drawing image is required");
+    if (error.status === 503) throw new HttpError(503, error.message);
     if (error.status === 402) throw new HttpError(402, error.message);
-    console.error("visualize failed", error.status || 502, error.code || "");
+    console.error(
+      "visualize failed",
+      error.status || 502,
+      error.code || "",
+      error.param || "",
+      error.message || "",
+    );
     throw new HttpError(502, "The visualization could not be generated");
   }
 }

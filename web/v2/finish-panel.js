@@ -809,7 +809,9 @@ function openingPlaceLabel(opening) {
 export function openingCalloutHtml(opening) {
   const kind = openingKindLabel(opening);
   const name = opening.name || kind;
-  const size = `${mm(opening.width)} × ${mm(opening.height)}`;
+  const size = opening.head === "arch" && opening.rise > 0
+    ? `${mm(opening.width)} × ${mm(opening.height)}, rise ${mm(opening.rise)}`
+    : `${mm(opening.width)} × ${mm(opening.height)}`;
   const place = [];
   if (opening.category !== "door" && opening.sill > 0.005) place.push(openingPlaceLabel(opening));
   if (Number.isFinite(opening.offset)) place.push(`${mm(Math.max(0, opening.offset))} mm from the left`);
@@ -1115,7 +1117,9 @@ function faceOpenHtml(doc, model, opts) {
       swatch: { kind: "opening" },
       name: o.name || openingKindLabel(o),
       place: `${openingPlaceLabel(o)} · ${mm(Math.max(0, o.offset))} mm from the left`,
-      area: `${mm(o.width)} × ${mm(o.height)}`,
+      area: o.head === "arch" && o.rise > 0
+        ? `${mm(o.width)} × ${mm(o.height)}, rise ${mm(o.rise)}`
+        : `${mm(o.width)} × ${mm(o.height)}`,
     })}<div class="fin-line-fields" data-fin-fields="opening" data-for-opening="${esc(o.id)}"></div></div>`;
   }).join("");
   const finishes = runs.map((b) => bandLineHtml(doc, b, model, bands, opts.selectedId)).join("")

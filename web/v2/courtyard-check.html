@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Courtyard plan</title>
+  <style>
+    body { margin: 0; font: 14px system-ui, sans-serif; background: #f6f1e8; color: #243044; }
+    header { padding: 12px 16px 0; }
+    p { margin: 4px 0 0; max-width: 70rem; }
+    main { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 12px; }
+    figure { margin: 0; background: #fffdf8; border: 1px solid #e4d9c8; }
+    figcaption { padding: 8px 10px; }
+    canvas { width: 100%; height: 520px; display: block; }
+  </style>
+</head>
+<body>
+  <header>
+    <strong>Courtyard house, read as a plan</strong>
+    <p>Square outer walls, hip roof, one hole open to the sky, two doors on the inner south wall. The picture had no scale: the doors are the firm's 813 × 2032, and the pitch is 30°.</p>
+  </header>
+  <main>
+    <figure>
+      <figcaption>Plan</figcaption>
+      <canvas id="plan"></canvas>
+    </figure>
+    <figure>
+      <figcaption>3D from that plan</figcaption>
+      <canvas id="mass"></canvas>
+    </figure>
+  </main>
+  <script type="module">
+    import { compile } from "./compile.js";
+    import { normalizeDoc } from "./model.js";
+    import { createMassingView } from "./massing.js";
+    import { courtyardHouseDoc } from "./picture-plan.js";
+    import { normalizePackUnits } from "./schema.js";
+
+    const pack = normalizePackUnits(await (await fetch("../samples/planner-pack-v2.json")).json());
+    const doc = normalizeDoc(courtyardHouseDoc());
+    const payload = compile(doc, pack);
+
+    const plan = document.getElementById("plan");
+    const ctx = plan.getContext("2d");
+    const dpr = window.devicePixelRatio || 1;
+    function size(canvas) {
+      const w = canvas.clientWidth;
+      const h = canvas.clientHeight;
+      canvas.width = Math.floor(w * dpr);
+      canvas.height = Math.floor(h * dpr);
+      return { w, h };
+    }
+    const { w, h } = size(plan);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = "#fffdf8";
+    ctx.fillRect(0, 0, w, h);
+    const scale = Math.min(w, h) / 14;
+    const ox = w / 2;
+    const oy = h / 2 + 20;
+    const px = (x) => ox + (x - 5) * scale;
+    const py = (y) => oy - (y - 5) * scale;
+    const roof = doc.roofs[0];
+    ctx.strokeStyle = "#243044";
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(px(roof.shape.x), py(roof.shape.y), roof.shape.w * scale, roof.shape.h * scale);
+    const hole = roof.cuts[0].shape;
+    ctx.setLineDash([4, 3]);
+    ctx.strokeRect(px(hole.x), py(hole.y), hole.w * scale, hole.h * scale);
+    ctx.setLineDash([]);
+    ctx.lineWidth = 6;
+    ctx.strokeStyle = "#b2451e";
+    for (const seg of doc.segments) {
+      ctx.beginPath();
+      ctx.moveTo(px(seg.x1), py(seg.y1));
+      ctx.lineTo(px(seg.x2), py(seg.y2));
+      ctx.stroke();
+    }
+    ctx.fillStyle = "#243044";
+    ctx.font = "13px system-ui, sans-serif";
+    ctx.fillText("court, open", px(4.2), py(5));
+    ctx.fillText("two doors", px(3.3), py(2.55));
+
+    const mass = document.getElementById("mass");
+    const view = createMassingView({ canvas: mass });
+    view.setServices([]);
+    view.setPayload(payload);
+  </script>
+</body>
+</html>

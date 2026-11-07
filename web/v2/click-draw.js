@@ -149,6 +149,45 @@ export function setLineLength(start, toward, length, round = (n) => n) {
   };
 }
 
+/**
+ * The angle shown beside a wall while it is being placed. It is the smaller
+ * angle between the run and the horizontal, the wedge you can see, so a run
+ * that climbs at 36° reads 36 either side of the horizontal. Null when the
+ * run has no length, or it lies along the horizontal and there is no wedge.
+ * Plan Y grows downward, the same way the screen does.
+ */
+export function wallDraftAngle(start, end) {
+  const dx = (end?.x ?? 0) - (start?.x ?? 0);
+  const dy = (end?.y ?? 0) - (start?.y ?? 0);
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-9) return null;
+  let heading = Math.atan2(dy, dx) * (180 / Math.PI);
+  if (heading < 0) heading += 360;
+  const degrees = heading > 180 ? 360 - heading : heading;
+  if (degrees < 0.5 || degrees > 179.5) return null;
+  return { degrees, heading, wallX: dx / len, wallY: dy / len, refX: 1, refY: 0 };
+}
+
+/**
+ * The angle between the wall just drawn (`prev`, any non-zero direction) and
+ * the one being placed. `interior` is 180 going straight on and 90 at a
+ * corner. `turn` is the signed sweep from `prev` to the new wall, radians.
+ * Null when either has no length.
+ */
+export function wallJointAngle(prev, start, end) {
+  const dx = (end?.x ?? 0) - (start?.x ?? 0);
+  const dy = (end?.y ?? 0) - (start?.y ?? 0);
+  const len = Math.hypot(dx, dy);
+  const plen = Math.hypot(prev?.x || 0, prev?.y || 0);
+  if (len < 1e-9 || plen < 1e-9) return null;
+  const refX = prev.x / plen;
+  const refY = prev.y / plen;
+  const wallX = dx / len;
+  const wallY = dy / len;
+  const turn = Math.atan2(refX * wallY - refY * wallX, refX * wallX + refY * wallY);
+  return { interior: 180 - Math.abs(turn * 180 / Math.PI), turn, wallX, wallY, refX, refY };
+}
+
 /** `round` snaps the length. The end stays on the heading, including 0°. */
 export function setLineHeading(start, length, deg, round = (n) => n) {
   const rad = (Number(deg) * Math.PI) / 180;
@@ -185,6 +224,199 @@ export function canCommitRect(rect, kind) {
  * first click yet. First Escape should drop this; a second Escape leaves
  * the tool.
  */
+/** A bulge smaller than this, in metres, is still a straight wall. */
+export const ARC_MIN_SAGITTA = 0.02;
+
+function chordFrame(x1, y1, x2, y2) {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const chord = Math.hypot(dx, dy);
+  if (chord < 1e-9) return null;
+  return {
+    chord,
+    mx: (x1 + x2) / 2,
+    my: (y1 + y2) / 2,
+    nx: dy / chord,
+    ny: -dx / chord,
+  };
+}
+
+/**
+ * Arc through a fixed chord. `side` +1 puts the centre on the left of
+ * start→end (the same left a face uses). A minor arc bows the other way.
+ * `major` takes the long way round, so the bow and the centre are on the
+ * same side and the sweep is more than 180°. A radius shorter than half the
+ * chord cannot reach both ends.
+ */
+export function arcFromRadius(x1, y1, x2, y2, radius, side, major = false) {
+  const frame = chordFrame(x1, y1, x2, y2);
+  if (!frame || !(radius > 0) || (side !== 1 && side !== -1)) return null;
+  if (radius < frame.chord / 2 - 1e-6) return null;
+  const r = Math.max(radius, frame.chord / 2);
+  const h = Math.sqrt(Math.max(0, r * r - (frame.chord / 2) ** 2));
+  const sign = side > 0 ? 1 : -1;
+  const long = major === true && h >= 1e-8;
+  const cx = frame.mx + sign * h * frame.nx;
+  const cy = frame.my + sign * h * frame.ny;
+  const a0 = Math.atan2(y1 - cy, x1 - cx);
+  let sweep;
+  if (h < 1e-8) {
+    const bulge = Math.atan2(-sign * frame.ny, -sign * frame.nx);
+    let toBulge = bulge - a0;
+    while (toBulge <= -Math.PI) toBulge += Math.PI * 2;
+    while (toBulge > Math.PI) toBulge -= Math.PI * 2;
+    sweep = toBulge >= 0 ? Math.PI : -Math.PI;
+  } else {
+    const a1 = Math.atan2(y2 - cy, x2 - cx);
+    sweep = a1 - a0;
+    while (sweep <= -Math.PI) sweep += Math.PI * 2;
+    while (sweep > Math.PI) sweep -= Math.PI * 2;
+    if (long) sweep += sweep > 0 ? -Math.PI * 2 : Math.PI * 2;
+  }
+  const mid = a0 + sweep / 2;
+  return {
+    cx,
+    cy,
+    radius: r,
+    a0,
+    sweep,
+    sweepDeg: Math.abs(sweep) * (180 / Math.PI),
+    length: r * Math.abs(sweep),
+    sagitta: long ? r + h : r - h,
+    side: sign,
+    major: long,
+    crownX: cx + Math.cos(mid) * r,
+    crownY: cy + Math.sin(mid) * r,
+  };
+}
+
+/** Signed distance of a point from the chord, along the chord's left normal. */
+export function chordOffset(x1, y1, x2, y2, px, py) {
+  const frame = chordFrame(x1, y1, x2, y2);
+  if (!frame) return null;
+  return (px - frame.mx) * frame.nx + (py - frame.my) * frame.ny;
+}
+
+/**
+ * Circle through the two ends and the cursor. The centre lies on the
+ * perpendicular bisector. Past a semicircle the cursor is on the long arc,
+ * and moving it further out makes the radius larger. A pull smaller than
+ * `minSagitta` stays a straight wall.
+ */
+export function arcThroughPoint(x1, y1, x2, y2, px, py, minSagitta = ARC_MIN_SAGITTA) {
+  const frame = chordFrame(x1, y1, x2, y2);
+  if (!frame) return null;
+  const off = (px - frame.mx) * frame.nx + (py - frame.my) * frame.ny;
+  if (Math.abs(off) < minSagitta) return null;
+  const along = (px - frame.mx) * (-frame.ny) + (py - frame.my) * frame.nx;
+  const half = frame.chord / 2;
+  const h = (off * off + along * along - half * half) / (2 * off);
+  const radius = Math.hypot(h, half);
+  const side = Math.abs(h) < 1e-8 ? (off > 0 ? -1 : 1) : (h > 0 ? 1 : -1);
+  return arcFromRadius(x1, y1, x2, y2, radius, side, h * off > 1e-9);
+}
+
+export function arcFromCursor(x1, y1, x2, y2, px, py, minSagitta = ARC_MIN_SAGITTA) {
+  return arcThroughPoint(x1, y1, x2, y2, px, py, minSagitta);
+}
+
+/**
+ * Bulge `sagitta` off the chord. `side` is the centre side of the short arc
+ * (opposite the bulge). Past a semicircle the centre stays with the bulge and
+ * the sweep takes the long way, so pulling further out keeps the radius growing
+ * instead of folding the curve back onto the short arc.
+ */
+export function arcBySagitta(x1, y1, x2, y2, sagitta, side) {
+  const frame = chordFrame(x1, y1, x2, y2);
+  const s = Math.abs(sagitta);
+  if (!frame || !(s > 0) || (side !== 1 && side !== -1)) return null;
+  const radius = (frame.chord * frame.chord / 4 + s * s) / (2 * s);
+  const major = s > frame.chord / 2 + 1e-9;
+  const centerSide = major ? (side === 1 ? -1 : 1) : side;
+  return arcFromRadius(x1, y1, x2, y2, radius, centerSide, major);
+}
+
+/** Included angle back to the radius that subtends this chord. Null outside (0, 180]. */
+export function radiusFromSweep(chord, sweepDeg) {
+  const theta = Math.abs(Number(sweepDeg)) * (Math.PI / 180);
+  if (!(chord > 0) || !(theta > 0.01) || theta > Math.PI + 1e-6) return null;
+  return (chord / 2) / Math.sin(Math.min(theta, Math.PI) / 2);
+}
+
+/** Drop an arc that cannot span the chord. Returns the stored `{ radius, side }`. */
+export function normalizeWallArc(raw, x1, y1, x2, y2) {
+  const radius = Number(raw?.radius);
+  const side = raw?.side > 0 ? 1 : raw?.side < 0 ? -1 : null;
+  if (!Number.isFinite(radius) || side == null) return null;
+  const arc = arcFromRadius(x1, y1, x2, y2, radius, side, raw.major === true);
+  if (!arc) return null;
+  return arc.major
+    ? { radius: arc.radius, side: arc.side, major: true }
+    : { radius: arc.radius, side: arc.side };
+}
+
+/** Keep a stored arc that still reaches both ends; otherwise remove it. */
+export function fitWallArc(seg) {
+  if (!seg?.arc) return;
+  const arc = normalizeWallArc(seg.arc, seg.x1, seg.y1, seg.x2, seg.y2);
+  if (!arc) delete seg.arc;
+  else seg.arc = arc;
+}
+
+/** Points along the centreline, including both ends. */
+export function arcPoints(x1, y1, x2, y2, radius, side, step = Math.PI / 18, major = false) {
+  const arc = arcFromRadius(x1, y1, x2, y2, radius, side, major);
+  if (!arc) return null;
+  const n = Math.max(2, Math.ceil(Math.abs(arc.sweep) / step));
+  const pts = [];
+  for (let i = 0; i <= n; i += 1) {
+    const a = arc.a0 + arc.sweep * (i / n);
+    pts.push([arc.cx + Math.cos(a) * arc.radius, arc.cy + Math.sin(a) * arc.radius]);
+  }
+  return pts;
+}
+
+/** Distance from a point to the arc centreline, or to the nearer end past the sweep. */
+export function distToArc(arc, px, py) {
+  if (!arc) return Infinity;
+  const ang = Math.atan2(py - arc.cy, px - arc.cx);
+  let d = ang - arc.a0;
+  let on = false;
+  if (arc.sweep >= 0) {
+    while (d < 0) d += Math.PI * 2;
+    while (d >= Math.PI * 2) d -= Math.PI * 2;
+    on = d <= arc.sweep + 1e-6;
+  } else {
+    while (d > 0) d -= Math.PI * 2;
+    while (d <= -Math.PI * 2) d += Math.PI * 2;
+    on = d >= arc.sweep - 1e-6;
+  }
+  if (on) return Math.abs(Math.hypot(px - arc.cx, py - arc.cy) - arc.radius);
+  const sx = arc.cx + Math.cos(arc.a0) * arc.radius;
+  const sy = arc.cy + Math.sin(arc.a0) * arc.radius;
+  const ex = arc.cx + Math.cos(arc.a0 + arc.sweep) * arc.radius;
+  const ey = arc.cy + Math.sin(arc.a0 + arc.sweep) * arc.radius;
+  return Math.min(Math.hypot(px - sx, py - sy), Math.hypot(px - ex, py - ey));
+}
+
+/** Annular footprint of a wall following the arc. Outer edge first, then the inner edge back. */
+export function arcWallPolygon(arc, thickness, step = Math.PI / 24) {
+  if (!arc || !(thickness > 0)) return null;
+  const outer = arc.radius + thickness / 2;
+  const inner = Math.max(arc.radius - thickness / 2, 0.002);
+  const n = Math.max(8, Math.ceil(Math.abs(arc.sweep) / step));
+  const pts = [];
+  for (let i = 0; i <= n; i += 1) {
+    const a = arc.a0 + arc.sweep * (i / n);
+    pts.push({ x: arc.cx + Math.cos(a) * outer, y: arc.cy + Math.sin(a) * outer });
+  }
+  for (let i = n; i >= 0; i -= 1) {
+    const a = arc.a0 + arc.sweep * (i / n);
+    pts.push({ x: arc.cx + Math.cos(a) * inner, y: arc.cy + Math.sin(a) * inner });
+  }
+  return pts;
+}
+
 export function hasClickDraft(state) {
   return Boolean(
     state.wallDraft

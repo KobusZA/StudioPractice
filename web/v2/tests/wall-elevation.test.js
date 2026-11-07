@@ -49,6 +49,35 @@ test("the model gives the face's length, base, top and its openings", () => {
   assert.ok(m.levels.length >= 1);
 });
 
+test("a wall that comes through this face is a strip as thick as that wall", async () => {
+  const { elevationSvg } = await import("../wall-elevation-render.js");
+  const doc = drawnDoc();
+  doc.segments.push(
+    { id: "cross", sku: "TSP_MAS009", level: "01 GFL", x1: 2, y1: -2, x2: 2, y2: 2 },
+    { id: "tee", sku: "TSP_MAS009", level: "01 GFL", x1: 4, y1: 0, x2: 4, y2: -3 },
+    { id: "away", sku: "TSP_MAS009", level: "01 GFL", x1: 5, y1: 1, x2: 5, y2: 3 },
+  );
+  const face = elevationModel(doc, pack, { wallId: "w1", side: 1 });
+  assert.equal(face.projections.length, 1);
+  const strip = face.projections[0];
+  assert.equal(strip.id, "cross");
+  assert.ok(Math.abs(strip.from - (2 - 0.11)) < 1e-6);
+  assert.ok(Math.abs(strip.to - (2 + 0.11)) < 1e-6);
+  assert.ok(Math.abs((strip.top - strip.base) - face.height) < 1e-6);
+  const back = elevationModel(doc, pack, { wallId: "w1", side: -1 });
+  assert.equal(back.projections.length, 2);
+  const tee = back.projections.find((p) => p.id === "tee");
+  const crossed = back.projections.find((p) => p.id === "cross");
+  assert.ok(tee);
+  assert.ok(Math.abs(tee.from - (6 - (4 + 0.11))) < 1e-6);
+  assert.ok(Math.abs(tee.to - (6 - (4 - 0.11))) < 1e-6);
+  assert.ok(Math.abs(crossed.from - (6 - (2 + 0.11))) < 1e-6);
+  const svg = elevationSvg(face, { width: 640, height: 280, interactive: true });
+  assert.match(svg.svg, /data-elev-protrusion="cross"/);
+  assert.doesNotMatch(svg.svg, /data-elev-protrusion="tee"/);
+  assert.doesNotMatch(svg.svg, /data-elev-protrusion="away"/);
+});
+
 test("the other side mirrors offsets", () => {
   const doc = drawnDoc([{ id: "o1", sku: "TSP_WN1212", wallId: "w1", t: 0.25 }]);
   const a = elevationModel(doc, pack, { wallId: "w1", side: 1 }).openings[0];
@@ -569,8 +598,8 @@ test("a long wall keeps the next floor above the wall", async () => {
   assert.ok(Math.abs(Number(fittedWall[1]) - 7) < 1 && Math.abs(fittedRight - 633) < 1, "a shorter wall fills the width too");
 });
 
-test("zooming keeps the point under the cursor, and zooming out restores the fit", async () => {
-  const { elevationSvg, zoomElevationView } = await import("../wall-elevation-render.js");
+test("zooming keeps the point under the cursor, in either direction", async () => {
+  const { elevationSvg, zoomElevationView, ELEV_ZOOM_MIN, ELEV_ZOOM_MAX } = await import("../wall-elevation-render.js");
   const model = elevationModel(drawnDoc(), pack, { wallId: "w1" });
   const fitted = elevationSvg(model, { width: 640, height: 280, interactive: true });
   const px = 200;
@@ -587,13 +616,24 @@ test("zooming keeps the point under the cursor, and zooming out restores the fit
   assert.ok(Math.abs(zoomed.scaleX / fitted.scaleX - 2) < 1e-9);
   assert.ok(Math.abs(zoomed.scaleY / fitted.scaleY - 2) < 1e-9);
 
-  const back = zoomElevationView(fitted.fit, view, px, py, 0.01);
-  assert.deepEqual(back, { zoom: 1, panX: 0, panY: 0 });
+  const back = zoomElevationView(fitted.fit, view, px, py, 0.5);
+  assert.ok(Math.abs(back.zoom - 1) < 1e-9);
   const restored = elevationSvg(model, { width: 640, height: 280, interactive: true, view: back });
-  assert.equal(restored.originX, fitted.originX);
-  assert.equal(restored.originY, fitted.originY);
-  assert.equal(restored.scaleX, fitted.scaleX);
-  assert.equal(restored.scaleY, fitted.scaleY);
+  assert.ok(Math.abs(restored.originX - fitted.originX) < 1e-6);
+  assert.ok(Math.abs(restored.originY - fitted.originY) < 1e-6);
+  assert.ok(Math.abs(restored.scaleX - fitted.scaleX) < 1e-6);
+  assert.ok(Math.abs(restored.scaleY - fitted.scaleY) < 1e-6);
+
+  const smaller = zoomElevationView(fitted.fit, view, px, py, 0.01);
+  assert.equal(smaller.zoom, ELEV_ZOOM_MIN);
+  const shrunk = elevationSvg(model, { width: 640, height: 280, interactive: true, view: smaller });
+  assert.ok(shrunk.scaleY < fitted.scaleY, "zooming out makes the wall shorter than the fit");
+
+  const closer = zoomElevationView(fitted.fit, { zoom: 1, panX: 0, panY: 0 }, px, py, 100);
+  assert.equal(closer.zoom, ELEV_ZOOM_MAX);
+  const grown = elevationSvg(model, { width: 640, height: 280, interactive: true, view: closer });
+  const grownWall = grown.svg.match(/<rect x="([^"]+)" y="[^"]+" width="([^"]+)" height="[^"]+" class="elev-wall"/);
+  assert.ok(Number(grownWall[2]) > 640, "zooming in grows the wall past the strip");
 
   const { clampElevationView } = await import("../wall-elevation-render.js");
   const shoved = clampElevationView(fitted.fit, { zoom: 2, panX: 5000, panY: -5000 }, 640, 280);
@@ -603,6 +643,101 @@ test("zooming keeps the point under the cursor, and zooming out restores the fit
   const wallLeft = parked.originX;
   const wallRight = parked.originX + model.length * parked.scaleX;
   assert.ok(wallRight > 16 && wallLeft < 640 - 16, "part of the wall stays in frame");
+});
+
+test("panning is ignored, and moving the wall moves the face centre", async () => {
+  const { faceTrack, trackFaceCenter, alignCameraShift } = await import("../wall-elevation-render.js");
+  const track = faceTrack({ x1: 0, y1: 2, x2: 6, y2: 2, side: 1 });
+  assert.equal(track.axis, "x");
+  assert.equal(track.mid, 3);
+  const held = trackFaceCenter(null, track, 40, 400);
+  assert.equal(held.centerX, 400);
+  const same = trackFaceCenter(held, track, 80, 400);
+  assert.equal(same.centerX, 400, "zoom keeps the centre");
+  const moved = trackFaceCenter(same, faceTrack({ x1: 1, y1: 2, x2: 7, y2: 2, side: 1 }), 80, 400);
+  assert.equal(moved.centerX, 480);
+  const vertical = faceTrack({ x1: 2, y1: 1, x2: 2, y2: 5, side: 1 });
+  assert.equal(vertical.axis, "y");
+  const turned = trackFaceCenter(moved, vertical, 80, 400);
+  assert.equal(turned.centerX, 480, "turning the wall keeps the centre");
+  const raised = trackFaceCenter(turned, faceTrack({ x1: 2, y1: 0, x2: 2, y2: 4, side: 1 }), 80, 400);
+  assert.equal(raised.centerX, 400, "moving the wall up moves the face");
+  assert.deepEqual(alignCameraShift(false, 200, 360), { ox: 160, oy: 0 });
+  assert.deepEqual(alignCameraShift(true, 200, 80), { ox: 0, oy: -120 });
+  const { nudgeIntoView } = await import("../wall-elevation-render.js");
+  assert.equal(nudgeIntoView(40, 80, 0, 200), 0, "already in view");
+  assert.equal(nudgeIntoView(-30, 20, 0, 200), 30, "pull the start in");
+  assert.equal(nudgeIntoView(180, 240, 0, 200), -40, "pull the end in");
+  assert.equal(nudgeIntoView(-50, 250, 0, 200), 0, "a span already centred stays put");
+  assert.equal(nudgeIntoView(0, 300, 0, 200), -50, "a span longer than the view is centred");
+});
+
+test("the open face matches the plan scale and lines up with the wall", async () => {
+  const { elevationSvg, planFaceFrame, zoomElevationView } = await import("../wall-elevation-render.js");
+  const face = {
+    length: 6, height: 3, top: 3, base: 0,
+    levels: [{ id: "g", name: "GFL", elevation: 0, kind: "level" }],
+    openings: [], finishBands: [], foundations: [],
+  };
+  const cam = { scale: 40, ox: 100, oy: 80 };
+  const frame = planFaceFrame({ x1: 0, y1: 2, x2: 6, y2: 2, side: 1 }, cam, 8);
+  assert.equal(frame.dir, 1);
+  assert.equal(frame.vertical, false);
+  assert.equal(frame.originX, 100 + 8);
+
+  const drawn = elevationSvg(face, { width: 800, height: 500, interactive: true, frame });
+  const wall = drawn.svg.match(/<rect x="([^"]+)" y="([^"]+)" width="([^"]+)" height="([^"]+)" class="elev-wall"/);
+  assert.ok(wall, "wall rect");
+  assert.ok(Math.abs(Number(wall[1]) - frame.originX) < 1e-6, "left end lines up with the wall");
+  assert.ok(Math.abs(Number(wall[3]) - 6 * 40) < 1e-6, "width is the wall's length on screen");
+  assert.ok(Math.abs(Number(wall[4]) - 3 * 40) < 1e-6, "height keeps the same scale");
+  assert.ok(Math.abs(Number(wall[2]) + Number(wall[4]) - (500 - 14)) < 1e-6, "the floor sits on the bottom");
+  const level = drawn.svg.match(/<line x1="([^"]+)" x2="([^"]+)" y1="[^"]+" y2="[^"]+" class="elev-level /);
+  assert.ok(level, "level line");
+  assert.ok(Number(level[2]) - Number(level[1]) > 700, "level lines still cross the strip");
+
+  const back = planFaceFrame({ x1: 0, y1: 2, x2: 6, y2: 2, side: -1 }, cam, 0);
+  assert.equal(back.dir, -1);
+  assert.equal(back.originX, 100 + 6 * 40);
+  const mirrored = elevationSvg(face, { width: 800, height: 500, frame: back });
+  const mrect = mirrored.svg.match(/<rect x="([^"]+)" y="([^"]+)" width="([^"]+)" height="([^"]+)" class="elev-wall"/);
+  assert.ok(mirrored.scaleX < 0, "station 0 is the right end");
+  assert.ok(Math.abs(Number(mrect[1]) - 100) < 1e-6, "the other end still lines up");
+  assert.ok(Math.abs(Number(mrect[3]) - 240) < 1e-6);
+
+  const vertical = planFaceFrame({ x1: 2, y1: 1, x2: 2, y2: 4, side: 1 }, cam, 50);
+  assert.equal(vertical.vertical, true);
+  assert.equal(vertical.originX, 80 + 40);
+  assert.equal(vertical.dir, 1);
+  const raised = planFaceFrame({ x1: 2, y1: 0, x2: 2, y2: 3, side: 1 }, cam, 50);
+  assert.ok(raised.originX < vertical.originX, "moving the wall up moves the face sideways");
+
+  const angled = planFaceFrame({ x1: 0, y1: 0, x2: 3, y2: 4, side: 1 }, cam, 0);
+  const angledFace = { ...face, length: 5, height: 2.5, top: 2.5 };
+  const angledDrawn = elevationSvg(angledFace, { width: 800, height: 500, frame: angled });
+  const arect = angledDrawn.svg.match(/<rect x="([^"]+)" y="([^"]+)" width="([^"]+)" height="([^"]+)" class="elev-wall"/);
+  assert.equal(angled.vertical, true);
+  assert.equal(angled.originX, 80);
+  assert.ok(Math.abs(Number(arect[1]) - 80) < 1e-6);
+  assert.ok(Math.abs(Number(arect[3]) - 5 * 40) < 1e-6, "an angled wall is its full screen length");
+  assert.ok(Number(arect[3]) > 4 * 40, "longer than the up-down projection");
+  assert.ok(Math.abs(Number(arect[4]) - 2.5 * 40) < 1e-6);
+
+  const px = frame.originX + 40;
+  const py = 500 - 14 - 40;
+  const s = (px - drawn.originX) / drawn.scaleX;
+  const z = (drawn.originY - py) / drawn.scaleY;
+  const view = zoomElevationView(drawn.fit, { zoom: 1, panX: 0, panY: 0 }, px, py, 2);
+  const zoomed = elevationSvg(face, { width: 800, height: 500, interactive: true, frame, view });
+  assert.ok(Math.abs(zoomed.originX + s * zoomed.scaleX - px) < 1e-6, "extra zoom keeps the point");
+  assert.ok(Math.abs(zoomed.originY - z * zoomed.scaleY - py) < 1e-6, "extra zoom keeps the height");
+  assert.ok(Math.abs(zoomed.scaleX / 40 - 2) < 1e-9);
+  assert.ok(Math.abs(zoomed.scaleY / zoomed.scaleX - 1) < 1e-9, "the ratio survives the extra zoom");
+
+  const short = elevationSvg(face, { width: 800, height: 80, frame });
+  const srect = short.svg.match(/<rect x="([^"]+)" y="([^"]+)" width="([^"]+)" height="([^"]+)" class="elev-wall"/);
+  assert.ok(Math.abs(Number(srect[2]) + Number(srect[4]) - (80 - 14)) < 1e-6, "the floor stays on the bottom");
+  assert.ok(Number(srect[2]) < 0, "the top is clipped");
 });
 
 test("dragging the wall top sets a fixed height and will not pass the next floor", () => {

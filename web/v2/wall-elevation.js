@@ -12,16 +12,18 @@ import { defaultWallTop, isReferenceLevel, levelAboveRise } from "./level-view.j
 import { levelElevation, resolvedBase } from "./compile.js";
 import { nid } from "./model.js";
 import { foundationStorey, isFoundationLevel } from "./placement-warn.js";
+import { archRise, fitArchSize } from "./arch-head.js";
 import {
-  fitArchSize,
   isArchHead,
   openingOnWall,
   openingSize,
   roomEdgeSegment,
   skuById,
   wallForOpening,
+  wallNormal,
   wallT,
 } from "./openings.js";
+import { joinedWallPolygon } from "./drawing-defaults.js";
 import { deriveWalls, drawnSegmentFromWall, skuDrawnHeight } from "./walls.js";
 import { faceFinishBands, reanchorRun } from "./finish-model.js";
 
@@ -110,6 +112,30 @@ function heightGuide(pack, wall) {
   return null;
 }
 
+/**
+ * The stretch of one face as the plan paints it. The plan mitres a wall into
+ * its neighbours, so an outside face runs past the centreline end and an
+ * inside face stops short of it. Stations are measured along the wall from the
+ * viewer's left (`side` -1 reads from the second end), like every other offset.
+ */
+export function faceExtent(wall, all, side) {
+  const length = wall.length;
+  const whole = { from: 0, to: length };
+  if (!(wall.thickness > 0) || !(length > 1e-6)) return whole;
+  const sameLevel = (all || []).filter((w) => w.level === wall.level);
+  const poly = joinedWallPolygon(wall, sameLevel);
+  if (!poly) return whole;
+  const ux = (wall.x2 - wall.x1) / length;
+  const uy = (wall.y2 - wall.y1) / length;
+  const station = (p) => (p.x - wall.x1) * ux + (p.y - wall.y1) * uy;
+  // Polygon order: start left, end left, end right, start right.
+  const [a, b] = side === -1 ? [poly[3], poly[2]] : [poly[0], poly[1]];
+  const sa = station(a);
+  const sb = station(b);
+  if (!Number.isFinite(sa) || !Number.isFinite(sb) || sb - sa < 1e-3) return whole;
+  return side === -1 ? { from: length - sb, to: length - sa } : { from: sa, to: sb };
+}
+
 /** Height a wall keeps when its own override is cleared: up to the level above, else the type. */
 function naturalWallHeight(pack, wall) {
   const typeH = skuDrawnHeight(skuById(pack, wall.sku));
@@ -135,6 +161,7 @@ export function elevationModel(doc, pack, faceRef, walls = null, foundationSku =
   const side = normSide(faceRef.side);
   const flip = side === -1;
   const length = wall.length;
+  const extent = faceExtent(wall, all, side);
 
   const sku = skuById(pack, wall.sku);
   const resolved = resolvedBase(doc, pack, wall, wall.height || sku?.geometry?.height || pack.system?.wallHeight || 0);
@@ -158,6 +185,7 @@ export function elevationModel(doc, pack, faceRef, walls = null, foundationSku =
       name: placed.sku?.name || opening.sku,
       category,
       head: isArchHead(placed.sku) ? "arch" : null,
+      rise: isArchHead(placed.sku) ? archRise(width, opening.rise) : null,
       offset,
       width,
       sill: openingSill(pack, opening),
@@ -194,6 +222,11 @@ export function elevationModel(doc, pack, faceRef, walls = null, foundationSku =
     name: sku?.name || wall.sku,
     level: wall.level,
     length,
+    // Where this side's face begins and ends, in the same stations as `length`
+    // (viewing order). Corner joins push it past 0 / length or pull it short.
+    // `length` stays the centreline, which openings, finishes and quantities use.
+    faceFrom: extent.from,
+    faceTo: extent.to,
     base,
     top,
     height: top - base,
@@ -212,10 +245,121 @@ export function elevationModel(doc, pack, faceRef, walls = null, foundationSku =
     finishBands: faceFinishBands(doc, pack, all, wall, side, {
       wallBases: new Map([[wall.id, { height: resolved.height }]]),
     }),
+    // Ends of walls that come out of this face, in viewing order. Each strip
+    // is as wide as that wall is where it meets the face. The run stays one
+    // wall; the strip is the other wall, covering this face.
+    projections: protrudingWalls(doc, pack, wall, all, side, extent, base, top),
     levels,
     guide: heightGuide(pack, wall),
     canDragTop: wall.category !== "foundation",
   };
+}
+
+/** How far a wall may stop short of this face and still read as joining it, metres. */
+const PROTRUSION_REACH = 0.05;
+
+/**
+ * Walls whose body comes toward the viewer through this face. A cross shows
+ * on both faces. A tee shows only on the side it enters the room. A return
+ * that only bounds the end of the face leaves no strip. Offsets are centreline
+ * stations, then flipped into viewing order like every other offset.
+ */
+function protrudingWalls(doc, pack, wall, all, side, extent, wallBase, wallTop) {
+  if (wall.arc || !(wall.thickness > 0) || !(wall.length > 1e-6)) return [];
+  const length = wall.length;
+  const ux = (wall.x2 - wall.x1) / length;
+  const uy = (wall.y2 - wall.y1) / length;
+  const n = wallNormal(wall, side);
+  const half = wall.thickness / 2;
+  const flip = side === -1;
+  const face = flip
+    ? { from: length - extent.to, to: length - extent.from }
+    : extent;
+  const origin = { x: wall.x1, y: wall.y1 };
+  const out = [];
+  for (const other of all) {
+    if (!other || other.id === wall.id || other.arc) continue;
+    if (other.level !== wall.level || other.category === "foundation") continue;
+    const olen = other.length || Math.hypot(other.x2 - other.x1, other.y2 - other.y1);
+    if (!(olen > 1e-6) || !(other.thickness > 0)) continue;
+    const oux = (other.x2 - other.x1) / olen;
+    const ouy = (other.y2 - other.y1) / olen;
+    if (Math.abs(oux * ux + ouy * uy) >= 0.996) continue;
+    const poly = wallRect(other, olen);
+    const signed = poly.map((p) => (p.x - origin.x) * n.x + (p.y - origin.y) * n.y - half);
+    const minS = Math.min(...signed);
+    const maxS = Math.max(...signed);
+    if (!(maxS > 0.01) || minS > PROTRUSION_REACH) continue;
+    // Across the face when the body passes through it. Otherwise the nearest
+    // line of a wall that stops just short, which is its end.
+    const at = minS < -0.005 ? 0 : minS;
+    const hits = stationsOnOffset(poly, origin, { x: ux, y: uy }, n, half + at);
+    if (hits.length < 2) continue;
+    let from = Math.max(face.from, Math.min(...hits));
+    let to = Math.min(face.to, Math.max(...hits));
+    if (to - from < 0.02) continue;
+    const sku = skuById(pack, other.sku);
+    const height = other.height || skuDrawnHeight(sku) || 0;
+    if (!(height > 0)) continue;
+    const resolved = resolvedBase(doc, pack, other, height);
+    const base = Math.max(wallBase, resolved.elevation);
+    const top = Math.min(wallTop, resolved.elevation + resolved.height);
+    if (top - base < 0.02) continue;
+    if (flip) {
+      const mirroredFrom = length - to;
+      to = length - from;
+      from = mirroredFrom;
+    }
+    out.push({
+      id: other.id,
+      name: sku?.name || other.sku,
+      from,
+      to,
+      base,
+      top,
+    });
+  }
+  out.sort((a, b) => a.from - b.from || a.base - b.base);
+  return out;
+}
+
+function wallRect(wall, length) {
+  const ux = (wall.x2 - wall.x1) / length;
+  const uy = (wall.y2 - wall.y1) / length;
+  const hx = -uy * wall.thickness / 2;
+  const hy = ux * wall.thickness / 2;
+  return [
+    { x: wall.x1 + hx, y: wall.y1 + hy },
+    { x: wall.x2 + hx, y: wall.y2 + hy },
+    { x: wall.x2 - hx, y: wall.y2 - hy },
+    { x: wall.x1 - hx, y: wall.y1 - hy },
+  ];
+}
+
+/** Stations where `poly` crosses the line `origin + n*offset`, measured along `u`. */
+function stationsOnOffset(poly, origin, u, n, offset) {
+  const fx = origin.x + n.x * offset;
+  const fy = origin.y + n.y * offset;
+  const dist = (p) => (p.x - fx) * n.x + (p.y - fy) * n.y;
+  const station = (p) => (p.x - origin.x) * u.x + (p.y - origin.y) * u.y;
+  const hits = [];
+  for (let i = 0; i < poly.length; i += 1) {
+    const p = poly[i];
+    const q = poly[(i + 1) % poly.length];
+    const dp = dist(p);
+    const dq = dist(q);
+    if (Math.abs(dp) <= 0.003 && Math.abs(dq) <= 0.003) {
+      hits.push(station(p), station(q));
+      continue;
+    }
+    if (dp * dq > 0) continue;
+    const denom = dp - dq;
+    if (Math.abs(denom) < 1e-12) continue;
+    const t = dp / denom;
+    if (t < -1e-6 || t > 1 + 1e-6) continue;
+    hits.push(station({ x: p.x + (q.x - p.x) * t, y: p.y + (q.y - p.y) * t }));
+  }
+  return hits;
 }
 
 /**
@@ -491,15 +635,29 @@ export function applyOpeningEdit(doc, pack, faceRef, openingId, edit, walls = nu
   const sku = skuById(pack, opening.sku);
   const arch = isArchHead(sku);
   if (arch) {
-    height = fitArchSize(width, height).height;
+    // A typed rise at or above half the width is a semicircle, and follows
+    // later width changes. A rise already stored stays put when the width
+    // shrinks past it: the head is drawn at the cap, and widening restores it.
+    if (Number.isFinite(edit.rise)) {
+      const snapped = snapElevation(Math.max(ELEVATION_SNAP, edit.rise));
+      opening.rise = snapped < width / 2 - 0.0005 ? snapped : null;
+    }
+    let rise = fitArchSize(width, height, opening.rise).rise;
+    height = Math.max(height, rise);
     if (sill + height > model.height) {
       sill = Math.max(0, model.height - height);
       if (sill + height > model.height) {
         height = Math.max(ELEVATION_SNAP, model.height);
         sill = 0;
-        if (height < width / 2) {
-          width = Math.min(model.length, height * 2);
-          left = Math.min(left, Math.max(0, model.length - width));
+        if (height + 1e-9 < rise) {
+          if (opening.rise == null) {
+            width = Math.min(model.length, height * 2);
+            left = Math.min(left, Math.max(0, model.length - width));
+          } else {
+            opening.rise = height < width / 2 - 0.0005 ? height : null;
+          }
+          rise = fitArchSize(width, height, opening.rise).rise;
+          height = Math.max(height, rise);
         }
       }
     }
@@ -874,6 +1032,17 @@ export function resizeOpeningCorner(orig, corner, s, z, face) {
     height = at - sill;
   }
   return { left: offset, width, sill, height };
+}
+
+/**
+ * Rise from a drag of the spring line. `z` is where the curve leaves the
+ * jambs. The crown stays put. The rise cannot pass half the width.
+ */
+export function resizeArchRise(orig, z) {
+  const head = orig.sill + orig.height;
+  const cap = Math.max(ELEVATION_SNAP, orig.width / 2);
+  const rise = Math.round((head - z) * 1000) / 1000;
+  return { rise: Math.min(cap, Math.max(ELEVATION_SNAP, rise)) };
 }
 
 /**

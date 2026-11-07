@@ -222,9 +222,12 @@ export function createCloud({
       };
     },
 
-    /** Snapshot in, photorealistic visualization out. The key stays on the server. */
-    async visualize({ image }) {
-      const body = await call("POST", "/api/visualize", { image });
+    /** Snapshot in, photorealistic visualization out. The key stays on the server.
+     *  `prompt` is the instruction shown in the 3D panel. Omit it and the server
+     *  uses the built-in wording. `images` is the camera first, then any
+     *  opposite-side and roof references. `image` remains the single-snapshot form. */
+    async visualize({ image, images, prompt } = {}) {
+      const body = await call("POST", "/api/visualize", { image, images, prompt });
       return body?.image ?? null;
     },
   };

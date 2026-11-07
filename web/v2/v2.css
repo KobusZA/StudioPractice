@@ -2268,6 +2268,32 @@ body.library-home {
   flex: 1;
   min-width: 0;
   min-height: 0;
+  position: relative;
+}
+
+.elev-align {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.elev-align[hidden] {
+  display: none;
+}
+
+.elev-align-line {
+  position: absolute;
+  width: 0;
+  border-left: 1.5px dashed #b2451e;
+}
+
+.elev-align-line.is-across {
+  width: auto;
+  height: 0;
+  border-left: 0;
+  border-top: 1.5px dashed #b2451e;
 }
 
 .svc-profile-dock {
@@ -2785,6 +2811,14 @@ button.fin-kind {
   margin-right: 0;
 }
 
+.elev-align-state {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--copper, #b2451e);
+  white-space: nowrap;
+}
+
 .svc-profile-title-row {
   display: flex;
   align-items: center;
@@ -3055,6 +3089,38 @@ button.fin-kind {
 }
 .elev-card-stage { position: relative; }
 
+/* On the preview drawing: send this face straight to the second screen. */
+.planner-fields button.elev-screen-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  align-self: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 28px;
+  min-height: 0;
+  padding: 0;
+  border: 1px solid var(--line, rgba(26, 22, 18, 0.22));
+  border-radius: 3px;
+  background: rgba(255, 253, 248, 0.94);
+  color: var(--copper-dark, #8d3416);
+  box-shadow: 0 1px 3px rgba(26, 22, 18, 0.14);
+  cursor: pointer;
+}
+.planner-fields button.elev-screen-btn:hover,
+.planner-fields button.elev-screen-btn:focus-visible {
+  border-color: var(--copper);
+  background: #fffdf8;
+}
+.elev-screen-btn svg {
+  display: block;
+  width: 26px;
+  height: 16px;
+}
+
 /* A selected room or slab leads with this picture. Clicking it opens the floor strip. */
 .planner-fields button.floor-card {
   position: relative;
@@ -3228,6 +3294,7 @@ button.fin-kind {
 .elev-svg { display: block; }
 .elev-bg { fill: #fffdf8; }
 .elev-wall { fill: #e4dccd; stroke: #1a1612; stroke-width: 1.5; }
+.elev-protrusion { fill: #b9aa98; stroke: #1a1612; stroke-width: 1.5; }
 .elev-foundation { fill: #d4cbbd; stroke: #5c5348; stroke-width: 1.25; stroke-dasharray: 5 3; cursor: pointer; }
 .elev-foundation-add { fill: rgba(212, 203, 189, 0.45); stroke: var(--copper, #b2451e); stroke-width: 1.25; cursor: pointer; }
 .elev-foundation-add-label { font: 700 12px "Source Sans 3", sans-serif; fill: var(--copper-dark, #8d3416); pointer-events: none; }
@@ -3272,6 +3339,8 @@ button.fin-kind {
 .elev-handle-t, .elev-handle-b { cursor: ns-resize; }
 .elev-handle-tl, .elev-handle-br { cursor: nwse-resize; }
 .elev-handle-tr, .elev-handle-bl { cursor: nesw-resize; }
+.elev-handle-spring { cursor: ns-resize; }
+.elev-spring { stroke: var(--copper, #b2451e); stroke-width: 1; stroke-dasharray: 3 2; pointer-events: none; }
 .elev-dim { font-size: 11px; fill: #1a1612; pointer-events: none; }
 .elev-dim-strong { font: 700 12px "Source Sans 3", sans-serif; fill: var(--copper-dark, #8d3416); pointer-events: none; }
 .elev-dim.elev-gap,
@@ -4003,6 +4072,13 @@ input.level-station-elev:focus {
   display: none !important;
 }
 
+/* Draw on / Corner in the bar share a row with the ribbon hint until the
+   first click; give the hint the full width so it does not sit on the buttons. */
+.canvas-status:has(#v2-wall-opts:not(.floating):not([hidden])) .ribbon-hint:not([hidden]) {
+  flex: 1 1 100%;
+  max-width: 100%;
+}
+
 /* Overrides the plain next-step hint when the armed tool would place
    something on a foundation storey - the one thing the level switcher can
    rule out without guessing which real storey is meant. Same amber as
@@ -4187,7 +4263,9 @@ input.level-station-elev:focus {
 }
 
 /* While a wall is being drawn the choices sit beside its start (placed from
-   ui.js), so the eye does not have to leave the line to change them. */
+   ui.js), so the eye does not have to leave the line to change them. Before
+   the first click, the same box sits beside the other wall's end the pointer
+   is on — the top-left bar cannot be reached without leaving that join. */
 .wall-opts.floating {
   position: fixed;
   z-index: 30;
@@ -4888,21 +4966,35 @@ input.level-station-elev:focus {
 .mass-panel header {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 12px;
   flex-wrap: wrap;
 }
 
 .mass-panel header h2 {
   margin: 0;
-  margin-right: auto;
 }
 
-#v2-mass-caption {
-  flex: 1 1 0;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.mass-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mass-readout {
+  margin: 0;
+  padding: 8px 16px 0;
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+}
+
+.mass-readout[hidden] {
+  display: none !important;
+}
+
+#v2-mass-wrap {
+  background: #f7f1e6;
 }
 
 .mass-services {
@@ -4923,6 +5015,7 @@ input.level-station-elev:focus {
   flex: 1;
 }
 
+#v2-mass-picture,
 #v2-mass-generate,
 #v2-mass-show-3d,
 #v2-mass-close {
@@ -4934,12 +5027,16 @@ input.level-station-elev:focus {
   cursor: pointer;
 }
 
+#v2-mass-picture[aria-expanded="true"] {
+  box-shadow: inset 0 0 0 2px var(--ink);
+}
+
 #v2-mass-generate {
-  margin-left: auto;
   background: var(--ink);
   color: #fff;
 }
 
+#v2-mass-picture:disabled,
 #v2-mass-generate:disabled,
 #v2-mass-show-3d:disabled {
   opacity: 0.55;
@@ -4949,6 +5046,148 @@ input.level-station-elev:focus {
 #v2-mass-show-3d[hidden] {
   display: none !important;
 }
+
+.mass-prompt {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 16px 12px;
+  border-bottom: 1px solid var(--line);
+  min-height: 0;
+}
+
+.mass-prompt[hidden] {
+  display: none !important;
+}
+
+.mass-prompt-note,
+.mass-prompt-count {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+}
+
+.mass-prompt-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.mass-prompt-count {
+  margin-right: auto;
+}
+
+.mass-refs {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.mass-refs[hidden] {
+  display: none !important;
+}
+
+.mass-refs input {
+  margin: 0;
+}
+
+.mass-prompt-examples {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.mass-prompt-examples button {
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 99px;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.mass-prompt-examples button.active {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: #fff;
+}
+
+.mass-prompt textarea {
+  width: 100%;
+  min-height: 4.5rem;
+  max-height: 8rem;
+  resize: vertical;
+  font: inherit;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #fff;
+  color: var(--ink);
+}
+
+.mass-gesture {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 2;
+  margin: 0;
+  padding: 3px 10px;
+  font-size: 0.75rem;
+  color: #5c5348;
+  background: rgba(244, 237, 225, 0.9);
+  border-radius: 99px;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.mass-gesture[hidden] {
+  display: none !important;
+}
+
+.mass-legend {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  margin: 0;
+  padding: 6px 10px;
+  list-style: none;
+  font-size: 0.75rem;
+  color: #3d3428;
+  background: rgba(244, 237, 225, 0.92);
+  border-radius: 4px;
+  pointer-events: none;
+}
+
+.mass-legend[hidden] {
+  display: none !important;
+}
+
+.mass-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 5px;
+  border-radius: 2px;
+  vertical-align: -2px;
+  box-shadow: inset 0 0 0 1px rgba(28, 26, 23, 0.35);
+}
+
+.mass-swatch-existing { background: rgba(90, 84, 76, 0.72); }
+.mass-swatch-proposed { background: rgba(178, 69, 30, 0.8); }
+.mass-swatch-roof { background: rgba(70, 112, 140, 0.85); }
+.mass-swatch-ground { background: rgba(210, 198, 176, 0.95); }
 
 .mass-render {
   position: absolute;
@@ -4964,29 +5203,146 @@ input.level-station-elev:focus {
   display: none !important;
 }
 
-.mass-render img {
+#v2-mass-render-img {
   display: none;
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
 }
 
-.mass-render.is-ready img {
+.mass-render.is-ready #v2-mass-render-img {
   display: block;
+}
+
+.mass-render-refs {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 4;
+  display: flex;
+  gap: 8px;
+  margin: 0;
+}
+
+.mass-render-refs[hidden] {
+  display: none !important;
+}
+
+.mass-render-refs figure {
+  margin: 0;
+}
+
+.mass-render-refs img {
+  display: block;
+  width: 104px;
+  height: 68px;
+  object-fit: cover;
+  background: #f7f1e6;
+  border: 2px solid #f4ede1;
+}
+
+.mass-render-refs figcaption {
+  margin-top: 2px;
+  font-size: 0.68rem;
+  line-height: 1.2;
+  color: #f4ede1;
+  text-align: center;
 }
 
 .mass-render-status {
   position: absolute;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(320px, calc(100% - 32px));
   margin: 0;
-  padding: 8px 14px;
+  padding: 12px 14px;
   border-radius: 6px;
   background: rgba(244, 237, 225, 0.94);
   color: #3d3428;
   font-size: 0.9rem;
 }
 
+.mass-render-status p {
+  margin: 0;
+}
+
 .mass-render-status[hidden] {
   display: none !important;
+}
+
+.mass-render-wait {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.mass-render-wait[hidden] {
+  display: none !important;
+}
+
+.mass-render-bar {
+  flex: 1;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: linear-gradient(90deg, rgba(61, 52, 40, 0.16) 0%, #b2451e 45%, rgba(61, 52, 40, 0.16) 90%);
+  background-size: 220% 100%;
+  animation: mass-render-bar 1.4s ease-in-out infinite;
+}
+
+.mass-render-bar span {
+  display: none;
+}
+
+.mass-render-elapsed {
+  font-variant-numeric: tabular-nums;
+  min-width: 2.8em;
+  text-align: right;
+}
+
+@keyframes mass-render-bar {
+  0% { background-position: 100% 0; }
+  100% { background-position: 0 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mass-render-bar {
+    background: rgba(178, 69, 30, 0.55);
+    animation: none;
+  }
+}
+
+.mass-render-actions {
+  display: none;
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  z-index: 4;
+  gap: 8px;
+  padding: 6px;
+  background: rgba(244, 237, 225, 0.94);
+  border-radius: 6px;
+}
+
+.mass-render.is-ready .mass-render-actions {
+  display: flex;
+}
+
+.mass-render-actions button {
+  font: inherit;
+  padding: 5px 10px;
+  border: 1px solid var(--ink);
+  background: #fff;
+  border-radius: 3px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.mass-render-actions button:disabled {
+  opacity: 0.55;
+  cursor: wait;
 }
 
 /* Type detail overlay: an opt-in escalation from a palette row's expand
@@ -7258,3 +7614,55 @@ button.fin-bare[aria-pressed="true"] { color: #8a4b12; font-weight: 650; }
   opacity: 0.35;
   cursor: default;
 }
+
+/* The wall elevation in its own window (second screen). The parts of the face
+   keep their dock classes, so everything in the strip also styles here. */
+.wall-face-part { display: contents; }
+.wall-face-part[hidden] { display: none; }
+
+body.wall-screen {
+  display: block;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+.wall-screen-main {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.wall-screen-wait,
+.wall-screen-note {
+  margin: auto;
+  max-width: 34ch;
+  padding: 24px;
+  text-align: center;
+  font-size: 1.05rem;
+  color: var(--ink-soft, #5c5348);
+}
+
+.wall-screen-note p { margin: 0 0 12px; }
+.wall-screen-wait[hidden],
+.wall-screen-note[hidden],
+.wall-screen-face[hidden] { display: none; }
+body.wall-screen[data-link] .wall-screen-wait,
+body.wall-screen[data-link] .wall-screen-face { display: none; }
+
+.wall-screen-face {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.wall-screen-dock {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+  border-top: 0;
+}
+
+.wall-screen-dock .svc-profile-head { padding-top: 2px; margin-bottom: 8px; }
+.wall-screen-dock .svc-profile-head .svc-profile-all { margin-left: 0; }

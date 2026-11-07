@@ -3,9 +3,14 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import { compile } from "../compile.js";
+import { PLAIN_OPENING_SKUS } from "../openings.js";
+import { pointInPoly } from "../geom.js";
+import { courtyardHouseDoc } from "../picture-plan.js";
 import {
   createCamera,
   frameCamera,
+  orbitReferenceCameras,
+  plateCallouts,
   groundFacesFromBounds,
   massingLayer,
   clipServiceSegment,
@@ -29,6 +34,21 @@ import { normalizePackUnits } from "../schema.js";
 const pack = normalizePackUnits(
   JSON.parse(readFileSync(new URL("../../samples/planner-pack-v2.json", import.meta.url))),
 );
+
+test("orbit references are the opposite side and a higher roof, and only from orbit", () => {
+  const cam = createCamera();
+  const shots = orbitReferenceCameras(cam);
+  assert.deepEqual(shots.map((shot) => shot.role), ["opposite", "roof"]);
+  assert.equal(shots[0].pitch, cam.pitch);
+  assert.ok(Math.abs(shots[0].yaw - (cam.yaw + Math.PI)) < 1e-9);
+  assert.equal(shots[1].yaw, cam.yaw);
+  assert.ok(shots[1].pitch > cam.pitch);
+  assert.deepEqual(orbitReferenceCameras({ mode: "look", yaw: 0, pitch: 0.4 }), []);
+  assert.deepEqual(orbitReferenceCameras({ mode: "section", yaw: 1, pitch: 1 }), []);
+  assert.deepEqual(orbitReferenceCameras({ mode: "elevation", yaw: 0.2, pitch: 0.9 }), []);
+  const high = orbitReferenceCameras({ mode: "orbit", yaw: 0.4, pitch: 1.4 });
+  assert.deepEqual(high.map((shot) => shot.role), ["opposite"]);
+});
 
 test("grade is a tiled plane at z = 0 around the building bounds", () => {
   const faces = groundFacesFromBounds({ minX: 0, minY: 0, maxX: 2, maxY: 1 });
@@ -73,6 +93,48 @@ test("a portrait gable covers the eaves rectangle, not a ridge sliver", () => {
   const ys = faces.flatMap((f) => f.pts.map((p) => p[1]));
   assert.ok(Math.max(...xs) - Math.min(...xs) > 3.5, `span in X should be the eaves width, got ${Math.max(...xs) - Math.min(...xs)}`);
   assert.ok(Math.max(...ys) - Math.min(...ys) > 9.5, `run in Y should be the eaves length, got ${Math.max(...ys) - Math.min(...ys)}`);
+});
+
+function covers(faces, x, y) {
+  return faces.some((face) => pointInPoly(x, y, face.pts.map((p) => [p[0], p[1]])));
+}
+
+test("a square hip with no hole still meets at a point", () => {
+  const doc = normalizeDoc({
+    roofs: [{
+      id: "rf1",
+      sku: pack.system.defaultRoofSku,
+      form: "hip",
+      pitch: 30,
+      shape: rectShape(0, 0, 10, 10),
+    }],
+  });
+  const faces = facesFromPayload(compile(doc, pack)).filter((f) => f.kind === "roof");
+  assert.ok(covers(faces, 5, 5), "the apex is still roof");
+});
+
+test("a courtyard hip stops at the hole instead of closing into a pyramid", () => {
+  const doc = normalizeDoc(courtyardHouseDoc());
+  assert.equal(doc.segments.length, 8);
+  assert.equal(doc.roofs[0].form, "hip");
+  assert.equal(doc.roofs[0].cuts.length, 1);
+  assert.equal(doc.roofs[0].cuts[0].kind, "hole");
+  assert.equal(doc.openings.length, 2);
+
+  const payload = compile(doc, pack);
+  const roof = (payload.sketchForms || []).find((f) => String(f.kind).toLowerCase() === "roof");
+  assert.ok(roof.roofCuts.length === 1 && roof.roofCuts[0].length >= 4);
+  const openings = (payload.sketchForms || []).filter((f) => String(f.kind).toLowerCase() === "opening");
+  assert.equal(openings.length, 2);
+
+  const faces = facesFromPayload(payload).filter((f) => f.kind === "roof");
+  assert.ok(covers(faces, 5, 1.2), "the eave slope is still there");
+  assert.equal(covers(faces, 5, 5), false, "the court is open");
+  const apex = faces.some((f) => f.pts.some((p) => Math.hypot(p[0] - 5, p[1] - 5) < 0.3));
+  assert.equal(apex, false, "the slopes do not meet over the court");
+  const zs = faces.flatMap((f) => f.pts).filter((p) => Math.hypot(p[0] - 3.11, p[1] - 3.11) < 0.05);
+  assert.ok(zs.length > 0, "the slope reaches the court corner");
+  assert.ok(zs.every((p) => p[2] > 2.8), "the inner edge is above the plate");
 });
 
 test("default 3D camera looks down over a typical pitched roof", () => {
@@ -274,6 +336,57 @@ test("a door's jamb line stops at the head", () => {
   }
 });
 
+test("an arch is a curved head in the 3D model, not its bounding rectangle", () => {
+  const src = PLAIN_OPENING_SKUS.find((s) => s.id === "TSP_ARCH");
+  const archPack = {
+    ...pack,
+    skus: [...pack.skus.filter((s) => s.id !== "TSP_ARCH"), {
+      ...src,
+      geometry: {
+        ...src.geometry,
+        width: src.geometry.width / 1000,
+        height: src.geometry.height / 1000,
+        sill: (src.geometry.sill || 0) / 1000,
+      },
+    }],
+  };
+  const doc = openingDoc(null, [
+    { id: "o1", sku: "TSP_ARCH", roomId: "r1", edgeIndex: 0, t: 0.5, rise: 0.3, status: "planned" },
+  ]);
+  const payload = compile(doc, archPack);
+  const form = payload.sketchForms.find((f) => f.elementId === "o1");
+  assert.equal(form?.head, "arch");
+  assert.ok(Math.abs(form.rise - 0.3) < 1e-9);
+  const line = form.profileLoops[0].curves[0];
+  const z0 = Number(form.elevation) || 0;
+  const head = z0 + (Number(form.sill) || 0) + Number(form.depth);
+  const spring = head - 0.3;
+  const faces = facesFromPayload(payload);
+  const near = (p, x, y, r) => Math.hypot(p[0] - x, p[1] - y) < r;
+  const mid = [(line.start[0] + line.end[0]) / 2, (line.start[1] + line.end[1]) / 2];
+  const wallPts = faces.filter((f) => f.kind === "wall").flatMap((f) => f.pts);
+  assert.ok(
+    wallPts.some((p) => near(p, mid[0], mid[1], 0.25) && Math.abs(p[2] - head) < 0.04),
+    "the wall rises to a crown at mid-opening",
+  );
+  const panel = faces.filter((f) => f.id === "o1").flatMap((f) => f.pts);
+  assert.ok(panel.length > 4, "the arch is a solid in the model");
+  assert.ok(
+    panel.some((p) => near(p, mid[0], mid[1], 0.2) && Math.abs(p[2] - head) < 0.04),
+    "the arch panel reaches the crown",
+  );
+  assert.equal(
+    panel.some((p) => near(p, line.start[0], line.start[1], 0.06) && p[2] > spring + 0.08),
+    false,
+    "the jamb of the arch stops at the spring",
+  );
+  const spans = jambStrokes(faces, line.start[0], line.start[1], line.end[0], line.end[1]);
+  assert.ok(spans.length > 0, "the straight jamb below the spring is drawn");
+  for (const [lo, hi] of spans) {
+    assert.ok(hi <= spring + 0.05, `a flat head is still drawn above the spring (${hi} > ${spring})`);
+  }
+});
+
 test("strokeFaceEdges leaves a coplanar joint undrawn", () => {
   const calls = [];
   const ctx = {
@@ -303,4 +416,93 @@ test("a section keeps the service run on the look side and cuts one that crosses
   assert.ok(Math.abs(crossed[1][1] - 2) < 1e-9);
   assert.ok(Math.abs(crossed[1][2] - 2) < 1e-9);
   assert.equal(clipServiceSegment([-1, 2, 1], [1, 2, 3], { mode: "orbit" })[0][0], -1);
+});
+
+test("a roof face remembers its eave, so a plate step can be named", () => {
+  const doc = normalizeDoc({
+    roofs: [{
+      id: "rf1",
+      sku: pack.system.defaultRoofSku,
+      form: "gable",
+      pitch: 30,
+      ridge: "long",
+      status: "existing",
+      shape: rectShape(0, 0, 6, 4),
+    }],
+  });
+  const payload = compile(doc, pack);
+  const form = (payload.sketchForms || []).find((f) => String(f.kind).toLowerCase() === "roof");
+  const faces = facesFromPayload(payload).filter((f) => f.id === "rf1");
+  assert.ok(faces.length > 0);
+  assert.ok(faces.every((f) => f.eaveZ === form.elevation));
+});
+
+test("a wall face takes its colour from the finish on it", () => {
+  const doc = normalizeDoc({
+    finishSettings: { externalFinish: "facebrick" },
+    segments: [{ id: "w1", sku: "TSP_MAS009", level: "01 GFL", x1: 0, y1: 0, x2: 4, y2: 0 }],
+  });
+  const faces = facesFromPayload(compile(doc, pack)).filter((f) => f.kind === "wall" && f.finish);
+  assert.ok(faces.length > 0, "the finish colours the wall");
+  assert.ok(faces.some((f) => f.fill.includes("164,71,47")), "face brick, not the default terracotta");
+  const styled = faceStyle(faces[0]);
+  assert.equal(styled.fill, faces[0].fill, "a finish colour is not replaced by the planned-wall tint");
+});
+
+test("a curved wall leaves the facet joints undrawn", () => {
+  const curved = normalizeDoc({
+    segments: [{ id: "w1", sku: "TSP_MAS009", level: "01 GFL", x1: 0, y1: 0, x2: 4, y2: 0, arc: { radius: 2.5, side: -1 } }],
+  });
+  const straight = normalizeDoc({
+    segments: [{ id: "w1", sku: "TSP_MAS009", level: "01 GFL", x1: 0, y1: 0, x2: 4, y2: 0 }],
+  });
+  const bare = (doc) => facesFromPayload(compile(doc, pack)).filter((f) => f.kind === "wall" && f.bare?.length);
+  assert.ok(bare(curved).length > 0, "the joints between facets are bare");
+  assert.equal(bare(straight).length, 0, "a straight wall still strokes its corners");
+});
+
+test("a wall under a gable follows the slope, and a low wall stays low", () => {
+  const doc = normalizeDoc({
+    segments: [{ id: "w1", sku: "TSP_MAS009", level: "01 GFL", x1: 5, y1: 0, x2: 5, y2: 8 }],
+    roofs: [{ id: "rf1", sku: pack.system.defaultRoofSku, form: "gable", pitch: 30, shape: rectShape(0, 0, 10, 8) }],
+  });
+  const payload = compile(doc, pack);
+  const roof = payload.sketchForms.find((f) => f.elementId === "rf1");
+  const rise = 4 * Math.tan((30 * Math.PI) / 180);
+  const pts = facesFromPayload(payload).filter((f) => f.id === "w1").flatMap((f) => f.pts);
+  const ridge = pts.filter((p) => Math.hypot(p[0] - 5, p[1] - 4) < 0.2);
+  assert.ok(ridge.some((p) => Math.abs(p[2] - (roof.elevation + rise)) < 0.15), "the wall rises to the ridge");
+  const above = pts.filter((p) => {
+    const allowed = roof.elevation + (4 - Math.abs(p[1] - 4)) * Math.tan((30 * Math.PI) / 180) + 0.05;
+    return p[2] > allowed;
+  });
+  assert.equal(above.length, 0, "nothing sticks through the slope");
+
+  const low = normalizeDoc({
+    segments: [{ id: "w1", sku: "TSP_MAS009", level: "01 GFL", x1: 5, y1: 0, x2: 5, y2: 8, height: 1.1 }],
+    roofs: [{ id: "rf1", sku: pack.system.defaultRoofSku, form: "gable", pitch: 30, shape: rectShape(0, 0, 10, 8) }],
+  });
+  const lowPts = facesFromPayload(compile(low, pack)).filter((f) => f.id === "w1").flatMap((f) => f.pts);
+  assert.ok(Math.max(...lowPts.map((p) => p[2])) < 1.3, "a low wall is not stretched up to the roof");
+});
+
+test("a plate step is named on the higher roof, and a storey is not", () => {
+  assert.deepEqual(plateCallouts([
+    { id: "low", eaveZ: 2.8 },
+    { id: "step", eaveZ: 2.95 },
+  ]), [{ id: "step", text: "Plate +150 mm" }]);
+  assert.deepEqual(plateCallouts([
+    { id: "low", eaveZ: 2.8 },
+    { id: "step", eaveZ: 2.95 },
+    { id: "up", eaveZ: 5.6 },
+  ]), [{ id: "step", text: "Plate +150 mm" }]);
+  assert.deepEqual(plateCallouts([
+    { id: "a", eaveZ: 2.8 },
+    { id: "b", eaveZ: 2.8 },
+  ]), []);
+  assert.deepEqual(plateCallouts([
+    { id: "ground", eaveZ: 2.8 },
+    { id: "storey", eaveZ: 5.6 },
+  ]), []);
+  assert.deepEqual(plateCallouts([{ id: "only", eaveZ: 2.8 }]), []);
 });

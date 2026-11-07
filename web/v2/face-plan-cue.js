@@ -18,6 +18,11 @@ export const FACE_CUE_INTRO_MS = 280;
 export const FACE_CUE_PULSE_MS = 1000;
 /** Hairline and corners left on the plan while the elevation stays open. */
 export const FACE_CUE_REST_ALPHA = 0.4;
+/** The pan that brings a face into the clear plan lasts about this long. */
+export const FACE_PAN_MS = 200;
+/** Breathing room kept around the face, as a share of the clear area (each side), capped in px. */
+export const FACE_FRAME_MARGIN = 0.12;
+export const FACE_FRAME_MARGIN_MAX_PX = 80;
 
 /**
  * Scale so a face shorter than {@link FACE_CUE_MIN_PX} becomes about
@@ -27,6 +32,42 @@ export const FACE_CUE_REST_ALPHA = 0.4;
 export function faceCueZoom(screenLen, scale, maxScale) {
   if (!(screenLen >= 1) || screenLen >= FACE_CUE_MIN_PX) return scale;
   return Math.min(maxScale, scale * (FACE_CUE_TARGET_PX / screenLen));
+}
+
+/**
+ * How far to slide the plan, in screen pixels, so a face is in the part of the
+ * plan that nothing covers.
+ *
+ * `bounds` is the face and its marks, `{ minX, maxX, minY, maxY }`, in canvas
+ * pixels. `view` is the clear plan area, `{ w, h }`, from the canvas's top left
+ * (the elevation strip, once open, covers what lies below `h`).
+ *
+ * `mode`:
+ * - `"fit"` (opening a face): an axis moves only when the face does not sit
+ *   wholly inside the area with its margin. When it moves, the face is
+ *   centred on that axis. A face wider than the area is centred on its middle;
+ *   the zoom is never changed.
+ * - `"rescue"` (the strip was resized): an axis moves only when the face has no
+ *   part left in the area at all.
+ *
+ * Returns `{ dx, dy }`, both 0 when nothing needs to move.
+ */
+export function faceFrameShift(bounds, view, mode = "fit") {
+  if (!bounds || !view || !(view.w > 0) || !(view.h > 0)) return { dx: 0, dy: 0 };
+  const axis = (near, far, size) => {
+    const margin = Math.min(size * FACE_FRAME_MARGIN, FACE_FRAME_MARGIN_MAX_PX);
+    const centre = size / 2 - (near + far) / 2;
+    if (mode === "rescue") return far < 0 || near > size ? centre : 0;
+    if (near >= margin && far <= size - margin) return 0;
+    // Close enough to fitting that centring would not help: a face that
+    // already spans the area stays put once it covers it.
+    if (near <= 0 && far >= size) return 0;
+    return centre;
+  };
+  return {
+    dx: axis(bounds.minX, bounds.maxX, view.w),
+    dy: axis(bounds.minY, bounds.maxY, view.h),
+  };
 }
 
 /**

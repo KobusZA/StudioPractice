@@ -14,17 +14,23 @@
 //  - Marquee selection uses each shape's bounding box, not exact polygon
 //    overlap. Exact for rectangles, which is everything this UI draws.
 //  - Free-angle walls are drawable (a v1 impossibility) and are not snapped
-//    to common angles. A run within the snap tolerance of an axis, or of an
+//    to common angles. The wall after a click jumps onto a right angle or a
+//    straight continuation of the one just drawn, so a corner and a straight
+//    run can be felt, and lets go once the pointer moves off, so 1° and 2°
+//    still place. A run within the snap tolerance of an axis, or of an
 //    existing wall, is stored on that line. Hold Shift while dragging an
 //    end to keep the current heading. Walls are click–click and chain from
-//    the last end. Length is
+//    the last end. Start-End-Radius draws that wall, then the curve: the
+//    sweep and the radius stay on the plan until the click. Length is
 //    labelled on the visible part of the wall (so zooming into an end does
-//    not hide it), and in the options strip with angle.
+//    not hide it). The first wall's angle is drawn off the horizontal. A
+//    chained wall's angle is drawn off the wall before it: 90° at a corner,
+//    180° going straight. The options strip keeps the absolute heading.
 
 import { complianceGaps, normalizePackUnits, GEOMETRY_LENGTH_KEYS } from "./schema.js";
 import { RULE_PACK, evaluateCompliance, groupFindingsByPart, summarizeFindings } from "./rules.js";
 import { deriveBuildingLine, hitPropertyLine, setBuildingLine, setPropertyLine, setSgReference } from "./site.js?v=20261015-property";
-import { HINTS, firstTabId, renderRibbon } from "./ribbon.js?v=20261103-history";
+import { HINTS, firstTabId, renderRibbon } from "./ribbon.js?v=20261107-trim2";
 import { closeOverflowMenus, decorateRibbon, fitRibbon } from "./ribbon-fit.js?v=20261103-history";
 import {
   ghostContext,
@@ -60,13 +66,15 @@ import {
   mirrorSelection,
   moveWallEnd,
   realignWallFaces,
+  shiftJoinedEnds,
   retypeSelection,
   rotateSelection,
   collinearWallJoints,
   splitSelection,
   splitWallAt,
   MIN_WALL_SPLIT_M,
-} from "./modify.js?v=20261103-bos07c";
+} from "./modify.js?v=20261107-arc2";
+import { planTrimCorner, planTrimSingle, trimToBoundary, trimToCorner, wallCanTrim } from "./trim-extend.js?v=20261107-trim2";
 import {
   calibrate,
   activateSheetForLevel,
@@ -145,7 +153,16 @@ import {
   rectFromCorners,
   setLineHeading,
   setLineLength,
-} from "./click-draw.js?v=20261103-wall-line";
+  ARC_MIN_SAGITTA,
+  arcFromRadius,
+  arcThroughPoint,
+  arcWallPolygon,
+  chordOffset,
+  distToArc,
+  radiusFromSweep,
+  wallDraftAngle,
+  wallJointAngle,
+} from "./click-draw.js?v=20261107-arc2";
 import {
   armPlacement,
   nextTraceView,
@@ -153,11 +170,13 @@ import {
   openingStaysArmed,
   recentDoorSkus,
   rememberFunctionSku,
+  joinedWallPolygon,
   wallFootprint,
   wallPlanColour,
-} from "./drawing-defaults.js?v=20261103-wave1";
+  WALL_EXISTING_EDGE,
+} from "./drawing-defaults.js?v=20261107-wall-join";
 import { area as polyArea, bbox, clampDeltaInside, clampToPoly, clipPolygon, clipSegToRect, distToSeg, fitPolygonToHost, formatLengthMm, headingDeg, parseLengthMm, pointInPoly, roundGrid, translatePolyEdge } from "./geom.js?v=20261103-bos14";
-import { SNAP_PIXEL_TOL, GAP_MAX_M, ALIGN_ORIGIN_MAX_M, NICE_MIN_STEP_M, PROBE_VECTORS, applyNicePoint, bestLinearMoveSnap, collectSnapEdges, collectSnapTargets, isExactPointSnap, nearestAlignments, resolveProbes, snapEdgeToLine, snapLengthFrom, snapLinearEnd, snapNiceDelta, snapPoint, snapToFace } from "./snap.js?v=20261103-bos14";
+import { SNAP_PIXEL_TOL, GAP_MAX_M, ALIGN_ORIGIN_MAX_M, CHAIN_GUIDE_DEG, NICE_MIN_STEP_M, PROBE_VECTORS, applyNicePoint, bestLinearMoveSnap, chainAngleTarget, collectSnapEdges, collectSnapTargets, isExactPointSnap, nearestAlignments, resolveProbes, snapEdgeToLine, snapLengthFrom, snapLinearEnd, snapNiceDelta, snapPoint, snapToFace } from "./snap.js?v=20261107-wall-jump3";
 import { DEFAULT_ROOF_PITCH, ROOF_CUT_MIN_AREA, normalizeRoofCutKind, roofGuideLines, roofPlanAreas } from "./roof.js";
 import {
   ATTACHABLE_KINDS,
@@ -185,18 +204,18 @@ import {
   hostedFinishRegionsOf,
   carryFinishRegionsToLevel,
   translateShape,
-} from "./model.js?v=20261102-room-tag";
+} from "./model.js?v=20261107-arc";
 import { historyAction, historyListHtml } from "./history-panel.js?v=20261103-history-icons";
 import { clearShapeLink, enclosedFace, footprintFace, spaceAt, syncRoomBounds } from "./room-bound.js?v=20261103-bos11";
 import { REGION_CONVENTIONS, regionConvention } from "./region.js";
-import { ELEVATION_SNAP, FINISH_MIN_M, OPENING_MIN_M, addFoundationUnderWall, alignOutlineShift, applyBandEdit, applyOpeningEdit, applyOutlinePoints, applyTypedGap, applyWallTopEdit, axisAlignedOutline, dropGuideZ, elevationModel, faceRefForSelection, foundationTypes, includeDropGuide, maxTypedGap, openingSnapEdges, resizeOpeningCorner, snapElevation, translateOutlineEdge } from "./wall-elevation.js?v=20261103-wave1";
-import { FACE_CORNER_ALONG, FACE_CORNER_TRAVEL, FACE_CUE_INTRO_MS, FACE_CUE_PULSE_MS, FACE_CUE_REST_ALPHA, faceCornerMarks, faceCueZoom } from "./face-plan-cue.js?v=20261102-face-corners";
-import { createFinishRegion, createFinishRun, dependentsOfWalls, finishBillNote, finishEditRing, finishProductById, floorCoverage, libraryLine, materializeFinishRing, planWallFinishMarks, presetFromRoom, roomsBySide, rulesFromPreset, savePreset } from "./finish-model.js?v=20261104-paint-label";
+import { ELEVATION_SNAP, FINISH_MIN_M, OPENING_MIN_M, addFoundationUnderWall, alignOutlineShift, applyBandEdit, applyOpeningEdit, applyOutlinePoints, applyTypedGap, applyWallTopEdit, axisAlignedOutline, dropGuideZ, elevationModel, faceRefForSelection, foundationTypes, includeDropGuide, maxTypedGap, openingSnapEdges, resizeArchRise, resizeOpeningCorner, snapElevation, translateOutlineEdge } from "./wall-elevation.js?v=20261107-arch-rise2";
+import { FACE_CORNER_ALONG, FACE_CORNER_TRAVEL, FACE_CUE_INTRO_MS, FACE_CUE_PULSE_MS, FACE_CUE_REST_ALPHA, FACE_PAN_MS, faceCornerMarks, faceCueZoom, faceFrameShift } from "./face-plan-cue.js?v=20261107-face-frame";
+import { createFinishRegion, createFinishRun, dependentsOfWalls, finishBillNote, finishEditRing, finishProductById, floorCoverage, libraryLine, materializeFinishRing, planWallFinishMarks, presetFromRoom, roomsBySide, rulesFromPreset, savePreset } from "./finish-model.js?v=20261107-arch-rise2";
 import { FINISH_CATEGORIES, finishId, finishSwatch, normalizeFinishProducts, normalizeFinishSettings } from "./finish-data.js";
-import { HEIGHT_PRESETS, bandFaceLine, compareBands, draftBandPreviewHtml, faceFinishHtml, finishCalloutHtml, floorOpenHtml, formatFloorArea, openingCalloutHtml, floorProductSuggestions, parseTarget, productsHtml, roomFinishHtml, slabFinishHtml, targetOptions } from "./finish-panel.js?v=20261103-wave1";
-import { clampElevationView, edgeResizeCursor, elevationSvg, finishLocate, zoomElevationView } from "./wall-elevation-render.js?v=20261103-wave1";
+import { HEIGHT_PRESETS, bandFaceLine, compareBands, draftBandPreviewHtml, faceFinishHtml, finishCalloutHtml, floorOpenHtml, formatFloorArea, openingCalloutHtml, floorProductSuggestions, parseTarget, productsHtml, roomFinishHtml, slabFinishHtml, targetOptions } from "./finish-panel.js?v=20261107-arch-rise2";
+import { alignCameraShift, clampElevationView, edgeResizeCursor, elevationSvg, faceTrack, finishLocate, nudgeIntoView, planFaceFrame, trackFaceCenter, zoomElevationView } from "./wall-elevation-render.js?v=20261107-elev-zoom";
 import { FLOOR_TYPE_GROUPS, alignFloorPoint, faceToPlan, floorFaceOf, floorPictureSvg, planToFace, resolveFloorFinishOpen } from "./floor-picture.js?v=20261102-floor-gap";
-import { CORNER_JOIN_TOL, deriveWalls, drawnSegmentFromWall, drawnWallThickness, isStripFooting, skuDrawnHeight, statusVisible, wallThicknessLabel } from "./walls.js";
+import { CORNER_JOIN_TOL, deriveWalls, drawnSegmentFromWall, drawnWallThickness, isStripFooting, skuDrawnHeight, statusVisible, wallThicknessLabel } from "./walls.js?v=20261107-arc";
 import { findJoinTarget, resolveJoin, sideTowardTarget } from "./wall-join.js?v=20261022-corner-b";
 import {
   doorSwing,
@@ -213,7 +232,7 @@ import {
   pointOnOpeningSymbol,
   wallForOpening,
   wallNormal,
-} from "./openings.js?v=20261106-plain-opening";
+} from "./openings.js?v=20261107-arch-rise2";
 import { paintFixture } from "./plan-symbols.js?v=20261105-sans";
 import { paintSanitaryPreview, sanitaryPreview } from "./type-preview.js?v=20261106-san-preview";
 import {
@@ -232,11 +251,18 @@ import {
   levelElevation,
   objectLabel,
   resolvedBase,
-} from "./compile.js";
+} from "./compile.js?v=20261107-arc";
 import { exportDxf } from "./dxf.js";
 import { exportIfc } from "./ifc.js";
 import { boqRows, bomRows, scheduleTotal } from "./schedule.js";
-import { createMassingView, lookFromClicks, EYE_HEIGHT_M, facesFromPayload, faceStyle, massingLayer, hatchPolygon, strokeFaceEdges } from "./massing.js";
+import { createMassingView, lookFromClicks, EYE_HEIGHT_M, facesFromPayload, faceStyle, massingLayer, hatchPolygon, strokeFaceEdges } from "./massing.js?v=20261107-roofcut";
+import {
+  MAX_VISUALIZE_PROMPT,
+  VISUALIZE_BUILTIN,
+  VISUALIZE_EXAMPLES,
+  VISUALIZE_PROMPT,
+  visualizePromptId,
+} from "./visualize-prompts.js?v=20261107-viz-refs";
 import { drawLookPlan, lookPlanCaption } from "./look-plan.js";
 import { sectionFromClicks, createSection, ensureSections, sectionById, clipFacesForSection, sectionUV } from "./section.js";
 import { ELEVATION_DIRECTIONS, elevationDirectionLabel, createElevation, ensureElevations, elevationById } from "./elevation.js";
@@ -452,6 +478,7 @@ const el = {
   levelIsolate: document.getElementById("v2-level-isolate"),
   planOptions: document.getElementById("v2-plan-options"),
   wallLoc: document.getElementById("v2-wall-loc"),
+  wallArc: document.getElementById("v2-wall-arc"),
   wallCorner: document.getElementById("v2-wall-corner"),
   wallOpts: document.getElementById("v2-wall-opts"),
   floorEdgeMode: document.getElementById("v2-floor-edge-mode"),
@@ -537,6 +564,8 @@ const el = {
   ctxOWidthWrap: document.getElementById("v2-ctx-owidth-wrap"),
   ctxOHeight: document.getElementById("v2-ctx-oheight"),
   ctxOHeightWrap: document.getElementById("v2-ctx-oheight-wrap"),
+  ctxORise: document.getElementById("v2-ctx-orise"),
+  ctxORiseWrap: document.getElementById("v2-ctx-orise-wrap"),
   ctxOSizeNote: document.getElementById("v2-ctx-osize-note"),
   ctxConvert: document.getElementById("v2-ctx-convert"),
   ctxRemove: document.getElementById("v2-ctx-remove"),
@@ -550,6 +579,7 @@ const el = {
   ctxElev: document.getElementById("v2-ctx-elev"),
   ctxElevCallout: document.getElementById("v2-ctx-elev-callout"),
   ctxElevOpen: document.getElementById("v2-ctx-elev-open"),
+  ctxElevScreen: document.getElementById("v2-ctx-elev-screen"),
   ctxElevFlip: document.getElementById("v2-ctx-elev-flip"),
   ctxWallMore: document.getElementById("v2-ctx-wall-more"),
   ctxWallMoreFields: document.getElementById("v2-ctx-wall-more-fields"),
@@ -565,6 +595,9 @@ const el = {
   faceFoundationAdd: document.getElementById("v2-face-foundation-add"),
   facePlan: document.getElementById("v2-face-plan"),
   elevFlash: document.getElementById("v2-elev-flash"),
+  elevAlign: document.getElementById("v2-elev-align"),
+  elevAlignState: document.getElementById("v2-elev-align-state"),
+  elevAlignLines: document.getElementById("v2-elev-align-lines"),
   faceWhich: document.getElementById("v2-face-which"),
   faceBill: document.getElementById("v2-face-bill"),
   faceMeta: document.getElementById("v2-face-meta"),
@@ -600,6 +633,11 @@ const el = {
   elevCoach: document.getElementById("v2-elev-coach"),
   elevCoachOk: document.getElementById("v2-elev-coach-ok"),
   elevEdgeMode: document.getElementById("v2-elev-edge-mode"),
+  wallFace: document.getElementById("v2-wall-face"),
+  wallFaceTools: document.getElementById("v2-wall-face-tools"),
+  wallFaceNotes: document.getElementById("v2-wall-face-notes"),
+  faceFlashLive: document.getElementById("v2-face-flash-live"),
+  elevSecondScreen: document.getElementById("v2-elev-second-screen"),
   levelParent: document.getElementById("v2-level-parent"),
   levelReference: document.getElementById("v2-level-reference"),
   ctxAttach: document.getElementById("v2-ctx-attach"),
@@ -609,11 +647,28 @@ const el = {
   massCanvas: document.getElementById("v2-mass-canvas"),
   massEmpty: document.getElementById("v2-mass-empty"),
   massCaption: document.getElementById("v2-mass-caption"),
+  massHint: document.getElementById("v2-mass-hint"),
+  massLegend: document.getElementById("v2-mass-legend"),
+  massPicture: document.getElementById("v2-mass-picture"),
+  massPrompt: document.getElementById("v2-mass-prompt"),
   massGenerate: document.getElementById("v2-mass-generate"),
+  massPromptExamples: document.getElementById("v2-mass-prompt-examples"),
+  massPromptNote: document.getElementById("v2-mass-prompt-note"),
+  massPromptText: document.getElementById("v2-mass-prompt-text"),
+  massPromptCount: document.getElementById("v2-mass-prompt-count"),
+  massRefs: document.getElementById("v2-mass-refs"),
+  massRefsToggle: document.getElementById("v2-mass-refs-toggle"),
   massShow3d: document.getElementById("v2-mass-show-3d"),
   massRender: document.getElementById("v2-mass-render"),
+  massRenderRefs: document.getElementById("v2-mass-render-refs"),
   massRenderImg: document.getElementById("v2-mass-render-img"),
   massRenderStatus: document.getElementById("v2-mass-render-status"),
+  massRenderStatusText: document.getElementById("v2-mass-render-status-text"),
+  massRenderWait: document.getElementById("v2-mass-render-wait"),
+  massRenderElapsed: document.getElementById("v2-mass-render-elapsed"),
+  massRenderCopy: document.getElementById("v2-mass-render-copy"),
+  massRenderPaint: document.getElementById("v2-mass-render-paint"),
+  massRenderSave: document.getElementById("v2-mass-render-save"),
   massClose: document.getElementById("v2-mass-close"),
   massPanel: document.querySelector("#v2-mass-overlay .mass-panel"),
   massPlanWrap: document.getElementById("v2-mass-plan-wrap"),
@@ -758,6 +813,11 @@ let wallDraft = null;
 // the centreline, and a face choice is kept on it as `location`. Remembered
 // for the session.
 let wallLocation = "center";
+// Start-End-Radius, the same order as Revit: the wall's two ends first, then
+// the curve. Stays on while the wall tool is in that mode. `arcEdit` is the
+// same pull on a wall that is already selected.
+let wallArcMode = false;
+let arcEdit = null;
 const WALL_LOC_TITLE = {
   draw: {
     center: "Centreline: The line you draw is the middle of the wall.",
@@ -872,6 +932,20 @@ let wallsCache = [];
 // follows the selection (see wall-elevation.js). Selecting a wall does not
 // open it: the plan stays full size until the face is asked for.
 let elevationOpen = false;
+// Where the wall face is shown. "strip" is under the plan. "screen" is a
+// separate window (wall-screen.html) that can sit on a second monitor. It is
+// "screen" only while that window is open; a new session starts in "strip".
+let elevationHost = "strip";
+let screenWin = null;
+let screenRefs = null;
+let screenWatch = 0;
+let screenRetry = 0;
+let screenRetryTries = 0;
+let planKeyHandlers = null;
+const SCREEN_NAME = "tsp-wall-elevation";
+const SCREEN_URL = "./wall-screen.html";
+const SCREEN_HINT_KEY = "v2-wall-screen-open";
+const faceHomes = new Map();
 // The floor picture uses the same strip as a wall elevation. Opening one
 // clears the other. Null unless a room or a slab is showing its floor.
 let floorPicture = null;
@@ -970,6 +1044,15 @@ let snapGuide = null;
 // Snap or split armed on the one selected wall. Snap picks an end, then a
 // point from the same magnets a new wall uses. Split takes a point on the wall.
 let wallEdit = null;
+// Trim to corner and Trim single share one pick state: { mode, first }.
+// `mode` is "corner" (both walls move) or "single" (the first wall is the
+// boundary and stays; only the second moves).
+let trimCorner = null;
+let trimHover = null;
+
+function isTrimTool(name) {
+  return name === "trim-corner" || name === "trim-single";
+}
 // One Move command: a selected sheet, wall, or tiled area. The base point is
 // the first click; the landing point is the second, or a typed distance.
 let moveSession = null;
@@ -1101,22 +1184,44 @@ let lastPaletteLabel = null;
 const massView = createMassingView({
   canvas: el.massCanvas,
   emptyEl: el.massEmpty,
-  captionEl: el.massCaption,
+  hintEl: el.massHint,
   titleEl: el.massTitle,
   onDraw: syncLookPlan,
 });
 
-function syncLookPlan(cam, payload) {
+function syncLookPlan(cam, payload, info) {
   const isLook = cam?.mode === "look";
+  const isSection = cam?.mode === "section";
   if (el.massPanel) el.massPanel.classList.toggle("mass-panel--look", isLook);
   if (el.massPlanWrap) el.massPlanWrap.hidden = !isLook;
-  if (el.massViewLabel) el.massViewLabel.textContent = isLook ? "What you will see" : cam?.mode === "section" ? "Section" : "3D";
-  syncGenerateEnabled();
-  if (!isLook || !el.massPlanCanvas) return;
-  drawLookPlan(el.massPlanCanvas, payload, cam);
-  if (el.massCaption) {
-    el.massCaption.textContent = `${lookPlanCaption(payload, cam)} · drag to look around · scroll to zoom`;
+  if (el.massViewLabel) {
+    const label = isLook ? "What you will see" : isSection ? "Section" : "";
+    el.massViewLabel.hidden = !label;
+    if (label) el.massViewLabel.textContent = label;
   }
+  const empty = Boolean(el.massEmpty && !el.massEmpty.hidden);
+  if (el.massLegend) el.massLegend.hidden = empty;
+  const emptyTitle = el.massEmpty?.querySelector("h3");
+  const emptyCopy = el.massEmpty?.querySelector("p");
+  if (emptyTitle && emptyCopy) {
+    const title = empty && info?.note ? "Nothing in this cut" : "Nothing to show";
+    const copy = empty && info?.note
+      ? info.note
+      : "Draw a room, wall, roof, floor, door or window, then open 3D again.";
+    if (emptyTitle.textContent !== title) emptyTitle.textContent = title;
+    if (emptyCopy.textContent !== copy) emptyCopy.textContent = copy;
+  }
+  syncGenerateEnabled();
+  if (el.massCaption) {
+    if (isLook && !empty) {
+      el.massCaption.hidden = false;
+      el.massCaption.textContent = lookPlanCaption(payload, cam);
+    } else {
+      el.massCaption.hidden = true;
+    }
+  }
+  if (!isLook || !el.massPlanCanvas || empty) return;
+  drawLookPlan(el.massPlanCanvas, payload, cam);
 }
 
 // Output > Print > Sheets. The id of the sheet currently shown/edited in the
@@ -2438,9 +2543,16 @@ function applySnap(wx, wy, exclude) {
   // A wall end keeps the line it was aimed along. Other tools still round
   // each free axis, which is what a rectangle corner wants.
   const movingWallEnd = Boolean(wallEdit?.mode === "snap" && wallEdit.end && from);
+  const chaining = Boolean(wallDraft?.prev && from);
   let point = (wallDraft && from) || movingWallEnd
-    ? snapLinearEnd(wx, wy, { ...snapOptsPoint, lines: edges })
+    ? snapLinearEnd(wx, wy, {
+      ...snapOptsPoint,
+      lines: edges,
+      prev: chaining ? wallDraft.prev : null,
+      latch: chaining ? wallDraft.angleLatch : null,
+    })
     : applyNicePoint(wx, wy, snapOptsPoint);
+  if (wallDraft) wallDraft.angleLatch = point.latch || null;
   // A route drawn beside a wall keeps its justification. "Clear" lands the pipe
   // edge the chosen distance from the face, unless a corner has already locked
   // the point. "In the wall" is stricter: the point is on a wall's centreline or
@@ -3490,6 +3602,7 @@ function shouldHidePlanEmpty() {
 
 function draw() {
   labelOccupied = [];
+  reserveWallOptsLabelSpace();
   selectedWallLength = null;
   wallFinishExtents = new Map();
   const rect = el.canvasWrap.getBoundingClientRect();
@@ -3524,7 +3637,7 @@ function draw() {
     drawUnderlay(ctx, store.doc, worldToScreen, cam.scale);
   } else if (underlayIsVisible()) {
     const picked = levelWalls.filter((w) => w.drawn && store.isSelected("segment", w.id));
-    if (picked.length) revealUnderlayThroughWalls(picked);
+    if (picked.length) revealUnderlayThroughWalls(picked, levelWalls);
   }
   if (attachPick) drawAttachCandidates();
   if (showDimensions) drawDimensions();
@@ -3585,6 +3698,11 @@ function draw() {
   }
   if (drag?.kind === "marquee") drawMarquee();
   if (wallDraft) drawWallDraft();
+  if (arcEdit) {
+    const seg = segmentById(arcEdit.id);
+    const arc = seg ? arcForSegment(seg, arcEdit.cursor || hoverPoint, arcEdit.radiusLock) : null;
+    if (arc) drawArcReadout(arc, segmentThickness(seg));
+  }
   if (tool === "wall") drawWallCornerTag();
   if (shapeDraft) drawShapeDraft();
   if (beamStart) drawBeamStart();
@@ -3614,6 +3732,7 @@ function draw() {
   drawLocateFlash();
   drawFacePlanCue();
   drawWallEditPreview();
+  drawTrimCornerPreview();
   drawSnapGuide(rect);
   drawEndpointHandles();
   drawPropertyChrome();
@@ -4075,7 +4194,7 @@ function syncModeBar() {
     primaryDisabled = n < 3;
     setHidden(el.calibrateDistanceWrap, !bSet);
     setHidden(el.calibrateRestart, !aSet);
-    if (bSet && !calibration.distanceEdited && el.calibrateDistance && document.activeElement !== el.calibrateDistance) {
+    if (bSet && !calibration.distanceEdited && el.calibrateDistance && activeEl() !== el.calibrateDistance) {
       const guess = calibrationDistanceGuess(liveCalibrationPoint(calibration.a), liveCalibrationPoint(calibration.b));
       if (guess) el.calibrateDistance.value = formatLengthMm(guess);
     }
@@ -4099,8 +4218,8 @@ function syncModeBar() {
       : "Drag to move. Corners resize, the top handle rotates.";
     escLabel = "Esc = Done";
     sheetUi.syncPanel(el.modeSheet);
-    if (u && document.activeElement !== el.underlayOpacity) el.underlayOpacity.value = String(Math.round((u.opacity ?? 0.55) * 100));
-    if (u && document.activeElement !== el.underlayRotation) el.underlayRotation.value = String(Math.round(((u.rotation || 0) % 360) * 10) / 10);
+    if (u && activeEl() !== el.underlayOpacity) el.underlayOpacity.value = String(Math.round((u.opacity ?? 0.55) * 100));
+    if (u && activeEl() !== el.underlayRotation) el.underlayRotation.value = String(Math.round(((u.rotation || 0) % 360) * 10) / 10);
     el.underlayPin.setAttribute("aria-pressed", String(pinned));
     el.underlayPin.textContent = pinned ? "Pinned" : "Pin";
     for (const control of [el.underlayRotation, el.underlayRotateCcw, el.underlayRotateCw]) control.disabled = pinned;
@@ -4140,7 +4259,7 @@ function syncModeBar() {
 
   const snapping = (mode === "scale" || mode === "align") && pdfSnapAvailable();
   if (el.calibrateSnapWrap) el.calibrateSnapWrap.hidden = !snapping;
-  if (el.calibrateSnap && document.activeElement !== el.calibrateSnap) el.calibrateSnap.checked = snapToPdf;
+  if (el.calibrateSnap && activeEl() !== el.calibrateSnap) el.calibrateSnap.checked = snapToPdf;
   if (snapping && el.modeSnapNote) {
     const status = pageLineworkStatus(u.sheetPage);
     el.modeSnapNote.textContent = status === "loading" ? " (reading…)" : status === "empty" ? " (no vector lines)" : status === "failed" ? " (could not read)" : "";
@@ -4322,7 +4441,7 @@ function drawPlanLevel(levelId, walls, { ghost = false, look = "down", allow = (
   }
   if (allow("wall")) {
     const levelWalls = walls.filter((w) => onPlanOf(pack.levels, w.level, levelId) && planObjectVisible(w));
-    for (const wall of levelWalls) drawWall(wall);
+    drawWallsJoined(wallsForJoin(levelWalls, { ghost, levelId }));
     if (!ghost && finishLayerShown("wall")) drawWallFinishMarks(levelWalls);
   }
   if (allow("beam")) {
@@ -4695,12 +4814,107 @@ function drawSpaceReadout() {
   ctx.restore();
 }
 
+/** The arc on a wall, including the one being pulled and not yet stored. */
+function liveArc(wall) {
+  if (!wall) return null;
+  if (arcEdit && wall.id === arcEdit.id) return arcForSegment(segmentById(wall.id), arcEdit.cursor, arcEdit.radiusLock);
+  if (wall.id === "__draft") return draftCentrelineArc();
+  if (!wall.arc) return null;
+  return arcFromRadius(wall.x1, wall.y1, wall.x2, wall.y2, wall.arc.radius, wall.arc.side, wall.arc.major === true);
+}
+
+function segmentById(id) {
+  return (store.doc.segments || []).find((seg) => seg.id === id) || null;
+}
+
+/**
+ * Centreline arc from a cursor pull off the location line. A typed radius
+ * keeps that radius and takes only the side from the cursor.
+ */
+function centrelineArcFromPull(locA, locB, center, cursor, radiusLock) {
+  if (!cursor) return null;
+  const off = chordOffset(locA.x, locA.y, locB.x, locB.y, cursor.x, cursor.y);
+  if (off == null || off === 0) return null;
+  const side = off > 0 ? -1 : 1;
+  if (radiusLock > 0) return arcFromRadius(center.x1, center.y1, center.x2, center.y2, radiusLock, side);
+  if (Math.abs(off) < ARC_MIN_SAGITTA) return null;
+  // The centreline is parallel to the line that was drawn. Shift the cursor
+  // by that same offset so the bulge matches the pull, and the ends stay put.
+  const dx = (center.x1 + center.x2) / 2 - (locA.x + locB.x) / 2;
+  const dy = (center.y1 + center.y2) / 2 - (locA.y + locB.y) / 2;
+  return arcThroughPoint(center.x1, center.y1, center.x2, center.y2, cursor.x + dx, cursor.y + dy, 0);
+}
+
+function draftCentrelineArc() {
+  if (!wallDraft?.arcPhase) return null;
+  const { a, b, center } = wallDraftLines();
+  return centrelineArcFromPull(a, b, center, wallDraft.arcCursor || hoverPoint, wallDraft.radiusLock);
+}
+
+function arcForSegment(seg, cursor, radiusLock) {
+  if (!seg) return null;
+  const line = locationLineOf(seg, segmentThickness(seg));
+  return centrelineArcFromPull(
+    { x: line.x1, y: line.y1 },
+    { x: line.x2, y: line.y2 },
+    { x1: seg.x1, y1: seg.y1, x2: seg.x2, y2: seg.y2 },
+    cursor,
+    radiusLock,
+  );
+}
+
+function arcRecord(arc) {
+  return arc.major
+    ? { radius: arc.radius, side: arc.side, major: true }
+    : { radius: arc.radius, side: arc.side };
+}
+
+function storedArc(seg) {
+  if (!seg?.arc) return null;
+  return arcFromRadius(seg.x1, seg.y1, seg.x2, seg.y2, seg.arc.radius, seg.arc.side, seg.arc.major === true);
+}
+
+function distToWallLine(seg, wx, wy) {
+  const arc = storedArc(seg);
+  if (arc) return distToArc(arc, wx, wy);
+  return distToSeg(seg.x1, seg.y1, seg.x2, seg.y2, wx, wy);
+}
+
+function planWallPoly(wall, company) {
+  const arc = liveArc(wall);
+  if (arc) return arcWallPolygon(arc, wall.thickness);
+  return joinedWallPolygon(wall, company);
+}
+
+function strokeScreenArc(arc, radius = arc.radius) {
+  if (!(radius > 0)) return;
+  const [sx, sy] = worldToScreen(arc.cx, arc.cy);
+  ctx.beginPath();
+  ctx.arc(sx, sy, radius * cam.scale, arc.a0, arc.a0 + arc.sweep, arc.sweep < 0);
+  ctx.stroke();
+}
+
 function drawWall(wall, { marker = false } = {}) {
+  const arc = liveArc(wall);
   const [ax, ay] = worldToScreen(wall.x1, wall.y1);
   const [bx, by] = worldToScreen(wall.x2, wall.y2);
   ctx.save();
   if (marker) {
-    drawAboveMarker(ax, ay, bx, by);
+    if (arc) {
+      ctx.strokeStyle = "#b2451e";
+      ctx.lineWidth = 1.6;
+      ctx.setLineDash([6, 4]);
+      ctx.globalAlpha = 0.7;
+      strokeScreenArc(arc);
+      ctx.setLineDash([]);
+    } else {
+      drawAboveMarker(ax, ay, bx, by);
+    }
+  } else if (arc) {
+    ctx.lineCap = "butt";
+    ctx.strokeStyle = wallPlanColour(wall.status)?.stroke || statusStroke(wall.status);
+    ctx.lineWidth = Math.max(2, wall.thickness * cam.scale);
+    strokeScreenArc(arc);
   } else if (wall.drawn) {
     strokeWallBody(ax, ay, bx, by, wall.status, Math.max(2, wall.thickness * cam.scale));
   } else {
@@ -4712,6 +4926,103 @@ function drawWall(wall, { marker = false } = {}) {
     ctx.lineTo(bx, by);
     ctx.stroke();
   }
+  ctx.restore();
+}
+
+/** The wall being drawn, joined to the walls it meets, so the corner reads while the line is still open. */
+function wallsForJoin(levelWalls, { ghost = false, levelId = null } = {}) {
+  if (ghost || levelId !== activeLevel || tool !== "wall" || !wallDraft) return levelWalls;
+  const { center, thickness, moves } = wallDraftLines();
+  if (!(thickness > 0) || segmentLength(center.x1, center.y1, center.x2, center.y2) < 0.05) return levelWalls;
+  const preview = new Map();
+  for (const move of moves) {
+    const wall = levelWalls.find((w) => w.id === move.seg.id);
+    if (!wall) continue;
+    const copy = preview.get(wall.id) || { ...wall };
+    if (move.end === 2) { copy.x2 = move.to.x; copy.y2 = move.to.y; }
+    else { copy.x1 = move.to.x; copy.y1 = move.to.y; }
+    preview.set(wall.id, copy);
+  }
+  const drawn = levelWalls.map((wall) => preview.get(wall.id) || wall);
+  const draftWall = {
+    id: "__draft",
+    x1: center.x1,
+    y1: center.y1,
+    x2: center.x2,
+    y2: center.y2,
+    thickness,
+    status: placementStatus(),
+    drawn: true,
+    level: activeLevel,
+  };
+  const arc = wallDraft.arcPhase ? draftCentrelineArc() : null;
+  if (arc) draftWall.arc = arcRecord(arc);
+  drawn.push(draftWall);
+  return drawn;
+}
+
+function traceWorldPoly(poly) {
+  ctx.beginPath();
+  poly.forEach((p, i) => {
+    const [sx, sy] = worldToScreen(p.x, p.y);
+    if (i === 0) ctx.moveTo(sx, sy);
+    else ctx.lineTo(sx, sy);
+  });
+  ctx.closePath();
+}
+
+/**
+ * Walls that share a corner are one outline. Each wall is filled, every
+ * outline is stroked, then each wall is filled again, which covers the
+ * stroke where two walls meet and leaves the black edge around the pair.
+ */
+function drawWallsJoined(walls) {
+  const filled = [];
+  for (const wall of walls) {
+    if (wall.id === "__draft") {
+      filled.push(wall);
+      continue;
+    }
+    const [ax, ay] = worldToScreen(wall.x1, wall.y1);
+    const [bx, by] = worldToScreen(wall.x2, wall.y2);
+    if (!wall.drawn || !wallPlanColour(wall.status) || !(wall.thickness > 0)) {
+      ctx.save();
+      if (!wall.drawn) {
+        ctx.strokeStyle = COLOUR.wall;
+        ctx.lineWidth = Math.max(2, wall.thickness * cam.scale);
+        ctx.lineCap = "butt";
+        ctx.beginPath();
+        ctx.moveTo(ax, ay);
+        ctx.lineTo(bx, by);
+        ctx.stroke();
+      } else {
+        strokeWallBody(ax, ay, bx, by, wall.status, Math.max(2, wall.thickness * cam.scale));
+      }
+      ctx.restore();
+      continue;
+    }
+    filled.push(wall);
+  }
+  if (!filled.length) return;
+  const polys = filled.map((wall) => ({ wall, poly: planWallPoly(wall, filled) })).filter((row) => row.poly);
+  const fillBody = (row) => {
+    const colour = wallPlanColour(row.wall.status);
+    if (!colour) return;
+    traceWorldPoly(row.poly);
+    ctx.fillStyle = colour.stroke;
+    ctx.fill();
+  };
+  ctx.save();
+  for (const row of polys) fillBody(row);
+  ctx.strokeStyle = WALL_EXISTING_EDGE;
+  ctx.lineWidth = 2;
+  ctx.lineJoin = "miter";
+  ctx.lineCap = "butt";
+  for (const row of polys) {
+    traceWorldPoly(row.poly);
+    ctx.stroke();
+  }
+  for (const row of polys) fillBody(row);
   ctx.restore();
 }
 
@@ -4737,11 +5048,11 @@ function strokeWallBody(ax, ay, bx, by, status, width) {
 }
 
 /** Redraw the sheet inside selected walls so PDF openings are not covered. */
-function revealUnderlayThroughWalls(walls) {
+function revealUnderlayThroughWalls(walls, company = walls) {
   ctx.save();
   ctx.beginPath();
   for (const wall of walls) {
-    const poly = wallFootprint(wall);
+    const poly = planWallPoly(wall, company) || wallFootprint(wall);
     poly.forEach((p, i) => {
       const [sx, sy] = worldToScreen(p.x, p.y);
       if (i === 0) ctx.moveTo(sx, sy);
@@ -5295,12 +5606,16 @@ function drawSelectionHighlights(walls) {
         })(),
       );
     } else if (ref.kind === "segment" || ref.kind === "beam" || ref.kind === "line" || ref.kind === "dimension" || ref.kind === "separation") {
-      const [ax, ay] = worldToScreen(obj.x1, obj.y1);
-      const [bx, by] = worldToScreen(obj.x2, obj.y2);
-      ctx.beginPath();
-      ctx.moveTo(ax, ay);
-      ctx.lineTo(bx, by);
-      ctx.stroke();
+      const arc = ref.kind === "segment" ? liveArc(obj) : null;
+      if (arc) strokeScreenArc(arc);
+      else {
+        const [ax, ay] = worldToScreen(obj.x1, obj.y1);
+        const [bx, by] = worldToScreen(obj.x2, obj.y2);
+        ctx.beginPath();
+        ctx.moveTo(ax, ay);
+        ctx.lineTo(bx, by);
+        ctx.stroke();
+      }
       if (ref.kind === "segment" && isFaceLocation(obj.location)) {
         const f = locationLineOf(obj, segmentThickness(obj));
         ctx.lineWidth = 1.2;
@@ -5311,7 +5626,11 @@ function drawSelectionHighlights(walls) {
       // Split preview replaces the one length with the two pieces it would make.
       const splitting = ref.kind === "segment" && wallEdit?.mode === "split" && wallEdit.id === obj.id && snapGuide;
       if (!splitting) {
-        const paintedLength = drawLengthLabel(obj.x1, obj.y1, obj.x2, obj.y2, ref.kind === "segment" ? wallLengthPlace(obj) : null);
+        const paintedLength = drawLengthLabel(
+          obj.x1, obj.y1, obj.x2, obj.y2,
+          ref.kind === "segment" ? wallLengthPlace(obj) : null,
+          ref.kind === "segment" && liveArc(obj) ? liveArc(obj).length : null,
+        );
         if (paintedLength && ref.kind === "segment" && store.selected.length === 1 && store.selected[0].id === obj.id) {
           selectedWallLength = paintedLength;
         }
@@ -5365,12 +5684,16 @@ function drawHover(ref) {
     pathForPoly(shapePolygon(obj.shape));
     ctx.stroke();
   } else if (ref.kind === "segment" || ref.kind === "beam" || ref.kind === "line") {
-    const [ax, ay] = worldToScreen(obj.x1, obj.y1);
-    const [bx, by] = worldToScreen(obj.x2, obj.y2);
-    ctx.beginPath();
-    ctx.moveTo(ax, ay);
-    ctx.lineTo(bx, by);
-    ctx.stroke();
+    const arc = ref.kind === "segment" ? storedArc(obj) : null;
+    if (arc) strokeScreenArc(arc);
+    else {
+      const [ax, ay] = worldToScreen(obj.x1, obj.y1);
+      const [bx, by] = worldToScreen(obj.x2, obj.y2);
+      ctx.beginPath();
+      ctx.moveTo(ax, ay);
+      ctx.lineTo(bx, by);
+      ctx.stroke();
+    }
   } else if (ref.kind === "item") {
     const sku = skuById(obj.sku);
     if (sku) {
@@ -5484,9 +5807,26 @@ function wallStartedAgainstWall() {
   return Boolean(sideTowardTarget({ start: a, end: b, target }));
 }
 
+/** Last wall-end the pointer touched, before the first click. The Corner
+ * buttons only exist while a join is relevant, so this stays put long enough
+ * for the pointer to leave the end and land on the buttons beside it. */
+let wallJoinHold = null;
+let pointerOnWallOpts = false;
+const JOIN_HOLD_PX = 200;
+
+function nearJoinHold(p) {
+  if (!p || !wallJoinHold) return false;
+  const [hx, hy] = worldToScreen(p.x, p.y);
+  const [jx, jy] = worldToScreen(wallJoinHold.x, wallJoinHold.y);
+  return Math.hypot(hx - jx, hy - jy) <= JOIN_HOLD_PX;
+}
+
 /** Does the start or end of the wall being drawn, or the pointer, touch another wall's end? */
 function wallCornerRelevant() {
-  if (tool !== "wall") return false;
+  if (tool !== "wall") {
+    wallJoinHold = null;
+    return false;
+  }
   const thickness = drawnWallThickness(skuById(placeSkuId));
   const pool = wallJoinPool();
   const touches = (p) => {
@@ -5498,13 +5838,23 @@ function wallCornerRelevant() {
     const b = { x: wallDraft.x2 ?? wallDraft.x1, y: wallDraft.y2 ?? wallDraft.y1 };
     return touches(a) || (lineLength(a, b) >= MIN_TRACE && touches(b));
   }
-  return touches(hoverPoint);
+  if (touches(hoverPoint)) {
+    wallJoinHold = { x: hoverPoint.x, y: hoverPoint.y };
+    return true;
+  }
+  // The pointer has stepped off the end toward the buttons. Keep the join
+  // until it is clear of both, or the buttons hide on the way to them.
+  if (wallJoinHold && (pointerOnWallOpts || nearJoinHold(hoverPoint))) return true;
+  wallJoinHold = null;
+  return false;
 }
 
 /**
  * While a wall is being drawn, the Draw on / Corner choices sit beside its
  * start - on the side away from where the line is heading - instead of in the
- * bar at the top of the plan. Before the first click they stay in the bar.
+ * bar at the top of the plan. Before the first click they stay in the bar,
+ * unless the pointer is on another wall's end: then they sit beside that end,
+ * because the top-left bar cannot be reached without leaving the join.
  */
 const WALL_CORNER_ORDER = ["past", "against", "center"]; // same left-to-right order as the buttons
 const WALL_CORNER_NAMES = { against: "Against old wall", past: "Past old wall", center: "On the line" };
@@ -5542,10 +5892,34 @@ function drawWallCornerTag() {
 }
 
 const wallOptsSide = { draft: null, locked: false, sx: -1, sy: 1 };
+
+/** A spot beside (ax, ay) that stays on the canvas. The preferred side is
+ * tried first; the corner-tag quadrant (down-right of the pointer) is last. */
+function placeWallOpts(ax, ay, w, h, gap, rect, sx, sy) {
+  const maxX = Math.max(4, rect.width - w - 4);
+  const maxY = Math.max(4, rect.height - h - 4);
+  const spot = (dx, dy) => ({
+    x: ax + (dx < 0 ? -w - gap : gap),
+    y: ay + (dy < 0 ? -h - gap : gap),
+  });
+  const fits = (p) => p.x >= 4 && p.y >= 4 && p.x <= maxX && p.y <= maxY;
+  const preferred = spot(sx, sy);
+  if (fits(preferred)) return preferred;
+  for (const [dx, dy] of [[sx, -sy], [-sx, sy], [-sx, -sy]]) {
+    const p = spot(dx, dy);
+    if (fits(p)) return p;
+  }
+  return {
+    x: Math.min(Math.max(preferred.x, 4), maxX),
+    y: Math.min(Math.max(preferred.y, 4), maxY),
+  };
+}
+
 function positionWallOpts() {
   const box = el.wallOpts;
   if (!box) return;
-  const floating = tool === "wall" && Boolean(wallDraft) && !box.hidden;
+  const joinHover = tool === "wall" && !wallDraft && wallCornerRelevant();
+  const floating = tool === "wall" && !box.hidden && (Boolean(wallDraft) || joinHover);
   box.classList.toggle("floating", floating);
   if (!floating) {
     box.style.left = "";
@@ -5553,28 +5927,57 @@ function positionWallOpts() {
     return;
   }
   const rect = el.canvas.getBoundingClientRect();
-  const [ax, ay] = worldToScreen(wallDraft.x1, wallDraft.y1);
-  const [bx, by] = worldToScreen(wallDraft.x2 ?? wallDraft.x1, wallDraft.y2 ?? wallDraft.y1);
+  let ax;
+  let ay;
+  let sx;
+  let sy;
+  if (wallDraft) {
+    [ax, ay] = worldToScreen(wallDraft.x1, wallDraft.y1);
+    const [bx, by] = worldToScreen(wallDraft.x2 ?? wallDraft.x1, wallDraft.y2 ?? wallDraft.y1);
+    // Pick the side once the line has some length, then keep it for the whole
+    // wall so the buttons never jump away as the cursor approaches them.
+    if (wallOptsSide.draft !== wallDraft) {
+      wallOptsSide.draft = wallDraft;
+      wallOptsSide.locked = false;
+      wallOptsSide.sx = -1;
+      wallOptsSide.sy = 1;
+    }
+    if (!wallOptsSide.locked && Math.hypot(bx - ax, by - ay) > 40) {
+      wallOptsSide.locked = true;
+      wallOptsSide.sx = bx - ax >= 0 ? -1 : 1;
+      wallOptsSide.sy = by - ay >= 0 ? -1 : 1;
+    }
+    sx = wallOptsSide.sx;
+    sy = wallOptsSide.sy;
+  } else {
+    const p = wallJoinHold || hoverPoint;
+    [ax, ay] = worldToScreen(p.x, p.y);
+    // Up-left of the join. The "Against old wall · Tab" tag sits down-right.
+    sx = -1;
+    sy = -1;
+  }
   const w = box.offsetWidth;
   const h = box.offsetHeight;
   const gap = 14;
-  // Pick the side once the line has some length, then keep it for the whole
-  // wall so the buttons never jump away as the cursor approaches them.
-  if (wallOptsSide.draft !== wallDraft) {
-    wallOptsSide.draft = wallDraft;
-    wallOptsSide.locked = false;
-    wallOptsSide.sx = -1;
-    wallOptsSide.sy = 1;
-  }
-  if (!wallOptsSide.locked && Math.hypot(bx - ax, by - ay) > 40) {
-    wallOptsSide.locked = true;
-    wallOptsSide.sx = bx - ax >= 0 ? -1 : 1;
-    wallOptsSide.sy = by - ay >= 0 ? -1 : 1;
-  }
-  const x = Math.min(Math.max(ax + (wallOptsSide.sx < 0 ? -w - gap : gap), 4), Math.max(4, rect.width - w - 4));
-  const y = Math.min(Math.max(ay + (wallOptsSide.sy < 0 ? -h - gap : gap), 4), Math.max(4, rect.height - h - 4));
-  box.style.left = `${rect.left + x}px`;
-  box.style.top = `${rect.top + y}px`;
+  const placed = placeWallOpts(ax, ay, w, h, gap, rect, sx, sy);
+  box.style.left = `${rect.left + placed.x}px`;
+  box.style.top = `${rect.top + placed.y}px`;
+}
+
+/** The floating Draw on / Corner panel shares the wall start with the
+ *  dimension readout; reserve it so length and angle labels step clear. */
+function reserveWallOptsLabelSpace() {
+  if (tool !== "wall" || !wallDraft || !el.wallOpts || el.wallOpts.hidden) return;
+  positionWallOpts();
+  const canvas = el.canvas.getBoundingClientRect();
+  const box = el.wallOpts.getBoundingClientRect();
+  const pad = 8;
+  labelOccupied.push({
+    x: box.left - canvas.left - pad,
+    y: box.top - canvas.top - pad,
+    w: box.width + pad * 2,
+    h: box.height + pad * 2,
+  });
 }
 
 /**
@@ -5621,33 +6024,17 @@ function endShared(seg, end) {
 }
 
 function drawWallDraft() {
-  const { a, b, thickness, location, center, moves } = wallDraftLines();
-  // An old wall running on to meet this one: show the piece it gains.
-  for (const move of moves) {
-    const from = move.end === 2 ? { x: move.seg.x2, y: move.seg.y2 } : { x: move.seg.x1, y: move.seg.y1 };
-    if (segmentLength(from.x, from.y, move.to.x, move.to.y) < 0.005) continue;
-    ctx.save();
-    const moved = wallPlanColour(objectStatus(move.seg));
-    ctx.strokeStyle = moved?.stroke || statusStroke(objectStatus(move.seg));
-    ctx.globalAlpha = 0.45;
-    ctx.lineWidth = Math.max(2, segmentThickness(move.seg) * cam.scale);
-    ctx.lineCap = "butt";
-    strokeWorldLine(from.x, from.y, move.to.x, move.to.y);
-    ctx.restore();
+  const { a, b, thickness, location, center } = wallDraftLines();
+  if (wallDraft.arcPhase) {
+    const arc = draftCentrelineArc();
+    if (arc) drawArcReadout(arc, thickness);
+    else drawLengthLabel(center.x1, center.y1, center.x2, center.y2);
+    return;
   }
+  // The body is drawn with the other walls, so the corner is already open.
+  // The two faces stay visible while the line is placed.
   if (segmentLength(center.x1, center.y1, center.x2, center.y2) >= 0.05) {
-    const [cx1, cy1] = worldToScreen(center.x1, center.y1);
-    const [cx2, cy2] = worldToScreen(center.x2, center.y2);
     ctx.save();
-    const draftColour = wallPlanColour(placementStatus());
-    ctx.strokeStyle = draftColour?.stroke || statusStroke(placementStatus());
-    ctx.globalAlpha = 0.45;
-    ctx.lineWidth = Math.max(2, thickness * cam.scale);
-    ctx.lineCap = "butt";
-    ctx.beginPath();
-    ctx.moveTo(cx1, cy1);
-    ctx.lineTo(cx2, cy2);
-    ctx.stroke();
     ctx.globalAlpha = 0.9;
     ctx.lineWidth = 1;
     ctx.strokeStyle = "#5c2410";
@@ -5667,6 +6054,277 @@ function drawWallDraft() {
   strokeWorldLine(a.x, a.y, b.x, b.y);
   ctx.restore();
   drawLengthLabel(a.x, a.y, b.x, b.y);
+  drawWallAngle(a, b);
+}
+
+const WALL_ANGLE_INK = "#3a5f7a";
+
+function drawAngleTick(x, y) {
+  const s = 4.5;
+  ctx.beginPath();
+  ctx.moveTo(x - s, y - s);
+  ctx.lineTo(x + s, y + s);
+  ctx.moveTo(x + s, y - s);
+  ctx.lineTo(x - s, y + s);
+  ctx.stroke();
+}
+
+/** The angle of the wall being placed: a dashed horizontal through the start,
+ *  an arc in the wedge, and the degrees. Sized in pixels so it stays readable
+ *  when the plan is zoomed. A short wall carries the arc just past its end;
+ *  a long one keeps the arc near the start. The wall after a click is measured
+ *  from the one just drawn, so 90° is a corner and 180° is straight on. */
+function drawWallAngle(a, b) {
+  if (wallDraft?.prev) {
+    drawChainedWallAngle(a, b);
+    return;
+  }
+  const angle = wallDraftAngle(a, b);
+  if (!angle) return;
+  const [sx, sy] = worldToScreen(a.x, a.y);
+  const [ex, ey] = worldToScreen(b.x, b.y);
+  const screenLen = Math.hypot(ex - sx, ey - sy);
+  if (screenLen < 10) return;
+  let radius = screenLen + 28;
+  if (radius < 56) radius = 56;
+  if (radius > 168) radius = 168;
+
+  const wallAng = Math.atan2(angle.wallY, angle.wallX);
+  let delta = wallAng;
+  while (delta <= -Math.PI) delta += Math.PI * 2;
+  while (delta > Math.PI) delta -= Math.PI * 2;
+
+  ctx.save();
+  ctx.strokeStyle = WALL_ANGLE_INK;
+  ctx.lineWidth = 1.15;
+  ctx.lineCap = "butt";
+  const ray = (ang, from, to) => {
+    ctx.beginPath();
+    ctx.moveTo(sx + Math.cos(ang) * from, sy + Math.sin(ang) * from);
+    ctx.lineTo(sx + Math.cos(ang) * to, sy + Math.sin(ang) * to);
+    ctx.stroke();
+  };
+  ctx.setLineDash([5, 4]);
+  ray(0, -36, radius + 16);
+  ctx.setLineDash([]);
+  if (screenLen + 4 < radius) ray(wallAng, screenLen + 2, radius);
+
+  ctx.beginPath();
+  ctx.arc(sx, sy, radius, 0, delta, delta < 0);
+  ctx.stroke();
+  drawAngleTick(sx + radius, sy);
+  drawAngleTick(sx + Math.cos(wallAng) * radius, sy + Math.sin(wallAng) * radius);
+
+  const label = `${angle.degrees.toFixed(2)}°`;
+  ctx.font = "600 12px Source Sans 3, sans-serif";
+  const textW = ctx.measureText(label).width + 8;
+  const mid = delta / 2;
+  let rot = mid + Math.PI / 2;
+  while (rot > Math.PI / 2) rot -= Math.PI;
+  while (rot <= -Math.PI / 2) rot += Math.PI;
+
+  const hits = (box) => labelOccupied.some((r) => rectsOverlap(
+    { x: box.x - 3, y: box.y - 3, w: box.w + 6, h: box.h + 6 },
+    r,
+  ));
+  let labelR = radius + 14;
+  let lx = 0;
+  let ly = 0;
+  let box = null;
+  for (let step = 0; step < 4; step += 1) {
+    lx = sx + Math.cos(mid) * labelR;
+    ly = sy + Math.sin(mid) * labelR;
+    box = rotatedLabelBox(lx, ly, rot, textW, 0);
+    if (!hits(box)) break;
+    labelR += 16;
+  }
+  const viewW = el.canvasWrap.clientWidth;
+  const viewH = el.canvasWrap.clientHeight;
+  const margin = 4;
+  if (box.x < margin) lx += margin - box.x;
+  if (box.y < margin) ly += margin - box.y;
+  if (box.x + box.w > viewW - margin) lx -= box.x + box.w - (viewW - margin);
+  if (box.y + box.h > viewH - margin) ly -= box.y + box.h - (viewH - margin);
+  box = rotatedLabelBox(lx, ly, rot, textW, 0);
+  labelOccupied.push(box);
+
+  ctx.translate(lx, ly);
+  ctx.rotate(rot);
+  ctx.fillStyle = "rgba(244, 237, 225, 0.92)";
+  ctx.fillRect(-textW / 2, -8, textW, 16);
+  ctx.fillStyle = WALL_ANGLE_INK;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(label, 0, 0);
+  ctx.restore();
+}
+
+/** Angle of a chained wall, measured from the wall just drawn. A jump onto
+ *  90° or 180° reads "corner" or "straight". The ray is drawn once the
+ *  pointer is close, solid while the jump holds and dashed after it lets go. */
+function drawChainedWallAngle(a, b) {
+  const joint = wallJointAngle(wallDraft.prev, a, b);
+  if (!joint) return;
+  const [sx, sy] = worldToScreen(a.x, a.y);
+  const [ex, ey] = worldToScreen(b.x, b.y);
+  const screenLen = Math.hypot(ex - sx, ey - sy);
+  if (screenLen < 10) return;
+
+  const target = chainAngleTarget(wallDraft.prev, b.x - a.x, b.y - a.y);
+  const jumped = Boolean(wallDraft.angleLatch && !wallDraft.angleLatch.freed);
+  const kind = jumped ? wallDraft.angleLatch.kind : null;
+  const showGuide = jumped || (target && target.errDeg <= CHAIN_GUIDE_DEG);
+
+  let radius = screenLen + 28;
+  if (radius < 56) radius = 56;
+  if (radius > 168) radius = 168;
+
+  const wallAng = Math.atan2(joint.wallY, joint.wallX);
+  const refAng = Math.atan2(joint.refY, joint.refX);
+
+  ctx.save();
+  ctx.strokeStyle = WALL_ANGLE_INK;
+  ctx.lineWidth = jumped ? 1.7 : 1.15;
+  ctx.lineCap = "butt";
+  const ray = (ang, from, to) => {
+    ctx.beginPath();
+    ctx.moveTo(sx + Math.cos(ang) * from, sy + Math.sin(ang) * from);
+    ctx.lineTo(sx + Math.cos(ang) * to, sy + Math.sin(ang) * to);
+    ctx.stroke();
+  };
+  if (showGuide && target) {
+    const guideAng = Math.atan2(target.uy, target.ux);
+    ctx.setLineDash(jumped ? [] : [5, 4]);
+    ray(guideAng, -28, radius + 18);
+    ctx.setLineDash([]);
+  }
+  if (Math.abs(joint.turn) > 0.02) {
+    if (screenLen + 4 < radius) ray(wallAng, screenLen + 2, radius);
+    ctx.beginPath();
+    ctx.arc(sx, sy, radius, refAng, refAng + joint.turn, joint.turn < 0);
+    ctx.stroke();
+    drawAngleTick(sx + Math.cos(refAng) * radius, sy + Math.sin(refAng) * radius);
+    drawAngleTick(sx + Math.cos(wallAng) * radius, sy + Math.sin(wallAng) * radius);
+  } else if (jumped) {
+    drawAngleTick(sx + Math.cos(wallAng) * radius, sy + Math.sin(wallAng) * radius);
+  }
+
+  const label = kind === "corner" ? "90° corner"
+    : kind === "straight" ? "180° straight"
+    : `${joint.interior.toFixed(2)}°`;
+  ctx.font = "600 12px Source Sans 3, sans-serif";
+  const textW = ctx.measureText(label).width + 8;
+  let mid = refAng + joint.turn / 2;
+  if (Math.abs(joint.turn) < 0.15) mid = wallAng - Math.PI / 2;
+  let rot = mid + Math.PI / 2;
+  while (rot > Math.PI / 2) rot -= Math.PI;
+  while (rot <= -Math.PI / 2) rot += Math.PI;
+
+  const hits = (box) => labelOccupied.some((r) => rectsOverlap(
+    { x: box.x - 3, y: box.y - 3, w: box.w + 6, h: box.h + 6 },
+    r,
+  ));
+  let labelR = radius + 14;
+  let lx = 0;
+  let ly = 0;
+  let box = null;
+  for (let step = 0; step < 4; step += 1) {
+    lx = sx + Math.cos(mid) * labelR;
+    ly = sy + Math.sin(mid) * labelR;
+    box = rotatedLabelBox(lx, ly, rot, textW, 0);
+    if (!hits(box)) break;
+    labelR += 16;
+  }
+  const viewW = el.canvasWrap.clientWidth;
+  const viewH = el.canvasWrap.clientHeight;
+  const margin = 4;
+  if (box.x < margin) lx += margin - box.x;
+  if (box.y < margin) ly += margin - box.y;
+  if (box.x + box.w > viewW - margin) lx -= box.x + box.w - (viewW - margin);
+  if (box.y + box.h > viewH - margin) ly -= box.y + box.h - (viewH - margin);
+  box = rotatedLabelBox(lx, ly, rot, textW, 0);
+  labelOccupied.push(box);
+
+  ctx.translate(lx, ly);
+  ctx.rotate(rot);
+  ctx.fillStyle = "rgba(244, 237, 225, 0.92)";
+  ctx.fillRect(-textW / 2, -8, textW, 16);
+  ctx.fillStyle = WALL_ANGLE_INK;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(label, 0, 0);
+  ctx.restore();
+}
+
+/** Sweep at the wall, and the radius from the centre out to the arc. */
+function drawArcReadout(arc, thickness = 0.22) {
+  if (!arc || !(arc.radius > 0)) return;
+  const [cx, cy] = worldToScreen(arc.cx, arc.cy);
+  const [hx, hy] = worldToScreen(arc.crownX, arc.crownY);
+  const halfPx = Math.max(10, (thickness * cam.scale) / 2 + 14);
+  const outer = arc.radius * cam.scale + halfPx;
+  const inner = Math.max(10, arc.radius * cam.scale - halfPx);
+
+  ctx.save();
+  ctx.strokeStyle = WALL_ANGLE_INK;
+  ctx.fillStyle = WALL_ANGLE_INK;
+  ctx.lineWidth = 1.15;
+  ctx.lineCap = "butt";
+
+  ctx.setLineDash([5, 4]);
+  ctx.beginPath();
+  ctx.moveTo(cx, cy);
+  ctx.lineTo(hx, hy);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  drawAngleTick(cx, cy);
+
+  const ray = (ang) => {
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(ang) * inner, cy + Math.sin(ang) * inner);
+    ctx.lineTo(cx + Math.cos(ang) * outer, cy + Math.sin(ang) * outer);
+    ctx.stroke();
+  };
+  ray(arc.a0);
+  ray(arc.a0 + arc.sweep);
+  ctx.beginPath();
+  ctx.arc(cx, cy, outer, arc.a0, arc.a0 + arc.sweep, arc.sweep < 0);
+  ctx.stroke();
+  drawAngleTick(cx + Math.cos(arc.a0) * outer, cy + Math.sin(arc.a0) * outer);
+  drawAngleTick(cx + Math.cos(arc.a0 + arc.sweep) * outer, cy + Math.sin(arc.a0 + arc.sweep) * outer);
+
+  const mid = arc.a0 + arc.sweep / 2;
+  paintArcLabel(
+    cx + Math.cos(mid) * (outer + 14),
+    cy + Math.sin(mid) * (outer + 14),
+    mid + Math.PI / 2,
+    `${arc.sweepDeg.toFixed(2)}°`,
+  );
+
+  let rdx = cx - hx;
+  let rdy = cy - hy;
+  const rd = Math.hypot(rdx, rdy) || 1;
+  const pull = Math.min(Math.max(halfPx, 28), rd * 0.55);
+  const radiusAng = Math.atan2(rdy, rdx);
+  paintArcLabel(hx + (rdx / rd) * pull, hy + (rdy / rd) * pull, radiusAng + Math.PI / 2, `${formatLengthMm(arc.radius)} mm`);
+  ctx.restore();
+}
+
+function paintArcLabel(x, y, rot, text) {
+  while (rot > Math.PI / 2) rot -= Math.PI;
+  while (rot <= -Math.PI / 2) rot += Math.PI;
+  ctx.save();
+  ctx.font = "600 12px Source Sans 3, sans-serif";
+  const textW = ctx.measureText(text).width + 8;
+  ctx.translate(x, y);
+  ctx.rotate(rot);
+  ctx.fillStyle = "rgba(244, 237, 225, 0.92)";
+  ctx.fillRect(-textW / 2, -8, textW, 16);
+  ctx.fillStyle = WALL_ANGLE_INK;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, 0, 0);
+  ctx.restore();
 }
 
 function strokeWorldLine(x1, y1, x2, y2) {
@@ -5724,8 +6382,8 @@ function wallLengthPlace(wall) {
   return { normal, near };
 }
 
-function drawLengthLabel(x1, y1, x2, y2, place = null) {
-  const len = segmentLength(x1, y1, x2, y2);
+function drawLengthLabel(x1, y1, x2, y2, place = null, metres = null) {
+  const len = metres ?? segmentLength(x1, y1, x2, y2);
   if (len < 0.05) return null;
   const [ax, ay] = worldToScreen(x1, y1);
   const [bx, by] = worldToScreen(x2, y2);
@@ -5769,14 +6427,52 @@ function drawLengthLabel(x1, y1, x2, y2, place = null) {
     return { box, nx: place.normal.x, ny: place.normal.y };
   }
   ctx.textBaseline = "bottom";
-  const box = { x: sx - width / 2, y: sy - 22, w: width, h: height };
+  const hits = (b) => labelOccupied.some((r) => rectsOverlap(
+    { x: b.x - 3, y: b.y - 3, w: b.w + 6, h: b.h + 6 },
+    r,
+  ));
+  let dx = bx - ax;
+  let dy = by - ay;
+  const span = Math.hypot(dx, dy) || 1;
+  let nx = -dy / span;
+  let ny = dx / span;
+  if (ny > 0 || (Math.abs(ny) <= 1e-6 && nx > 0)) {
+    nx = -nx;
+    ny = -ny;
+  }
+  let box = null;
+  let tcx = sx;
+  let tcy = sy - 8;
+  outer: for (let dist = 14; dist <= 90; dist += 14) {
+    for (const flip of [0, 1]) {
+      const fx = flip ? -nx : nx;
+      const fy = flip ? -ny : ny;
+      const cx = sx + fx * dist;
+      const cy = sy + fy * dist;
+      const cand = { x: cx - width / 2, y: cy - 14, w: width, h: height };
+      if (!hits(cand)) {
+        box = cand;
+        tcx = cx;
+        tcy = cy;
+        break outer;
+      }
+    }
+  }
+  let outNx = 0;
+  let outNy = -1;
+  if (!box) {
+    box = { x: sx - width / 2, y: sy - 22, w: width, h: height };
+  } else if (tcx !== sx || tcy !== sy - 8) {
+    outNx = nx;
+    outNy = ny;
+  }
   labelOccupied.push(box);
   ctx.fillStyle = "rgba(244, 237, 225, 0.92)";
   ctx.fillRect(box.x, box.y, box.w, box.h);
   ctx.fillStyle = "#1a1612";
-  ctx.fillText(label, sx, sy - 8);
+  ctx.fillText(label, tcx, tcy);
   ctx.restore();
-  return { box, nx: 0, ny: -1 };
+  return { box, nx: outNx, ny: outNy };
 }
 
 /** Axis-aligned box of a label drawn at (mx, my) after `ctx.rotate(angle)`. */
@@ -6031,6 +6727,105 @@ function drawSplitLengths(seg, point) {
 }
 
 /** The split station, or the line the chosen end will move along. */
+/** Dashed centrelines out to the crossing, and the corner the next click would make. */
+function drawTrimCornerPreview() {
+  if (!isTrimTool(tool) || !trimCorner?.first) return;
+  ctx.save();
+  const pick = trimCorner.first.pick;
+  const [px, py] = worldToScreen(pick.x, pick.y);
+  if (trimCorner.mode === "single") {
+    // The boundary stays put, so mark it apart from the wall that will move.
+    const boundary = (store.doc.segments || []).find((item) => item.id === trimCorner.first.ref.id);
+    if (boundary) {
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "#1a1612";
+      ctx.setLineDash([2, 3]);
+      strokeWorldLine(boundary.x1, boundary.y1, boundary.x2, boundary.y2);
+      ctx.setLineDash([]);
+    }
+  }
+  ctx.fillStyle = "#3a5f7a";
+  ctx.fillRect(px - 3, py - 3, 6, 6);
+  const plan = trimHover?.plan;
+  if (plan?.ok) {
+    // The walls as they would end up: a solid body from the kept end to the corner.
+    ctx.fillStyle = "rgba(60, 110, 200, 0.55)";
+    ctx.strokeStyle = "#1f4fa8";
+    ctx.lineWidth = 1;
+    for (const move of plan.moves) {
+      const seg = (store.doc.segments || []).find((item) => item.id === move.id);
+      const thick = Math.max(0.02, segmentThickness(seg) || seg?.thickness || 0.1);
+      const dx = move.point.x - move.keep.x;
+      const dy = move.point.y - move.keep.y;
+      const span = Math.hypot(dx, dy) || 1;
+      const nx = (-dy / span) * thick / 2;
+      const ny = (dx / span) * thick / 2;
+      const corners = [
+        [move.keep.x + nx, move.keep.y + ny],
+        [move.point.x + nx, move.point.y + ny],
+        [move.point.x - nx, move.point.y - ny],
+        [move.keep.x - nx, move.keep.y - ny],
+      ].map(([x, y]) => worldToScreen(x, y));
+      ctx.beginPath();
+      corners.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
+    // Dashed centreline over the stretch that is added or cut away.
+    ctx.lineWidth = 1.25;
+    ctx.strokeStyle = "#5aa9d6";
+    ctx.setLineDash([6, 4]);
+    for (const move of plan.moves) {
+      strokeWorldLine(move.from.x, move.from.y, move.point.x, move.point.y);
+    }
+    ctx.setLineDash([]);
+    const [cx, cy] = worldToScreen(plan.cross.x, plan.cross.y);
+    ctx.fillStyle = "#1f4fa8";
+    ctx.fillRect(cx - 3, cy - 3, 6, 6);
+    // A single trim has one moving arm, so there is no corner angle to show.
+    if (plan.moves.length === 2) drawTrimCornerAngle(plan, cx, cy);
+  }
+  ctx.restore();
+}
+
+/** The angle between the two kept arms, as an arc and a degree label at the corner. */
+function drawTrimCornerAngle(plan, cx, cy) {
+  const arms = plan.moves.map((move) => {
+    const [kx, ky] = worldToScreen(move.keep.x, move.keep.y);
+    return { x: kx - cx, y: ky - cy };
+  });
+  const lenA = Math.hypot(arms[0].x, arms[0].y);
+  const lenB = Math.hypot(arms[1].x, arms[1].y);
+  if (lenA < 1 || lenB < 1) return;
+  const a0 = Math.atan2(arms[0].y, arms[0].x);
+  const a1 = Math.atan2(arms[1].y, arms[1].x);
+  let delta = a1 - a0;
+  while (delta > Math.PI) delta -= Math.PI * 2;
+  while (delta < -Math.PI) delta += Math.PI * 2;
+  const degrees = Math.abs(delta) * 180 / Math.PI;
+  const radius = Math.min(28, lenA * 0.6, lenB * 0.6);
+  ctx.save();
+  ctx.strokeStyle = "#1a1612";
+  ctx.lineWidth = 1.25;
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius, a0, a0 + delta, delta < 0);
+  ctx.stroke();
+  const mid = a0 + delta / 2;
+  const label = `${degrees.toFixed(1).replace(/\.0$/, "")}°`;
+  ctx.font = "600 12px Source Sans 3, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  const width = ctx.measureText(label).width + 8;
+  const lx = cx + Math.cos(mid) * (radius + 6 + width / 2);
+  const ly = cy + Math.sin(mid) * (radius + 14);
+  ctx.fillStyle = "rgba(244, 237, 225, 0.92)";
+  ctx.fillRect(lx - width / 2, ly - 8, width, 16);
+  ctx.fillStyle = "#1a1612";
+  ctx.fillText(label, lx, ly);
+  ctx.restore();
+}
+
 function drawWallEditPreview() {
   if (!wallEdit || !snapGuide) return;
   if (drag && drag.kind !== "wall-split") return;
@@ -7565,7 +8360,7 @@ function hitTest(wx, wy, { skipServices = false, skipAreas = false } = {}) {
     const seg = segments[i];
     if (!planObjectVisible(seg) || !keptByCut(seg, "wall")) continue;
     const sku = skuById(seg.sku);
-    if (distToSeg(seg.x1, seg.y1, seg.x2, seg.y2, wx, wy) < wallHitTol(sku)) return { kind: "segment", id: seg.id };
+    if (distToWallLine(seg, wx, wy) < wallHitTol(sku)) return { kind: "segment", id: seg.id };
   }
   // No SKU to size a hit tolerance from, unlike a beam/wall - a fixed
   // pick width close to the drawn stroke is all a line needs.
@@ -7633,7 +8428,7 @@ function wallOrFloorAt(wx, wy) {
     if (!planObjectVisible(seg) || !keptByCut(seg, "wall")) continue;
     const sku = skuById(seg.sku);
     const tol = Math.max(0.18, drawnWallThickness(sku) / 2 + 0.08);
-    if (distToSeg(seg.x1, seg.y1, seg.x2, seg.y2, wx, wy) < tol) return { kind: "segment", id: seg.id };
+    if (distToWallLine(seg, wx, wy) < tol) return { kind: "segment", id: seg.id };
   }
   const slabs = (store.doc.slabs || []).filter(onActiveLevel);
   for (let i = slabs.length - 1; i >= 0; i -= 1) {
@@ -7796,7 +8591,7 @@ function skuDimLabel(sku) {
   const g = sku.geometry || {};
   if (g.width && g.height && (sku.category === "door" || sku.category === "window" || sku.category === "opening")) {
     const size = `${Math.round(g.width * 1000)} × ${Math.round(g.height * 1000)} mm`;
-    return isArchHead(sku) ? `${size}, semicircular head` : size;
+    return isArchHead(sku) ? `${size}, arched head` : size;
   }
   if (isStripFooting(sku) && g.width && g.depth) {
     return `${Math.round(g.width * 1000)} × ${Math.round(g.depth * 1000)} mm`;
@@ -8461,6 +9256,16 @@ function updateRibbonHint() {
         : "Click where that point should land, or type the distance and press Enter. Esc cancels.");
     return;
   }
+  if (isTrimTool(tool)) {
+    const single = tool === "trim-single";
+    if (trimHover?.plan && !trimHover.plan.ok) setRibbonHint(trimHover.plan.message, true);
+    else if (trimCorner?.first) {
+      setRibbonHint(single
+        ? "Click the wall to trim, on the part you want to keep. Esc drops the boundary."
+        : "Click the second wall on the part you want to keep. Esc drops this pick.");
+    } else setRibbonHint(HINTS[tool]);
+    return;
+  }
   if (attachPick) {
     const hoverText = attachPick.hover ? attachHoverText(attachPick.hover) : null;
     setRibbonHint(hoverText ? hoverText.text : HINTS.attach, Boolean(hoverText?.warn));
@@ -8554,8 +9359,14 @@ function updateRibbonHint() {
     setRibbonHint(cutWarning, true);
     return;
   }
+  if (wallDraft?.arcPhase) {
+    setRibbonHint("Pull the curve and click. The sweep and the radius follow the cursor. Type a radius and press Enter. Esc goes back to the ends.");
+    return;
+  }
   if (wallDraft) {
-    setRibbonHint(wallLocation === "center"
+    setRibbonHint(wallArcMode
+      ? "Click to end the wall. The curve comes next. Esc cancels this wall."
+      : wallLocation === "center"
       ? "Click to end, or type a length and press Enter. Drawing on the centreline. Esc cancels this wall."
       : `Click to end, or type a length and press Enter. Drawing on the ${wallLocation} face; Space flips it. Esc cancels this wall.`);
     return;
@@ -8608,6 +9419,14 @@ function updateRibbonHint() {
       setRibbonHint("Click inside a floor. The point stays on that floor.");
       return;
     }
+  }
+  if (arcEdit) {
+    setRibbonHint("Pull the curve and click. The sweep and the radius are shown. Type a radius and press Enter. Esc cancels.");
+    return;
+  }
+  if (tool === "wall" && wallArcMode) {
+    setRibbonHint("Start-End-Radius arc. Click the start, click the end, then pull the curve. Esc to stop.");
+    return;
   }
   const hint = activeFunction && HINTS[activeFunction];
   setRibbonHint(hint || "");
@@ -8792,6 +9611,7 @@ function onRibbonFunction(item) {
   paletteFilter = item.categories || null;
   lastPaletteLabel = item.categories ? item.label : lastPaletteLabel;
   tool = item.tool || "select";
+  if (tool !== "select") arcEdit = null;
   if (tool !== "door") doorHandSign = 1;
   const armed = armPlacement(
     { placeSkuId, wallLocation, memory: placeSkuMemory },
@@ -8813,6 +9633,10 @@ function onRibbonFunction(item) {
   measureDraft = null;
   showDimensions = false;
   underlaySelected = false;
+  trimCorner = item.id === "trim-corner" ? { mode: "corner", first: null }
+    : item.id === "trim-single" ? { mode: "single", first: null }
+      : null;
+  trimHover = null;
   syncToolButtons();
   // The selection is what keeps the inspector on the wall, opening or route
   // it was editing, and the wall elevation stays open while that face is
@@ -9040,8 +9864,10 @@ function openMassing(view) {
   else if (view?.mode === "section") massView.setSection(view);
   else if (view?.mode === "elevation") massView.setElevation(view);
   else massView.setOrbit();
+  syncReferenceOffer();
   massView.setPayload(compile(store.doc, pack));
   hideMassRender();
+  setPictureOpen(false);
   el.massOverlay.hidden = false;
   requestAnimationFrame(() => requestAnimationFrame(() => massView.resize()));
 }
@@ -9052,26 +9878,280 @@ function closeMassing() {
 }
 
 function syncGenerateEnabled() {
+  const empty = Boolean(el.massEmpty && !el.massEmpty.hidden);
+  if (el.massPicture) el.massPicture.disabled = empty;
   if (!el.massGenerate || el.massGenerate.dataset.busy === "1") return;
-  el.massGenerate.disabled = Boolean(el.massEmpty && !el.massEmpty.hidden);
+  el.massGenerate.disabled = empty;
+}
+
+let massRenderClock = 0;
+
+function formatElapsed(ms) {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(total / 60);
+  const seconds = total % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+function setMassRenderStatus(message) {
+  if (el.massRenderStatus) el.massRenderStatus.hidden = false;
+  if (el.massRenderStatusText) el.massRenderStatusText.textContent = message;
+}
+
+/** OpenAI returns the picture in one response, so the bar only shows that the request is still running. The clock is elapsed time. */
+function startMassRenderClock() {
+  stopMassRenderClock();
+  const started = Date.now();
+  const paint = () => {
+    const label = formatElapsed(Date.now() - started);
+    if (el.massRenderElapsed) el.massRenderElapsed.textContent = label;
+    el.massRenderWait?.querySelector("[role=progressbar]")?.setAttribute("aria-valuetext", label);
+  };
+  if (el.massRenderWait) el.massRenderWait.hidden = false;
+  paint();
+  massRenderClock = window.setInterval(paint, 1000);
+}
+
+function stopMassRenderClock() {
+  if (massRenderClock) {
+    window.clearInterval(massRenderClock);
+    massRenderClock = 0;
+  }
+  if (el.massRenderWait) el.massRenderWait.hidden = true;
+  if (el.massRenderElapsed) el.massRenderElapsed.textContent = "0:00";
+  el.massRenderWait?.querySelector("[role=progressbar]")?.setAttribute("aria-valuetext", "0:00");
 }
 
 function hideMassRender() {
+  stopMassRenderClock();
   if (el.massRender) {
     el.massRender.hidden = true;
     el.massRender.classList.remove("is-ready", "is-pending");
   }
   if (el.massRenderImg) el.massRenderImg.removeAttribute("src");
-  if (el.massRenderStatus) {
-    el.massRenderStatus.hidden = true;
-    el.massRenderStatus.textContent = "";
+  if (el.massRenderRefs) {
+    el.massRenderRefs.hidden = true;
+    el.massRenderRefs.replaceChildren();
   }
+  if (el.massRenderStatus) el.massRenderStatus.hidden = true;
+  if (el.massRenderStatusText) el.massRenderStatusText.textContent = "";
   if (el.massShow3d) el.massShow3d.hidden = true;
-  if (el.massGenerate) el.massGenerate.textContent = "Generate model";
+  if (el.massGenerate) el.massGenerate.textContent = "Generate";
 }
 
-function massingSnapshot() {
-  const src = el.massCanvas;
+function renderDownloadName() {
+  const raw = String(store.doc?.name || "").trim();
+  const safe = raw.replace(/[<>:"/\\|?*\u0000-\u001f]/g, "").replace(/^\.+/, "").trim();
+  return `${safe || "model"}.png`;
+}
+
+/** PNG of the generated picture. A data URL is read directly; anything else is drawn off the image. */
+function renderPngBlob() {
+  const img = el.massRenderImg;
+  const src = img?.currentSrc || img?.src || "";
+  if (!src) return Promise.reject(new Error("no image"));
+  if (src.startsWith("data:image/png")) {
+    return fetch(src).then((res) => res.blob()).then((blob) => (
+      blob.type === "image/png" ? blob : new Blob([blob], { type: "image/png" })
+    ));
+  }
+  const width = img.naturalWidth || img.width;
+  const height = img.naturalHeight || img.height;
+  if (!width || !height) return Promise.reject(new Error("no image"));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("no image"))), "image/png");
+  });
+}
+
+function downloadBlob(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
+async function withRenderAction(button, run) {
+  if (!button || button.disabled) return;
+  button.disabled = true;
+  try {
+    await run();
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function copyRenderImage() {
+  if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") {
+    setStatusMessage("This browser cannot copy a picture.", "warn");
+    return;
+  }
+  try {
+    // The promise form keeps the click's permission. Awaiting the blob first drops it.
+    await navigator.clipboard.write([
+      new ClipboardItem({ "image/png": renderPngBlob() }),
+    ]);
+    setStatusMessage("Copied the picture.", "ok");
+  } catch {
+    setStatusMessage("The picture could not be copied.", "warn");
+  }
+}
+
+// The page is not allowed to start a desktop program. This helper, on the
+// same PC, writes the png and opens Paint. If it is not running, the picture
+// is saved instead, so it can still be opened by hand.
+const PAINT_BRIDGE = "http://127.0.0.1:17341/paint";
+
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error || new Error("unreadable"));
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function openRenderInPaint() {
+  let blob;
+  try {
+    blob = await renderPngBlob();
+  } catch {
+    setStatusMessage("Generate a model first.", "warn");
+    return;
+  }
+  try {
+    const image = await blobToDataUrl(blob);
+    const signal = typeof AbortSignal?.timeout === "function" ? AbortSignal.timeout(8000) : undefined;
+    const res = await fetch(PAINT_BRIDGE, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ image }),
+      signal,
+    });
+    if (res.ok) {
+      setStatusMessage("Opened in Paint.", "ok");
+      return;
+    }
+  } catch { /* helper not running, or it refused the picture */ }
+  downloadBlob(blob, renderDownloadName());
+  setStatusMessage("Saved the picture. Open that file with Paint.", "ok");
+}
+
+async function saveRenderImage() {
+  let blob;
+  try {
+    blob = await renderPngBlob();
+  } catch {
+    setStatusMessage("Generate a model first.", "warn");
+    return;
+  }
+  downloadBlob(blob, renderDownloadName());
+  setStatusMessage("Saved the picture.", "ok");
+}
+
+const VISUALIZE_PROMPT_KEY = "v2-visualize-prompt";
+const VISUALIZE_REFS_KEY = "v2-visualize-refs";
+
+function visualizeChoices() {
+  return [VISUALIZE_BUILTIN, ...VISUALIZE_EXAMPLES];
+}
+
+function rememberVisualizePrompt(text) {
+  try {
+    if (!text || visualizePromptId(text) === "builtin") window.localStorage.removeItem(VISUALIZE_PROMPT_KEY);
+    else window.localStorage.setItem(VISUALIZE_PROMPT_KEY, text);
+  } catch { /* private mode */ }
+}
+
+function applyVisualizePrompt(text) {
+  if (!el.massPromptText) return;
+  el.massPromptText.value = text;
+  rememberVisualizePrompt(text);
+  syncVisualizePromptChrome();
+}
+
+function syncVisualizePromptChrome() {
+  const text = el.massPromptText?.value ?? "";
+  const id = visualizePromptId(text);
+  const choice = visualizeChoices().find((item) => item.id === id);
+  if (el.massPromptNote) {
+    el.massPromptNote.textContent = choice?.note || "Your instruction. Generate sends it with this view.";
+  }
+  if (el.massPromptCount) {
+    el.massPromptCount.textContent = `${text.length} / ${MAX_VISUALIZE_PROMPT}`;
+  }
+  el.massPromptExamples?.querySelectorAll("[data-viz-prompt]").forEach((btn) => {
+    const on = btn.dataset.vizPrompt === id;
+    btn.classList.toggle("active", on);
+    btn.setAttribute("aria-pressed", on ? "true" : "false");
+  });
+}
+
+function promptForGenerate() {
+  const typed = (el.massPromptText?.value || "").replace(/\r\n/g, "\n").trim();
+  if (typed) return typed;
+  applyVisualizePrompt(VISUALIZE_PROMPT);
+  return VISUALIZE_PROMPT;
+}
+
+function wireVisualizePrompt() {
+  if (!el.massPromptExamples || el.massPromptExamples.childElementCount) return;
+  let stored = "";
+  try { stored = window.localStorage.getItem(VISUALIZE_PROMPT_KEY) || ""; } catch { stored = ""; }
+  applyVisualizePrompt(stored.trim() ? stored : VISUALIZE_PROMPT);
+  for (const choice of visualizeChoices()) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.dataset.vizPrompt = choice.id;
+    btn.textContent = choice.label;
+    btn.title = choice.note;
+    btn.addEventListener("click", () => applyVisualizePrompt(choice.prompt));
+    el.massPromptExamples.appendChild(btn);
+  }
+  syncVisualizePromptChrome();
+  el.massPromptText?.addEventListener("input", () => {
+    rememberVisualizePrompt(el.massPromptText.value);
+    syncVisualizePromptChrome();
+  });
+  try {
+    if (window.localStorage.getItem(VISUALIZE_REFS_KEY) === "0" && el.massRefsToggle) {
+      el.massRefsToggle.checked = false;
+    }
+  } catch { /* private mode */ }
+  el.massRefsToggle?.addEventListener("change", () => {
+    try {
+      if (el.massRefsToggle.checked) window.localStorage.removeItem(VISUALIZE_REFS_KEY);
+      else window.localStorage.setItem(VISUALIZE_REFS_KEY, "0");
+    } catch { /* private mode */ }
+  });
+}
+
+function setPictureOpen(open) {
+  if (el.massPrompt) el.massPrompt.hidden = !open;
+  if (el.massPicture) el.massPicture.setAttribute("aria-expanded", open ? "true" : "false");
+  syncReferenceOffer();
+  requestAnimationFrame(() => massView.resize());
+}
+
+const REFERENCE_LABELS = {
+  camera: "This view",
+  opposite: "Opposite side",
+  roof: "Roof",
+};
+
+function syncReferenceOffer() {
+  if (!el.massRefs) return;
+  el.massRefs.hidden = massView.mode() !== "orbit";
+}
+
+function canvasSnapshot(src) {
   if (!src?.width || !src.height) return null;
   const maxW = 1536;
   if (src.width <= maxW) return src.toDataURL("image/png");
@@ -9080,6 +10160,39 @@ function massingSnapshot() {
   dest.height = Math.max(1, Math.round(src.height * (maxW / src.width)));
   dest.getContext("2d").drawImage(src, 0, 0, dest.width, dest.height);
   return dest.toDataURL("image/png");
+}
+
+function massingSnapshot() {
+  return canvasSnapshot(el.massCanvas);
+}
+
+function referenceSnapshots() {
+  if (!el.massRefsToggle?.checked || massView.mode() !== "orbit") return [];
+  return massView.referenceCanvases()
+    .map((shot) => ({ role: shot.role, image: canvasSnapshot(shot.canvas) }))
+    .filter((shot) => shot.image);
+}
+
+function showSentViews(shots) {
+  const box = el.massRenderRefs;
+  if (!box) return;
+  box.replaceChildren();
+  if (!shots || shots.length < 2) {
+    box.hidden = true;
+    return;
+  }
+  for (const shot of shots) {
+    const fig = document.createElement("figure");
+    const img = document.createElement("img");
+    const label = REFERENCE_LABELS[shot.role] || "View";
+    img.src = shot.image;
+    img.alt = label;
+    const cap = document.createElement("figcaption");
+    cap.textContent = label;
+    fig.append(img, cap);
+    box.append(fig);
+  }
+  box.hidden = false;
 }
 
 async function generateModel() {
@@ -9092,6 +10205,7 @@ async function generateModel() {
     setStatusMessage("The 3D view is empty.", "warn");
     return;
   }
+  const images = [{ role: "camera", image }, ...referenceSnapshots()];
   if (el.massGenerate) {
     el.massGenerate.dataset.busy = "1";
     el.massGenerate.disabled = true;
@@ -9102,18 +10216,18 @@ async function generateModel() {
     el.massRender.classList.add("is-pending");
     el.massRender.classList.remove("is-ready");
   }
-  if (el.massRenderStatus) {
-    el.massRenderStatus.hidden = false;
-    el.massRenderStatus.textContent = "Generating a photorealistic view…";
-  }
+  setMassRenderStatus("Generating a photorealistic view…");
+  showSentViews(images);
+  startMassRenderClock();
   try {
-    const rendered = await cloud.visualize({ image });
+    const rendered = await cloud.visualize({ images, prompt: promptForGenerate() });
     if (!rendered) throw new CloudError(502, "The visualization could not be generated");
     if (el.massRenderImg) el.massRenderImg.src = rendered;
     if (el.massRender) {
       el.massRender.classList.remove("is-pending");
       el.massRender.classList.add("is-ready");
     }
+    stopMassRenderClock();
     if (el.massRenderStatus) el.massRenderStatus.hidden = true;
     if (el.massShow3d) el.massShow3d.hidden = false;
     if (el.massGenerate) el.massGenerate.textContent = "Generate again";
@@ -9127,10 +10241,8 @@ async function generateModel() {
       el.massRender.classList.add("is-pending");
       el.massRender.classList.remove("is-ready");
     }
-    if (el.massRenderStatus) {
-      el.massRenderStatus.hidden = false;
-      el.massRenderStatus.textContent = message;
-    }
+    stopMassRenderClock();
+    setMassRenderStatus(message);
     if (el.massShow3d) el.massShow3d.hidden = false;
     setStatusMessage(message, "warn");
   } finally {
@@ -9138,7 +10250,7 @@ async function generateModel() {
       delete el.massGenerate.dataset.busy;
       syncGenerateEnabled();
       if (!el.massGenerate.textContent || el.massGenerate.textContent === "Generating…") {
-        el.massGenerate.textContent = "Generate model";
+        el.massGenerate.textContent = "Generate";
       }
     }
   }
@@ -9547,9 +10659,16 @@ function finishMeasure(target) {
 }
 
 function wireMassing() {
+  wireVisualizePrompt();
   el.massClose.addEventListener("click", closeMassing);
+  el.massPicture?.addEventListener("click", () => {
+    setPictureOpen(el.massPrompt?.hidden !== false);
+  });
   el.massGenerate?.addEventListener("click", () => { generateModel(); });
   el.massShow3d?.addEventListener("click", hideMassRender);
+  el.massRenderCopy?.addEventListener("click", () => { withRenderAction(el.massRenderCopy, copyRenderImage); });
+  el.massRenderPaint?.addEventListener("click", () => { withRenderAction(el.massRenderPaint, openRenderInPaint); });
+  el.massRenderSave?.addEventListener("click", () => { withRenderAction(el.massRenderSave, saveRenderImage); });
   el.massOverlay.addEventListener("click", (event) => {
     if (event.target === el.massOverlay) closeMassing();
   });
@@ -11498,7 +12617,8 @@ function restoreMoveOrigin() {
   const session = moveSession;
   if (!session) return;
   if (session.kind === "segment") {
-    store.applyMoveSnapshot([{ ref: session.ref, ...session.origin }], 0, 0, null);
+    if (session.wallBefore) restoreWallEndSnapshot(session.wallBefore);
+    else store.applyMoveSnapshot([{ ref: session.ref, ...session.origin }], 0, 0, null);
   } else if (session.kind === "underlay") {
     moveUnderlayTo(store.doc, session.origin.x, session.origin.y);
   } else if (session.kind === "finishRegion") {
@@ -11537,7 +12657,18 @@ function applyMovePreview(wx, wy) {
   } else if (moveSession.kind === "underlay") {
     moveUnderlayTo(store.doc, moveSession.origin.x + dx, moveSession.origin.y + dy);
   } else {
+    if (!moveSession.wallBefore) moveSession.wallBefore = wallEndSnapshot();
+    restoreWallEndSnapshot(moveSession.wallBefore);
     store.applyMoveSnapshot([{ ref: moveSession.ref, ...moveSession.origin }], dx, dy, null);
+    const moved = objByRef(moveSession.ref);
+    if (moved) {
+      shiftJoinedEnds(store.doc, [{
+        id: moveSession.ref.id,
+        level: moved.level ?? null,
+        old: moveSession.origin,
+        next: { x1: moved.x1, y1: moved.y1, x2: moved.x2, y2: moved.y2 },
+      }], { skuById });
+    }
   }
   moveSession.dx = dx;
   moveSession.dy = dy;
@@ -11658,6 +12789,7 @@ function onMoveClick(wx, wy) {
     moveSession.base = { x: p.x, y: p.y };
     moveSession.dx = 0;
     moveSession.dy = 0;
+    if (moveSession.kind === "segment") moveSession.wallBefore = wallEndSnapshot();
     store.pushUndo(historyDid("Moved"));
     setStatusMessage("Click where that point should land, or type the distance. Enter places it.", "ok");
     render();
@@ -11710,11 +12842,64 @@ function setDistanceField(on) {
   wrap.firstChild.textContent = on ? "Distance " : wrap.dataset.lenLabel;
 }
 
+function setNamedField(wrap, name) {
+  if (!wrap?.firstChild || wrap.firstChild.nodeType !== 3) return;
+  if (wrap.dataset.ownLabel == null) wrap.dataset.ownLabel = wrap.firstChild.textContent;
+  wrap.firstChild.textContent = name == null ? wrap.dataset.ownLabel : name;
+}
+
+function arcGesture() {
+  return Boolean(wallDraft?.arcPhase || arcEdit);
+}
+
+function setArcFieldLabels(on) {
+  setNamedField(el.ctxLenWrap, on ? "Radius " : null);
+  setNamedField(el.ctxAngWrap, on ? "Arc " : null);
+}
+
+function syncArcFields() {
+  setArcFieldLabels(true);
+  const arc = wallDraft?.arcPhase ? draftCentrelineArc() : (arcEdit ? arcForSegment(segmentById(arcEdit.id), arcEdit.cursor || hoverPoint, arcEdit.radiusLock) : null);
+  setHidden(el.ctxLenWrap, false);
+  setHidden(el.ctxAngWrap, false);
+  if (el.ctxLen && activeEl() !== el.ctxLen) {
+    const locked = (wallDraft?.arcPhase && wallDraft.radiusLock > 0) || (arcEdit?.radiusLock > 0);
+    el.ctxLen.value = locked && sizeDraft?.lockW ? sizeDraft.typedW : (arc ? formatLengthMm(arc.radius) : "");
+  }
+  if (el.ctxAng && activeEl() !== el.ctxAng) {
+    el.ctxAng.value = arc ? arc.sweepDeg.toFixed(2) : "";
+  }
+}
+
+function applyArcRadiusLock(metres) {
+  if (!(metres > 0)) return;
+  if (wallDraft?.arcPhase) wallDraft.radiusLock = metres;
+  else if (arcEdit) arcEdit.radiusLock = metres;
+}
+
+function applyArcSweepLock(deg) {
+  let chord = 0;
+  if (wallDraft?.arcPhase) {
+    const { center } = wallDraftLines();
+    chord = segmentLength(center.x1, center.y1, center.x2, center.y2);
+  } else if (arcEdit) {
+    const seg = segmentById(arcEdit.id);
+    if (seg) chord = segmentLength(seg.x1, seg.y1, seg.x2, seg.y2);
+  }
+  const radius = radiusFromSweep(chord, deg);
+  if (!radius) return;
+  applyArcRadiusLock(radius);
+  if (sizeDraft) {
+    sizeDraft.lockW = true;
+    sizeDraft.typedW = formatLengthMm(radius);
+  }
+}
+
 function syncMoveDistanceField() {
   setDistanceField(true);
   if (!el.ctxLen) return;
   const len = moveOffsetLength();
-  if (document.activeElement !== el.ctxLen) {
+  if (activeEl() !== el.ctxLen) {
     el.ctxLen.value = sizeDraft?.lockW ? sizeDraft.typedW : (len < 0.05 ? "" : formatLengthMm(len));
   }
 }
@@ -12151,6 +13336,27 @@ function cancelDrawing() {
     cancelMoveStep();
     return;
   }
+  if (isTrimTool(tool)) {
+    trimHover = null;
+    if (trimCorner?.first) {
+      trimCorner = { mode: trimCorner.mode, first: null };
+      store.clearSelection();
+      setStatusMessage(HINTS[tool], "ok");
+      updateRibbonHint();
+      render();
+      return;
+    }
+    trimCorner = null;
+    tool = "select";
+    // The corner just made leaves both walls selected; leaving the tool should release them.
+    store.clearSelection();
+    if (isTrimTool(activeFunction)) activeFunction = null;
+    syncToolButtons();
+    drawRibbon();
+    setStatusMessage("Trim cancelled.", "ok");
+    render();
+    return;
+  }
   if (wallEdit) {
     if (drag?.kind === "wall-split") drag = null;
     if (wallEdit.mode === "snap" && wallEdit.end) {
@@ -12187,6 +13393,24 @@ function cancelDrawing() {
     return;
   }
 
+  if (arcEdit) {
+    arcEdit = null;
+    sizeDraft = null;
+    setStatusMessage("Arc cancelled.", "ok");
+    updateRibbonHint();
+    render();
+    return;
+  }
+  if (wallDraft?.arcPhase) {
+    wallDraft.arcPhase = false;
+    wallDraft.radiusLock = null;
+    wallDraft.arcCursor = null;
+    sizeDraft = null;
+    setStatusMessage("Back to the ends of the wall.", "ok");
+    updateRibbonHint();
+    render();
+    return;
+  }
   if (abortClickDraft()) {
     drawRibbon();
     render();
@@ -12328,20 +13552,40 @@ function defaultSkuFor(nextTool) {
 function wireCanvas() {
   el.canvas.addEventListener("pointerdown", onPointerDown);
   el.canvas.addEventListener("pointermove", onPointerMove);
-  el.canvas.addEventListener("pointerleave", () => {
-    hoverPoint = null;
-    hover = null;
-    // Stepping onto the option buttons (they sit close to the wall's start)
-    // leaves a stub shorter than a wall, which would switch the corner preview
-    // off. Fall back to the last proper end so every option can be tried.
-    if (wallDraft?.keep && segmentLength(wallDraft.x1, wallDraft.y1, wallDraft.x2, wallDraft.y2) < MIN_TRACE) {
+  el.canvas.addEventListener("pointerleave", (ev) => {
+    const ontoOpts = Boolean(el.wallOpts && ev.relatedTarget && ev.relatedTarget.nodeType === 1 && el.wallOpts.contains(ev.relatedTarget));
+    // Stepping onto the option buttons must not drop the join. A short stub
+    // beside the wall's start used to switch the corner preview off; a long
+    // wall drawn onto another wall's end did the same, because the end
+    // followed the pointer all the way to the buttons. Put the last proper
+    // end back so every option can be tried.
+    if (ontoOpts && wallDraft?.keep) {
       wallDraft.x2 = wallDraft.keep.x;
       wallDraft.y2 = wallDraft.keep.y;
+    } else if (wallDraft?.keep && segmentLength(wallDraft.x1, wallDraft.y1, wallDraft.x2, wallDraft.y2) < MIN_TRACE) {
+      wallDraft.x2 = wallDraft.keep.x;
+      wallDraft.y2 = wallDraft.keep.y;
+    }
+    if (!ontoOpts) {
+      hoverPoint = null;
+      hover = null;
+      if (!wallDraft) wallJoinHold = null;
     }
     const wasProp = propertyHover;
     propertyHover = null;
     const hadSpace = spaceNow.kind !== "empty";
-    if (wasProp || hadSpace || hostedOpeningTool() || wallDraft || shapeDraft || beamStart || lineStart || (tool === "camera" && cameraDraft?.a) || (tool === "section" && sectionDraft?.a) || (tool === "callout" && calloutDraft?.a) || (tool === "revision" && revisionCloudDraft?.a) || (tool === "measure" && measureDraft?.a)) render();
+    if (wasProp || hadSpace || hostedOpeningTool() || tool === "wall" || shapeDraft || beamStart || lineStart || ontoOpts || wallJoinHold || (tool === "camera" && cameraDraft?.a) || (tool === "section" && sectionDraft?.a) || (tool === "callout" && calloutDraft?.a) || (tool === "revision" && revisionCloudDraft?.a) || (tool === "measure" && measureDraft?.a)) render();
+  });
+  el.wallOpts?.addEventListener("pointerenter", () => {
+    pointerOnWallOpts = true;
+  });
+  el.wallOpts?.addEventListener("pointerleave", (ev) => {
+    pointerOnWallOpts = false;
+    if (ev.relatedTarget !== el.canvas && !wallDraft) {
+      wallJoinHold = null;
+      hoverPoint = null;
+    }
+    render();
   });
   window.addEventListener("pointerup", onPointerUp);
   el.canvas.addEventListener("wheel", onWheel, { passive: false });
@@ -12379,6 +13623,10 @@ function refreshLiveSnap() {
   if (tool === "align") {
     const p = applyPdfPick(hoverPoint.x, hoverPoint.y);
     hoverPoint = { x: p.x, y: p.y, kind: p.kind };
+    return;
+  }
+  if (wallDraft?.arcPhase) {
+    wallDraft.arcCursor = { x: hoverPoint.x, y: hoverPoint.y };
     return;
   }
   if (wallDraft) {
@@ -12448,6 +13696,11 @@ function onPointerDown(ev) {
     return;
   }
 
+  if (isTrimTool(tool) && ev.button === 0) {
+    pickTrimWall(wx, wy);
+    return;
+  }
+
   if (tool === "select" && wallEdit?.mode === "split" && !attachPick && !ev.shiftKey && ev.button === 0) {
     const sel = selectedWall();
     if (sel && wallEdit.id === sel.obj.id) {
@@ -12457,6 +13710,11 @@ function onPointerDown(ev) {
       render();
       return;
     }
+  }
+
+  if (tool === "select" && arcEdit && !attachPick && !ev.shiftKey && ev.button === 0) {
+    commitArcEdit({ x: wx, y: wy });
+    return;
   }
 
   if (tool === "select" && wallEdit && !attachPick && !ev.shiftKey && handleWallEditClick(wx, wy)) return;
@@ -13356,6 +14614,11 @@ function clickWallPoint(wx, wy) {
     render();
     return;
   }
+  if (wallDraft?.arcPhase) {
+    wallDraft.arcCursor = { x: wx, y: wy };
+    finishWallSegment();
+    return;
+  }
   const p = applySnap(wx, wy);
   if (!wallDraft) {
     sizeDraft = { lockW: false, lockH: false, typedW: "", typedH: "", axis: "w" };
@@ -13370,6 +14633,15 @@ function clickWallPoint(wx, wy) {
     wallDraft.x2 = p.x;
     wallDraft.y2 = p.y;
   }
+  if (wallArcMode) {
+    wallDraft.arcPhase = true;
+    wallDraft.arcCursor = { x: wx, y: wy };
+    wallDraft.radiusLock = null;
+    sizeDraft = { lockW: false, lockH: false, typedW: "", typedH: "", axis: "w" };
+    updateRibbonHint();
+    render();
+    return;
+  }
   finishWallSegment();
 }
 
@@ -13381,7 +14653,7 @@ function finishWallSegment() {
     return;
   }
   sizeDraft = { lockW: false, lockH: false, typedW: "", typedH: "", axis: "w" };
-  wallDraft = { ...chainStart(end), chained: true };
+  wallDraft = { ...chainStart(end), chained: true, prev: { x: end.x - start.x, y: end.y - start.y } };
   snapGuide = null;
   updateRibbonHint();
   render();
@@ -13959,6 +15231,99 @@ function commitWallEnd(seg, end, point) {
   setStatusMessage(result.message, "ok");
 }
 
+/** The wall under the pointer, ignoring doors and windows hosted on it. */
+function trimWallAt(wx, wy) {
+  const segments = (store.doc.segments || []).filter(onActiveLevel);
+  for (let i = segments.length - 1; i >= 0; i -= 1) {
+    const seg = segments[i];
+    if (!planObjectVisible(seg) || !keptByCut(seg, "wall")) continue;
+    if (distToSeg(seg.x1, seg.y1, seg.x2, seg.y2, wx, wy) < wallHitTol(skuById(seg.sku))) return seg;
+  }
+  return null;
+}
+
+function previewTrimCorner(wx, wy) {
+  const seg = trimWallAt(wx, wy);
+  const firstId = trimCorner?.first?.ref.id;
+  if (!firstId || !seg || seg.id === firstId) {
+    trimHover = null;
+    return;
+  }
+  const first = (store.doc.segments || []).find((item) => item.id === firstId);
+  const point = { x: wx, y: wy };
+  let plan = null;
+  if (first) {
+    plan = trimCorner.mode === "single"
+      ? planTrimSingle(first, seg, point)
+      : planTrimCorner(first, seg, trimCorner.first.pick, point);
+  }
+  trimHover = { seg, plan };
+}
+
+function commitTrimCorner(seg, wx, wy) {
+  const first = trimCorner.first;
+  const single = trimCorner.mode === "single";
+  const picks = [
+    { ref: first.ref, pick: first.pick },
+    { ref: { kind: "segment", id: seg.id }, pick: { x: wx, y: wy } },
+  ];
+  // A single trim changes only the second wall, so only it is named in history.
+  store.pushUndo(historyDid("Trimmed", single ? [picks[1].ref] : [first.ref, picks[1].ref]));
+  const result = single
+    ? trimToBoundary(store.doc, picks, { skuById })
+    : trimToCorner(store.doc, picks, { skuById });
+  if (!result.ok) {
+    store.dropUndo();
+    setStatusMessage(result.message, "warn");
+    render();
+    return;
+  }
+  store.setSelection(result.refs, result.refs[0]);
+  store.persist();
+  trimCorner = { mode: trimCorner.mode, first: null };
+  trimHover = null;
+  setStatusMessage(single
+    ? "Wall trimmed. Click the next boundary wall, or Esc to stop."
+    : "Corner made. Click the next two walls, or Esc to stop.", "ok");
+  updateRibbonHint();
+  render();
+}
+
+function pickTrimWall(wx, wy) {
+  const seg = trimWallAt(wx, wy);
+  if (!seg) {
+    setStatusMessage("Click a wall.", "warn");
+    return;
+  }
+  const single = trimCorner?.mode === "single";
+  if (!wallCanTrim(skuById(seg.sku))) {
+    setStatusMessage(single
+      ? "Trim single works on walls and foundations."
+      : "Trim to corner works on walls and foundations.", "warn");
+    return;
+  }
+  if (!trimCorner?.first) {
+    trimCorner = {
+      mode: trimCorner?.mode || "corner",
+      first: { ref: { kind: "segment", id: seg.id }, pick: { x: wx, y: wy } },
+    };
+    trimHover = null;
+    setStatusMessage(single
+      ? "Click the wall to trim, on the part you want to keep. Esc drops the boundary."
+      : "Click the second wall on the part you want to keep. Esc drops this pick.", "ok");
+    updateRibbonHint();
+    render();
+    return;
+  }
+  if (trimCorner.first.ref.id === seg.id) {
+    setStatusMessage(single
+      ? "Pick a different wall to trim."
+      : "Click a different wall for the second side.", "warn");
+    return;
+  }
+  commitTrimCorner(seg, wx, wy);
+}
+
 function commitWallSplit(seg, point) {
   store.pushUndo(historyDid("Split"));
   const result = splitWallAt(store.doc, { kind: "segment", id: seg.id }, point, { skuById });
@@ -14049,6 +15414,14 @@ function onPointerMove(ev) {
     el.canvas.style.cursor = "crosshair";
     if (moveSession.base) applyMovePreview(wx, wy);
     else applySnap(wx, wy);
+    render();
+    return;
+  }
+
+  if (isTrimTool(tool)) {
+    el.canvas.style.cursor = "crosshair";
+    previewTrimCorner(wx, wy);
+    updateRibbonHint();
     render();
     return;
   }
@@ -14244,7 +15617,22 @@ function onPointerMove(ev) {
       dy = roundGrid(dy, grid);
       grid = null;
     }
+    if (!drag.wallBefore) drag.wallBefore = wallEndSnapshot();
+    restoreWallEndSnapshot(drag.wallBefore);
     store.applyMoveSnapshot(drag.snaps, dx, dy, grid);
+    const joined = [];
+    for (const snap of drag.snaps) {
+      if (snap.ref?.kind !== "segment" || snap.x1 === undefined) continue;
+      const obj = objByRef(snap.ref);
+      if (!obj) continue;
+      joined.push({
+        id: snap.ref.id,
+        level: obj.level ?? null,
+        old: { x1: snap.x1, y1: snap.y1, x2: snap.x2, y2: snap.y2 },
+        next: { x1: obj.x1, y1: obj.y1, x2: obj.x2, y2: obj.y2 },
+      });
+    }
+    if (joined.length) shiftJoinedEnds(store.doc, joined, { skuById });
     render();
     return;
   }
@@ -14379,6 +15767,18 @@ function onPointerMove(ev) {
     el.canvas.style.cursor = roomClickPlaces() ? "pointer" : "crosshair";
   } else {
     propertyHover = null;
+  }
+  if (wallDraft?.arcPhase && !drag) {
+    wallDraft.arcCursor = { x: wx, y: wy };
+    el.canvas.style.cursor = "crosshair";
+    render();
+    return;
+  }
+  if (arcEdit && !drag && tool === "select") {
+    arcEdit.cursor = { x: wx, y: wy };
+    el.canvas.style.cursor = "crosshair";
+    render();
+    return;
   }
   if (wallDraft && !drag) {
     const p = applySnap(wx, wy);
@@ -14879,20 +16279,23 @@ function commitSelectionDelete() {
 }
 
 function wireKeyboard() {
-  window.addEventListener("keyup", (ev) => {
+  const onKeyUp = (ev) => {
     if (ev.key === "Shift") syncElevEdgeCursors(false);
-  });
-  window.addEventListener("blur", () => {
+  };
+  const onBlur = () => {
     if (elevShiftHeld) syncElevEdgeCursors(false);
-  });
-  window.addEventListener("keydown", (ev) => {
+  };
+  window.addEventListener("keyup", onKeyUp);
+  window.addEventListener("blur", onBlur);
+  // The wall elevation window sends its keys to the same handlers.
+  const onKeyDown = (ev) => {
     if (ev.key === "Shift") syncElevEdgeCursors(true);
     if (ev.key === "F6") {
       ev.preventDefault();
       setHistoryOpen(!historyOpen);
       return;
     }
-    const tag = document.activeElement?.tagName;
+    const tag = activeEl()?.tagName;
     const typing = tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA";
 
     if (ev.key === "Shift") return;
@@ -14902,7 +16305,7 @@ function wireKeyboard() {
     // drawing, so typing a width there must not trap the draft. On the open
     // face, blurring the field is the whole press.
     if (typing && ev.key === "Escape") {
-      document.activeElement.blur();
+      activeEl().blur();
       if ((elevationOpen && selectedElevationFace()) || floorHostNow()) return;
     } else if (typing) return;
 
@@ -15041,6 +16444,9 @@ function wireKeyboard() {
     } else if (ev.key === "Enter" && tool === "move" && moveSession?.base) {
       ev.preventDefault();
       finishMove();
+    } else if (ev.key === "Enter" && arcEdit) {
+      ev.preventDefault();
+      commitArcEdit(arcEdit.cursor || hoverPoint || { x: 0, y: 0 });
     } else if (ev.key === "Enter" && wallDraft) {
       ev.preventDefault();
       finishWallSegment();
@@ -15104,7 +16510,9 @@ function wireKeyboard() {
         render();
       }
     }
-  });
+  };
+  window.addEventListener("keydown", onKeyDown);
+  planKeyHandlers = { keydown: onKeyDown, keyup: onKeyUp, blur: onBlur };
 }
 
 // --- object creation ------------------------------------------------------
@@ -15229,10 +16637,39 @@ function commitWall(a, b) {
   const newSku = skuById(placeSkuId);
   seg.top = defaultWallTop(pack.levels, activeLevel, skuDrawnHeight(newSku));
   if (isFaceLocation(location)) seg.location = location;
+  const arc = wallDraft?.arcPhase ? draftCentrelineArc() : null;
+  if (arc) seg.arc = arcRecord(arc);
+  else if (wallDraft?.arcPhase && wallDraft.radiusLock > 0) {
+    setStatusMessage("That radius is shorter than half the wall, so the wall stays straight.", "warn");
+  }
   store.doc.segments.push(seg);
   store.selectOne({ kind: "segment", id });
   store.persist();
   return true;
+}
+
+function commitArcEdit(cursor) {
+  const seg = segmentById(arcEdit?.id);
+  if (!seg) {
+    arcEdit = null;
+    render();
+    return;
+  }
+  const arc = arcForSegment(seg, cursor, arcEdit.radiusLock);
+  if (!arc && arcEdit.radiusLock > 0) {
+    setStatusMessage("That radius is shorter than half the wall.", "warn");
+    render();
+    return;
+  }
+  store.pushUndo(historyDid(arc ? "Curved" : "Straightened"));
+  if (arc) seg.arc = arcRecord(arc);
+  else delete seg.arc;
+  arcEdit = null;
+  sizeDraft = null;
+  store.persist();
+  setStatusMessage(arc ? "Wall curved." : "Wall straightened.", "ok");
+  updateRibbonHint();
+  render();
 }
 
 function commitBeam(a, b) {
@@ -15378,10 +16815,10 @@ function syncSeparationSizeFields() {
   const end = snapGuide ? { x: snapGuide.x, y: snapGuide.y } : (hoverPoint || lineStart);
   const len = segmentLength(lineStart.x, lineStart.y, end.x, end.y);
   const ang = headingDeg(lineStart.x, lineStart.y, end.x, end.y);
-  if (document.activeElement !== el.ctxLen) {
+  if (activeEl() !== el.ctxLen) {
     el.ctxLen.value = sizeDraft?.lockW ? sizeDraft.typedW : (len < 0.05 ? "" : formatLengthMm(len));
   }
-  if (el.ctxAng && document.activeElement !== el.ctxAng) {
+  if (el.ctxAng && activeEl() !== el.ctxAng) {
     el.ctxAng.value = len < 0.05 ? "" : ang.toFixed(1);
   }
 }
@@ -15472,19 +16909,20 @@ function syncSizeHud() {
       ? "Click the opposite corner. Corners snap to walls; draw past them for an overhang."
       : "Click the opposite corner, or type millimetres. Tab switches width / height.";
   }
-  if (document.activeElement !== el.hudW) el.hudW.value = sizeDraft?.lockW ? sizeDraft.typedW : formatLengthMm(shapeDraft.rect.w);
-  if (document.activeElement !== el.hudH) el.hudH.value = sizeDraft?.lockH ? sizeDraft.typedH : formatLengthMm(shapeDraft.rect.h);
+  if (activeEl() !== el.hudW) el.hudW.value = sizeDraft?.lockW ? sizeDraft.typedW : formatLengthMm(shapeDraft.rect.w);
+  if (activeEl() !== el.hudH) el.hudH.value = sizeDraft?.lockH ? sizeDraft.typedH : formatLengthMm(shapeDraft.rect.h);
 }
 
 function handleSizeTyping(ev) {
   const moving = tool === "move" && moveSession?.base;
   const sepDraft = tool === "separation" && lineStart;
-  if (!wallDraft && !shapeDraft && !sepDraft && !moving) return false;
+  if (!wallDraft && !shapeDraft && !sepDraft && !moving && !arcEdit) return false;
   if (ev.target !== el.hudW && ev.target !== el.hudH && ev.target !== el.ctxLen && ev.target !== el.ctxAng) return false;
   if (!sizeDraft) sizeDraft = { lockW: false, lockH: false, typedW: "", typedH: "", axis: "w" };
   if (ev.key === "Enter") {
     ev.preventDefault();
     if (moving) finishMove();
+    else if (arcEdit) commitArcEdit(arcEdit.cursor || hoverPoint);
     else if (wallDraft) finishWallSegment();
     else if (sepDraft) finishSeparationDraft();
     else if (shapeDraft?.rect) finishShapeRect();
@@ -15502,14 +16940,25 @@ function handleDraftNumericShortcut(ev) {
   if (ev.ctrlKey || ev.metaKey || ev.altKey) return false;
   const moving = tool === "move" && moveSession?.base;
   const sepDraft = tool === "separation" && lineStart;
-  if (!wallDraft && !shapeDraft && !sepDraft && !moving) return false;
+  if (!wallDraft && !shapeDraft && !sepDraft && !moving && !arcEdit) return false;
   if (ev.key.length !== 1 || !/[0-9.,]/.test(ev.key)) return false;
-  const tag = document.activeElement?.tagName;
+  const tag = activeEl()?.tagName;
   if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return false;
   ev.preventDefault();
   if (!sizeDraft) sizeDraft = { lockW: false, lockH: false, typedW: "", typedH: "", axis: "w" };
   sizeDraft.lockW = true;
   sizeDraft.typedW = ev.key === "," ? "." : ev.key;
+  if (wallDraft?.arcPhase || arcEdit) {
+    const radius = parseLengthInput(sizeDraft.typedW, 1);
+    if (wallDraft?.arcPhase) wallDraft.radiusLock = radius;
+    else arcEdit.radiusLock = radius;
+    if (el.ctxLen) {
+      el.ctxLen.focus();
+      el.ctxLen.value = sizeDraft.typedW;
+    }
+    render();
+    return true;
+  }
   if (moving) {
     const at = hoverPoint || moveSession.base;
     applyMovePreview(at.x, at.y);
@@ -15737,7 +17186,7 @@ function syncObjectLevel(obj) {
     .map((s) => `<option value="${escapeHtml(s.id)}">${escapeHtml(s.label)}</option>`)
     .join("");
   const id = selectedInspectorStationId(stations, obj.level || pack.system.defaultLevel, activeStationId);
-  if (document.activeElement !== el.ctxOLevel) el.ctxOLevel.value = id;
+  if (activeEl() !== el.ctxOLevel) el.ctxOLevel.value = id;
 }
 
 /** "Top: up to [level] / fixed height" for a selected drawn wall. Only offered
@@ -15751,7 +17200,7 @@ function syncWallTop(seg) {
     .filter((l) => l.elevation > (pack.levels.find((x) => x.id === effectiveLevel(seg, pack))?.elevation ?? 0) + 1e-6 && l.kind !== "reference" && !l.parentId)
     .sort((a, b) => a.elevation - b.elevation)[0];
   el.ctxTop.options[0].textContent = `Up to ${above?.name || above?.id || "level above"}`;
-  if (document.activeElement !== el.ctxTop) el.ctxTop.value = seg.top === "level-above" ? "level-above" : "fixed";
+  if (activeEl() !== el.ctxTop) el.ctxTop.value = seg.top === "level-above" ? "level-above" : "fixed";
 }
 
 /** Wall height for a drawn wall or a room, and sill / width / height for an
@@ -15763,7 +17212,7 @@ function syncHeightFields(obj, kind) {
   const segWall = seg ? wallsCache.find((w) => w.id === seg.id) : null;
   const showSegH = Boolean(seg && segWall && segWall.category !== "foundation");
   setHidden(el.ctxWallHWrap, !(showSegH || room));
-  if (el.ctxWallH && (showSegH || room) && document.activeElement !== el.ctxWallH) {
+  if (el.ctxWallH && (showSegH || room) && activeEl() !== el.ctxWallH) {
     if (showSegH) {
       el.ctxWallH.value = formatLengthMm(segWall.height);
       el.ctxWallH.placeholder = "";
@@ -15779,16 +17228,19 @@ function syncHeightFields(obj, kind) {
   const openingCat = opening ? skuById(opening.sku)?.category : null;
   const showSill = openingCat === "window" || openingCat === "opening";
   setHidden(el.ctxSillWrap, !showSill);
+  const arch = Boolean(opening && isArchHead(skuById(opening.sku)));
   setHidden(el.ctxOWidthWrap, !opening);
   setHidden(el.ctxOHeightWrap, !opening);
+  setHidden(el.ctxORiseWrap, !arch);
   setHidden(el.ctxOSizeNote, !size?.nonStandard);
   if (!opening) return;
   const put = (input, metres) => {
-    if (input && document.activeElement !== input) input.value = Number.isFinite(metres) ? formatLengthMm(metres) : "";
+    if (input && activeEl() !== input) input.value = Number.isFinite(metres) ? formatLengthMm(metres) : "";
   };
   put(el.ctxSill, size.sill);
   put(el.ctxOWidth, size.width);
   put(el.ctxOHeight, size.height);
+  if (arch) put(el.ctxORise, size.rise);
   const note = el.ctxOSizeNote?.querySelector("strong");
   if (note) note.textContent = "Non-standard size: firm to confirm";
 }
@@ -15832,15 +17284,25 @@ function setOpeningSize(field, raw, { allowZero = false } = {}) {
   const opening = soleOf("opening");
   const value = typedMm(raw, { allowZero });
   if (!opening || value === undefined) { render(); return; }
-  const g = skuById(opening.sku)?.geometry || {};
-  // Typing the type's own value is the same as having no override.
-  const typeValue = g[field];
-  store.pushUndo(`Set the ${field} of ${historyThing(store.primary)} to ${String(raw).trim()} mm`);
-  opening[field] = value === null || (Number.isFinite(typeValue) && Math.abs(typeValue - value) < 0.0005) ? null : value;
-  if (isArchHead(skuById(opening.sku))) {
+  const sku = skuById(opening.sku);
+  const g = sku?.geometry || {};
+  const arch = isArchHead(sku);
+  if (field === "rise" && !arch) { render(); return; }
+  const clearedRise = field === "rise" && (value === null || value >= (openingSize(pack, opening).width / 2) - 0.0005);
+  store.pushUndo(clearedRise
+    ? `Set the rise of ${historyThing(store.primary)} to a semicircle`
+    : `Set the ${field} of ${historyThing(store.primary)} to ${String(raw).trim()} mm`);
+  if (field === "rise") {
+    opening.rise = clearedRise ? null : value;
+  } else {
+    // Typing the type's own value is the same as having no override.
+    const typeValue = g[field];
+    opening[field] = value === null || (Number.isFinite(typeValue) && Math.abs(typeValue - value) < 0.0005) ? null : value;
+  }
+  if (arch) {
     const size = openingSize(pack, opening);
-    const fitted = fitArchSize(size.width, size.height);
-    const typeH = skuById(opening.sku)?.geometry?.height;
+    const fitted = fitArchSize(size.width, size.height, opening.rise);
+    const typeH = g.height;
     if (Math.abs(fitted.height - (size.height || 0)) > 0.0005) {
       opening.height = Number.isFinite(typeH) && Math.abs(typeH - fitted.height) < 0.0005 ? null : fitted.height;
     }
@@ -15851,6 +17313,7 @@ function setOpeningSize(field, raw, { allowZero = false } = {}) {
 el.ctxSill?.addEventListener("change", (e) => setOpeningSize("sill", e.target.value, { allowZero: true }));
 el.ctxOWidth?.addEventListener("change", (e) => setOpeningSize("width", e.target.value));
 el.ctxOHeight?.addEventListener("change", (e) => setOpeningSize("height", e.target.value));
+el.ctxORise?.addEventListener("change", (e) => setOpeningSize("rise", e.target.value));
 
 el.ctxRemove?.addEventListener("click", () => {
   const room = soleOf("room");
@@ -16005,6 +17468,275 @@ function serviceProfileEdge() {
   return null;
 }
 
+// --- second screen --------------------------------------------------------
+// The wall face can live in its own window. Its parts are moved there as DOM
+// nodes, so every listener, `el` reference and ui.js function stays as it is
+// and still runs here, in the plan tab, against `store`. wall-screen.html is
+// only a frame.
+
+function screenAlive() {
+  try { return Boolean(screenWin && !screenWin.closed); } catch { return false; }
+}
+
+/** The focused element of whichever window has focus. */
+function activeEl() {
+  if (screenAlive()) {
+    try {
+      const doc = screenWin.document;
+      if (doc.hasFocus()) return doc.activeElement;
+    } catch { /* the window is going away */ }
+  }
+  return document.activeElement;
+}
+
+function faceDoc() {
+  return el.wallFace?.ownerDocument || document;
+}
+
+function faceById(id) {
+  return faceDoc().getElementById(id);
+}
+
+function faceQueryAll(selector) {
+  return el.wallFace ? el.wallFace.querySelectorAll(selector) : [];
+}
+
+function rememberFaceHomes() {
+  if (faceHomes.size) return;
+  for (const node of [el.wallFace, el.wallFaceTools, el.wallFaceNotes]) {
+    if (!node?.parentNode) continue;
+    const mark = document.createComment("wall-face");
+    node.parentNode.insertBefore(mark, node);
+    faceHomes.set(node, mark);
+  }
+}
+
+function mountFaceInStrip() {
+  for (const [node, mark] of faceHomes) {
+    if (mark.parentNode && node.parentNode !== mark.parentNode) mark.parentNode.insertBefore(node, mark);
+  }
+}
+
+function screenKeyDown(ev) { planKeyHandlers?.keydown(ev); }
+function screenKeyUp(ev) { planKeyHandlers?.keyup(ev); }
+function screenBlur() { planKeyHandlers?.blur(); }
+function screenResize() { window.setTimeout(() => render(), 0); }
+
+function bindScreenDocument(win, doc) {
+  doc.addEventListener("keydown", screenKeyDown);
+  doc.addEventListener("keyup", screenKeyUp);
+  doc.addEventListener("pointerdown", closeInfoNoteOutside);
+  win.addEventListener("blur", screenBlur);
+  win.addEventListener("resize", screenResize);
+}
+
+/** The second window's chrome, once its page has loaded. Null until then. */
+function ensureScreenRefs() {
+  if (!screenAlive()) return null;
+  let doc;
+  try { doc = screenWin.document; } catch { return null; }
+  const host = doc.getElementById("screen-face");
+  if (!host || doc.readyState === "loading") return null;
+  if (screenRefs && screenRefs.doc === doc && screenRefs.dock.isConnected) return screenRefs;
+  host.replaceChildren();
+  const dock = doc.createElement("div");
+  dock.className = "svc-profile-dock wall-screen-dock";
+  const head = doc.createElement("div");
+  head.className = "svc-profile-head";
+  const titleRow = doc.createElement("div");
+  titleRow.className = "svc-profile-title-row";
+  const title = doc.createElement("p");
+  title.className = "svc-profile-title";
+  titleRow.append(title);
+  const done = doc.createElement("button");
+  done.type = "button";
+  done.className = "svc-profile-exit";
+  done.textContent = "Done";
+  done.title = "Clear this wall. The window stays open for the next one. Escape selects the wall first, then clears it.";
+  done.addEventListener("click", () => closeOpenFace());
+  head.append(titleRow, done);
+  dock.append(head);
+  host.append(dock);
+  screenRefs = { win: screenWin, doc, host, dock, head, titleRow, title, done };
+  bindScreenDocument(screenWin, doc);
+  return screenRefs;
+}
+
+/** Put the wall-face parts where the host says. False while the second window is still loading. */
+function placeFaceParts(toScreen) {
+  rememberFaceHomes();
+  if (!toScreen) {
+    mountFaceInStrip();
+    return true;
+  }
+  const refs = ensureScreenRefs();
+  if (!refs) return false;
+  screenRetryTries = 0;
+  if (el.wallFace.parentNode !== refs.dock) {
+    refs.titleRow.append(el.wallFaceNotes);
+    refs.head.insertBefore(el.wallFaceTools, refs.done);
+    refs.dock.append(el.wallFace);
+  }
+  return true;
+}
+
+/** Waiting message, or the face, and the window title that goes with it. */
+function syncScreenPanes(showFace, label = "") {
+  const refs = screenRefs;
+  if (!refs || !screenAlive()) return;
+  try {
+    const waiting = refs.doc.getElementById("screen-waiting");
+    if (waiting) waiting.hidden = showFace;
+    refs.host.hidden = !showFace;
+    const next = showFace && label ? `Wall elevation · ${label}` : `Wall elevation · ${store.doc.name || "Untitled job"}`;
+    if (refs.doc.title !== next) refs.doc.title = next;
+  } catch { /* the window is going away */ }
+}
+
+/** The face title goes in the header of whichever window holds the face. */
+function setFaceTitle(text) {
+  const inScreen = elevationHost === "screen" && screenRefs && el.wallFace?.parentNode === screenRefs.dock;
+  const node = inScreen ? screenRefs.title : el.serviceProfileTitle;
+  if (node && node.textContent !== text) node.textContent = text;
+}
+
+function screenFeatures() {
+  const w = Math.min(1280, Math.max(720, (window.screen?.availWidth || 1280) - 120));
+  const h = Math.min(860, Math.max(520, (window.screen?.availHeight || 860) - 120));
+  return `popup,width=${w},height=${h}`;
+}
+
+/**
+ * Find the second window by its fixed name, or open it. Has to run inside a
+ * click. Null when the browser blocks it, or when `create` is off and there
+ * is no wall-screen window to find.
+ */
+function acquireScreen({ create }) {
+  let win = null;
+  try { win = create ? window.open("", SCREEN_NAME, screenFeatures()) : window.open("", SCREEN_NAME); } catch { win = null; }
+  if (!win) return null;
+  let ours = false;
+  let loading = false;
+  try { ours = Boolean(win.document.getElementById("screen-face")); } catch { ours = false; }
+  try { loading = /wall-screen\.html$/.test(win.location.pathname); } catch { loading = false; }
+  if (!ours && !loading) {
+    if (!create) {
+      try { win.close(); } catch { /* nothing to close */ }
+      return null;
+    }
+    try { win.location.replace(new URL(SCREEN_URL, window.location.href).href); } catch { /* blocked */ }
+  }
+  return win;
+}
+
+function useScreen(win) {
+  screenWin = win;
+  screenRefs = null;
+  elevationHost = "screen";
+  window.__tspWallScreen = win;
+  try { window.sessionStorage.setItem(SCREEN_HINT_KEY, "1"); } catch { /* private mode */ }
+  startScreenWatch();
+}
+
+function focusScreen() {
+  try { screenWin?.focus(); } catch { /* the browser may refuse */ }
+}
+
+function startScreenWatch() {
+  if (screenWatch) return;
+  screenWatch = window.setInterval(() => {
+    if (elevationHost !== "screen") {
+      stopScreenWatch();
+      return;
+    }
+    if (!screenAlive()) {
+      screenClosed();
+      return;
+    }
+    // A reload of the second window gives it a fresh page to fill.
+    try {
+      const doc = screenWin.document;
+      if (screenRefs && screenRefs.doc !== doc && doc.getElementById("screen-face")) render();
+    } catch { /* mid-navigation */ }
+  }, 400);
+}
+
+function stopScreenWatch() {
+  if (screenWatch) window.clearInterval(screenWatch);
+  screenWatch = 0;
+}
+
+/** The second window was closed. The plan keeps its selection; the face goes. */
+function screenClosed({ renderAfter = true } = {}) {
+  stopScreenWatch();
+  elevationHost = "strip";
+  screenWin = null;
+  screenRefs = null;
+  try { delete window.__tspWallScreen; } catch { /* nothing to remove */ }
+  try { window.sessionStorage.removeItem(SCREEN_HINT_KEY); } catch { /* private mode */ }
+  mountFaceInStrip();
+  endFace();
+  setStatusMessage("The second screen was closed.", "ok", {
+    label: "Open this face",
+    run: () => {
+      openWallFace();
+      render();
+    },
+  });
+  if (renderAfter) render();
+}
+
+/** The window is still loading its page: look again in a moment, then give up. */
+function retryScreenSoon() {
+  if (screenRetry) return;
+  screenRetryTries += 1;
+  if (screenRetryTries > 40) {
+    screenRetryTries = 0;
+    screenClosed({ renderAfter: false });
+    setStatusMessage("The browser blocked the second screen. Allow pop-ups for this site, then try again.", "warn");
+    return;
+  }
+  screenRetry = window.setTimeout(() => {
+    screenRetry = 0;
+    render();
+  }, 150);
+}
+
+function openSecondScreen() {
+  if (elevationHost === "screen") {
+    focusScreen();
+    return;
+  }
+  const win = acquireScreen({ create: true });
+  if (!win) {
+    setStatusMessage("The browser blocked the second screen. Allow pop-ups for this site, then try again.", "warn");
+    return;
+  }
+  useScreen(win);
+  focusScreen();
+  render();
+}
+
+/** From the inspector preview: open this face in the second window, without the strip. */
+function openPreviewOnSecondScreen() {
+  const face = selectedElevationFace();
+  if (!face) return;
+  if (elevFinishDraft && elevFinishDraft.face.wallId === face.wallId) return;
+  closePreviewCallout();
+  if (elevationHost === "screen" && !screenAlive()) screenClosed({ renderAfter: false });
+  if (elevationHost !== "screen") {
+    const win = acquireScreen({ create: true });
+    if (!win) {
+      setStatusMessage("The browser blocked the second screen. Allow pop-ups for this site, then try again.", "warn");
+      return;
+    }
+    useScreen(win);
+  }
+  openWallFace();
+  focusScreen();
+  render();
+}
+
 // --- wall elevation (aansig) ---------------------------------------------
 
 /** The wall face the current selection stands for, or null. */
@@ -16015,6 +17747,11 @@ function selectedElevationFace() {
 
 function selectedOpeningId() {
   return store.selected.length === 1 && store.primary?.kind === "opening" ? store.primary.id : null;
+}
+
+/** A new finish is waiting on this face. The arch, door, or window that was clicked is not the subject. */
+function placingFinishOn(wallId) {
+  return Boolean(wallId && faceAddPending && faceAddPending.wallId === wallId);
 }
 
 /** Drawn wall an opening sits in, when that wall can be selected on its own. */
@@ -16113,7 +17850,7 @@ function escapeOpenFace() {
 }
 
 /** Close the open face in one press. The plan keeps whatever it had selected. */
-function closeOpenFace() {
+function endFace() {
   elevationOpen = false;
   foundationPick = null;
   faceAddPending = null;
@@ -16121,6 +17858,11 @@ function closeOpenFace() {
   elevFinishDraft = null;
   dropElevGapHold();
   faceWallSelected = false;
+}
+
+/** Ends the face. With the second screen that window is left open, waiting for the next wall (Done). */
+function closeOpenFace() {
+  endFace();
   setStatusMessage("This wall is closed.", "ok", {
     label: "Open this wall",
     run: () => {
@@ -16213,6 +17955,11 @@ function elevationDragEdit(d) {
         face,
       ).height };
     }
+    case "spring": {
+      const head = o.sill + o.height;
+      const at = d.springZ != null ? d.springZ : head - (o.rise > 0 ? o.rise : o.width / 2) + dy;
+      return resizeArchRise({ sill: o.sill, height: o.height, width: o.width }, at);
+    }
     case "wall-top": return { height: o.height + dy };
     default: return {};
   }
@@ -16259,6 +18006,8 @@ let elevationLayout = null;
 // pan is that fit. The inspector preview does not use this.
 let elevationView = { zoom: 1, panX: 0, panY: 0 };
 let elevationViewFace = "";
+/** A face that has just opened and still has to be brought into the plan the strip leaves clear. */
+let framePlanAfterChrome = null;
 let elevationPan = null;
 
 function setElevationView(next) {
@@ -16275,12 +18024,100 @@ function elevationViewFitted() {
   return elevationView.zoom === 1 && elevationView.panX === 0 && elevationView.panY === 0;
 }
 
+/** "Not aligned" while this elevation's own zoom or pan has left the plan match. */
+function syncElevationAlignState(show) {
+  if (!el.elevAlignState) return;
+  el.elevAlignState.hidden = !show || elevationViewFitted();
+}
+
 function resetElevationView() {
   elevationView = { zoom: 1, panX: 0, panY: 0 };
   elevationViewFace = "";
+  elevationHold = null;
   elevationPan = null;
   el.elevBody?.classList.remove("is-panning");
+  clearElevationAlignment();
 }
+
+// The face centre in the strip. Panning the plan does not move it. Moving the
+// wall does. Align is what brings the wall's centre onto it.
+let elevationHold = null;
+let elevationAlignTimer = 0;
+
+function clearElevationAlignment() {
+  if (elevationAlignTimer) window.clearTimeout(elevationAlignTimer);
+  elevationAlignTimer = 0;
+  const host = el.elevAlignLines;
+  if (!host) return;
+  host.replaceChildren();
+  host.hidden = true;
+}
+
+/** Where the wall's centre sits in the strip with the plan as it is now. */
+function projectedFaceCenter(wall, face) {
+  const canvasRect = el.canvas?.getBoundingClientRect();
+  const stripRect = el.elevBody?.getBoundingClientRect();
+  const shiftX = canvasRect && stripRect ? canvasRect.left - stripRect.left - (el.elevBody.clientLeft || 0) : 0;
+  const projected = planFaceFrame({ ...wall, side: face.side }, cam, shiftX);
+  if (!projected) return null;
+  const half = wall.length / 2 * projected.scale;
+  return { projected, center: projected.originX + projected.dir * half };
+}
+
+/** Bring the wall into the open plan, and shrink the zoom if it is too long for the elevation. */
+function fitWallOnOpen(wall) {
+  const canvas = el.canvas;
+  const stripW = el.elevBody?.clientWidth || 0;
+  if (!canvas || stripW < 2 || !(cam.scale > 0) || !(wall.length > 0)) return;
+  const margin = 32;
+  const available = Math.min(stripW, canvas.clientWidth) - margin * 2;
+  if (available > 40 && wall.length * cam.scale > available) {
+    const midX = (wall.x1 + wall.x2) / 2;
+    const midY = (wall.y1 + wall.y2) / 2;
+    const sx = cam.ox + midX * cam.scale;
+    const sy = cam.oy + midY * cam.scale;
+    cam.scale = available / wall.length;
+    cam.ox = sx - midX * cam.scale;
+    cam.oy = sy - midY * cam.scale;
+  }
+  const pad = 24;
+  const x1 = cam.ox + wall.x1 * cam.scale;
+  const x2 = cam.ox + wall.x2 * cam.scale;
+  const y1 = cam.oy + wall.y1 * cam.scale;
+  const y2 = cam.oy + wall.y2 * cam.scale;
+  cam.ox += nudgeIntoView(x1, x2, pad, canvas.clientWidth - pad);
+  cam.oy += nudgeIntoView(y1, y2, pad, canvas.clientHeight - pad);
+}
+
+/** Strip placement: plan scale and direction, held against the wall. */
+function heldFaceFrame(wall, face) {
+  const track = faceTrack({ ...wall, side: face.side });
+  const width = el.elevBody?.clientWidth || 0;
+  if (!track || !(cam.scale > 0)) return null;
+  const key = `${wall.id}:${face.side}`;
+  const fresh = !elevationHold || elevationHold.faceKey !== key;
+  const settle = fresh || elevationHold.pending;
+  if (settle && width <= 2) {
+    elevationHold = { faceKey: key, axis: track.axis, mid: track.mid, centerX: 0, pending: true };
+  } else if (settle) {
+    fitWallOnOpen(wall);
+    const placed = projectedFaceCenter(wall, face);
+    let center = placed ? placed.center : width / 2;
+    const half = wall.length / 2 * cam.scale;
+    const margin = 16;
+    center += nudgeIntoView(center - half, center + half, margin, width - margin);
+    const next = trackFaceCenter(null, track, cam.scale, center);
+    elevationHold = { ...next, faceKey: key, pending: false };
+  } else {
+    const next = trackFaceCenter(elevationHold, track, cam.scale, 0);
+    elevationHold = { ...next, faceKey: key, pending: false };
+  }
+  const frame = planFaceFrame({ ...wall, side: face.side }, { scale: cam.scale, ox: 0, oy: 0 }, 0);
+  if (!frame) return null;
+  const half = wall.length / 2 * frame.scale;
+  return { ...frame, originX: elevationHold.centerX - frame.dir * half };
+}
+
 
 const ELEV_INFO_KEY = "v2-elev-info-dismissed";
 const FLOOR_INFO_KEY = "v2-floor-info-dismissed";
@@ -16331,7 +18168,8 @@ function syncElevHints(show) {
 function placeElevCoach() {
   const handle = el.elevBody?.querySelector(".elev-wall-top-handle");
   const coach = el.elevCoach;
-  const dock = el.serviceProfileDock;
+  // The dock that holds the coach: the strip, or the second window's.
+  const dock = coach?.offsetParent || el.serviceProfileDock;
   if (!handle || !coach || coach.hidden || !dock) return;
   const hr = handle.getBoundingClientRect();
   const dr = dock.getBoundingClientRect();
@@ -16395,26 +18233,28 @@ function fillFaceTypeSelect() {
 }
 
 function setFaceField(node, value) {
-  if (!node || document.activeElement === node) return;
+  if (!node || activeEl() === node) return;
   node.value = value ?? "";
 }
 
 function syncWallFaceChrome(show) {
   const column = document.getElementById("v2-plan-column");
+  // The strip's own chrome (its height and its resize handle) only applies while the face is in the strip.
+  const inStrip = show && elevationHost !== "screen";
   const was = column?.classList.contains("is-wall-face");
-  column?.classList.toggle("is-wall-face", show);
+  column?.classList.toggle("is-wall-face", inStrip);
   const dock = el.serviceProfileDock;
   const handle = document.getElementById("v2-resize-profile");
   if (handle) {
-    handle.setAttribute("aria-label", show ? "Resize wall elevation" : "Resize route profile");
-    handle.title = show ? "Drag to give the plan or the elevation more room" : "Drag to change height";
+    handle.setAttribute("aria-label", inStrip ? "Resize wall elevation" : "Resize route profile");
+    handle.title = inStrip ? "Drag to give the plan or the elevation more room" : "Drag to change height";
   }
-  if (show && !was) {
+  if (inStrip && !was) {
     const parentH = column?.clientHeight || 0;
     const stored = Number(window.localStorage.getItem(elevDockHeightKey()));
     applyElevDockHeight(Number.isFinite(stored) && stored > 0 ? stored : parentH * ELEV_DOCK_RATIO);
   }
-  if (!show && was && dock) {
+  if (!inStrip && was && dock) {
     releasePlanPeek(undefined, { restore: false });
     const remembered = Number(window.localStorage.getItem(PROFILE_HEIGHT_KEY));
     dock.style.height = Number.isFinite(remembered) && remembered > 0 ? `${Math.round(remembered)}px` : "";
@@ -16429,7 +18269,7 @@ function syncWallFaceChrome(show) {
   const exit = document.getElementById("v2-profile-exit");
   if (exit) {
     exit.textContent = "Exit";
-    exit.title = show
+    exit.title = inStrip
       ? "Close this wall. Escape selects the wall first, then closes."
       : "Close the route profile and the Services panel. A click on empty plan leaves them open. Escape does the same.";
   }
@@ -16452,13 +18292,15 @@ function syncFaceEditor() {
     return;
   }
   el.faceEditor?.classList.remove("is-foundation");
-  document.querySelectorAll("[data-face-place]").forEach((btn) => { btn.hidden = false; });
+  faceQueryAll("[data-face-place]").forEach((btn) => { btn.hidden = false; });
   setHidden(el.faceFoundationAdd, true);
   fillFaceTypeSelect();
   const drafting = Boolean(elevFinishDraft && elevFinishDraft.face?.wallId === model?.wallId);
   const pending = Boolean(faceAddPending && faceAddPending.wallId === model?.wallId);
   const wallOn = faceWallSelected && !pending && !drafting;
-  const openingId = wallOn || drafting ? null : selectedOpeningId();
+  // Pending wins over a selected arch, door, or window. Otherwise the box
+  // names that opening and hides the new-finish fields.
+  const openingId = wallOn || drafting || pending ? null : selectedOpeningId();
   const opening = openingId ? model?.openings.find((o) => o.id === openingId) : null;
   const band = !opening && !wallOn && !drafting && selectedBandId ? model?.finishBands.find((b) => b.id === selectedBandId) : null;
   const product = band ? finishProductById(store.doc, band.productId) : null;
@@ -16490,12 +18332,13 @@ function syncFaceEditor() {
   if (opening) {
     const kind = opening.category === "door" ? "Door" : opening.head === "arch" ? "Arch" : opening.category === "opening" ? "Opening" : "Window";
     if (el.faceWhich) el.faceWhich.textContent = opening.name || kind;
-    if (el.faceMeta) el.faceMeta.textContent = `${kind} · ${Math.round(opening.width * 1000)} × ${Math.round(opening.height * 1000)}`;
+    const riseNote = opening.head === "arch" && opening.rise > 0 ? `, rise ${Math.round(opening.rise * 1000)}` : "";
+    if (el.faceMeta) el.faceMeta.textContent = `${kind} · ${Math.round(opening.width * 1000)} × ${Math.round(opening.height * 1000)}${riseNote}`;
     if (el.faceSwatch) el.faceSwatch.style.background = "#fffdf8";
     setHidden(el.faceBill, true);
     return;
   }
-  const kicker = document.getElementById("v2-face-place-kicker");
+  const kicker = faceById("v2-face-place-kicker");
   if (kicker) kicker.textContent = pending ? "Place this finish" : "Reshape";
   const billCategory = pending ? (el.faceType?.value || "") : band?.category;
   const typedName = String(el.faceProduct?.value || "").trim();
@@ -16511,7 +18354,7 @@ function syncFaceEditor() {
     if (el.faceWhich) el.faceWhich.textContent = "New finish";
     if (el.faceMeta) el.faceMeta.textContent = "Choose where it goes. Nothing is added until then. Colour and exact millimetres come after.";
     if (el.faceSwatch) el.faceSwatch.style.background = finishSwatch(el.faceType?.value || "paint");
-    document.querySelectorAll("[data-face-place]").forEach((btn) => {
+    faceQueryAll("[data-face-place]").forEach((btn) => {
       btn.setAttribute("aria-pressed", "false");
       btn.disabled = false;
     });
@@ -16528,11 +18371,11 @@ function syncFaceEditor() {
   if (el.faceSwatch) el.faceSwatch.style.background = band.fill || finishSwatch(band.category);
   setFaceField(el.faceType, band.category);
   setFaceField(el.faceProduct, product?.name || "");
-  setFaceField(document.getElementById("v2-face-bottom"), formatLengthMm(band.bottom));
-  setFaceField(document.getElementById("v2-face-top"), formatLengthMm(band.top));
-  setFaceField(document.getElementById("v2-face-from"), formatLengthMm(band.from));
-  setFaceField(document.getElementById("v2-face-to"), formatLengthMm(band.to));
-  document.querySelectorAll("[data-face-place]").forEach((btn) => {
+  setFaceField(faceById("v2-face-bottom"), formatLengthMm(band.bottom));
+  setFaceField(faceById("v2-face-top"), formatLengthMm(band.top));
+  setFaceField(faceById("v2-face-from"), formatLengthMm(band.from));
+  setFaceField(faceById("v2-face-to"), formatLengthMm(band.to));
+  faceQueryAll("[data-face-place]").forEach((btn) => {
     const whole = band.from <= 0.02 && model.length - band.to <= 0.02 && band.bottom <= 0.02 && model.height - band.top <= 0.02;
     const low = band.bottom <= 0.02 && Math.abs(band.top - 0.15) < 0.02;
     const dado = band.bottom <= 0.02 && Math.abs(band.top - 1.2) < 0.02;
@@ -16543,7 +18386,7 @@ function syncFaceEditor() {
   if (!paint) return;
   const paints = (store.doc.finishProducts || []).filter((p) => p.category === "paint" && (p.colourName || p.swatch));
   const pick = el.faceColourPick;
-  if (pick && document.activeElement !== pick) {
+  if (pick && activeEl() !== pick) {
     const current = product?.id && paints.some((p) => p.id === product.id) ? product.id : "";
     const safe = (text) => String(text).replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" }[ch]));
     pick.innerHTML = `<option value="">Choose a colour</option>${paints.map((p) => `<option value="${safe(p.id)}">${safe([p.manufacturer, p.colourName || p.name, p.colourCode].filter(Boolean).join(" · "))}</option>`).join("")}<option value="__other__">Other colour</option>`;
@@ -16552,7 +18395,7 @@ function syncFaceEditor() {
   setFaceField(el.faceMaker, product?.manufacturer || "");
   setFaceField(el.faceColourName, product?.colourName || "");
   setFaceField(el.faceColourCode, product?.colourCode || "");
-  if (el.faceSwatchInput && document.activeElement !== el.faceSwatchInput && product?.swatch) el.faceSwatchInput.value = product.swatch;
+  if (el.faceSwatchInput && activeEl() !== el.faceSwatchInput && product?.swatch) el.faceSwatchInput.value = product.swatch;
 }
 
 /** The same named block as a new finish: the type on the right, place underneath. */
@@ -16569,7 +18412,7 @@ function syncFoundationEditor(model) {
   setHidden(el.faceBill, true);
   setHidden(el.faceUp, true);
   setHidden(el.faceAlong, true);
-  document.querySelectorAll("[data-face-place]").forEach((btn) => { btn.hidden = true; });
+  faceQueryAll("[data-face-place]").forEach((btn) => { btn.hidden = true; });
   setHidden(el.faceFoundationAdd, false);
   if (el.faceType) el.faceType.disabled = false;
   if (el.faceRemove) {
@@ -16577,7 +18420,7 @@ function syncFoundationEditor(model) {
     el.faceRemove.textContent = "Cancel";
     el.faceRemove.title = "Leave this foundation unplaced.";
   }
-  const kicker = document.getElementById("v2-face-place-kicker");
+  const kicker = faceById("v2-face-place-kicker");
   if (kicker) kicker.textContent = "Place this foundation";
   if (el.faceWhich) el.faceWhich.textContent = "New foundation";
   if (el.faceMeta) el.faceMeta.textContent = `${Math.round(offer.depth * 1000)} mm deep. Nothing is added until you place it under the wall.`;
@@ -16773,7 +18616,7 @@ function commitFloorGap() {
 /** Digits, Backspace, Enter, Escape and the arrows, while a floor corner or edge is held or dragged. */
 function floorGapKey(ev) {
   if (!floorHostNow() || ev.ctrlKey || ev.metaKey || ev.altKey) return false;
-  const tag = document.activeElement?.tagName;
+  const tag = activeEl()?.tagName;
   if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return false;
   const live = floorGapLive();
   const arrow = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down" }[ev.key];
@@ -17164,7 +19007,7 @@ const FLOOR_FLASH_MS = 1440;
 function showFloorOnPlan() {
   if (!floorHostNow()) return;
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const live = document.getElementById("v2-face-flash-live");
+  const live = el.faceFlashLive;
   if (live) live.textContent = `${reduced ? "Showing" : "Flashing"} this floor on the plan.`;
   if (reduced) {
     releasePlanPeek();
@@ -17420,8 +19263,12 @@ function syncFloorPictureDock() {
   setHidden(el.faceAdd, false);
   if (el.elevFit) {
     el.elevFit.disabled = elevationViewFitted();
+    el.elevFit.textContent = "Fit";
     el.elevFit.title = "Show the whole floor again";
   }
+  setHidden(el.elevAlign, true);
+  syncElevationAlignState(false);
+  clearElevationAlignment();
   if (el.elevFlash) el.elevFlash.title = "Show this floor on the plan";
   const exit = document.getElementById("v2-profile-exit");
   if (exit) exit.title = "Close this floor. Escape selects the floor first, then closes.";
@@ -17431,7 +19278,7 @@ function syncFloorPictureDock() {
     handle.title = "Drag to give the plan or the floor more room";
   }
   if (el.elevInfo) el.elevInfo.title = "How this floor works";
-  const live = document.getElementById("v2-face-flash-live");
+  const live = el.faceFlashLive;
   if (live && !floorFlash) live.textContent = `Showing ${host.name || "this floor"} on the plan.`;
   const poly = floorHostPoly(host);
   const area = formatFloorArea(Math.abs(polyArea(poly)));
@@ -17508,13 +19355,27 @@ function syncElevationDock() {
     floorDraft = null;
     dropFloorGap();
   }
-  if (floorPicture) return syncFloorPictureDock();
+  if (floorPicture) {
+    // The floor picture stays in the strip, so the face parts come back to it.
+    placeFaceParts(false);
+    syncScreenPanes(false);
+    setHidden(el.elevSecondScreen, true);
+    return syncFloorPictureDock();
+  }
+  if (elevationHost === "screen" && !screenAlive()) screenClosed({ renderAfter: false });
+  const inScreen = elevationHost === "screen";
+  if (!placeFaceParts(inScreen) && elevationOpen && selectedElevationFace()) {
+    // The second window is still loading its page.
+    retryScreenSoon();
+    setHidden(el.serviceProfileDock, true);
+    return true;
+  }
   const leavingFloor = el.serviceProfileDock?.classList.contains("is-floor-picture");
   document.getElementById("v2-plan-column")?.classList.remove("is-floor-face");
   if (leavingFloor) {
     parkFaceAdd(false);
     if (el.elevInfo) el.elevInfo.title = "How this elevation works";
-    const live = document.getElementById("v2-face-flash-live");
+    const live = el.faceFlashLive;
     if (live) live.textContent = "";
     el.serviceProfileDock.classList.remove("is-floor-picture");
   }
@@ -17540,17 +19401,22 @@ function syncElevationDock() {
     resetElevationView();
     setHidden(el.elevBody, true);
     setHidden(el.elevFit, true);
+    setHidden(el.elevAlign, true);
+    syncElevationAlignState(false);
+    clearElevationAlignment();
     setHidden(el.elevGuidelineWrap, true);
     setHidden(el.elevInfo, true);
     closeElevInfo();
     syncElevHints(false);
     setHidden(el.elevFlash, true);
+    setHidden(el.elevSecondScreen, true);
     setHidden(el.elevEdgeMode, true);
     setHidden(el.serviceProfileCanvas, false);
     setHidden(dock.querySelector(".svc-profile-mode"), false);
     setHidden(document.getElementById("v2-profile-select-all"), false);
     el.elevBody?.classList.remove("is-drawing", "is-edge-add", "is-edge-resize");
     syncWallFaceChrome(false);
+    syncScreenPanes(false);
     return false;
   }
   elevationFace = face;
@@ -17561,17 +19427,26 @@ function syncElevationDock() {
     el.elevBody?.classList.remove("is-drawing", "is-edge-add", "is-edge-resize");
     syncElevHints(false);
     syncWallFaceChrome(false);
+    syncScreenPanes(false);
     return false;
   }
-  setHidden(dock, false);
-  fitServiceProfileHeight();
+  // On the second screen the strip stays shut; the window holds the face.
+  setHidden(dock, inScreen);
+  if (!inScreen) fitServiceProfileHeight();
   setHidden(el.serviceProfileCanvas, true);
   setHidden(dock.querySelector(".svc-profile-mode"), true);
   setHidden(document.getElementById("v2-profile-select-all"), true);
   setHidden(el.elevFlash, false);
+  // Align matches the elevation to the plan above it, and there is no plan above a second screen.
+  setHidden(el.elevAlign, inScreen);
+  setHidden(el.elevSecondScreen, inScreen);
   setHidden(el.elevFit, false);
+  if (el.elevFit) {
+    el.elevFit.textContent = "Whole wall";
+    el.elevFit.title = "Show the whole wall in the elevation";
+  }
   setHidden(el.elevGuidelineWrap, false);
-  if (el.elevGuideline && document.activeElement !== el.elevGuideline && elevDropMm == null) el.elevGuideline.value = "";
+  if (el.elevGuideline && activeEl() !== el.elevGuideline && elevDropMm == null) el.elevGuideline.value = "";
   setHidden(el.elevInfo, false);
   if (el.elevFit) el.elevFit.disabled = elevationViewFitted();
   setHidden(el.elevBody, false);
@@ -17581,8 +19456,9 @@ function syncElevationDock() {
     elevationViewFace = faceKey;
     elevationView = { zoom: 1, panX: 0, panY: 0 };
     if (el.elevFit) el.elevFit.disabled = true;
-    placeFaceCorners(face);
+    framePlanAfterChrome = face;
   }
+  syncElevationAlignState(!inScreen);
   const shaping = !elevFinishDraft && model.finishBands.some((b) => b.id === selectedBandId && elevRing(b));
   const lineMode = shaping && elevEdgeMode === "line";
   setHidden(el.elevEdgeMode, !shaping);
@@ -17591,22 +19467,37 @@ function syncElevationDock() {
     b.classList.toggle("active", on);
     b.setAttribute("aria-pressed", String(on));
   });
-  if (el.serviceProfileTitle) {
-    const side = faceSideTitle(model);
-    el.serviceProfileTitle.textContent = elevFinishDraft
-      ? "Click each corner. Double-click or Esc finishes the shape."
-      : `This wall${side ? ` · ${side}` : ""} · ${Math.round(model.length * 1000)} × ${Math.round(model.height * 1000)} mm`;
-  }
+  const faceSide = faceSideTitle(model);
+  setFaceTitle(elevFinishDraft
+    ? "Click each corner. Double-click or Esc finishes the shape."
+    : `This wall${faceSide ? ` · ${faceSide}` : ""} · ${Math.round(model.length * 1000)} × ${Math.round(model.height * 1000)} mm`);
   syncWallFaceChrome(true);
+  // Only now does the strip have its height, so only now can the plan say what is clear of it.
+  if (framePlanAfterChrome) {
+    const framed = framePlanAfterChrome;
+    framePlanAfterChrome = null;
+    placeFaceCorners(framed);
+  }
+  if (inScreen) {
+    const faceWall = wallsCache.find((w) => w.id === face.wallId);
+    syncScreenPanes(true, `${wallProductName(faceWall)}, ${faceSide || "face"}`);
+  }
   const w = el.elevBody.clientWidth;
   const h = el.elevBody.clientHeight;
   const selectedId = selectedOpeningId();
   const draft = elevFinishDraft && elevFinishDraft.face.wallId === face.wallId ? elevFinishDraft : null;
+  const placingFinish = placingFinishOn(face.wallId);
+  // While a finish is being placed, the elevation is the whole wall. An arch
+  // that was selected keeps its handles and its dimensions off the drawing.
+  const drawOpeningId = faceWallSelected || placingFinish || draft ? null : selectedId;
   const guides = elevationGuides();
   const locate = elevationLocate(model);
   const pickingFoundation = Boolean(pendingFoundationSku(face));
   const dropGuide = dropGuideZ(model.height, elevDropMm);
-  const key = `${w}x${h}|${elevationView.zoom}|${elevationView.panX}|${elevationView.panY}|${selectedId}|${selectedBandId}|${selectedElevVertex}|${faceWallSelected ? "wall" : ""}|${lineMode ? "line" : "corner"}|${pickingFoundation ? "found" : ""}|drop:${dropGuide}|${JSON.stringify(model)}|${JSON.stringify(draft)}|${JSON.stringify(guides)}|${JSON.stringify(locate)}`;
+  const wall = wallsCache.find((w) => w.id === face.wallId);
+  const frame = wall && !inScreen ? heldFaceFrame(wall, face) : null;
+  const frameKey = frame ? `${frame.dir}|${frame.scale}|${Math.round(frame.originX * 10) / 10}` : "fit";
+  const key = `${w}x${h}|${frameKey}|${elevationView.zoom}|${elevationView.panX}|${elevationView.panY}|${drawOpeningId}|${selectedBandId}|${selectedElevVertex}|${faceWallSelected ? "wall" : ""}|${lineMode ? "line" : "corner"}|${pickingFoundation ? "found" : ""}|drop:${dropGuide}|${JSON.stringify(model)}|${JSON.stringify(draft)}|${JSON.stringify(guides)}|${JSON.stringify(locate)}`;
   if (key === elevationKey) {
     placeElevEdgeMode(model);
     syncElevHints(true);
@@ -17617,7 +19508,7 @@ function syncElevationDock() {
     width: w,
     height: h,
     interactive: true,
-    selectedId: faceWallSelected ? null : selectedId,
+    selectedId: drawOpeningId,
     selectedBandId: faceWallSelected ? null : selectedBandId,
     selectedVertex: faceWallSelected ? null : selectedElevVertex,
     draft,
@@ -17628,6 +19519,7 @@ function syncElevationDock() {
     wallSelected: faceWallSelected,
     foundationPicking: pickingFoundation,
     dropGuide,
+    frame,
   });
   elevationLayout = { scale: drawn.scale, scaleX: drawn.scaleX, scaleY: drawn.scaleY, originX: drawn.originX, originY: drawn.originY, fit: drawn.fit };
   el.elevBody.innerHTML = drawn.svg;
@@ -17949,7 +19841,7 @@ function commitTypedGap() {
 /** Digits, Backspace, Enter, Escape and the arrows, while a corner or edge is held or dragged. */
 function elevationGapKey(ev) {
   if (!elevationOpen || ev.ctrlKey || ev.metaKey || ev.altKey) return false;
-  const tag = document.activeElement?.tagName;
+  const tag = activeEl()?.tagName;
   if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return false;
   const live = activeGapTarget();
   if (!live) return false;
@@ -18404,7 +20296,7 @@ function onElevationPointerDown(ev, layout) {
       ? { height: model.height }
       : band
         ? { from: band.from, to: band.to, bottom: band.bottom, top: band.top }
-        : { left: row.offset, width: row.width, sill: row.sill, height: row.height, category: row.category },
+        : { left: row.offset, width: row.width, sill: row.sill, height: row.height, rise: row.rise, category: row.category },
   };
   ev.currentTarget.setPointerCapture(ev.pointerId);
   ev.preventDefault();
@@ -18412,6 +20304,8 @@ function onElevationPointerDown(ev, layout) {
   if (part === "wall-top") {
     setStatusMessage("The wall is selected. Drag the top, or type the height.", "ok");
     render();
+  } else if (part === "spring") {
+    setStatusMessage("Drag to set the rise. The top of the opening stays where it is.", "ok");
   }
 }
 
@@ -18483,6 +20377,20 @@ const BAND_EDGE_CORNERS = {
 /** Snap a window corner, a door head, a rectangle edge, or a whole opening, and remember the guides. */
 function alignElevationDrag(ev, d) {
   const corner = d.part === "tl" || d.part === "tr" || d.part === "bl" || d.part === "br" || d.part === "t";
+  if (d.part === "spring") {
+    const layout = ev.currentTarget === el.elevBody ? elevationLayout : elevPreviewLayout;
+    const model = elevationModel(store.doc, pack, d.face, wallsCache);
+    if (!layout || layout.originX == null || !model) return false;
+    const raw = elevRawPoint(ev, ev.currentTarget, layout);
+    const o = d.orig;
+    const head = o.sill + o.height;
+    const aligned = elevAlign(o.left + o.width / 2, raw.z, model, elevSnapPoints(model, null), -1, { id: d.id, z: head - (o.rise > 0 ? o.rise : o.width / 2) });
+    const rise = resizeArchRise({ sill: o.sill, height: o.height, width: o.width }, aligned.z).rise;
+    d.springZ = head - rise;
+    d.guideZ = Math.abs(d.springZ - aligned.z) < 1e-6 ? aligned.guideZ : null;
+    d.guideS = null;
+    return true;
+  }
   const bandEdge = typeof d.part === "string" && Object.prototype.hasOwnProperty.call(BAND_EDGE_CORNERS, d.part);
   const moving = d.part === "move";
   if (!corner && !bandEdge && !moving) return false;
@@ -18602,16 +20510,12 @@ function onElevationPointerMove(ev) {
     }
   }
   if (elevationPan && ev.currentTarget === el.elevBody) {
-    // At the fitted zoom the wall already fills the strip; sliding it only
-    // hides the next floor. Panning starts once the view is zoomed in.
-    if (elevationView.zoom > 1) {
-      setElevationView({
-        zoom: elevationView.zoom,
-        panX: elevationPan.panX + (ev.clientX - elevationPan.startX),
-        panY: elevationPan.panY + (ev.clientY - elevationPan.startY),
-      });
-      render();
-    }
+    setElevationView({
+      zoom: elevationView.zoom,
+      panX: elevationPan.panX + (ev.clientX - elevationPan.startX),
+      panY: elevationPan.panY + (ev.clientY - elevationPan.startY),
+    });
+    render();
     return;
   }
   if (elevationDrag?.part === "outline") {
@@ -18805,6 +20709,105 @@ el.elevFit?.addEventListener("click", () => {
   render();
 });
 
+/** Centre the wall on the plan and the face in the elevation, at the current zoom. */
+function alignWallToElevation() {
+  const face = elevationFace;
+  const wall = wallsCache.find((w) => w.id === face?.wallId);
+  const model = face ? elevationModelNow(face) : null;
+  const width = el.elevBody?.clientWidth || 0;
+  if (!wall || !model || !elevationHold || !(cam.scale > 0) || width < 2) return;
+  const zoom = elevationView.zoom || 1;
+  elevationView = { zoom, panX: 0, panY: 0 };
+  const bare = planFaceFrame({ ...wall, side: face.side }, { scale: cam.scale, ox: 0, oy: 0 }, 0);
+  if (!bare) return;
+  const half = model.length / 2 * cam.scale;
+  const target = width / 2;
+  const track = faceTrack({ ...wall, side: face.side });
+  elevationHold = {
+    faceKey: `${wall.id}:${face.side}`,
+    axis: track.axis,
+    mid: track.mid,
+    centerX: target - bare.dir * half * (zoom - 1),
+    pending: false,
+  };
+  const placed = projectedFaceCenter(wall, face);
+  if (!placed) return;
+  const shift = alignCameraShift(placed.projected.vertical, placed.center, target);
+  cam.ox += shift.ox;
+  cam.oy += shift.oy;
+  const canvas = el.canvas;
+  if (canvas) {
+    if (placed.projected.vertical) {
+      const midX = (wall.x1 + wall.x2) / 2;
+      cam.ox = canvas.clientWidth / 2 - midX * cam.scale;
+    } else {
+      const midY = (wall.y1 + wall.y2) / 2;
+      cam.oy = canvas.clientHeight / 2 - midY * cam.scale;
+    }
+  }
+  render();
+  flashElevationAlignment(placed.projected.vertical, model.length, { from: model.faceFrom, to: model.faceTo });
+}
+
+function flashElevationAlignment(vertical, length, extent = null) {
+  const host = el.elevAlignLines;
+  const column = document.getElementById("v2-plan-column");
+  const face = elevationFace;
+  const wall = wallsCache.find((w) => w.id === face?.wallId);
+  if (!host || !column || !wall || !el.canvas || !el.elevBody || !elevationHold) return;
+  const cr = column.getBoundingClientRect();
+  const canvas = el.canvas.getBoundingClientRect();
+  const body = el.elevBody.getBoundingClientRect();
+  const inset = el.elevBody.clientLeft || 0;
+  const half = length / 2 * cam.scale;
+  const zoom = elevationView.zoom || 1;
+  const panX = Number(elevationView.panX) || 0;
+  const dir = planFaceFrame({ ...wall, side: face.side }, { scale: cam.scale, ox: 0, oy: 0 }, 0)?.dir || 1;
+  const origin = elevationHold.centerX - dir * half;
+  const span = length * cam.scale * zoom;
+  const faceFrom = Number.isFinite(extent?.from) ? extent.from : 0;
+  const faceTo = Number.isFinite(extent?.to) ? extent.to : length;
+  const end0 = origin + panX + dir * faceFrom * cam.scale * zoom;
+  const end1 = origin + panX + dir * faceTo * cam.scale * zoom;
+  const center = origin + panX + dir * half * zoom;
+  const toX = (svgX) => body.left + inset + svgX - cr.left;
+  const toY = (clientY) => clientY - cr.top;
+  host.replaceChildren();
+  host.hidden = false;
+  const verticalLine = (svgX, top, bottom) => {
+    const line = document.createElement("span");
+    line.className = "elev-align-line";
+    line.style.left = `${toX(svgX)}px`;
+    line.style.top = `${toY(top)}px`;
+    line.style.height = `${Math.max(0, toY(bottom) - toY(top))}px`;
+    host.appendChild(line);
+  };
+  const across = (clientY, left, right) => {
+    const line = document.createElement("span");
+    line.className = "elev-align-line is-across";
+    line.style.left = `${left - cr.left}px`;
+    line.style.top = `${toY(clientY)}px`;
+    line.style.width = `${Math.max(0, right - left)}px`;
+    host.appendChild(line);
+  };
+  const midY = (Number(wall.y1) + Number(wall.y2)) / 2;
+  const wallCy = canvas.top + cam.oy + midY * cam.scale;
+  if (vertical) {
+    across(wallCy, canvas.left, canvas.right);
+    verticalLine(center, body.top, body.bottom);
+  } else {
+    verticalLine(Math.min(end0, end1), wallCy, body.bottom);
+    verticalLine(center, wallCy, body.bottom);
+    verticalLine(Math.max(end0, end1), wallCy, body.bottom);
+  }
+  if (elevationAlignTimer) window.clearTimeout(elevationAlignTimer);
+  elevationAlignTimer = window.setTimeout(clearElevationAlignment, 1400);
+}
+
+el.elevAlign?.addEventListener("click", () => {
+  alignWallToElevation();
+});
+
 function closeElevInfo() {
   setHidden(el.elevInfoNote, true);
   el.elevInfo?.setAttribute("aria-expanded", "false");
@@ -18823,18 +20826,35 @@ el.elevInfo?.addEventListener("click", () => {
   el.elevInfo.setAttribute("aria-expanded", String(open));
 });
 
-document.addEventListener("pointerdown", (ev) => {
+function closeInfoNoteOutside(ev) {
   if (!el.elevInfoNote || el.elevInfoNote.hidden) return;
   if (ev.target.closest?.("#v2-elev-info, #v2-elev-info-note")) return;
   closeElevInfo();
-});
+}
+
+document.addEventListener("pointerdown", closeInfoNoteOutside);
 
 function openWallFace() {
+  if (elevationHost === "screen" && !screenAlive()) screenClosed({ renderAfter: false });
   floorPicture = null;
   floorAddPending = null;
   floorDraft = null;
   elevationOpen = true;
+  // After a reload of the plan tab the second window may still be open. Open
+  // this face finds it by name, without navigating it.
+  if (elevationHost !== "screen") {
+    let remembered = false;
+    try { remembered = window.sessionStorage.getItem(SCREEN_HINT_KEY) === "1"; } catch { remembered = false; }
+    if (remembered) {
+      const win = acquireScreen({ create: false });
+      if (win) useScreen(win);
+      else try { window.sessionStorage.removeItem(SCREEN_HINT_KEY); } catch { /* private mode */ }
+    }
+  }
+  if (elevationHost === "screen") focusScreen();
 }
+
+el.elevSecondScreen?.addEventListener("click", openSecondScreen);
 
 function toggleWallElevation() {
   if (elevationOpen) closeOpenFace();
@@ -18850,6 +20870,11 @@ el.ctxElevOpen?.addEventListener("click", () => {
   const face = selectedElevationFace();
   if (elevFinishDraft && face && elevFinishDraft.face.wallId === face.wallId) return;
   toggleWallElevation();
+});
+
+el.ctxElevScreen?.addEventListener("click", (ev) => {
+  ev.stopPropagation();
+  openPreviewOnSecondScreen();
 });
 
 el.ctxFloor?.addEventListener("click", (ev) => {
@@ -18926,17 +20951,27 @@ function liveFaceLine(wallId, side) {
  * corner marks. A face already readable stays at the current scale, and one
  * already on screen is not recentred.
  */
-function frameFaceForCue(line, { zoom = true } = {}) {
+function frameFaceForCue(line, { zoom = true, animate = false, mode = "fit" } = {}) {
   const span = Math.hypot(line.b.x - line.a.x, line.b.y - line.a.y) || 1;
   const ux = (line.b.x - line.a.x) / span;
   const uy = (line.b.y - line.a.y) / span;
   const m = 28 / Math.max(cam.scale, MIN_VIEW_SCALE);
   const a = { x: line.a.x - ux * m + line.nx * m, y: line.a.y - uy * m + line.ny * m };
   const b = { x: line.b.x + ux * m + line.nx * m, y: line.b.y + uy * m + line.ny * m };
-  framePlanPoints([a, b, { x: line.wall.x1, y: line.wall.y1 }, { x: line.wall.x2, y: line.wall.y2 }]);
-  if (!zoom) return;
   const view = planViewExtent();
   if (!view) return;
+  // The part of the plan the strip leaves clear, measured now that the strip has its height.
+  const screen = [a, b, { x: line.wall.x1, y: line.wall.y1 }, { x: line.wall.x2, y: line.wall.y2 }]
+    .map((p) => worldToScreen(p.x, p.y));
+  const bounds = {
+    minX: Math.min(...screen.map((s) => s[0])),
+    maxX: Math.max(...screen.map((s) => s[0])),
+    minY: Math.min(...screen.map((s) => s[1])),
+    maxY: Math.max(...screen.map((s) => s[1])),
+  };
+  const shift = faceFrameShift(bounds, { w: view.viewW, h: view.viewH }, mode);
+  panCamBy(shift.dx, shift.dy, { animate: animate && !zoom });
+  if (!zoom) return;
   const [ax, ay] = worldToScreen(line.a.x, line.a.y);
   const [bx, by] = worldToScreen(line.b.x, line.b.y);
   const next = faceCueZoom(Math.hypot(bx - ax, by - ay), cam.scale, MAX_VIEW_SCALE);
@@ -18964,11 +20999,13 @@ function placeFaceCorners(face) {
     activeLevel = line.levelId;
     drawLevelSwitcher();
   }
-  frameFaceForCue(line, { zoom: false });
+  // The strip has its height by now (see the order in the elevation render),
+  // so "clear" means the plan above it. On the second screen nothing covers the plan.
+  frameFaceForCue(line, { zoom: false, animate: true });
   facePlanCue = { wallId, side };
   const sideName = faceSideTitle(face) || "This side";
   const phrase = sideName.charAt(0).toLowerCase() + sideName.slice(1);
-  const live = document.getElementById("v2-face-flash-live");
+  const live = el.faceFlashLive;
   if (live) live.textContent = `Showing the ${phrase} of ${wallProductName(line.wall)} on the plan.`;
   if (faceCueRepaint) return;
   faceCueRepaint = true;
@@ -18998,7 +21035,7 @@ function showFaceOnPlan() {
   const sideName = faceSideTitle(face) || "This side";
   const phrase = sideName.charAt(0).toLowerCase() + sideName.slice(1);
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const live = document.getElementById("v2-face-flash-live");
+  const live = el.faceFlashLive;
   if (live) live.textContent = `${reduced ? "Showing" : "Flashing"} the ${phrase} of ${wallProductName(line.wall)} on the plan.`;
   if (locateFlash?.faceCue) clearLocateFlash();
   const cue = { wallId, side };
@@ -19054,7 +21091,7 @@ function commitFaceSpan() {
   const model = finishFaceModel();
   const band = faceBandNow();
   if (!face || !model || !band?.editable || band.outline) return;
-  const read = (id) => typedMm(document.getElementById(id)?.value, { allowZero: true });
+  const read = (id) => typedMm(faceById(id)?.value, { allowZero: true });
   const top = read("v2-face-top");
   const edit = { bottom: read("v2-face-bottom") ?? 0, top: top == null ? model.height : top };
   if (band.source !== "rule") {
@@ -19160,7 +21197,7 @@ function fillFoundationTypeSelect(offer) {
     select.innerHTML = types.map((t) => `<option value="${escapeHtml(t.id)}">${escapeHtml(t.name)}</option>`).join("");
   }
   const skuId = types.some((t) => t.id === foundationPick.skuId) ? foundationPick.skuId : offer?.skuId;
-  if (skuId && select.value !== skuId && document.activeElement !== select) select.value = skuId;
+  if (skuId && select.value !== skuId && activeEl() !== select) select.value = skuId;
 }
 
 /** Place the chosen foundation along the open wall. The wall stays selected, so the elevation stays open and the new footing appears under it. */
@@ -19177,7 +21214,7 @@ function addFoundationFromFace() {
   render();
 }
 
-document.getElementById("v2-face-add")?.addEventListener("click", () => {
+el.faceAdd?.addEventListener("click", () => {
   if (floorHostNow()) {
     beginFloorAdd();
     return;
@@ -19186,6 +21223,9 @@ document.getElementById("v2-face-add")?.addEventListener("click", () => {
   if (!face) return;
   foundationPick = null;
   selectedBandId = null;
+  // The arch, door, or window stays on the plan until the selection moves to
+  // its wall. Add a finish is the same from either click: the whole face.
+  if (store.primary?.kind === "opening") focusElevationWall();
   faceWallSelected = false;
   faceAddPending = { wallId: face.wallId, side: face.side };
   openWallFace();
@@ -19223,7 +21263,7 @@ el.faceType?.addEventListener("change", () => {
     const bucket = floorAddPending || floorDraft;
     bucket.category = next;
     bucket.productName = "";
-    if (el.faceProduct && document.activeElement !== el.faceProduct) el.faceProduct.value = "";
+    if (el.faceProduct && activeEl() !== el.faceProduct) el.faceProduct.value = "";
     if (el.faceSwatch) el.faceSwatch.style.background = finishSwatch(next);
     render();
     return;
@@ -19293,7 +21333,7 @@ el.faceProduct?.addEventListener("change", () => {
 });
 
 for (const id of ["v2-face-bottom", "v2-face-top", "v2-face-from", "v2-face-to"]) {
-  document.getElementById(id)?.addEventListener("change", commitFaceSpan);
+  faceById(id)?.addEventListener("change", commitFaceSpan);
 }
 
 function patchFaceColour(patch) {
@@ -19369,7 +21409,7 @@ function syncElevationPreview() {
   setHidden(el.ctxElevWrap, !model || faceOpen);
   const opening = model && selectedOpeningId() ? model.openings.find((o) => o.id === selectedOpeningId()) : null;
   setHidden(el.ctxOOffsetWrap, !opening);
-  if (opening && el.ctxOOffset && document.activeElement !== el.ctxOOffset) el.ctxOOffset.value = formatLengthMm(opening.offset);
+  if (opening && el.ctxOOffset && activeEl() !== el.ctxOOffset) el.ctxOOffset.value = formatLengthMm(opening.offset);
   if (!model) {
     elevPreviewKey = "";
     elevPreviewLayout = null;
@@ -19498,7 +21538,7 @@ function syncFinishPanel(room, slab) {
       floorSelected: !editingId && !floorAddPending && !floorDraft,
     });
     if (html !== finishKey) {
-      const typing = host.contains(document.activeElement) && document.activeElement?.matches?.("input");
+      const typing = host.contains(activeEl()) && activeEl()?.matches?.("input");
       if (!(typing && finishKey)) {
         finishKey = html;
         host.innerHTML = html;
@@ -19516,13 +21556,13 @@ function syncFinishPanel(room, slab) {
     bareOn: bareFinishHost?.kind === kind && bareFinishHost?.id === id,
     adding: finishAddOpen === "floor",
   });
-  const html = (room ? roomFinishHtml(store.doc, room, editingId, floorOpts("room", room.id)) : slab ? slabFinishHtml(store.doc, slab, editingId, floorOpts("slab", slab.id)) : faceFinishHtml(store.doc, model, { selectedId: faceWallSelected ? null : selectedBandId, savedId: finishSavedBandId, adding: finishAddOpen === "face", bareAsk: finishBareAsk, bill: true, compact: true, openingId: faceWallSelected ? null : selectedOpeningId(), faceOpen: elevationOpen, wallSelected: faceWallSelected, identity: faceIdentity(model) }))
+  const html = (room ? roomFinishHtml(store.doc, room, editingId, floorOpts("room", room.id)) : slab ? slabFinishHtml(store.doc, slab, editingId, floorOpts("slab", slab.id)) : faceFinishHtml(store.doc, model, { selectedId: faceWallSelected ? null : selectedBandId, savedId: finishSavedBandId, adding: finishAddOpen === "face", bareAsk: finishBareAsk, bill: true, compact: true, openingId: faceWallSelected || placingFinishOn(model.wallId) ? null : selectedOpeningId(), faceOpen: elevationOpen, wallSelected: faceWallSelected, identity: faceIdentity(model) }))
     + productsHtml(store.doc, { open: finishProductsOpen });
   if (html !== finishKey) {
     // A cleared key means the finish was just saved, so the panel has to catch up.
     // Otherwise leave an input alone while someone is still typing in it.
     // Size fields were parked above, so rewriting the list does not destroy them.
-    const typing = host.contains(document.activeElement) && document.activeElement?.matches?.("input");
+    const typing = host.contains(activeEl()) && activeEl()?.matches?.("input");
     if (!(typing && finishKey)) {
       finishKey = html;
       host.innerHTML = html;
@@ -20830,6 +22870,7 @@ function bindServiceProfileResize() {
       handle.removeEventListener("pointercancel", onUp);
       const h = Math.round(dock.getBoundingClientRect().height);
       if (h > 0) window.localStorage.setItem(dockHeightStorageKey(), String(h));
+      rescueFaceInPlan();
     };
     handle.addEventListener("pointermove", onMove);
     handle.addEventListener("pointerup", onUp);
@@ -20842,8 +22883,23 @@ function bindServiceProfileResize() {
     if (e.key === "ArrowUp") apply(h + 24, { store: true });
     else if (e.key === "ArrowDown") apply(h - 24, { store: true });
     else return;
+    rescueFaceInPlan();
     e.preventDefault();
   });
+}
+
+/**
+ * After the strip is resized: if the open face now has nothing left on the
+ * plan above it, slide the plan to bring it back. A face still partly showing
+ * is left alone, and nothing moves while the handle is being dragged.
+ */
+function rescueFaceInPlan() {
+  if (!elevationOpen || elevationHost === "screen" || floorHostNow()) return;
+  const face = elevationFace;
+  const line = face?.wallId ? liveFaceLine(face.wallId, face.side === -1 ? -1 : 1) : null;
+  if (!line || line.levelId !== activeLevel) return;
+  frameFaceForCue(line, { zoom: false, animate: true, mode: "rescue" });
+  render();
 }
 
 bindServiceProfileResize();
@@ -20857,7 +22913,7 @@ function syncServiceDock() {
   const html = servicePanelHtml({
     doc: store.doc, pack, ui: serviceUi, model, showRoute: tool === "service-route", connectHint,
   });
-  const focused = el.serviceFields.contains(document.activeElement) && document.activeElement !== el.serviceFields;
+  const focused = el.serviceFields.contains(activeEl()) && activeEl() !== el.serviceFields;
   setHidden(el.serviceFields, false);
   if (html === serviceDockKey || focused) return;
   el.serviceFields.innerHTML = html;
@@ -20879,7 +22935,7 @@ function mutateServices(fn) {
     if (res?.message) setStatusMessage(res.message, "ok");
   }
   serviceDockKey = "";
-  if (el.serviceFields.contains(document.activeElement)) document.activeElement.blur();
+  if (el.serviceFields.contains(activeEl())) activeEl().blur();
   render();
   return res;
 }
@@ -21019,7 +23075,7 @@ function restoreFold(node) {
 }
 
 function faceOpeningFieldNodes() {
-  return [el.ctxSillWrap, el.ctxOWidthWrap, el.ctxOHeightWrap, el.ctxOOffsetWrap, el.ctxOSizeNote].filter(Boolean);
+  return [el.ctxSillWrap, el.ctxOWidthWrap, el.ctxOHeightWrap, el.ctxORiseWrap, el.ctxOOffsetWrap, el.ctxOSizeNote].filter(Boolean);
 }
 
 function faceWallFieldNodes() {
@@ -21043,6 +23099,8 @@ function mountFaceInspectorFields() {
   if (!el.dockContext?.classList.contains("is-face-open")) return;
   const host = el.ctxFinish;
   if (!host) return;
+  const face = selectedElevationFace();
+  if (face && placingFinishOn(face.wallId)) return;
   if (faceWallSelected && store.primary?.kind === "segment") {
     const slot = host.querySelector('[data-fin-fields="wall"]');
     if (slot) slot.append(...faceWallFieldNodes());
@@ -21282,6 +23340,11 @@ function syncPlanContext() {
   if (!moving) setDistanceField(false);
   setHidden(el.wallLoc, !(placingWall || editingFace));
   if (placingWall || editingFace) syncWallLocButtons(placingWall ? wallLocation : sharedWallLocation(faceWalls), placingWall ? "draw" : "edit");
+  if (el.wallArc) {
+    const arcOn = placingWall ? wallArcMode : Boolean(arcEdit);
+    el.wallArc.classList.toggle("active", arcOn);
+    el.wallArc.setAttribute("aria-pressed", arcOn ? "true" : "false");
+  }
   // Corner only matters where a wall meets another wall's end.
   setHidden(el.wallCorner, !(placingWall && wallCornerRelevant()));
   positionWallOpts();
@@ -21419,28 +23482,31 @@ function syncPlanContext() {
 
   if (moving) {
     syncMoveDistanceField();
+  } else if (linear && arcGesture()) {
+    syncArcFields();
   } else if (linear) {
+    setArcFieldLabels(false);
     const x1 = draft ? wallDraft.x1 : obj.x1;
     const y1 = draft ? wallDraft.y1 : obj.y1;
     const x2 = draft ? (wallDraft.x2 ?? wallDraft.x1) : obj.x2;
     const y2 = draft ? (wallDraft.y2 ?? wallDraft.y1) : obj.y2;
     const len = segmentLength(x1, y1, x2, y2);
     const ang = headingDeg(x1, y1, x2, y2);
-    if (document.activeElement !== el.ctxLen) {
+    if (activeEl() !== el.ctxLen) {
       el.ctxLen.value = (draft && sizeDraft?.lockW) ? sizeDraft.typedW : (len < 0.05 ? "" : formatLengthMm(len));
     }
-    if (document.activeElement !== el.ctxAng) {
+    if (activeEl() !== el.ctxAng) {
       el.ctxAng.value = len < 0.05 ? "" : ang.toFixed(1);
     }
   } else if (placingSep) {
     syncSeparationSizeFields();
   }
-  if (room && document.activeElement !== el.ctxName) el.ctxName.value = obj.name;
-  if (room && document.activeElement !== el.ctxUse) el.ctxUse.value = obj.use;
-  if (region && document.activeElement !== el.ctxRegion) el.ctxRegion.value = obj.convention || "";
+  if (room && activeEl() !== el.ctxName) el.ctxName.value = obj.name;
+  if (room && activeEl() !== el.ctxUse) el.ctxUse.value = obj.use;
+  if (region && activeEl() !== el.ctxRegion) el.ctxRegion.value = obj.convention || "";
   if (rect) {
-    if (document.activeElement !== el.ctxW) el.ctxW.value = formatLengthMm(obj.shape.w);
-    if (document.activeElement !== el.ctxH) el.ctxH.value = formatLengthMm(obj.shape.h);
+    if (activeEl() !== el.ctxW) el.ctxW.value = formatLengthMm(obj.shape.w);
+    if (activeEl() !== el.ctxH) el.ctxH.value = formatLengthMm(obj.shape.h);
   } else if (linear) {
     const sku = skuById(draft ? placeSkuId : obj?.sku);
     const { width, height } = linearWidthHeight(sku);
@@ -21448,13 +23514,21 @@ function syncPlanContext() {
     el.ctxH.value = Number.isFinite(height) ? formatLengthMm(height) : "";
   }
   if (roof) {
-    if (document.activeElement !== el.ctxForm) el.ctxForm.value = obj.form;
-    if (document.activeElement !== el.ctxPitch) el.ctxPitch.value = String(obj.pitch);
-    if (el.ctxRidge && document.activeElement !== el.ctxRidge) el.ctxRidge.value = obj.ridge === "short" ? "short" : "long";
+    if (activeEl() !== el.ctxForm) el.ctxForm.value = obj.form;
+    if (activeEl() !== el.ctxPitch) el.ctxPitch.value = String(obj.pitch);
+    if (el.ctxRidge && activeEl() !== el.ctxRidge) el.ctxRidge.value = obj.ridge === "short" ? "short" : "long";
   }
 }
 
 el.ctxLen?.addEventListener("input", (ev) => {
+  if (arcGesture()) {
+    if (!sizeDraft) sizeDraft = { lockW: false, lockH: false, typedW: "", typedH: "", axis: "w" };
+    sizeDraft.lockW = true;
+    sizeDraft.typedW = ev.target.value;
+    applyArcRadiusLock(parseLengthInput(sizeDraft.typedW, 1));
+    render();
+    return;
+  }
   if (tool === "move" && moveSession?.base) {
     if (!sizeDraft) sizeDraft = { lockW: false, lockH: false, typedW: "", typedH: "", axis: "w" };
     sizeDraft.lockW = true;
@@ -21475,7 +23549,7 @@ el.ctxLen?.addEventListener("input", (ev) => {
 });
 
 el.ctxLen?.addEventListener("change", (ev) => {
-  if (wallDraft || tool === "move") return;
+  if (arcGesture() || wallDraft || tool === "move") return;
   const sel = soleLinearSelection();
   if (!sel) return;
   store.pushUndo(historyDid("Set the length of"));
@@ -21487,6 +23561,43 @@ el.ctxLen?.addEventListener("change", (ev) => {
     return;
   }
   store.persist();
+  render();
+});
+
+el.wallArc?.addEventListener("click", () => {
+  if (tool === "wall") {
+    wallArcMode = !wallArcMode;
+    if (!wallArcMode && wallDraft?.arcPhase) {
+      wallDraft.arcPhase = false;
+      wallDraft.radiusLock = null;
+      wallDraft.arcCursor = null;
+      sizeDraft = null;
+    }
+    updateRibbonHint();
+    render();
+    return;
+  }
+  const sel = selectedWall();
+  if (!sel) {
+    setStatusMessage("Select a wall, then click the arc.", "warn");
+    return;
+  }
+  if (arcEdit?.id === sel.obj.id) {
+    arcEdit = null;
+    sizeDraft = null;
+    setStatusMessage("Arc cancelled.", "ok");
+    updateRibbonHint();
+    render();
+    return;
+  }
+  arcEdit = {
+    id: sel.obj.id,
+    cursor: hoverPoint ? { x: hoverPoint.x, y: hoverPoint.y } : null,
+    radiusLock: null,
+  };
+  sizeDraft = null;
+  setStatusMessage("Pull the curve, then click. Type a radius and press Enter. Esc cancels.", "ok");
+  updateRibbonHint();
   render();
 });
 
@@ -21556,6 +23667,11 @@ el.floorEdgeMode?.addEventListener("click", (ev) => {
 });
 
 el.ctxAng?.addEventListener("change", (ev) => {
+  if (arcGesture()) {
+    applyArcSweepLock(parseDegrees(ev.target.value, 0));
+    render();
+    return;
+  }
   if (wallDraft) {
     const cur = headingDeg(wallDraft.x1, wallDraft.y1, wallDraft.x2 ?? wallDraft.x1, wallDraft.y2 ?? wallDraft.y1);
     setWallDraftHeading(parseDegrees(ev.target.value, cur));
@@ -22324,7 +24440,9 @@ function elementLevel(ref, obj, walls = null) {
 /** The plan area that is not covered by a docked schedule, or null when the canvas is not on screen. */
 function planViewExtent() {
   if (!el.canvas) return null;
-  const rect = el.canvas.getBoundingClientRect();
+  // The wrap, not the canvas: the canvas keeps its old pixel size until the
+  // resize observer runs, but the wrap already has the size the layout gave it.
+  const rect = (el.canvasWrap || el.canvas).getBoundingClientRect();
   if (rect.width < 8 || rect.height < 8) return null;
   // While peeking, the docked panel sits over the right of the canvas.
   // That strip is not "on screen": an element under the panel still needs a nudge.
@@ -22336,7 +24454,47 @@ function planViewExtent() {
       viewW = Math.max(160, p.left - rect.left - 12);
     }
   }
-  return { viewW, viewH: rect.height };
+  let viewH = rect.height;
+  // Show on plan shrinks the strip for a moment. The strip comes back, so the
+  // plan that counts is the one it leaves.
+  const stripDock = el.serviceProfileDock;
+  if (planPeek && stripDock && !stripDock.hidden) {
+    const back = planPeek.height - stripDock.getBoundingClientRect().height;
+    if (back > 0) viewH = Math.max(80, viewH - back);
+  }
+  return { viewW, viewH };
+}
+
+let camPan = null;
+
+/** Slide the plan by (dx, dy) pixels. Brief, and dropped if the user pans meanwhile. */
+function panCamBy(dx, dy, { animate = false } = {}) {
+  if (!dx && !dy) return;
+  const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  if (!animate || reduced) {
+    camPan = null;
+    cam.ox += dx;
+    cam.oy += dy;
+    return;
+  }
+  const token = {};
+  camPan = token;
+  const from = { ox: cam.ox, oy: cam.oy };
+  let last = { ox: from.ox, oy: from.oy };
+  const t0 = performance.now();
+  const step = (now) => {
+    if (camPan !== token) return;
+    if (cam.ox !== last.ox || cam.oy !== last.oy) { camPan = null; return; }
+    const k = Math.min(1, (now - t0) / FACE_PAN_MS);
+    const ease = 1 - (1 - k) ** 3;
+    cam.ox = from.ox + dx * ease;
+    cam.oy = from.oy + dy * ease;
+    last = { ox: cam.ox, oy: cam.oy };
+    render();
+    if (k < 1) requestAnimationFrame(step);
+    else camPan = null;
+  };
+  requestAnimationFrame(step);
 }
 
 /** Bring these points into the visible plan without changing zoom. If any

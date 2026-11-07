@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,560&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="./v2.css?v=20261106-san-preview" />
+  <link rel="stylesheet" href="./v2.css?v=20261107-viz-refs" />
 </head>
 <body class="auth-pending">
   <div class="chrome">
@@ -211,6 +211,7 @@
                 <button type="button" data-wall-loc="center" class="active" aria-pressed="true" aria-label="Centreline" title="Centreline: The line you draw is the middle of the wall."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><rect x="2" y="8" width="20" height="8" fill="#d9c7b0" stroke="#5c2410" stroke-width="1"/><line x1="2" y1="12" x2="22" y2="12" stroke="#c8501e" stroke-width="2" stroke-dasharray="3 2"/></svg></button>
                 <button type="button" data-wall-loc="exterior" aria-pressed="false" aria-label="Exterior face" title="Exterior face: The line you draw is the outside face. Draw clockwise and the wall sits inside the line. Space flips."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><rect x="2" y="8" width="20" height="8" fill="#d9c7b0" stroke="#5c2410" stroke-width="1"/><line x1="2" y1="8" x2="22" y2="8" stroke="#c8501e" stroke-width="2.5"/></svg></button>
                 <button type="button" data-wall-loc="interior" aria-pressed="false" aria-label="Interior face" title="Interior face: The line you draw is the inside face. Draw clockwise and the wall sits outside the line. Space flips."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><rect x="2" y="8" width="20" height="8" fill="#d9c7b0" stroke="#5c2410" stroke-width="1"/><line x1="2" y1="16" x2="22" y2="16" stroke="#c8501e" stroke-width="2.5"/></svg></button>
+                <button type="button" id="v2-wall-arc" aria-pressed="false" aria-label="Start-End-Radius arc" title="Start-End-Radius arc. Draw the wall from its start to its end, then pull the curve. On a wall that is already drawn, select it and click here, then pull the curve. The sweep and the radius are shown."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M3 17.5C6 8 18 8 21 17.5" fill="none" stroke="#d9c7b0" stroke-width="6" stroke-linecap="butt"/><path d="M3 17.5C6 8 18 8 21 17.5" fill="none" stroke="#5c2410" stroke-width="5.2" stroke-linecap="butt"/><path d="M3 17.5C6 8 18 8 21 17.5" fill="none" stroke="#c8501e" stroke-width="1.4" stroke-linecap="butt"/></svg></button>
               </div>
             </div>
             <div class="plan-loc" id="v2-wall-corner" hidden>
@@ -348,17 +349,20 @@
            leaves it open; Exit, Escape, or selecting another object closes it.
            Drawn by ui.js.
            The top edge is a height handle; the canvas fills whatever is left. -->
+      <div class="elev-align" id="v2-elev-align-lines" hidden></div>
       <div class="svc-profile-dock" id="v2-service-profile-dock" hidden>
         <button type="button" class="svc-profile-resize" id="v2-resize-profile"
                 aria-label="Resize route profile" title="Drag to change height" tabindex="0"></button>
         <div class="svc-profile-head">
           <div class="svc-profile-title-row">
             <p class="svc-profile-title" id="v2-service-profile-title">Route profile</p>
+            <span class="wall-face-part" id="v2-wall-face-notes">
             <label class="elev-drop-field" id="v2-elev-guideline-wrap" hidden>Down from top
               <input id="v2-elev-guideline" type="text" inputmode="decimal" placeholder="mm" aria-label="Guideline, millimetres down from the top of the wall" />
             </label>
             <button type="button" class="elev-info" id="v2-elev-info" hidden aria-expanded="false" aria-controls="v2-elev-info-note" title="How this elevation works">i</button>
-            <p class="elev-info-note" id="v2-elev-info-note" hidden>Drag the top of the wall to set its height. The line above is the next floor, or the roof on the top storey. Scroll to zoom; middle-drag or Alt-drag to move around. Fit shows the whole wall. Escape blurs a field, finishes or cancels a drawing, cancels a finish that is waiting, drops a typed gap, releases a corner, selects the wall, then closes it. Exit closes this wall in one press.</p>
+            <p class="elev-info-note" id="v2-elev-info-note" hidden>Drag the top of the wall to set its height. The line above is the next floor, or the roof on the top storey. Scroll to zoom in or out; middle-drag or Alt-drag to move around. Not aligned shows when this view has been zoomed or moved. Whole wall shows the whole face. Align centres the wall and the elevation at this zoom. Escape blurs a field, finishes or cancels a drawing, cancels a finish that is waiting, drops a typed gap, releases a corner, selects the wall, then closes it. Exit closes this wall in one press.</p>
+            </span>
           </div>
           <button type="button" class="svc-profile-all" id="v2-profile-select-all"
                   title="Select every run on this route, rises and drops included, so type and Include in BoQ can be changed in one go. Double-clicking a run does the same.">Select whole route</button>
@@ -366,17 +370,26 @@
             <button type="button" data-profile-mode="step" title="Dragging a node makes a vertical rise or drop (90 degrees). Hold Shift to use Slope for one drag.">Step</button>
             <button type="button" data-profile-mode="slope" title="Dragging a node changes only its height, so the runs beside it slope (use for drainage falls). Hold Shift to use Step for one drag.">Slope</button>
           </span>
+          <span class="wall-face-part" id="v2-wall-face-tools">
           <button type="button" id="v2-face-add" hidden>Add a finish</button>
           <button type="button" id="v2-face-foundation" hidden title="Choose a foundation for this wall">+ Foundation</button>
           <button type="button" class="svc-profile-all" id="v2-face-plan" hidden
                   title="View the other face of this wall.">Flip face</button>
+          <span class="elev-align-state" id="v2-elev-align-state" hidden>Not aligned</span>
+          <button type="button" class="svc-profile-all" id="v2-elev-align" hidden
+                  title="Centre the wall and the elevation, keeping this zoom">Align</button>
           <button type="button" class="svc-profile-all" id="v2-elev-fit" hidden
-                  title="Show the whole wall again">Fit</button>
+                  title="Show the whole wall again">Whole wall</button>
           <button type="button" class="svc-profile-all" id="v2-elev-flash" hidden
                   title="Show this side of the wall on the plan">Show on plan</button>
+          <button type="button" class="svc-profile-all" id="v2-elev-second-screen" hidden
+                  title="Move this elevation to its own window, for a second monitor">Second screen</button>
+          </span>
           <button type="button" class="svc-profile-exit" id="v2-profile-exit"
                   title="Close the route profile and the Services panel. A click on empty plan leaves them open. Escape does the same.">Exit</button>
         </div>
+        <canvas id="v2-service-profile-canvas"></canvas>
+        <div class="wall-face-part" id="v2-wall-face">
         <span class="visually-hidden" id="v2-face-flash-live" aria-live="polite"></span>
         <div class="face-editor-band" id="v2-face-editor" hidden>
           <div class="face-editor">
@@ -431,7 +444,6 @@
           <p>Drag the top of the wall to set its height.</p>
           <button type="button" id="v2-elev-info-dismiss">Don't show again</button>
         </div>
-        <canvas id="v2-service-profile-canvas"></canvas>
         <span class="elev-edge-mode" id="v2-elev-edge-mode" hidden role="group" aria-label="Drag an edge of the finish to">
           <span class="elev-edge-subject">Editing the finish</span>
           <span class="elev-edge-actions">
@@ -447,6 +459,7 @@
         <div class="elev-coach" id="v2-elev-coach" hidden>
           <p>Drag the top of the wall to set its height.</p>
           <button type="button" id="v2-elev-coach-ok">Got it</button>
+        </div>
         </div>
       </div>
       </div>
@@ -568,6 +581,12 @@
                 <span>mm</span>
               </span>
             </label>
+            <label id="v2-ctx-orise-wrap" hidden title="How far the crown rises above where the curve leaves the jambs. Clear the field for a semicircle.">Rise
+              <span class="plan-context-field">
+                <input id="v2-ctx-orise" type="text" inputmode="decimal" autocomplete="off" aria-label="Arch rise, mm" />
+                <span>mm</span>
+              </span>
+            </label>
             <label id="v2-ctx-ooffset-wrap" hidden>Offset
               <span class="plan-context-field">
                 <input id="v2-ctx-ooffset" type="text" inputmode="decimal" autocomplete="off" aria-label="Offset from left, mm" />
@@ -591,6 +610,16 @@
             </div>
             <div class="elev-card-stage">
               <div class="elev-preview" id="v2-ctx-elev"></div>
+              <button type="button" class="elev-screen-btn" id="v2-ctx-elev-screen"
+                      title="Open this face on the second screen" aria-label="Second screen">
+                <svg viewBox="0 0 32 20" aria-hidden="true">
+                  <rect x="1.5" y="2" width="11" height="8" rx="0.6" fill="none" stroke="currentColor" stroke-width="1.4"/>
+                  <path d="M12.5 4.2 20 8.2v4.2l-7.5 1.2z" fill="currentColor" opacity="0.22" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/>
+                  <rect x="19" y="7" width="11.5" height="8" rx="1.2" fill="#fffdf8" stroke="currentColor" stroke-width="1.4"/>
+                  <circle cx="22.2" cy="11" r="1.7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+                  <path d="M26.2 15.2h3.2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+                </svg>
+              </button>
             </div>
             <div class="elev-finish-callout" id="v2-ctx-elev-callout" hidden></div>
           </div>
@@ -734,36 +763,73 @@
   <div class="mass-overlay" id="v2-mass-overlay" hidden>
     <div class="panel mass-panel">
       <header>
-        <h2 id="v2-mass-title">3D massing</h2>
+        <h2 id="v2-mass-title">3D</h2>
         <div class="seg" role="group" aria-label="Show in 3D">
           <button type="button" data-mass-status="both" class="active">Both</button>
           <button type="button" data-mass-status="existing">Existing</button>
           <button type="button" data-mass-status="planned">Proposed</button>
         </div>
         <label class="mass-services" title="Hot water, cold water, drainage, electrical and gas. Drawn in each system's colour, including vertical rises. A run with no height set is left out.">
-          <input type="checkbox" id="v2-mass-services" checked />
+          <input type="checkbox" id="v2-mass-services" />
           Services
         </label>
-        <span id="v2-mass-caption">Drag to orbit · scroll to zoom</span>
-        <button type="button" id="v2-mass-generate">Generate model</button>
-        <button type="button" id="v2-mass-show-3d" hidden>Show 3D</button>
-        <button type="button" id="v2-mass-close">Close</button>
+        <div class="mass-actions">
+          <button type="button" id="v2-mass-picture" aria-expanded="false" aria-controls="v2-mass-prompt">Generate model</button>
+          <button type="button" id="v2-mass-show-3d" hidden>Back to the model</button>
+          <button type="button" id="v2-mass-close">Back to plan</button>
+        </div>
       </header>
+      <p class="mass-readout" id="v2-mass-caption" hidden></p>
+      <section class="mass-prompt" id="v2-mass-prompt" hidden>
+        <div class="mass-prompt-examples" id="v2-mass-prompt-examples" role="group" aria-label="Example prompts"></div>
+        <p class="mass-prompt-note" id="v2-mass-prompt-note"></p>
+        <label class="visually-hidden" for="v2-mass-prompt-text">Instruction sent with the 3D view</label>
+        <textarea id="v2-mass-prompt-text" rows="4" maxlength="4000" spellcheck="true"></textarea>
+        <div class="mass-prompt-foot">
+          <p class="mass-prompt-count" id="v2-mass-prompt-count"></p>
+          <label class="mass-refs" id="v2-mass-refs" title="Also sends the opposite side and a higher view of the roof. The photograph still matches this camera. Untick to send only this view.">
+            <input type="checkbox" id="v2-mass-refs-toggle" checked />
+            Send the hidden sides
+          </label>
+          <button type="button" id="v2-mass-generate">Generate</button>
+        </div>
+      </section>
       <div class="mass-split" id="v2-mass-split">
         <div class="canvas-wrap mass-wrap mass-plan-wrap" id="v2-mass-plan-wrap" hidden>
           <p class="mass-pane-label">Plan · distances</p>
           <canvas id="v2-mass-plan-canvas"></canvas>
         </div>
         <div class="canvas-wrap mass-wrap" id="v2-mass-wrap">
-          <p class="mass-pane-label" id="v2-mass-view-label">3D</p>
+          <p class="mass-pane-label" id="v2-mass-view-label" hidden>3D</p>
+          <p class="mass-gesture" id="v2-mass-hint" hidden>Drag to turn · scroll to zoom</p>
+          <ul class="mass-legend" id="v2-mass-legend" hidden>
+            <li><span class="mass-swatch mass-swatch-existing"></span>Existing wall</li>
+            <li><span class="mass-swatch mass-swatch-proposed"></span>Proposed wall</li>
+            <li><span class="mass-swatch mass-swatch-roof"></span>Roof</li>
+            <li><span class="mass-swatch mass-swatch-ground"></span>Ground floor</li>
+          </ul>
           <canvas id="v2-mass-canvas"></canvas>
           <div class="empty" id="v2-mass-empty">
             <h3>Nothing to show</h3>
             <p>Draw a room, wall, roof, floor, door or window, then open 3D again.</p>
           </div>
           <div class="mass-render" id="v2-mass-render" hidden>
+            <div class="mass-render-refs" id="v2-mass-render-refs" hidden></div>
             <img id="v2-mass-render-img" alt="Photorealistic visualization of the building" />
-            <p class="mass-render-status" id="v2-mass-render-status" hidden></p>
+            <div class="mass-render-status" id="v2-mass-render-status" hidden>
+              <p id="v2-mass-render-status-text"></p>
+              <div class="mass-render-wait" id="v2-mass-render-wait" hidden>
+                <div class="mass-render-bar" role="progressbar" aria-label="Generating" aria-valuemin="0" aria-valuetext="0:00">
+                  <span></span>
+                </div>
+                <span class="mass-render-elapsed" id="v2-mass-render-elapsed">0:00</span>
+              </div>
+            </div>
+            <div class="mass-render-actions" role="group" aria-label="Picture">
+              <button type="button" id="v2-mass-render-copy" title="Copy the picture">Copy</button>
+              <button type="button" id="v2-mass-render-paint" title="Open this picture in Paint">Open in Paint</button>
+              <button type="button" id="v2-mass-render-save" title="Save the picture">Save</button>
+            </div>
           </div>
         </div>
       </div>
@@ -1168,6 +1234,6 @@
     </form>
   </div>
 
-  <script type="module" src="./ui.js?v=20261106-plain-opening"></script>
+  <script type="module" src="./ui.js?v=20261107-trimprev"></script>
 </body>
 </html>

@@ -508,7 +508,7 @@ export function buildPack(catalog, { includeUnplaced = false, id, name, version 
   }
 
   // A plain opening and an arch are not in the Revit catalog export. They
-  // live in the Doors list: a hole, and the same hole with a semicircular head.
+  // live in the Doors list: a hole, and the same hole with an arched head.
   for (const sku of PLAIN_OPENING_SKUS) {
     if (!skus.some((existing) => existing.id === sku.id)) skus.push(structuredClone(sku));
   }

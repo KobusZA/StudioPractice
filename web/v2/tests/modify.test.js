@@ -14,6 +14,7 @@ import {
   mirrorSelection,
   moveWallEnd,
   realignWallFaces,
+  shiftJoinedEnds,
   retypeSelection,
   rotateSelection,
   selectionBounds,
@@ -273,7 +274,7 @@ function snapSku(id) {
   return thickSkuById(id);
 }
 
-test("moving an end lands the location line and keeps the door and the corner", () => {
+test("moving an end lands the location line, keeps the door, and leaves the other wall", () => {
   // Exterior face on y = 0, drawn to the right. The 220 mm centreline sits 110 mm below it.
   const doc = docWith({
     segments: [
@@ -293,7 +294,7 @@ test("moving an end lands the location line and keeps the door and the corner", 
   assert.ok(Math.abs(wall1.y1 - 0.11) < 1e-9 && Math.abs(wall1.y2 - 0.11) < 1e-9, `centreline at ${wall1.y1}`);
   assert.equal(wall1.x2, 6);
   assert.equal(wall1.location, "exterior");
-  assert.equal(wall2.x1, 6);
+  assert.equal(wall2.x1, 4);
   assert.equal(wall2.y1, 0.11);
   assert.equal(wall2.x2, 4);
   assert.equal(wall2.y2, 3.11);
@@ -330,6 +331,61 @@ test("a finish past the shortened end is removed and the door stays put", () => 
   assert.equal(doc.finishRuns.length, 1);
   assert.equal(doc.finishRuns[0].id, "keep");
   assert.equal(doc.finishRuns[0].b, 1);
+});
+
+test("moving a wall carries the wall joined to its end", () => {
+  const doc = docWith({
+    segments: [wall("w1", 0, 0, 4, 0, "T220"), wall("w2", 4, 0, 4, 3, "T220")],
+    openings: [{ id: "d1", sku: "D1", wallId: "w2", t: 0.5, status: "planned" }],
+  });
+  doc.segments[0].y1 = 1;
+  doc.segments[0].y2 = 1;
+  shiftJoinedEnds(doc, [{
+    id: "w1",
+    level: null,
+    old: { x1: 0, y1: 0, x2: 4, y2: 0 },
+    next: { x1: 0, y1: 1, x2: 4, y2: 1 },
+  }], { skuById: snapSku });
+  const wall2 = doc.segments[1];
+  assert.equal(wall2.x1, 4);
+  assert.equal(wall2.y1, 1);
+  assert.equal(wall2.x2, 4);
+  assert.equal(wall2.y2, 3);
+  assert.ok(Math.abs(doc.openings[0].t - 0.25) < 1e-9, `door stays on the plan, station ${doc.openings[0].t}`);
+});
+
+test("a corner drawn 'against' (ends a thickness apart) still moves with its wall", () => {
+  // Horizontal wall stops at the vertical wall's near face; the vertical runs on past it.
+  const doc = docWith({
+    segments: [wall("w1", 0, 0, 3.89, 0, "T220"), wall("w2", 4, -0.11, 4, 3, "T220")],
+  });
+  doc.segments[0].y1 = 1;
+  doc.segments[0].y2 = 1;
+  const changed = shiftJoinedEnds(doc, [{
+    id: "w1",
+    level: null,
+    old: { x1: 0, y1: 0, x2: 3.89, y2: 0 },
+    next: { x1: 0, y1: 1, x2: 3.89, y2: 1 },
+  }], { skuById: snapSku });
+  assert.deepEqual(changed, ["w2"]);
+  const wall2 = doc.segments[1];
+  assert.ok(Math.abs(wall2.x1 - 4) < 1e-9 && Math.abs(wall2.x2 - 4) < 1e-9, "keeps its direction");
+  assert.ok(Math.abs(wall2.y1 - 0.89) < 1e-9, `corner follows, end at ${wall2.y1}`);
+  assert.equal(wall2.y2, 3);
+});
+
+test("a wall that only touches nearby is not carried", () => {
+  const doc = docWith({
+    segments: [wall("w1", 0, 0, 4, 0, "T220"), wall("w2", 4, 2, 4, 5, "T220")],
+  });
+  const changed = shiftJoinedEnds(doc, [{
+    id: "w1",
+    level: null,
+    old: { x1: 0, y1: 0, x2: 4, y2: 0 },
+    next: { x1: 0, y1: 1, x2: 4, y2: 1 },
+  }], { skuById: snapSku });
+  assert.deepEqual(changed, []);
+  assert.equal(doc.segments[1].y1, 2);
 });
 
 test("moving the shared end of a split leaves the other piece", () => {

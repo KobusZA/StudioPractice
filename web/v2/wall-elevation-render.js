@@ -1,23 +1,30 @@
 // SVG drawing of a wall elevation model. One function serves the small
 // inspector preview and the strip under the plan; `interactive` adds the drag
 // handles. Returns markup plus the scales the pointer code needs to turn pixels
-// back into metres. The wall always spans the width of the level lines. Height
-// is fitted on its own, so a short wall is stretched across the graph and a
-// long one is squeezed, and the next floor stays above the wall.
+// back into metres.
 //
-// The open strip can zoom in on that fitted view (`view.zoom`) and slide it
-// (`view.panX`, `view.panY`, screen pixels). Zoom 1 with no pan is the fit.
-// The preview never passes a view, so it stays fitted.
+// The preview fits the wall to the graph: the face spans the level lines, and
+// the height is fitted on its own. The open strip passes `frame`. The face is
+// then as long on screen as the wall, and exactly as tall for its height, so
+// the ratio follows the plan's scale. The strip holds that face: panning the
+// plan leaves it, moving the wall carries it, and Align is what lines the two
+// centres up. Level lines still cross the whole strip. The floor sits on the
+// bottom; anything above the strip is clipped.
+//
+// `view.zoom` magnifies either drawing, and `view.panX` / `view.panY` slide it.
+// Zoom 1 with no pan is the fit, or the plan match when a frame is set.
+// The open strip can zoom further in or further out from that match. The
+// preview never passes a view, so it stays fitted.
 
 import { FINISH_CATEGORIES, finishSwatch } from "./finish-data.js";
 import { area as polyArea, clipPolygon, offsetPolygonInward, pointInPoly } from "./geom.js";
-import { archVoidPolygon } from "./openings.js";
+import { archVoidPolygon } from "./arch-head.js";
 
 const PAD = 14;
 const HANDLE = 5;
 
-/** Zoom out stops at the fitted wall. Further out would letterbox it. */
-export const ELEV_ZOOM_MIN = 1;
+/** Far enough out to see a long face with the storeys around it. */
+export const ELEV_ZOOM_MIN = 1 / 16;
 /** Enough to work a window on a long face without the handles leaving the strip. */
 export const ELEV_ZOOM_MAX = 16;
 
@@ -31,6 +38,7 @@ function clampZoom(zoom) {
  * Screen placement of a fitted elevation under a zoom/pan view.
  * `fit.top` is the screen y of the top of the frame (the high level). The
  * floor (`fit.originY`) moves down as the zoom grows; pan is extra pixels.
+ * `fit.scaleX` stays positive. `fit.dir` is -1 when station 0 is the right end.
  */
 export function elevationPlacement(fit, view) {
   const zoom = clampZoom(view?.zoom);
@@ -40,22 +48,22 @@ export function elevationPlacement(fit, view) {
   const scaleY = fit.scaleY * zoom;
   const originX = fit.originX + panX;
   const originY = fit.top + (fit.originY - fit.top) * zoom + panY;
-  return { zoom, scaleX, scaleY, originX, originY };
+  return { zoom, scaleX, scaleY, originX, originY, dir: fit.dir < 0 ? -1 : 1 };
 }
 
 /**
  * Next view after a wheel step about a screen point, so that point stays put.
- * Zooming back to the fitted wall clears the pan: that view is exactly the
- * unzoomed drawing.
+ * Zoom can grow past the strip or shrink below the plan match. Zoom 1 with
+ * no pan is the only view that still matches that drawing exactly.
  */
 export function zoomElevationView(fit, view, px, py, factor) {
   const prev = clampZoom(view?.zoom);
   const zoom = clampZoom(prev * factor);
-  if (zoom === ELEV_ZOOM_MIN) return { zoom: 1, panX: 0, panY: 0 };
   const placed = elevationPlacement(fit, { zoom: prev, panX: view?.panX, panY: view?.panY });
-  const s = (px - placed.originX) / placed.scaleX;
+  const dir = placed.dir < 0 ? -1 : 1;
+  const s = (px - placed.originX) / (placed.scaleX * dir);
   const above = (placed.originY - py) / placed.scaleY;
-  const originX = px - s * fit.scaleX * zoom;
+  const originX = px - s * fit.scaleX * zoom * dir;
   const originY = py + above * fit.scaleY * zoom;
   return {
     zoom,
@@ -70,7 +78,6 @@ export function zoomElevationView(fit, view, px, py, factor) {
  */
 export function clampElevationView(fit, view, width, height) {
   const zoom = clampZoom(view?.zoom);
-  if (zoom === ELEV_ZOOM_MIN) return { zoom: 1, panX: 0, panY: 0 };
   const margin = Math.min(48, Math.max(16, Math.min(width, height) / 4));
   const clamp = (origin0, span, pan, viewSize) => {
     let origin = origin0 + pan;
@@ -78,11 +85,109 @@ export function clampElevationView(fit, view, width, height) {
     if (origin > viewSize - margin) origin -= origin - (viewSize - margin);
     return origin - origin0;
   };
+  const left0 = fit.dir < 0 ? fit.originX - fit.spanX : fit.originX;
   return {
     zoom,
-    panX: clamp(fit.originX, fit.spanX * zoom, Number(view?.panX) || 0, width),
+    panX: clamp(left0, fit.spanX * zoom, Number(view?.panX) || 0, width),
     panY: clamp(fit.top, fit.spanY * zoom, Number(view?.panY) || 0, height),
   };
+}
+
+/**
+ * Where one wall face sits in the strip so it matches the plan.
+ * `wall` is `{ x1, y1, x2, y2, side }`. `cam` is `{ scale, ox, oy }` in canvas
+ * pixels (y down). `shiftX` is the canvas's left minus the strip's left, so a
+ * horizontal wall shares the plan's screen x.
+ * Side -1 reads the wall from its second end. The face is `length * scale`
+ * pixels wide, which is the wall's length on screen at any angle. A wall that
+ * runs more up-down uses the plan's y as the strip's x, so moving it up moves
+ * the face sideways. `dir` is -1 when that axis runs backwards: station 0 stays
+ * on the viewing start, which is then the right end.
+ */
+export function planFaceFrame(wall, cam, shiftX = 0) {
+  const scale = Number(cam?.scale);
+  if (!wall || !(scale > 0)) return null;
+  const x1 = Number(wall.x1);
+  const y1 = Number(wall.y1);
+  const x2 = Number(wall.x2);
+  const y2 = Number(wall.y2);
+  if (![x1, y1, x2, y2].every(Number.isFinite)) return null;
+  const flipped = wall.side === -1;
+  const ax = flipped ? x2 : x1;
+  const ay = flipped ? y2 : y1;
+  const bx = flipped ? x1 : x2;
+  const by = flipped ? y1 : y2;
+  const sx0 = (Number(cam.ox) || 0) + ax * scale;
+  const sy0 = (Number(cam.oy) || 0) + ay * scale;
+  const sx1 = (Number(cam.ox) || 0) + bx * scale;
+  const sy1 = (Number(cam.oy) || 0) + by * scale;
+  const useY = Math.abs(sy1 - sy0) > Math.abs(sx1 - sx0);
+  const shift = useY ? 0 : (Number(shiftX) || 0);
+  const start = (useY ? sy0 : sx0) + shift;
+  const end = (useY ? sy1 : sx1) + shift;
+  return { scale, originX: start, dir: end - start >= 0 ? 1 : -1, vertical: useY };
+}
+
+/**
+ * The axis the strip tracks, and the wall's midpoint on it. A wall that runs
+ * more up-down is tracked by its y. The midpoint is the same on either face.
+ */
+export function faceTrack(wall) {
+  if (!wall) return null;
+  const x1 = Number(wall.x1);
+  const y1 = Number(wall.y1);
+  const x2 = Number(wall.x2);
+  const y2 = Number(wall.y2);
+  if (![x1, y1, x2, y2].every(Number.isFinite)) return null;
+  const flipped = wall.side === -1;
+  const ax = flipped ? x2 : x1;
+  const ay = flipped ? y2 : y1;
+  const bx = flipped ? x1 : x2;
+  const by = flipped ? y1 : y2;
+  const vertical = Math.abs(by - ay) > Math.abs(bx - ax);
+  return { axis: vertical ? "y" : "x", mid: vertical ? (ay + by) / 2 : (ax + bx) / 2, vertical };
+}
+
+/**
+ * Where the face centre sits in the strip. A new face (`hold` null) starts at
+ * `centerX`. Panning the plan never comes through here. Moving the wall adds
+ * that movement, in pixels, along the axis being tracked. Turning the wall
+ * onto the other axis keeps the centre and starts tracking the new midpoint.
+ */
+export function trackFaceCenter(hold, track, scale, centerX) {
+  if (!track || !(scale > 0)) return hold;
+  if (!hold || hold.axis !== track.axis) {
+    return { axis: track.axis, mid: track.mid, centerX: hold ? hold.centerX : centerX };
+  }
+  return {
+    axis: track.axis,
+    mid: track.mid,
+    centerX: hold.centerX + (track.mid - hold.mid) * scale,
+  };
+}
+
+/**
+ * Camera shift that puts the wall's centre on `centerX` in the strip.
+ * `projected` is where the centre sits now. A horizontal wall moves with `ox`;
+ * a wall that runs up the plan moves with `oy`.
+ */
+export function alignCameraShift(vertical, projected, centerX) {
+  const delta = centerX - projected;
+  return vertical ? { ox: 0, oy: delta } : { ox: delta, oy: 0 };
+}
+
+/**
+ * How far to slide the span `[a, b]` so it lies inside `[lo, hi]`.
+ * A span longer than the view is centred. A span already inside does not move.
+ */
+export function nudgeIntoView(a, b, lo, hi) {
+  const min = Math.min(a, b);
+  const max = Math.max(a, b);
+  if (!(hi > lo)) return 0;
+  if (max - min > hi - lo) return (lo + hi) / 2 - (min + max) / 2;
+  if (min < lo) return lo - min;
+  if (max > hi) return hi - max;
+  return 0;
 }
 
 function esc(text) {
@@ -434,7 +539,7 @@ function openingPoly(o) {
   const x1 = o.offset + o.width;
   const z0 = o.sill;
   const z1 = o.sill + o.height;
-  if (o.head === "arch") return archVoidPolygon({ from: x0, to: x1, bottom: z0, top: z1 });
+  if (o.head === "arch") return archVoidPolygon({ from: x0, to: x1, bottom: z0, top: z1, rise: o.rise });
   return [[x0, z0], [x1, z0], [x1, z1], [x0, z1]];
 }
 
@@ -641,7 +746,7 @@ function drawCoatMarks(parts, model, xOf, yOf) {
  * @param {{width:number,height:number,interactive?:boolean,selectedId?:string|null,view?:{zoom?:number,panX?:number,panY?:number}|null}} opts
  * @returns {{svg:string, scale:number, scaleX:number, scaleY:number, originX:number, originY:number, fit:object}}
  */
-export function elevationSvg(model, { width, height, interactive = false, selectedId = null, selectedBandId = null, selectedVertex = null, draft = null, guides = null, edgeMode = "corner", view = null, locate = null, wallSelected = false, foundationPicking = false, dropGuide = null } = {}) {
+export function elevationSvg(model, { width, height, interactive = false, selectedId = null, selectedBandId = null, selectedVertex = null, draft = null, guides = null, edgeMode = "corner", view = null, locate = null, wallSelected = false, foundationPicking = false, dropGuide = null, frame = null } = {}) {
   const W = Math.max(80, Math.round(width));
   const H = Math.max(60, Math.round(height));
   if (!model) {
@@ -663,25 +768,57 @@ export function elevationSvg(model, { width, height, interactive = false, select
   // on the left for the height figure; the preview uses the whole graph.
   const x0 = interactive ? Math.max(PAD / 2, 32) : PAD / 2;
   const x1 = W - PAD / 2;
-  const fitScaleY = Math.max(1e-3, (H - PAD * 2) / Math.max(zHi - zLo, 0.1));
-  const fitScaleX = Math.max(1e-3, (x1 - x0) / Math.max(model.length, 0.1));
-  const fit = {
-    scaleX: fitScaleX,
-    scaleY: fitScaleY,
-    originX: x0,
-    originY: PAD + (zHi - model.base) * fitScaleY,
-    top: PAD,
-    spanX: model.length * fitScaleX,
-    spanY: (zHi - zLo) * fitScaleY,
-  };
-  // Zoom 1, no pan: the floor and the left of the wall sit where they always have.
+  const planScale = Number(frame?.scale);
+  const locked = planScale > 0 && Number.isFinite(Number(frame?.originX));
+  let fit;
+  if (locked) {
+    // The floor is the anchor. A footing under it keeps its own height, and
+    // is clipped once it no longer fits beneath that floor.
+    const footing = Math.max(
+      0,
+      ...((model.foundations || []).map((f) => model.base - f.base)),
+      offer ? Number(offer.depth) || 0 : 0,
+    );
+    let originY = H - PAD - footing * planScale;
+    if (originY < PAD) originY = H - PAD;
+    fit = {
+      scaleX: planScale,
+      scaleY: planScale,
+      originX: Number(frame.originX),
+      originY,
+      top: originY - (zHi - model.base) * planScale,
+      spanX: model.length * planScale,
+      spanY: Math.max(model.height, zHi - zLo) * planScale,
+      dir: frame.dir < 0 ? -1 : 1,
+    };
+  } else {
+    const fitScaleY = Math.max(1e-3, (H - PAD * 2) / Math.max(zHi - zLo, 0.1));
+    const fitScaleX = Math.max(1e-3, (x1 - x0) / Math.max(model.length, 0.1));
+    fit = {
+      scaleX: fitScaleX,
+      scaleY: fitScaleY,
+      originX: x0,
+      originY: PAD + (zHi - model.base) * fitScaleY,
+      top: PAD,
+      spanX: model.length * fitScaleX,
+      spanY: (zHi - zLo) * fitScaleY,
+      dir: 1,
+    };
+  }
+  // Zoom 1, no pan: the fitted wall, or the plan-matched face when a frame is set.
   const placed = elevationPlacement(fit, view);
+  const dir = placed.dir < 0 ? -1 : 1;
   const scaleY = placed.scaleY;
-  const scaleX = placed.scaleX;
+  const scaleX = placed.scaleX * dir;
   const scale = scaleY;
   const originX = placed.originX;
   const yOf = (z) => placed.originY - (z - model.base) * scaleY;
   const xOf = (offset) => originX + offset * scaleX;
+  const xSpan = (s0, s1) => {
+    const a = xOf(s0);
+    const b = xOf(s1);
+    return [Math.min(a, b), Math.abs(b - a)];
+  };
   const originY = yOf(model.base);
 
   const parts = [];
@@ -715,9 +852,12 @@ export function elevationSvg(model, { width, height, interactive = false, select
     labels.push(`<text x="${W - PAD / 2}" y="${y - 3}" text-anchor="end" class="elev-level-label">${levelLabel(guide.name, guide.elevation)}</text>`);
   }
 
-  const wx = xOf(0);
+  // Plan-matched, the body is the face the plan paints (mitred at corners).
+  // The fitted preview keeps the centreline so it stays inside its graph.
+  const faceFrom = locked && Number.isFinite(model.faceFrom) ? model.faceFrom : 0;
+  const faceTo = locked && Number.isFinite(model.faceTo) ? model.faceTo : model.length;
+  const [wx, ww] = xSpan(faceFrom, faceTo);
   const wy = yOf(model.top);
-  const ww = model.length * scaleX;
   const wh = model.height * scaleY;
   if (guide && guide.elevation > model.top + 0.02) {
     const gy = yOf(guide.elevation);
@@ -726,9 +866,8 @@ export function elevationSvg(model, { width, height, interactive = false, select
   const host = selectedId ? " elev-wall-host" : "";
   parts.push(`<rect x="${wx}" y="${wy}" width="${ww}" height="${wh}" class="elev-wall${host}" data-elev-wall="1"/>`);
   for (const f of model.foundations || []) {
-    const fx = xOf(f.from);
+    const [fx, fw] = xSpan(f.from, f.to);
     const fy = yOf(f.top);
-    const fw = (f.to - f.from) * scaleX;
     const fh = (f.top - f.base) * scaleY;
     if (fw < 1 || fh < 1) continue;
     parts.push(`<rect x="${fx}" y="${fy}" width="${fw}" height="${fh}" class="elev-foundation" data-elev-foundation="${esc(f.id)}"><title>${esc(f.name)}</title></rect>`);
@@ -737,9 +876,8 @@ export function elevationSvg(model, { width, height, interactive = false, select
     }
   }
   if (offer) {
-    const fx = xOf(0);
+    const [fx, fw] = xSpan(faceFrom, faceTo);
     const fy = yOf(offer.top);
-    const fw = model.length * scaleX;
     const fh = offer.depth * scaleY;
     if (fw >= 1 && fh >= 1) {
       const label = foundationPicking ? mm(offer.depth) : "+ Foundation";
@@ -773,12 +911,12 @@ export function elevationSvg(model, { width, height, interactive = false, select
       const pts = b.outline.map(([s, z]) => `${xOf(s)},${yOf(model.base + z)}`).join(" ");
       parts.push(`<polygon points="${pts}" class="${cls}"${tint} data-elev-fill="${esc(b.id)}">${title}</polygon>`);
     } else {
-      parts.push(`<rect x="${xOf(b.from ?? 0)}" y="${yOf(model.base + b.top)}" width="${((b.to ?? model.length) - (b.from ?? 0)) * scaleX}" height="${(b.top - b.bottom) * scaleY}" class="${cls}"${tint} data-elev-fill="${esc(b.id)}">${title}</rect>`);
+      const [bx, bw] = xSpan(b.from ?? 0, b.to ?? model.length);
+      parts.push(`<rect x="${bx}" y="${yOf(model.base + b.top)}" width="${bw}" height="${(b.top - b.bottom) * scaleY}" class="${cls}"${tint} data-elev-fill="${esc(b.id)}">${title}</rect>`);
     }
     if (b.source === "rule") {
-      const rx = xOf(b.from ?? 0);
+      const [rx, rw] = xSpan(b.from ?? 0, b.to ?? model.length);
       const ry = yOf(model.base + b.top);
-      const rw = ((b.to ?? model.length) - (b.from ?? 0)) * scaleX;
       const rh = (b.top - b.bottom) * scaleY;
       parts.push(`<rect x="${rx}" y="${ry}" width="${rw}" height="${rh}" fill="url(#elev-rule-${hatch})" pointer-events="none"/>`);
     }
@@ -786,9 +924,8 @@ export function elevationSvg(model, { width, height, interactive = false, select
   if (interactive) drawCoatMarks(parts, model, xOf, yOf);
 
   for (const o of model.openings) {
-    const x = xOf(o.offset);
+    const [x, w] = xSpan(o.offset, o.offset + o.width);
     const y = yOf(model.base + o.sill + o.height);
-    const w = o.width * scaleX;
     const h = o.height * scaleY;
     const sel = o.id === selectedId;
     const cls = `elev-opening elev-${o.category === "door" ? "door" : o.head === "arch" ? "arch" : o.category === "opening" ? "opening" : "window"}${sel ? " is-selected" : ""}${o.nonStandard ? " is-nonstandard" : ""}`;
@@ -808,7 +945,8 @@ export function elevationSvg(model, { width, height, interactive = false, select
       // top of this wall).
       const headRoom = y - yOf(model.top);
       const labelY = headRoom >= 32 ? Math.max(10, y - 16) : Math.min(y + h - 4, y + 16);
-      parts.push(`<text x="${x + w / 2}" y="${labelY}" text-anchor="middle" class="elev-dim">${mm(o.width)} × ${mm(o.height)}</text>`);
+      const riseNote = o.head === "arch" && o.rise > 0 ? `  rise ${mm(o.rise)}` : "";
+      parts.push(`<text x="${x + w / 2}" y="${labelY}" text-anchor="middle" class="elev-dim">${mm(o.width)} × ${mm(o.height)}${riseNote}</text>`);
       dimensionOpening(parts, { x, y, w, h, opening: o, model, yOf, W, H });
     }
     if (interactive && sel) {
@@ -822,7 +960,26 @@ export function elevationSvg(model, { width, height, interactive = false, select
       for (const [part, hx, hy] of hs) {
         parts.push(`<rect x="${hx - HANDLE}" y="${hy - HANDLE}" width="${HANDLE * 2}" height="${HANDLE * 2}" class="elev-handle elev-handle-${part}" data-elev-op="${part}" data-elev-id="${esc(o.id)}"/>`);
       }
+      // The spring is where the curve leaves the jambs. Dragging it changes
+      // the rise and leaves the crown where it is.
+      if (o.head === "arch" && o.rise > 0) {
+        const sy = yOf(model.base + o.sill + o.height - o.rise);
+        const hx = x + w / 2;
+        parts.push(`<line x1="${x + 6}" y1="${sy}" x2="${x + w - 6}" y2="${sy}" class="elev-spring"/>`);
+        parts.push(`<rect x="${hx - HANDLE}" y="${sy - HANDLE}" width="${HANDLE * 2}" height="${HANDLE * 2}" class="elev-handle elev-handle-spring" data-elev-op="spring" data-elev-id="${esc(o.id)}"><title>Rise</title></rect>`);
+      }
     }
+  }
+
+  // A wall that comes out of this face covers a strip as wide as its end.
+  // Drawn over finishes and openings, because that part of the face is hidden.
+  // It is the other wall, so it carries no finish and no drag handles.
+  for (const p of model.projections || []) {
+    const [px, pw] = xSpan(p.from, p.to);
+    const py = yOf(p.top);
+    const ph = (p.top - p.base) * scaleY;
+    if (pw < 0.5 || ph < 0.5) continue;
+    parts.push(`<rect x="${px}" y="${py}" width="${pw}" height="${ph}" class="elev-protrusion" data-elev-protrusion="${esc(p.id)}"><title>${esc(p.name)}</title></rect>`);
   }
 
   if (Number.isFinite(dropGuide)) {
@@ -850,8 +1007,7 @@ export function elevationSvg(model, { width, height, interactive = false, select
     };
     for (const b of model.finishBands) {
       if (!b.editable || b.outline || editRing(b)) continue;
-      const bx = xOf(b.from);
-      const bw = (b.to - b.from) * scaleX;
+      const [bx, bw] = xSpan(b.from, b.to);
       const byTop = yOf(model.base + b.top);
       const byBottom = yOf(model.base + b.bottom);
       const edge = (part, x, y, w, h) => parts.push(`<rect x="${x}" y="${y}" width="${Math.max(2, w)}" height="${Math.max(2, h)}" class="elev-band-edge elev-band-edge-${part}" data-elev-op="band-${part}" data-elev-band="${esc(b.id)}"/>`);

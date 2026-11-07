@@ -20,6 +20,7 @@ import {
 } from "./geom.js";
 import { effectiveLevel, nid, roomPolygon } from "./model.js";
 import { defaultWallTop, levelAboveRise } from "./level-view.js";
+import { arcFromRadius } from "./click-draw.js";
 
 function skuById(pack, id) {
   return pack?.skus?.find((s) => s.id === id) || null;
@@ -243,11 +244,11 @@ export function deriveDrawnWalls(doc, pack, minLength = 0.3) {
     if (!roomsByLevel.has(level)) roomsByLevel.set(level, []);
     roomsByLevel.get(level).push({ id: room.id, edges: polyEdges(poly) });
   }
-  const adjoining = (wall) => {
+  const adjoining = (wall, probe) => {
     const rooms = roomsByLevel.get(wall.level);
     if (!rooms) return [];
-    const mx = (wall.x1 + wall.x2) / 2;
-    const my = (wall.y1 + wall.y2) / 2;
+    const mx = probe ? probe.x : (wall.x1 + wall.x2) / 2;
+    const my = probe ? probe.y : (wall.y1 + wall.y2) / 2;
     const reach = wall.thickness / 2 + ROOM_WALL_REACH;
     return rooms
       .filter((r) => r.edges.some((e) => e.length > EPS && distToSeg(e.a[0], e.a[1], e.b[0], e.b[1], mx, my) <= reach))
@@ -256,8 +257,10 @@ export function deriveDrawnWalls(doc, pack, minLength = 0.3) {
   for (const seg of doc.segments || []) {
     const sku = skuById(pack, seg.sku);
     if (!sku) continue;
-    const length = segLength(seg.x1, seg.y1, seg.x2, seg.y2);
-    if (length < minLength) continue;
+    const chord = segLength(seg.x1, seg.y1, seg.x2, seg.y2);
+    if (chord < minLength) continue;
+    const arc = seg.arc ? arcFromRadius(seg.x1, seg.y1, seg.x2, seg.y2, seg.arc.radius, seg.arc.side, seg.arc.major === true) : null;
+    const length = arc ? arc.length : chord;
     const drawnWall = {
       id: seg.id,
       x1: seg.x1,
@@ -288,8 +291,9 @@ export function deriveDrawnWalls(doc, pack, minLength = 0.3) {
       edges: [],
       drawn: true,
       status: objectStatus(seg),
+      ...(arc ? { arc: { radius: arc.radius, side: arc.side, ...(arc.major ? { major: true } : {}) } } : {}),
     };
-    drawnWall.roomIds = adjoining(drawnWall);
+    drawnWall.roomIds = adjoining(drawnWall, arc ? { x: arc.crownX, y: arc.crownY } : null);
     walls.push(drawnWall);
   }
   return walls;
@@ -353,6 +357,60 @@ function coveredByDrawn(piece, drawn) {
  * the narrowest wall/footing this app draws is well over 100 mm thick.
  */
 export const CORNER_JOIN_TOL = 0.006;
+
+/**
+ * Which walls meet `wall` at one of its ends, as a corner.
+ *
+ * Two walls form a corner when their centrelines cross close to an end of
+ * each. That holds however the corner was drawn: on the centreline, or with
+ * "past" / "against", which leave the two ends about a wall-thickness apart.
+ * Walls that continue the same line count only when their ends coincide.
+ *
+ * `others` are plain segments or derived walls; `thicknessOf` gives metres.
+ * Each hit carries the other wall, which of its ends is at the corner, and
+ * the point where the two centrelines cross (null for a continuing line).
+ */
+export function wallCornerNeighbors(wall, end, others, {
+  thicknessOf = (w) => Number(w?.thickness) || 0,
+  tol = CORNER_JOIN_TOL,
+} = {}) {
+  const px = end === 1 ? wall.x1 : wall.x2;
+  const py = end === 1 ? wall.y1 : wall.y2;
+  const ax = wall.x2 - wall.x1;
+  const ay = wall.y2 - wall.y1;
+  const la = Math.hypot(ax, ay);
+  if (la < 1e-9) return [];
+  const ta = thicknessOf(wall);
+  const hits = [];
+  for (const other of others || []) {
+    if (!other || other === wall || (other.id != null && other.id === wall.id)) continue;
+    const bx = other.x2 - other.x1;
+    const by = other.y2 - other.y1;
+    const lb = Math.hypot(bx, by);
+    if (lb < 1e-9) continue;
+    const cross = ax * by - ay * bx;
+    const sin = Math.abs(cross) / (la * lb);
+    if (sin < 0.05) {
+      for (const qEnd of [1, 2]) {
+        const qx = qEnd === 1 ? other.x1 : other.x2;
+        const qy = qEnd === 1 ? other.y1 : other.y2;
+        if (Math.hypot(qx - px, qy - py) <= tol) hits.push({ wall: other, end: qEnd, x: null, y: null });
+      }
+      continue;
+    }
+    const t = ((other.x1 - wall.x1) * by - (other.y1 - wall.y1) * bx) / cross;
+    const x = wall.x1 + t * ax;
+    const y = wall.y1 + t * ay;
+    const q1 = Math.hypot(other.x1 - x, other.y1 - y);
+    const q2 = Math.hypot(other.x2 - x, other.y2 - y);
+    const qEnd = q1 <= q2 ? 1 : 2;
+    const reach = (ta + thicknessOf(other)) / (2 * Math.max(sin, 0.25)) + 0.03;
+    if (Math.hypot(px - x, py - y) <= reach && Math.min(q1, q2) <= reach) {
+      hits.push({ wall: other, end: qEnd, x, y });
+    }
+  }
+  return hits;
+}
 
 /**
  * Pull every wall/foundation endpoint within `tol` of another one on the

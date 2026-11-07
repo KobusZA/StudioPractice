@@ -22,6 +22,15 @@ import {
   rethickenAboutLocation,
   setLineHeading,
   setLineLength,
+  arcBySagitta,
+  arcFromCursor,
+  arcFromRadius,
+  arcPoints,
+  distToArc,
+  normalizeWallArc,
+  radiusFromSweep,
+  wallDraftAngle,
+  wallJointAngle,
 } from "../click-draw.js";
 
 function near(actual, expected) {
@@ -220,6 +229,96 @@ test("locked width keeps the typed metres while the free corner moves", () => {
   const r = rectFromCorners(0, 0, 5, 3, { lockW: true, w: 4, lockH: false });
   assert.equal(r.w, 4);
   assert.equal(r.h, 3);
+});
+
+test("the wall angle is the wedge off the horizontal", () => {
+  const rad = (36 * Math.PI) / 180;
+  const upRight = wallDraftAngle({ x: 0, y: 0 }, { x: Math.cos(rad), y: -Math.sin(rad) });
+  assert.ok(Math.abs(upRight.degrees - 36) < 1e-6, upRight.degrees);
+  const downRight = wallDraftAngle({ x: 0, y: 0 }, { x: Math.cos(rad), y: Math.sin(rad) });
+  assert.ok(Math.abs(downRight.degrees - 36) < 1e-6, downRight.degrees);
+  const upLeft = wallDraftAngle({ x: 1, y: 1 }, { x: 1 - Math.cos(rad), y: 1 - Math.sin(rad) });
+  assert.ok(Math.abs(upLeft.degrees - 144) < 1e-6, upLeft.degrees);
+});
+
+test("a vertical wall reads as a right angle", () => {
+  const ang = wallDraftAngle({ x: 2, y: 2 }, { x: 2, y: -2 });
+  assert.ok(Math.abs(ang.degrees - 90) < 1e-6);
+});
+
+test("a chained wall reads 180 straight on and 90 at a corner", () => {
+  const straight = wallJointAngle({ x: 4, y: 0 }, { x: 0, y: 0 }, { x: 5, y: 0 });
+  assert.ok(Math.abs(straight.interior - 180) < 1e-6);
+  const corner = wallJointAngle({ x: 4, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 3 });
+  assert.ok(Math.abs(corner.interior - 90) < 1e-6);
+  const two = (2 * Math.PI) / 180;
+  const kink = wallJointAngle({ x: 1, y: 0 }, { x: 0, y: 0 }, { x: Math.cos(two), y: Math.sin(two) });
+  assert.ok(Math.abs(kink.interior - 178) < 1e-6, kink.interior);
+});
+
+test("a start-end-radius arc bows toward the cursor and reports the radius and the sweep", () => {
+  // Chord along +x. Plan Y grows down, so a cursor at y = -1 is above the line.
+  const arc = arcFromCursor(0, 0, 4, 0, 2, -1);
+  assert.ok(arc);
+  assert.ok(Math.abs(arc.radius - 2.5) < 1e-9, arc.radius);
+  assert.ok(Math.abs(arc.cx - 2) < 1e-9 && Math.abs(arc.cy - 1.5) < 1e-9, `${arc.cx},${arc.cy}`);
+  assert.ok(Math.abs(arc.crownY - -1) < 1e-9, arc.crownY);
+  assert.ok(Math.abs(arc.sweepDeg - (2 * Math.asin(0.8) * 180 / Math.PI)) < 1e-6, arc.sweepDeg);
+  assert.ok(Math.abs(arc.length - arc.radius * Math.abs(arc.sweep)) < 1e-9);
+  assert.ok(distToArc(arc, arc.crownX, arc.crownY) < 1e-9);
+  assert.ok(distToArc(arc, 0, 0) < 1e-9);
+});
+
+test("a pull along the chord stays a straight wall", () => {
+  assert.equal(arcFromCursor(0, 0, 4, 0, 2, 0), null);
+  assert.equal(arcFromRadius(0, 0, 4, 0, 1.5, 1), null);
+});
+
+test("sweeping the cursor further from the wall keeps the radius growing", () => {
+  const near = arcFromCursor(0, 0, 4, 0, 3, -1);
+  const far = arcFromCursor(0, 0, 4, 0, 8, -3);
+  assert.ok(far.radius > near.radius + 1, `${far.radius} vs ${near.radius}`);
+});
+
+test("pulling past a semicircle keeps the crown on the cursor and the radius growing", () => {
+  const half = arcFromCursor(0, 0, 4, 0, 2, -2);
+  const past = arcFromCursor(0, 0, 4, 0, 2, -4);
+  const further = arcFromCursor(0, 0, 4, 0, 2, -6);
+  assert.ok(half.sweepDeg > 179 && half.sweepDeg < 181, half.sweepDeg);
+  assert.ok(past.major && past.sweepDeg > 180, past.sweepDeg);
+  assert.ok(further.radius > past.radius, `${further.radius} vs ${past.radius}`);
+  assert.ok(past.radius > half.radius, `${past.radius} vs ${half.radius}`);
+  assert.ok(Math.abs(past.crownY - -4) < 1e-6, past.crownY);
+  assert.ok(Math.abs(further.crownY - -6) < 1e-6, further.crownY);
+});
+
+test("a semicircle bows to the side opposite its centre", () => {
+  const up = arcFromRadius(0, 0, 4, 0, 2, -1);
+  const down = arcFromRadius(0, 0, 4, 0, 2, 1);
+  assert.ok(Math.abs(up.sweepDeg - 180) < 1e-6);
+  assert.ok(up.crownY < 0, up.crownY);
+  assert.ok(down.crownY > 0, down.crownY);
+  assert.ok(Math.abs(radiusFromSweep(4, 180) - 2) < 1e-9);
+  assert.equal(radiusFromSweep(4, 0), null);
+});
+
+test("a stored arc is kept only when the radius still reaches both ends", () => {
+  assert.deepEqual(normalizeWallArc({ radius: 2.5, side: -1 }, 0, 0, 4, 0), { radius: 2.5, side: -1 });
+  assert.equal(normalizeWallArc({ radius: 1, side: 1 }, 0, 0, 4, 0), null);
+  assert.equal(normalizeWallArc(null, 0, 0, 4, 0), null);
+  const pts = arcPoints(0, 0, 4, 0, 2.5, -1);
+  assert.ok(pts.length > 2);
+  assert.ok(Math.hypot(pts[0][0] - 0, pts[0][1] - 0) < 1e-9);
+  assert.ok(Math.hypot(pts[pts.length - 1][0] - 4, pts[pts.length - 1][1] - 0) < 1e-9);
+  const moved = arcBySagitta(0, 0, 6, 0, 1, -1);
+  assert.ok(moved.radius > 3);
+  assert.equal(moved.side, -1);
+});
+
+test("a wall along the horizontal draws no angle", () => {
+  assert.equal(wallDraftAngle({ x: 0, y: 0 }, { x: 5, y: 0 }), null);
+  assert.equal(wallDraftAngle({ x: 0, y: 0 }, { x: -4, y: 0 }), null);
+  assert.equal(wallDraftAngle({ x: 1, y: 1 }, { x: 1, y: 1 }), null);
 });
 
 test("Escape aborts a live click-click draft before leaving the tool", () => {

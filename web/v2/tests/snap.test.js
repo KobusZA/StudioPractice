@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { emptyDoc, rectShape } from "../model.js";
-import { ALIGN_ORIGIN_MAX_M, GAP_MAX_M, applyNicePoint, bestEndpointSnap, bestLinearMoveSnap, collectSnapEdges, collectSnapTargets, faceCorners, faceEdges, isExactPointSnap, nearestAlignments, probeAlongEdge, probeAlongOccupiedEdge, probeDirection, resolveProbes, snapCoord, snapEdgeToLine, snapLengthFrom, snapLinearEnd, snapNiceDelta, snapPoint, snapToFace } from "../snap.js";
+import { ALIGN_ORIGIN_MAX_M, GAP_MAX_M, applyNicePoint, bestEndpointSnap, bestLinearMoveSnap, chainAngleJump, collectSnapEdges, collectSnapTargets, faceCorners, faceEdges, isExactPointSnap, nearestAlignments, probeAlongEdge, probeAlongOccupiedEdge, probeDirection, resolveProbes, snapCoord, snapEdgeToLine, snapLengthFrom, snapLinearEnd, snapNiceDelta, snapPoint, snapToFace } from "../snap.js";
 
 function docWithWall(x1, y1, x2, y2, id = "s1") {
   const doc = emptyDoc();
@@ -667,4 +667,119 @@ test("applyNicePoint keeps an X alignment and rounds the free length", () => {
   });
   assert.equal(point.x, 5);
   assert.ok(Math.abs(point.y - 3.5) < 1e-9);
+});
+
+function aim(deg, length = 6) {
+  const rad = (deg * Math.PI) / 180;
+  return { x: Math.cos(rad) * length, y: Math.sin(rad) * length };
+}
+
+test("the next wall jumps onto a straight continuation", () => {
+  const prev = { x: 1, y: 0 };
+  const from = { x: 0, y: 0 };
+  const p = aim(0.4);
+  const hit = chainAngleJump(from, p.x, p.y, prev, null);
+  assert.equal(hit.jumped, true);
+  assert.equal(hit.kind, "straight");
+  assert.ok(Math.abs(hit.point.y) < 1e-9, hit.point.y);
+  assert.ok(hit.point.x > 1);
+});
+
+test("the next wall jumps onto a right angle", () => {
+  const prev = { x: 3, y: 1 };
+  const from = { x: 1, y: 2 };
+  const ux = prev.x / Math.hypot(prev.x, prev.y);
+  const uy = prev.y / Math.hypot(prev.x, prev.y);
+  const deg = (90 - 0.3) * Math.PI / 180;
+  const len = 5;
+  const wx = from.x + (ux * Math.cos(deg) - uy * Math.sin(deg)) * len;
+  const wy = from.y + (uy * Math.cos(deg) + ux * Math.sin(deg)) * len;
+  const hit = chainAngleJump(from, wx, wy, prev, null);
+  assert.equal(hit.jumped, true);
+  assert.equal(hit.kind, "corner");
+  const along = (hit.point.x - from.x) * ux + (hit.point.y - from.y) * uy;
+  const cross = (hit.point.x - from.x) * -uy + (hit.point.y - from.y) * ux;
+  assert.ok(Math.abs(along) < 1e-8, along);
+  assert.ok(cross > len - 0.01, cross);
+});
+
+test("after the jump, one degree and two degrees follow the pointer", () => {
+  const prev = { x: 1, y: 0 };
+  const from = { x: 0, y: 0 };
+  const landed = chainAngleJump(from, 6, 0, prev, null);
+  assert.equal(landed.jumped, true);
+  const two = aim(2);
+  const left = chainAngleJump(from, two.x, two.y, prev, landed.latch);
+  assert.equal(left.jumped, false);
+  assert.equal(left.latch.freed, true);
+  const stored = snapLinearEnd(two.x, two.y, {
+    from, prev, latch: left.latch, tolWorld: 10 / 48, lines: [], originsX: [0], originsY: [0],
+  });
+  const got = Math.atan2(stored.y - from.y, stored.x - from.x) * 180 / Math.PI;
+  assert.ok(Math.abs(got - 2) < 1e-6, got);
+
+  const one = aim(1);
+  const cap = { x1: 0, y1: -0.3, x2: 0, y2: 0.3 };
+  const fine = snapLinearEnd(one.x, one.y, {
+    from, prev, latch: left.latch, tolWorld: 10 / 48,
+    lines: [{ x1: -2, y1: 0, x2: 2, y2: 0 }, cap],
+    originsX: [0], originsY: [0],
+  });
+  const gotOne = Math.atan2(fine.y - from.y, fine.x - from.x) * 180 / Math.PI;
+  assert.ok(Math.abs(gotOne - 1) < 1e-6, gotOne);
+  assert.equal(fine.latch.freed, true);
+
+  const corner = chainAngleJump(from, 0, 6, prev, null);
+  assert.equal(corner.kind, "corner");
+  const offCorner = aim(92);
+  const leftCorner = chainAngleJump(from, offCorner.x, offCorner.y, prev, corner.latch);
+  const storedCorner = snapLinearEnd(offCorner.x, offCorner.y, {
+    from, prev, latch: leftCorner.latch, tolWorld: 10 / 48, lines: [cap],
+    originsX: [0], originsY: [0],
+  });
+  const gotCorner = Math.atan2(storedCorner.y, storedCorner.x) * 180 / Math.PI;
+  assert.ok(Math.abs(gotCorner - 92) < 1e-6, gotCorner);
+});
+
+test("coming back onto the angle jumps again", () => {
+  const prev = { x: 1, y: 0 };
+  const from = { x: 0, y: 0 };
+  const landed = chainAngleJump(from, 6, 0, prev, null);
+  const two = aim(2);
+  const left = chainAngleJump(from, two.x, two.y, prev, landed.latch);
+  const back = aim(0.2);
+  const again = chainAngleJump(from, back.x, back.y, prev, left.latch);
+  assert.equal(again.jumped, true);
+  assert.equal(again.latch.freed, false);
+  assert.ok(Math.abs(again.point.y) < 1e-9);
+});
+
+test("a run clear of a corner and of straight keeps its aim", () => {
+  const prev = { x: 1, y: 0 };
+  const from = { x: 0, y: 0 };
+  const p = aim(20);
+  const hit = chainAngleJump(from, p.x, p.y, prev, null);
+  assert.equal(hit.jumped, false);
+  assert.equal(hit.latch, null);
+  const stored = snapLinearEnd(p.x, p.y, {
+    from, prev, latch: null, tolWorld: 10 / 80, lines: [], originsX: [0], originsY: [0],
+  });
+  const got = Math.atan2(stored.y, stored.x);
+  assert.ok(Math.abs(got - 20 * Math.PI / 180) < 1e-8);
+});
+
+test("another wall's line wins over the angle jump", () => {
+  const prev = { x: 1, y: 0 };
+  const from = { x: 0, y: 0 };
+  const ang = 87 * Math.PI / 180;
+  const ux = Math.cos(ang);
+  const uy = Math.sin(ang);
+  const line = { x1: 0, y1: 0, x2: ux * 3, y2: uy * 3 };
+  const p = aim(87.2);
+  const point = snapLinearEnd(p.x, p.y, {
+    from, prev, latch: null, tolWorld: 0.4, lines: [line], originsX: [0], originsY: [0],
+  });
+  const cross = point.x * uy - point.y * ux;
+  assert.ok(Math.abs(cross) < 1e-8, cross);
+  assert.equal(point.jump, null);
 });

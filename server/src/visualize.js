@@ -2,52 +2,29 @@
 //
 // The OpenAI call is the same shape as the mobile helper in lib/gpt.js —
 // a Bearer key and a POST to api.openai.com — except this one also sends
-// the drawing. /v1/images/generations (DALL-E 3) cannot see an upload, and
-// the prompt below treats that upload as the design. /v1/images/edits with
-// gpt-image-1 is the endpoint that accepts both.
+// the snapshot. From an orbit view the client may send two more: the
+// opposite side, then a higher view of the roof. The first image stays
+// the camera. /v1/images/generations (DALL-E 3) cannot see an upload, and
+// the prompt treats that upload as the design. /v1/images/edits is the
+// endpoint that accepts both. gpt-image-1 was shut down on 23 October 2026;
+// gpt-image-2.5-sunburst is the replacement the images API documents.
+//
+// The wording lives in web/v2 so the 3D panel can show the same text it sends.
+// A blank client prompt falls back to that built-in wording.
 
-export const VISUALIZE_PROMPT = `Transform the provided architectural drawing into a photorealistic architectural visualization.
+import { resolveVisualizePrompt, withReferenceImages } from "../../web/v2/visualize-prompts.js";
 
-IMPORTANT: Treat the uploaded drawing as the authoritative source for the building design. Preserve the architecture exactly as shown.
+export {
+  MAX_VISUALIZE_PROMPT,
+  VISUALIZE_BUILTIN,
+  VISUALIZE_EXAMPLES,
+  VISUALIZE_PROMPT,
+  resolveVisualizePrompt,
+  visualizePromptId,
+  withReferenceImages,
+} from "../../web/v2/visualize-prompts.js";
 
-Preserve:
-- Building footprint and overall proportions
-- Number of floors
-- Roof shape, roof pitch and roof structure
-- Position, size and proportions of all windows and doors
-- Wall positions and building volumes
-- Porches, balconies, verandas, patios and other architectural elements
-- Garage position and doors
-- Steps, columns, walls and other structural features
-- Relative position and proportions of all visible architectural elements
-
-Do NOT redesign the building, add floors, remove rooms, move windows or doors, change the roof design, or introduce architectural features that are not present in the drawing.
-
-Convert the drawing into a realistic finished building suitable for presentation to an architectural client.
-
-Use:
-- Realistic architectural materials
-- Natural plaster, brick, concrete, timber, glass and metal where appropriate
-- Physically realistic lighting and shadows
-- Realistic reflections in windows
-- Realistic landscaping appropriate to the building
-- Natural-looking grass, plants, trees and paving
-- High-quality realistic textures
-- Professional architectural photography
-
-Camera:
-Create an attractive three-quarter exterior perspective showing the front and side of the building. Use a realistic eye-level architectural photography viewpoint with natural perspective and no extreme wide-angle distortion.
-
-Lighting:
-Use warm late-afternoon natural sunlight with realistic shadows and highlights. The building should be well illuminated and clearly visible.
-
-Style:
-Photorealistic architectural visualization, high-end architectural photography, realistic materials, realistic scale, realistic lighting, professional presentation quality.
-
-The final image should look like a photograph of the completed building rather than a computer-generated sketch.
-
-Do not include people unless they are specifically present in the source drawing.
-Do not add text, dimensions, annotations, labels, watermarks or logos.`;
+const MAX_REFERENCE_IMAGES = 3;
 
 const DATA_IMAGE = /^data:(image\/(?:png|jpeg|jpg|webp));base64,([A-Za-z0-9+/=\s]+)$/i;
 const MAX_IMAGE_BYTES = 6 * 1024 * 1024;
@@ -69,29 +46,26 @@ export function parseDataImage(dataUrl) {
 export async function generateVisualization({
   apiKey,
   image,
-  prompt = VISUALIZE_PROMPT,
+  images,
+  prompt,
   fetch: fetchImpl = globalThis.fetch,
 } = {}) {
-  const parsed = parseDataImage(image);
-  if (!parsed) {
-    const error = new Error("A drawing image is required");
-    error.status = 400;
-    throw error;
-  }
+  const { files, roles } = collectImages(image, images);
+  const text = withReferenceImages(resolveVisualizePrompt(prompt), roles);
   if (!apiKey) {
-    const error = new Error("Visualization is not configured");
+    const error = new Error("Generate model needs an OpenAI API key. Set OPENAI_API_KEY on the server and restart.");
     error.status = 503;
     throw error;
   }
 
   const encoded = encodeMultipart(
     {
-      model: "gpt-image-1",
-      prompt,
+      model: "gpt-image-2.5-sunburst",
+      prompt: text,
       size: "1536x1024",
       quality: "high",
     },
-    parsed,
+    files,
   );
 
   const res = await fetchImpl("https://api.openai.com/v1/images/edits", {
@@ -120,13 +94,55 @@ function openaiFailure(payload, httpStatus) {
     error.code = "insufficient_quota";
     return error;
   }
-  const error = new Error(upstream);
+  const error = new Error(redact(upstream));
   error.status = 502;
   error.code = code || "openai_error";
+  error.param = payload?.error?.param || "";
   return error;
 }
 
-function encodeMultipart(fields, file) {
+function redact(text) {
+  return String(text || "").replace(/sk-[A-Za-z0-9_-]+/g, "sk-…").slice(0, 300);
+}
+
+function collectImages(image, images) {
+  if (images != null && !Array.isArray(images)) {
+    const error = new Error("Images must be a list");
+    error.status = 400;
+    throw error;
+  }
+  const list = Array.isArray(images) && images.length ? images : (image ? [image] : []);
+  if (!list.length) {
+    const error = new Error("A drawing image is required");
+    error.status = 400;
+    throw error;
+  }
+  if (list.length > MAX_REFERENCE_IMAGES) {
+    const error = new Error("Send at most three views");
+    error.status = 400;
+    throw error;
+  }
+  const files = [];
+  const roles = [];
+  for (let i = 0; i < list.length; i += 1) {
+    const item = list[i];
+    const data = typeof item === "string" ? item : item?.image;
+    const parsed = parseDataImage(data);
+    if (!parsed) {
+      const error = new Error("A drawing image is required");
+      error.status = 400;
+      throw error;
+    }
+    const role = item && typeof item === "object" ? String(item.role || "") : "";
+    const name = role === "opposite" ? "opposite" : role === "roof" ? "roof" : "drawing";
+    parsed.filename = parsed.type === "image/jpeg" ? `${name}.jpg` : `${name}.png`;
+    files.push(parsed);
+    if (i > 0 && (role === "opposite" || role === "roof")) roles.push(role);
+  }
+  return { files, roles };
+}
+
+function encodeMultipart(fields, files) {
   const boundary = `----sp${Date.now().toString(16)}${Math.random().toString(16).slice(2)}`;
   const chunks = [];
   const push = (part) => chunks.push(Buffer.isBuffer(part) ? part : Buffer.from(part, "utf8"));
@@ -135,11 +151,14 @@ function encodeMultipart(fields, file) {
     push(`Content-Disposition: form-data; name="${name}"\r\n\r\n`);
     push(`${value}\r\n`);
   }
-  push(`--${boundary}\r\n`);
-  push(`Content-Disposition: form-data; name="image[]"; filename="${file.filename}"\r\n`);
-  push(`Content-Type: ${file.type}\r\n\r\n`);
-  push(file.bytes);
-  push(`\r\n--${boundary}--\r\n`);
+  for (const file of files) {
+    push(`--${boundary}\r\n`);
+    push(`Content-Disposition: form-data; name="image[]"; filename="${file.filename}"\r\n`);
+    push(`Content-Type: ${file.type}\r\n\r\n`);
+    push(file.bytes);
+    push("\r\n");
+  }
+  push(`--${boundary}--\r\n`);
   return {
     contentType: `multipart/form-data; boundary=${boundary}`,
     body: Buffer.concat(chunks),

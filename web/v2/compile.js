@@ -37,6 +37,7 @@ import {
   beamHostsOk,
   hostOk,
   doorSwing,
+  isArchHead,
   openingOnWall,
   openingSize,
   openingVoidArea,
@@ -44,8 +45,9 @@ import {
   wallForOpening,
 } from "./openings.js";
 import { deriveDrawnWalls, deriveWalls, isExternalWall, skuDrawnHeight } from "./walls.js";
+import { arcPoints } from "./click-draw.js";
 import { edgeHomeLevel, runGradient, serviceTakeoff } from "./services.js";
-import { finishRegionAreas, resolveFinishes } from "./finish-model.js";
+import { finishRegionAreas, resolveFinishes, wallFaceFills } from "./finish-model.js";
 
 const CATEGORY_TO_SCHEDULE = {
   wall: "Walls",
@@ -301,6 +303,28 @@ function polyLoop(poly) {
   return { length, curves };
 }
 
+/** Centreline of a wall: one line, or short lines along a start-end-radius arc. */
+function wallProfileCurves(wall) {
+  const straight = [{
+    kind: "Line",
+    length: wall.length,
+    start: [wall.x1, wall.y1, 0],
+    end: [wall.x2, wall.y2, 0],
+  }];
+  if (!wall.arc) return straight;
+  const pts = arcPoints(wall.x1, wall.y1, wall.x2, wall.y2, wall.arc.radius, wall.arc.side, Math.PI / 18, wall.arc.major === true);
+  if (!pts || pts.length < 2) return straight;
+  return pts.slice(0, -1).map((p, i) => {
+    const q = pts[i + 1];
+    return {
+      kind: "Line",
+      length: Math.hypot(q[0] - p[0], q[1] - p[1]),
+      start: [p[0], p[1], 0],
+      end: [q[0], q[1], 0],
+    };
+  });
+}
+
 function segLoop(x1, y1, x2, y2, width) {
   const dx = x2 - x1;
   const dy = y2 - y1;
@@ -512,6 +536,11 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
       roofForm: form,
       roofPitch: form === "flat" ? 0 : Math.min(60, Math.max(5, roof.pitch ?? 30)),
       roofRidge: roof.ridge === "short" ? "short" : "long",
+      // Plan cuts, in metres. The 3D roof stops at these. A hole and a
+      // remove are the same absence of roof; the plan still tells them apart.
+      roofCuts: (roof.cuts || [])
+        .map((cut) => shapePolygon(cut.shape))
+        .filter((ring) => ring.length >= 3),
       profileLoops: [polyLoop(poly)],
       status: objectStatus(roof),
     });
@@ -589,12 +618,7 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
       status: wall.status || "planned",
       profileLoops: [{
         length: wall.length,
-        curves: [{
-          kind: "Line",
-          length: wall.length,
-          start: [wall.x1, wall.y1, 0],
-          end: [wall.x2, wall.y2, 0],
-        }],
+        curves: wallProfileCurves(wall),
       }],
     });
   }
@@ -618,7 +642,7 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
     const size = openingSize(pack, opening);
 
     const row = baseRow(pack, sku, opening.id, objectStatus(opening));
-    applyMeasures(row, sku, { count: 1, area: openingVoidArea(size.width, size.height, sku) });
+    applyMeasures(row, sku, { count: 1, area: openingVoidArea(size.width, size.height, sku, size.rise) });
     if (size.nonStandard) {
       row.nonStandardSize = true;
       nonStandardOpenings.push(`${sku.name} ${Math.round(size.width * 1000)} x ${Math.round(size.height * 1000)} mm on ${levelName(pack, wall.level)}`);
@@ -650,6 +674,10 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
         }],
       }],
     };
+    if (isArchHead(sku)) {
+      tick.head = "arch";
+      tick.rise = size.rise;
+    }
     if (sku.category === "door") {
       const swing = doorSwing(wall, placed, opening);
       tick.profileLoops[0].curves.push({
@@ -672,6 +700,14 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
   const finishes = resolveFinishes(doc, pack, walls, { wallBases });
   instances.push(...finishes.rows);
   warnings.push(...finishes.warnings);
+  // The 3D view paints each side of a wall with the finish that covers it.
+  const faceFills = wallFaceFills(doc, finishes.bands);
+  for (const form of sketchForms) {
+    if ((form.kind || "").toLowerCase() !== "wall") continue;
+    const sides = faceFills.get(form.elementId);
+    if (!sides || (!sides[1] && !sides[-1])) continue;
+    form.faceFills = { 1: sides[1] || null, [-1]: sides[-1] || null };
+  }
 
   // --- items ---------------------------------------------------------------
   for (const item of doc.items || []) {

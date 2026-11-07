@@ -134,28 +134,207 @@ export function applyNicePoint(wx, wy, opts = {}) {
   return { x, y };
 }
 
+const DEG = Math.PI / 180;
+
+/**
+ * How close the next wall must come to a right angle or a straight
+ * continuation before it jumps onto that line. Wide enough to feel at a
+ * normal zoom. Leaving it is `CHAIN_JUMP_LEAVE_DEG`, so 1° and 2° still place.
+ */
+export const CHAIN_JUMP_CATCH_DEG = 4.5;
+
+/** Once the jump has been met, this far off it the wall follows the pointer again. */
+export const CHAIN_JUMP_LEAVE_DEG = 1;
+
+/** A small outward wobble does not count as leaving the jump. */
+export const CHAIN_JUMP_NOISE_DEG = 0.25;
+
+/** Coming back this close, after leaving, jumps onto the angle again. */
+export const CHAIN_JUMP_REARM_DEG = 0.35;
+
+/** The plan draws the corner or straight ray once the pointer is this close. */
+export const CHAIN_GUIDE_DEG = 8;
+
+/**
+ * The right angle or straight continuation of `prev` nearest the vector
+ * `(dx, dy)`. `prev` is the wall just drawn, any non-zero length.
+ * `errDeg` is how far the aim sits from that ray. Null when either
+ * direction has no length.
+ */
+export function chainAngleTarget(prev, dx, dy) {
+  const plen = Math.hypot(prev?.x || 0, prev?.y || 0);
+  const len = Math.hypot(dx, dy);
+  if (plen < 1e-9 || len < 1e-9) return null;
+  const px = prev.x / plen;
+  const py = prev.y / plen;
+  const delta = Math.atan2(px * dy - py * dx, px * dx + py * dy);
+  const rays = [
+    { target: 0, ux: px, uy: py, kind: "straight" },
+    { target: Math.PI, ux: -px, uy: -py, kind: "straight" },
+    { target: Math.PI / 2, ux: -py, uy: px, kind: "corner" },
+    { target: -Math.PI / 2, ux: py, uy: -px, kind: "corner" },
+  ];
+  let best = null;
+  for (const ray of rays) {
+    let err = delta - ray.target;
+    if (err <= -Math.PI) err += Math.PI * 2;
+    else if (err > Math.PI) err -= Math.PI * 2;
+    const abs = Math.abs(err);
+    if (!best || abs < best.abs) best = { ux: ray.ux, uy: ray.uy, kind: ray.kind, abs, errDeg: abs / DEG };
+  }
+  return best;
+}
+
+/**
+ * Jump the next wall onto a corner (90°) or a straight continuation (180°)
+ * of the wall just drawn.
+ *
+ * Entering the catch lands the end on that ray, which is the jump. It stays
+ * there while the pointer homes in or simply stops. Moving back out to 1°
+ * or more lets the wall follow the pointer, so a 1° or 2° run still places.
+ * Coming back to within `CHAIN_JUMP_REARM_DEG` jumps again. `latch` is the
+ * value returned last move; null on the first.
+ */
+export function chainAngleJump(from, wx, wy, prev, latch) {
+  const dx = wx - from.x;
+  const dy = wy - from.y;
+  const target = chainAngleTarget(prev, dx, dy);
+  if (!target) return { jumped: false, latch: null, kind: null, point: null };
+  const same = Boolean(
+    latch
+    && Math.abs(latch.ux - target.ux) < 1e-6
+    && Math.abs(latch.uy - target.uy) < 1e-6,
+  );
+  const project = () => {
+    const span = dx * target.ux + dy * target.uy;
+    return { x: from.x + target.ux * span, y: from.y + target.uy * span };
+  };
+  const hold = (minErr, freed) => ({
+    ux: target.ux,
+    uy: target.uy,
+    kind: target.kind,
+    minErr,
+    freed,
+  });
+
+  if (latch?.freed && same && target.errDeg <= CHAIN_JUMP_CATCH_DEG) {
+    if (target.errDeg <= CHAIN_JUMP_REARM_DEG) {
+      return { jumped: true, kind: target.kind, point: project(), latch: hold(target.errDeg, false) };
+    }
+    return { jumped: false, kind: target.kind, point: null, latch };
+  }
+  if (latch?.freed && (!same || target.errDeg > CHAIN_JUMP_CATCH_DEG)) latch = null;
+
+  if (latch && !latch.freed && same) {
+    const minErr = Math.min(latch.minErr, target.errDeg);
+    const pushedOut = target.errDeg > minErr + CHAIN_JUMP_NOISE_DEG
+      && target.errDeg >= CHAIN_JUMP_LEAVE_DEG;
+    if (!pushedOut && target.errDeg <= CHAIN_JUMP_CATCH_DEG) {
+      return { jumped: true, kind: target.kind, point: project(), latch: hold(minErr, false) };
+    }
+    if (target.errDeg <= CHAIN_JUMP_CATCH_DEG) {
+      return { jumped: false, kind: target.kind, point: null, latch: hold(minErr, true) };
+    }
+    latch = null;
+  }
+
+  if (target.errDeg <= CHAIN_JUMP_CATCH_DEG) {
+    return { jumped: true, kind: target.kind, point: project(), latch: hold(target.errDeg, false) };
+  }
+  return { jumped: false, kind: null, point: null, latch: null };
+}
+
+/**
+ * An existing wall's own line, other than the one just drawn. Parallel to
+ * `prev` is the straight continuation, and perpendicular to it is the corner
+ * (including that wall's own end). The angle jump owns both, so they are
+ * left out. The start has to lie on the line too, the same rule as
+ * `runDirection`.
+ */
+function foreignLineAim(from, wx, wy, lines, prev, tolWorld) {
+  const plen = Math.hypot(prev?.x || 0, prev?.y || 0);
+  if (plen < 1e-9) return null;
+  const px = prev.x / plen;
+  const py = prev.y / plen;
+  const dx = wx - from.x;
+  const dy = wy - from.y;
+  let best = null;
+  for (const edge of lines) {
+    const ex = edge.x2 - edge.x1;
+    const ey = edge.y2 - edge.y1;
+    const len = Math.hypot(ex, ey);
+    if (len < 1e-9) continue;
+    const ux = ex / len;
+    const uy = ey / len;
+    const cross = Math.abs(ux * py - uy * px);
+    const dot = Math.abs(ux * px + uy * py);
+    if (cross < Math.sin(DEG) || dot < Math.sin(DEG)) continue;
+    const dFrom = Math.abs((from.x - edge.x1) * -uy + (from.y - edge.y1) * ux);
+    if (dFrom > tolWorld) continue;
+    const dPtr = Math.abs((wx - edge.x1) * -uy + (wy - edge.y1) * ux);
+    if (!(dPtr <= tolWorld)) continue;
+    const along = dx * ux + dy * uy;
+    const sign = along >= 0 ? 1 : -1;
+    const span = along * sign;
+    if (Math.abs(span) < 1e-9) continue;
+    if (!best || dPtr < best.dist - 1e-9) {
+      best = { dist: dPtr, x: from.x + ux * sign * span, y: from.y + uy * sign * span };
+    }
+  }
+  return best ? { x: best.x, y: best.y } : null;
+}
+
 /**
  * Where a wall's free end lands.
  *
  * An exact join, or a single-axis alignment, is unchanged. Otherwise the
- * direction is chosen before the length. A run within `tolWorld` of the
- * horizontal or vertical through `from` is stored on that axis (the grid
- * line through the start). A run within `tolWorld` of an existing line,
- * with the start on that line too, is stored on that line's direction.
- * Anything else keeps the ray from `from` through the pointer: only the
- * length is pulled to a round millimetre. Rounding X and Y separately
- * turns that ray, which is how a wall aimed along a line was stored off it.
+ * direction is chosen before the length. With `prev` — the wall just drawn —
+ * a run that comes within `CHAIN_JUMP_CATCH_DEG` of a right angle or a
+ * straight continuation jumps onto that ray. Moving on past the jump, to
+ * 1° or more, leaves it, and that aim is not pulled back onto an axis.
+ * A run within `tolWorld` of the horizontal or vertical through `from` is
+ * stored on that axis. A run within `tolWorld` of an existing line, with
+ * the start on that line too, is stored on that line's direction. Anything
+ * else keeps the ray from `from` through the pointer: only the length is
+ * pulled to a round millimetre. Rounding X and Y separately turns that ray,
+ * which is how a wall aimed along a line was stored off it.
+ *
+ * `latch` is the jump state from the previous move. The returned point
+ * carries the next `latch`, and `jump` (`"corner"`, `"straight"`, or null).
  */
 export function snapLinearEnd(wx, wy, opts = {}) {
   const join = opts.join || { snapped: false, x: wx, y: wy, guideX: null, guideY: null };
   const from = opts.from || null;
   if (!from || isExactPointSnap(join) || (join.snapped && (join.guideX != null || join.guideY != null))) {
-    return applyNicePoint(wx, wy, opts);
+    const point = applyNicePoint(wx, wy, opts);
+    return { ...point, latch: null, jump: null };
   }
   const tolWorld = opts.tolWorld ?? 0;
-  const locked = runDirection(from, wx, wy, opts.lines || [], tolWorld);
-  const aim = locked || { x: wx, y: wy };
-  return snapLengthFrom(from, aim, tolWorld, opts.minStep ?? NICE_MIN_STEP_M);
+  const minStep = opts.minStep ?? NICE_MIN_STEP_M;
+  const lines = opts.lines || [];
+  const prev = opts.prev || null;
+  const other = prev ? foreignLineAim(from, wx, wy, lines, prev, tolWorld) : null;
+  if (other) {
+    const point = snapLengthFrom(from, other, tolWorld, minStep);
+    return { ...point, latch: null, jump: null };
+  }
+  const chain = prev ? chainAngleJump(from, wx, wy, prev, opts.latch || null) : null;
+  let aim;
+  let latch = null;
+  let jump = null;
+  if (chain?.jumped && chain.point) {
+    aim = chain.point;
+    latch = chain.latch;
+    jump = chain.kind;
+  } else if (chain?.latch?.freed) {
+    aim = { x: wx, y: wy };
+    latch = chain.latch;
+  } else {
+    const locked = runDirection(from, wx, wy, lines, tolWorld);
+    aim = locked || { x: wx, y: wy };
+  }
+  const point = snapLengthFrom(from, aim, tolWorld, minStep);
+  return { ...point, latch, jump };
 }
 
 function runDirection(from, wx, wy, lines, tolWorld) {
