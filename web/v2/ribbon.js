@@ -19,22 +19,23 @@ export const RIBBON = [
     groups: [
       {
         label: "Add drawing",
-        // Once-a-sheet commands stay one click away, in this group's menu,
-        // instead of taking a column on the row. DWG and CAD live on Output.
-        menu: ["sheet-list", "underlay-toggle", "underlay-off"],
+        // With nothing loaded this group is the two ways in, and nothing
+        // else. Once a sheet is loaded, Edit sheet sits past a divider. It
+        // selects the sheet, which opens Modify | Sheet (SHEET_TAB below).
+        // Hide and Model / Sheet are on the plan strip. DWG and CAD live on Output.
         items: [
           // `anchor` items are the group's lead buttons: they render large,
           // stacked or side by side depending on room (see ribbon-fit.js).
           { id: "underlay", label: "PDF / image", command: "underlay", anchor: true },
           { id: "satellite", label: "Satellite", command: "satellite", anchor: true },
-          { id: "underlay-adjust", label: "Adjust", command: "underlay-adjust" },
-          { id: "trace-view", label: "Model", command: "trace-view" },
-          { id: "calibrate", label: "Set scale", command: "calibrate" },
-          { id: "reference", label: "Elevations & sections", command: "reference" },
-          { id: "align-floors", label: "Align sheets", command: "align-floors" },
-          { id: "sheet-list", label: "Sheet list", command: "sheet-list" },
-          { id: "underlay-toggle", label: "Hide", command: "underlay-toggle" },
-          { id: "underlay-off", label: "Remove…", command: "underlay-off" },
+          { id: "underlay-adjust", label: "Edit sheet", command: "underlay-adjust", anchor: true, needsUnderlay: true, splitBefore: true },
+          { id: "trace-view", label: "Model", command: "trace-view", contextOnly: true },
+          { id: "calibrate", label: "Set scale", command: "calibrate", contextOnly: true },
+          { id: "reference", label: "Elevations & sections", command: "reference", contextOnly: true },
+          { id: "align-floors", label: "Align sheets", command: "align-floors", contextOnly: true },
+          { id: "sheet-list", label: "Sheet list", command: "sheet-list", contextOnly: true },
+          { id: "underlay-toggle", label: "Hide", command: "underlay-toggle", contextOnly: true },
+          { id: "underlay-off", label: "Remove…", command: "underlay-off", contextOnly: true },
         ],
       },
       {
@@ -52,7 +53,7 @@ export const RIBBON = [
         label: "Walls",
         items: [
           { id: "walls", label: "Walls", tool: "wall", categories: ["wall"] },
-          { id: "boundary", label: "Boundary", tool: "wall", categories: ["boundarywall"] },
+          { id: "boundary", label: "Boundary", tool: "wall", categories: ["boundarywall", "fence"] },
           { id: "foundations", label: "Foundations", tool: "wall", categories: ["foundation"] },
         ],
       },
@@ -338,13 +339,13 @@ export const HINTS = {
   "align-floors": "Click the same point on each sheet, such as a building corner. That lines up different floors, or two drawings of one floor — walls on one sheet, something else on the other. The other sheets move onto the one that stays put. Walls already drawn on a moved floor move with that sheet. A second drawing of the same floor moves on its own, and the walls stay with the sheet that does not move.",
   reference: "Open the elevations and sections from the imported PDF, and type each floor-to-ceiling height.",
   calibrate: "Click two points on the sheet, then type the real distance or drag a corner to resize.",
-  "underlay-adjust": "Drag the sheet to move, a corner to resize, the top handle to rotate.",
+  "underlay-adjust": "Edit this sheet. Its scale, alignment and removal are on Modify | Sheet.",
   "underlay-toggle": "Hide the sheet without removing it.",
   "trace-view": "Switch between the sheet and the modelled walls. The sheet view keeps PDF openings visible.",
   "underlay-off": "Remove the sheet, or the whole imported plan set, from the plan. Asks first, and can be undone for a few seconds.",
-  "level-isolate": "Show only this cut. A ceiling plan keeps the ceiling and walls; a roof plan keeps the roof. Off ghosts the neighbouring level and shows the tracing sheet.",
+  "level-isolate": "Show only this cut. A ceiling plan keeps the ceiling and walls; a roof plan keeps the roof. Off ghosts the neighbouring level. The tracing sheet stays; Hide sheet takes it off.",
   walls: "Click to start a wall, click again to end. Draw on the centreline or a face. Space flips the face. Esc to stop.",
-  boundary: "Click to start a boundary wall, click again to end. Draw on the centreline or a face. Space flips the face. Esc to stop.",
+  boundary: "Click to start a boundary wall or a fence, click again to end. Draw on the centreline or a face. Space flips the face. Esc to stop.",
   foundations: "Click to start a foundation, click again to end. Draw on the centreline or a face. Space flips the face. Esc to stop.",
   floors: "Click around a room to draw a floor slab.",
   roofs: "Click around the outline to draw a roof.",
@@ -363,8 +364,8 @@ export const HINTS = {
   "service-connect": "Select a route point, then click a placed component to connect it. The point moves onto the component.",
   "service-type": "Select one or more routes, then pick a size or type in the inspector.",
   "service-slope": "Select drainage runs, then set the fall. Flow runs from the first point to the second.",
-  furniture: "Click to place a piece of furniture.",
-  casework: "Click to place casework.",
+  furniture: "Click to place. Beds, tables and sofas are layout outlines, not joinery.",
+  casework: "Click a wall to start the run, then the other end. A cupboard cannot sit off the wall. Wall units are dashed (off the floor). An island is a click to place.",
   rooms: "Click inside the walls. The area is already shown; this names the room. Set its use in the inspector. Where there are no walls, click each corner and press Enter.",
   "room-sep": "Click one end, then the other. Ends snap to wall corners and faces. Type a length, as with a wall. A separation line bounds a room where there is no wall.",
   region: "Click each corner of the patch, then Enter. Pick Brick red, Concrete or Concrete 2 in the inspector. The patch stays ink on the drawing.",
@@ -490,6 +491,25 @@ export const CONTEXT_TABS = {
   },
 };
 
+/**
+ * Modify | Sheet: open while the sheet is selected (Adjust) or Set scale /
+ * Align sheets is running. Kept apart from CONTEXT_TABS because the sheet is
+ * not in `store.selected`; ui.js opens it from the underlay mode instead.
+ * Hide / Show and Model / Sheet are view toggles, so they are on the plan strip.
+ */
+export const SHEET_TAB = {
+  label: "Sheet",
+  groups: [
+    { label: "This sheet", items: ["calibrate", "underlay-off"] },
+    { label: "Plan set", items: ["sheet-list", "align-floors", "reference"] },
+  ],
+};
+
+/** The Modify | Sheet tab, resolved against RIBBON like every other. */
+export function sheetTab() {
+  return { id: CONTEXT_TAB_ID, key: "sheet", label: SHEET_TAB.label, groups: resolveGroups(SHEET_TAB.groups) };
+}
+
 /** What a selection kind with no tab of its own can still take from the Edit group. */
 const EDIT_OF_KIND = { room: ["delete"] };
 
@@ -601,6 +621,7 @@ function permanentGroups(tab) {
  * tool (see `selectionTab` / `placingTab`), or null. It sits right after the
  * permanent Modify tab, and `state.activeTab === CONTEXT_TAB_ID` shows it.
  * `state.hasSelection()` greys out the `needsSelection` items.
+ * `state.hasUnderlay()` shows the `needsUnderlay` items (the Edit sheet button).
  * `state.skuCount(categories)` decides whether a catalog-backed function has
  * anything behind it: a function pointing at an empty category is disabled and
  * says so, rather than opening a blank palette.
@@ -665,6 +686,8 @@ export function renderRibbon(tabsEl, functionsEl, state) {
     menuEl.className = "ribbon-menu";
     let menuCount = 0;
     for (const item of group.items) {
+      // Acts on a loaded sheet: with none, it is not on the row at all.
+      if (item.needsUnderlay && !state.hasUnderlay?.()) continue;
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = item.anchor ? "ribbon-item anchor" : "ribbon-item";
@@ -699,7 +722,14 @@ export function renderRibbon(tabsEl, functionsEl, state) {
         menuEl.appendChild(btn);
         menuCount += 1;
       } else {
-        (hasAnchors ? (item.anchor ? anchorsEl : restEl) : items).appendChild(btn);
+        const home = hasAnchors ? (item.anchor ? anchorsEl : restEl) : items;
+        if (item.splitBefore && home.childElementCount) {
+          const split = document.createElement("span");
+          split.className = "ribbon-anchor-split";
+          split.setAttribute("aria-hidden", "true");
+          home.appendChild(split);
+        }
+        home.appendChild(btn);
       }
     }
     if (menuCount) {
@@ -716,6 +746,8 @@ export function renderRibbon(tabsEl, functionsEl, state) {
       moreWrap.append(more, menuEl);
       (restEl || items).appendChild(moreWrap);
     }
+    // Only the anchors left (nothing loaded): no empty second column.
+    if (restEl && !restEl.children.length) restEl.remove();
 
     const label = document.createElement("span");
     label.className = "ribbon-group-label";

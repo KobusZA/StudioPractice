@@ -34,10 +34,12 @@ import {
   shapeRects,
   uniqueRefs,
 } from "./model.js";
+import { roofOverhangMm, roofRidgeAlongX } from "./roof.js?v=20261108-ridge";
 import { finishId } from "./finish-data.js";
 import { reanchorRun } from "./finish-model.js";
 import { CORNER_JOIN_TOL, drawnWallThickness, wallCornerNeighbors } from "./walls.js";
 import { findJoinTarget } from "./wall-join.js";
+import { rehostJoineryAfterSplit } from "./joinery.js";
 import { rehostSocketsAfterSplit, transformFloorSockets, translateFloorSockets } from "./socket-host.js";
 
 const SHAPED = new Set(["room", "slab", "roof", "region"]);
@@ -131,7 +133,10 @@ export function rotateSelection(doc, refs, { degrees = 90 } = {}) {
   for (const { ref, obj } of rows) {
     if (ref.kind === "item" && turnedSockets.has(obj.id)) continue;
     if (SHAPED.has(ref.kind)) {
+      const ridge = ridgeFrame(obj);
       obj.shape = rotateShape(obj.shape, turn);
+      carryRidge(obj, ridge, turn);
+      if (obj.base) obj.base = rotateShape(obj.base, turn);
       mapRoofCuts(obj, (shape) => rotateShape(shape, turn));
       if (obj.seed) [obj.seed.x, obj.seed.y] = turn(obj.seed.x, obj.seed.y);
     } else if (obj.rect && Number.isFinite(obj.rect.minX)) {
@@ -177,6 +182,44 @@ function rotateShape(shape, turn) {
   if (shape?.kind === "rects") return { ...shape, rects: (shape.rects || []).map((r) => rotateRect(r, turn)) };
   if (shape?.kind === "poly") return { ...shape, points: (shape.points || []).map(([x, y]) => turn(x, y)) };
   return shape;
+}
+
+/**
+ * A ridge off the middle is measured from the low wall. Turning or mirroring a
+ * roof can swap which side is low, so note both edges before the outline moves
+ * and, once it has, put the ridge back on the side it was on.
+ */
+function ridgeFrame(obj) {
+  if (!(Number(obj?.ridgeOffset) > 0)) return null;
+  const poly = shapePolygon(obj.shape);
+  if (poly.length < 3) return null;
+  const xs = poly.map((p) => p[0]);
+  const ys = poly.map((p) => p[1]);
+  const x = Math.min(...xs);
+  const y = Math.min(...ys);
+  const w = Math.max(...xs) - x;
+  const h = Math.max(...ys) - y;
+  const alongX = roofRidgeAlongX({ w, h }, obj.ridge);
+  const span = alongX ? h : w;
+  return {
+    low: alongX ? [x + w / 2, y] : [x, y + h / 2],
+    high: alongX ? [x + w / 2, y + h] : [x + w, y + h / 2],
+    wallSpan: span - 2 * (roofOverhangMm(obj) / 1000),
+  };
+}
+
+function carryRidge(obj, frame, fn) {
+  if (!frame) return;
+  const poly = shapePolygon(obj.shape);
+  if (poly.length < 3) return;
+  const xs = poly.map((p) => p[0]);
+  const ys = poly.map((p) => p[1]);
+  const w = Math.max(...xs) - Math.min(...xs);
+  const h = Math.max(...ys) - Math.min(...ys);
+  const low = fn(frame.low[0], frame.low[1]);
+  const high = fn(frame.high[0], frame.high[1]);
+  const flipped = roofRidgeAlongX({ w, h }, obj.ridge) ? low[1] > high[1] : low[0] > high[0];
+  if (flipped) obj.ridgeOffset = Math.max(1, Math.round(frame.wallSpan * 1000 - obj.ridgeOffset));
 }
 
 /** Move every cut with the roof. `mapShape` is the same transform as the outline. */
@@ -238,7 +281,10 @@ export function mirrorSelection(doc, refs, { axis = "v" } = {}) {
   for (const { ref, obj } of rows) {
     if (ref.kind === "item" && flippedSockets.has(obj.id)) continue;
     if (SHAPED.has(ref.kind)) {
+      const ridge = ridgeFrame(obj);
       obj.shape = rotateShape(obj.shape, flip); // corner mapping is the same job
+      carryRidge(obj, ridge, flip);
+      if (obj.base) obj.base = rotateShape(obj.base, flip);
       mapRoofCuts(obj, (shape) => rotateShape(shape, flip));
       if (obj.seed) [obj.seed.x, obj.seed.y] = flip(obj.seed.x, obj.seed.y);
     } else if (obj.rect && Number.isFinite(obj.rect.minX)) {
@@ -276,6 +322,7 @@ export function copySelection(doc, refs, { dx = null, dy = 0 } = {}) {
     copy.id = nid(ref.kind[0]);
     if (SHAPED.has(ref.kind)) {
       copy.shape = translateAny(copy.shape, offsetX, dy);
+      if (copy.base) copy.base = translateAny(copy.base, offsetX, dy);
       mapRoofCuts(copy, (shape) => translateAny(shape, offsetX, dy), { newIds: true });
       if (copy.seed) {
         copy.seed = { x: copy.seed.x + offsetX, y: copy.seed.y + dy };
@@ -362,6 +409,7 @@ function translateObject(ref, obj, dx, dy, doc = null) {
     // Found before the floor moves, while the tiles still sit on it.
     const hosted = doc ? hostedFinishRegions(doc, ref) : [];
     obj.shape = translateAny(obj.shape, dx, dy);
+    if (obj.base) obj.base = translateAny(obj.base, dx, dy);
     mapRoofCuts(obj, (shape) => translateAny(shape, dx, dy));
     for (const region of hosted) region.shape = translateAny(region.shape, dx, dy);
     if (ref.kind === "slab") translateFloorSockets(doc, obj.id, dx, dy);
@@ -515,6 +563,7 @@ export function splitWallAt(doc, ref, point, { skuById = () => null } = {}) {
 
   rehostSplitWall(doc, obj, tail, cut, len, skuById);
   rehostSocketsAfterSplit(doc, obj.id, tail.id, cut, len);
+  rehostJoineryAfterSplit(doc, obj.id, tail.id, cut, len);
   return done("Split into two.", [ref, { kind: ref.kind, id: tail.id }]);
 }
 
@@ -729,7 +778,7 @@ function retypeField(ref, obj, sku, skuById) {
   if (ref.kind === "slab") return (sku.category === "floor" || sku.category === "pool") ? "sku" : null;
   if (ref.kind === "roof") return (sku.category === "roof" || sku.category === "carport") ? "sku" : null;
   if (ref.kind === "segment") {
-    return (sku.category === "wall" || sku.category === "foundation" || sku.category === "boundarywall") ? "sku" : null;
+    return (sku.category === "wall" || sku.category === "foundation" || sku.category === "boundarywall" || sku.category === "fence") ? "sku" : null;
   }
   if (ref.kind === "opening" || ref.kind === "item") {
     return skuById(obj.sku)?.category === sku.category ? "sku" : null;
@@ -779,7 +828,7 @@ export function retypeSelection(doc, refs, sku, { skuById = () => null } = {}) {
 
 // --- location line ---------------------------------------------------------
 
-const FACE_CATEGORIES = new Set(["wall", "boundarywall"]);
+const FACE_CATEGORIES = new Set(["wall", "boundarywall", "fence"]);
 const FACE_WORD = { center: "centreline", exterior: "exterior face", interior: "interior face" };
 
 function faceThickness(obj, skuById) {

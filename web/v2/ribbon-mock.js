@@ -3,7 +3,7 @@
 
 import { RIBBON, renderRibbon } from "./ribbon.js?v=20261102-ribbon-more";
 
-const EMPTY_CATEGORIES = new Set(["boundarywall", "beam", "furniture"]);
+const EMPTY_CATEGORIES = new Set(["beam", "furniture"]);
 
 const HINTS = {
   underlay: "Load a PDF or image to trace.",

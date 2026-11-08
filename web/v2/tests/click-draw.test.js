@@ -330,4 +330,5 @@ test("Escape aborts a live click-click draft before leaving the tool", () => {
   assert.equal(hasClickDraft({ measureDraft: { a: { x: 1, y: 1 } } }), true);
   assert.equal(hasClickDraft({ calibration: { a: { x: 0, y: 0 }, b: null } }), true);
   assert.equal(hasClickDraft({ calibration: { a: { x: 0, y: 0 }, b: { x: 1, y: 0 } } }), false);
+  assert.equal(hasClickDraft({ joineryDraft: { wallId: "w1", t: 0.2 } }), true);
 });

@@ -480,6 +480,7 @@ export function createSheetUi(ctx) {
           "ok"
         );
         ctx.changed();
+        ctx.revealSheet?.();
         trackUpload((onProgress) => ctx.rememberPdf?.(source.id, onProgress));
         return;
       }
@@ -507,6 +508,7 @@ export function createSheetUi(ctx) {
         ctx.setStatus(`${oldSource.name} replaced by ${result.name}: ${plans} placed at the printed scale. Scale is unverified until you check it.`, "ok");
         ctx.changed();
         ctx.fitSheet?.();
+        ctx.revealSheet?.();
         trackUpload((onProgress) => ctx.rememberPdf?.(sourceId, onProgress));
         return;
       }
@@ -522,6 +524,7 @@ export function createSheetUi(ctx) {
       );
       ctx.changed();
       ctx.fitSheet?.();
+      ctx.revealSheet?.();
       // The sheet is on screen; the file goes up behind it.
       trackUpload((onProgress) => ctx.rememberPdf?.(set.sources[0].id, onProgress));
     }
@@ -631,6 +634,7 @@ export function createSheetUi(ctx) {
         "ok"
       );
       ctx.changed();
+      ctx.revealSheet?.();
       trackUpload((onProgress) => ctx.rememberPdf?.(sourceId, onProgress));
     }
 

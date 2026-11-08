@@ -318,9 +318,10 @@ test("every catalog-backed function maps to a category the pack defines", () => 
     if (!item.categories) continue;
     if (!item.categories.some((c) => known.has(c))) unbacked.push(id);
   }
-  // Boundary walls, beams and furniture are genuinely absent from the template;
-  // the ribbon disables them and says so.
-  assert.deepEqual(unbacked.sort(), ["beams", "boundary", "furniture"]);
+  // Beams are genuinely absent from the template. Furniture is supplied at
+  // load by mergeJoinerySkus (BIC, kitchen, beds), so the on-disk pack still
+  // lists none. Boundary walls are injected into the pack.
+  assert.deepEqual(unbacked.sort(), ["beams", "furniture"]);
 });
 
 import { alignSheets, markAlignmentPoint } from "../underlay.js";

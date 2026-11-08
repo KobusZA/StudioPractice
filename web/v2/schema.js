@@ -75,6 +75,7 @@ export const CATEGORIES = [
   "furniture",
   "casework",
   "boundarywall",
+  "fence",
   "pool",
   "carport",
 ];
@@ -136,6 +137,7 @@ export const REQUIRED_MEASURES = {
   furniture: ["count"],
   casework: ["count"],
   boundarywall: ["length", "area", "volume", "count"],
+  fence: ["length", "count"],
   pool: ["area", "volume", "count"],
   carport: ["area", "count"],
 };
@@ -160,6 +162,7 @@ const REQUIRED_GEOMETRY = {
   furniture: ["width", "depth", "height"],
   casework: ["width", "depth", "height"],
   boundarywall: ["thickness", "height"],
+  fence: ["thickness", "height"],
   pool: ["depth"],
   carport: ["height"],
 };
@@ -177,7 +180,8 @@ const COMPLIANCE_FACTS = {
     "loadBearing",
     "thermalBreakRValue", // required where metal elements touch
   ],
-  boundarywall: ["loadBearing"],
+  boundarywall: ["loadBearing", "plastered"],
+  fence: ["loadBearing"],
   foundation: ["loadBearing"],
   floor: ["rValue", "suspended", "exposed"],
   ceiling: ["rValue"],

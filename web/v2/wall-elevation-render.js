@@ -944,6 +944,25 @@ export function elevationSvg(model, { width, height, interactive = false, select
   }
   if (interactive) drawCoatMarks(parts, model, xOf, yOf);
 
+  for (const j of model.joinery || []) {
+    const [x, w] = xSpan(j.from, j.to);
+    const y = yOf(model.base + j.top);
+    const h = Math.max(1, (j.top - j.bottom) * scaleY);
+    const sel = j.id === selectedId;
+    const dash = j.dashed ? ` stroke-dasharray="5 3"` : "";
+    const cls = `elev-joinery${sel ? " is-selected" : ""}`;
+    parts.push(`<rect x="${x}" y="${y}" width="${w}" height="${h}" class="${cls}"${dash} data-elev-id="${esc(j.id)}" data-elev-op="move"><title>${esc(j.name)}</title></rect>`);
+    if (w > 28) {
+      parts.push(`<text x="${x + w / 2}" y="${y + Math.min(h - 4, h / 2 + 4)}" text-anchor="middle" class="elev-joinery-label" pointer-events="none">${esc(j.label)}</text>`);
+    }
+    if (interactive && sel) {
+      const hs = [["tl", x, y], ["tr", x + w, y], ["br", x + w, y + h], ["bl", x, y + h]];
+      for (const [part, hx, hy] of hs) {
+        parts.push(`<rect x="${hx - HANDLE}" y="${hy - HANDLE}" width="${HANDLE * 2}" height="${HANDLE * 2}" class="elev-handle elev-handle-${part}" data-elev-op="${part}" data-elev-id="${esc(j.id)}"/>`);
+      }
+    }
+  }
+
   for (const o of model.openings) {
     const [x, w] = xSpan(o.offset, o.offset + o.width);
     const y = yOf(model.base + o.sill + o.height);

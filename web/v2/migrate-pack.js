@@ -18,6 +18,7 @@ import {
 const COLOUR_BY_CATEGORY = {
   wall: "masonry",
   boundarywall: "masonry",
+  fence: "steel",
   foundation: "masonry",
   floor: "concrete",
   ceiling: "other",

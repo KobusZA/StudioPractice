@@ -21,6 +21,7 @@ import {
   simplify,
 } from "./geom.js";
 import { effectiveLevel, roomPolygon, shapePolygon } from "./model.js";
+import { roofEdgeFromBase } from "./roof.js";
 import { CORNER_JOIN_TOL, drawnWallThickness } from "./walls.js";
 
 const WELD = 0.001;
@@ -268,16 +269,64 @@ function splitAll(segments) {
   return pieces;
 }
 
-function insetFace(poly, distances) {
-  const ccw = normalizeWinding(simplify(poly));
+/**
+ * A face join walks out to the other wall's face and straight back. That spur
+ * has no area, and its two edges are the same line in opposite directions, so
+ * an offset of them never meets and the face would fall back to the centreline.
+ * Drop the spur first. An ordinary collinear corner (dot >= 0) stays, because
+ * the two edges can carry different thicknesses.
+ */
+function withoutSpurs(poly, distances) {
+  const pts = poly.map((p) => [p[0], p[1]]);
+  const dist = distances.slice();
+  let guard = pts.length + 1;
+  while (pts.length >= 3 && guard > 0) {
+    guard -= 1;
+    let drop = -1;
+    for (let i = 0; i < pts.length; i += 1) {
+      const prev = pts[(i - 1 + pts.length) % pts.length];
+      const cur = pts[i];
+      const next = pts[(i + 1) % pts.length];
+      const ax = cur[0] - prev[0];
+      const ay = cur[1] - prev[1];
+      const bx = next[0] - cur[0];
+      const by = next[1] - cur[1];
+      const cross = ax * by - ay * bx;
+      const dot = ax * bx + ay * by;
+      const zero = Math.hypot(ax, ay) < 1e-7 || Math.hypot(bx, by) < 1e-7;
+      if (zero || (Math.abs(cross) < 1e-7 && dot < 0)) {
+        drop = i;
+        break;
+      }
+    }
+    if (drop < 0) break;
+    pts.splice(drop, 1);
+    dist.splice((drop - 1 + dist.length) % dist.length, 1);
+  }
+  if (pts.length < 3) return null;
+  return { poly: pts, distances: dist };
+}
+
+function insetFace(poly, distances, outward = false) {
+  const bare = withoutSpurs(poly, distances) || { poly, distances };
+  let ring = bare.poly;
+  let used = bare.distances;
+  if (signedArea(ring) < 0) {
+    const n = ring.length;
+    ring = ring.slice().reverse();
+    used = ring.map((_, k) => bare.distances[(n - 2 - k + n) % n]);
+  }
+  const ccw = simplify(ring);
   if (ccw.length < 3) return null;
-  if (distances.every((d) => !(d > 0))) return ccw;
+  if (used.length !== ring.length) used = distances;
+  if (ccw.length !== ring.length) used = used.map(() => used.find((d) => d > 0) || 0).slice(0, ccw.length);
+  if (used.every((d) => !(d > 0))) return normalizeWinding(ccw);
   const lines = [];
   for (let i = 0; i < ccw.length; i += 1) {
     const a = ccw[i];
     const b = ccw[(i + 1) % ccw.length];
-    const n = segNormal(a[0], a[1], b[0], b[1], 1);
-    const d = distances[i] > 0 ? distances[i] : 0;
+    const n = segNormal(a[0], a[1], b[0], b[1], outward ? -1 : 1);
+    const d = used[i] > 0 ? used[i] : 0;
     lines.push({
       p: [a[0] + n.x * d, a[1] + n.y * d],
       dir: [b[0] - a[0], b[1] - a[1]],
@@ -288,11 +337,11 @@ function insetFace(poly, distances) {
     const prev = lines[(i - 1 + lines.length) % lines.length];
     const cur = lines[i];
     const pt = intersectLines(prev.p, prev.dir, cur.p, cur.dir);
-    if (!pt) return ccw;
+    if (!pt) return normalizeWinding(ccw);
     out.push(pt);
   }
   const clean = simplify(out);
-  if (clean.length < 3 || signedArea(clean) <= EPS) return ccw;
+  if (clean.length < 3 || signedArea(clean) <= EPS) return normalizeWinding(ccw);
   return normalizeWinding(clean);
 }
 
@@ -405,7 +454,7 @@ function ccwFace(face) {
  * The inner face of one closed walk. `which` is "room" (smallest room around
  * the point) or "footprint" (the external walls around the point).
  */
-function faceAround(faces, x, y, which) {
+function faceAround(faces, x, y, which, outward = false) {
   let best = null;
   let bestArea = Infinity;
   for (const face of faces) {
@@ -420,7 +469,7 @@ function faceAround(faces, x, y, which) {
     }
   }
   if (!best) return null;
-  return insetFace(best.poly, best.distances);
+  return insetFace(best.poly, best.distances, outward);
 }
 
 /**
@@ -439,6 +488,28 @@ export function enclosedFace(doc, pack, level, x, y) {
 export function footprintFace(doc, pack, level, x, y) {
   if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
   return faceAround(closedFaces(doc, pack, level), x, y, "footprint");
+}
+
+/**
+ * The outside face of the external walls around (x, y). Roofs bear here.
+ * Floors keep `footprintFace`, the inside face. Null when the point is not
+ * inside a closed building.
+ */
+export function footprintOuterFace(doc, pack, level, x, y) {
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return faceAround(closedFaces(doc, pack, level), x, y, "footprint", true);
+}
+
+/** Every building's outside face on `level`, for snapping a roof anchor. */
+export function exteriorOuterFaces(doc, pack, level) {
+  const out = [];
+  for (const face of closedFaces(doc, pack, level)) {
+    if (!(face.signed < -EPS)) continue;
+    const ring = ccwFace(face);
+    const outer = insetFace(ring.poly, ring.distances, true);
+    if (outer && outer.length >= 3) out.push(outer);
+  }
+  return out;
 }
 
 /**
@@ -557,6 +628,24 @@ export function clearShapeLink(obj) {
   obj.seed = null;
 }
 
+function pointsMatch(a, b) {
+  return a && b && a.length === b.length
+    && b.every((p, i) => Math.abs(p[0] - a[i][0]) < 1e-4 && Math.abs(p[1] - a[i][1]) < 1e-4);
+}
+
+/** A linked roof bears on the outside face. The edge is that face plus the overhang. */
+function writeRoofBearing(roof, face) {
+  if (!face || face.length < 3) return false;
+  const overhang = Number.isFinite(Number(roof.overhang)) && Number(roof.overhang) > 0 ? Number(roof.overhang) : 0;
+  const edge = roofEdgeFromBase(face, overhang);
+  if (!edge) return false;
+  if (pointsMatch(roof.base?.points, face) && pointsMatch(shapePolygon(roof.shape), edge)) return false;
+  roof.base = { kind: "poly", points: face.map((p) => [p[0], p[1]]) };
+  roof.overhang = overhang;
+  roof.shape = { kind: "poly", points: edge.map((p) => [p[0], p[1]]) };
+  return true;
+}
+
 function writeFace(obj, face) {
   if (!face || face.length < 3) return false;
   const prev = obj.shape?.kind === "poly" ? obj.shape.points : null;
@@ -602,6 +691,11 @@ export function syncRoomBounds(doc, pack) {
   for (const row of [...(doc.slabs || []), ...(doc.roofs || [])]) {
     if (!row.bound || !row.seed) continue;
     if (row.link !== "room" && row.link !== "footprint") continue;
+    if (row.link === "footprint" && (doc.roofs || []).includes(row)) {
+      const outer = faceAround(facesOf(row), row.seed.x, row.seed.y, "footprint", true);
+      if (writeRoofBearing(row, outer)) changed = true;
+      continue;
+    }
     const which = row.link === "footprint" ? "footprint" : "room";
     if (!writeFace(row, faceAround(facesOf(row), row.seed.x, row.seed.y, which))) continue;
     changed = true;

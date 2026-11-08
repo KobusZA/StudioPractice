@@ -548,7 +548,22 @@ function rehomeHosts(doc, head, tail, s0, s1, len) {
   }
   const dropItems = [];
   for (const item of doc.items || []) {
-    if (item.host !== "wall" || item.wallId !== head.id) continue;
+    if (item.wallId !== head.id) continue;
+    if (item.host === "joinery") {
+      const a = Math.min(Number(item.t0) || 0, Number(item.t1) || 0) * len;
+      const b = Math.max(Number(item.t0) || 0, Number(item.t1) || 0) * len;
+      if (b <= s0) {
+        item.t0 = s0 > 1e-6 ? a / s0 : 0;
+        item.t1 = s0 > 1e-6 ? b / s0 : 0;
+      } else if (a >= s1) {
+        item.wallId = tail.id;
+        const rest = len - s1;
+        item.t0 = rest > 1e-6 ? (a - s1) / rest : 0;
+        item.t1 = rest > 1e-6 ? (b - s1) / rest : 0;
+      } else dropItems.push(item.id);
+      continue;
+    }
+    if (item.host !== "wall") continue;
     const station = Math.min(1, Math.max(0, Number(item.t) || 0)) * len;
     if (station <= s0) item.t = s0 > 1e-6 ? station / s0 : 0;
     else if (station >= s1) {

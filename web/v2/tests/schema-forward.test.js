@@ -110,7 +110,7 @@ const FORWARD_SKUS = [
     unit: "m3",
     draw: "wall",
     geometry: { thickness: 220, height: 1800 },
-    compliance: { loadBearing: false },
+    compliance: { loadBearing: false, plastered: null },
     colourClass: "masonry",
   }),
   sku({

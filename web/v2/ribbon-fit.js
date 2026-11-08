@@ -22,7 +22,7 @@ const GLYPHS = {
   underlay: '<rect x="4" y="5" width="16" height="14" rx="1"/><path d="M4 15l4-4 3 3 4-5 5 6"/>',
   satellite: '<circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c3 3 3 13 0 16M12 4c-3 3-3 13 0 16"/>',
   calibrate: '<path d="M4 20L20 4"/><path d="M8 20h-4v-4M16 4h4v4"/>',
-  "underlay-adjust": '<rect x="5" y="7" width="14" height="10" rx="1"/><path d="M12 4v3M12 17v3"/>',
+  "underlay-adjust": '<rect x="6" y="3" width="12" height="18" rx="1"/><path d="M6 16h12"/>',
   "underlay-toggle": '<path d="M3 12s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6z"/><circle cx="12" cy="12" r="2.2"/>',
   "trace-view": '<rect x="4" y="5" width="16" height="14" rx="1"/><path d="M8 12h8M12 8v8"/>',
   "underlay-off": '<path d="M6 6l12 12M18 6L6 18"/>',

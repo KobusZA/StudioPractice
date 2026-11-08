@@ -40,6 +40,23 @@ test("walls, foundations and boundary walls are told apart by type name", () => 
   assert.equal(byName("Masonary wall 220mm Foundation (No-plaster)").category, "foundation");
 });
 
+test("erf walls and fences are added even though the template names none", () => {
+  const boundary = pack.skus.filter((s) => s.category === "boundarywall");
+  const fences = pack.skus.filter((s) => s.category === "fence");
+  assert.equal(boundary.length, 13);
+  assert.equal(fences.length, 2);
+  const brick = byName("Stock brick 220 mm, plastered, 1.8 m");
+  assert.equal(brick.geometry.thickness, 240);
+  assert.equal(brick.geometry.coreThickness, 220);
+  assert.equal(brick.geometry.height, 1800);
+  assert.equal(brick.compliance.plastered, true);
+  const palisade = byName("Steel palisade, 1.8 m");
+  assert.equal(palisade.category, "fence");
+  assert.equal(palisade.unit, "m");
+  assert.deepEqual(palisade.schedule.report, ["length", "count"]);
+  assert.equal(pack.skus.some((s) => /boundary/i.test(`${s.revit?.family} ${s.revit?.type}`) && s.revit?.placedCount > 0), false);
+});
+
 test("a named masonry wall records its core, and a foundation does not", () => {
   assert.equal(byName("Masonary wall 110mm (plaster)").geometry.coreThickness, 110);
   assert.equal(byName("Masonary wall 220mm (plaster)").geometry.coreThickness, 220);

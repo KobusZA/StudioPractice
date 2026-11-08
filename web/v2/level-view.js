@@ -50,11 +50,12 @@ export function ghostContext(levels, activeId) {
   return null;
 }
 
-// What "Show only this level" keeps. The neighbour ghost and the tracing
-// sheet are never part of this cut. A floor or foundation plan keeps the
-// whole storey. A ceiling plan keeps the ceiling and the walls it sits in.
-// A roof plan keeps the roof: the walls and floors of that storey are the
-// floor plan, and leaving them up is what reads as another level.
+// What "Show only this level" keeps. The neighbour ghost is never part of
+// this cut. The tracing sheet stays: Hide sheet is how it leaves the plan.
+// A floor or foundation plan keeps the whole storey. A ceiling plan keeps
+// the ceiling and the walls it sits in. A roof plan keeps the roof: the
+// walls and floors of that storey are the floor plan, and leaving them up
+// is what reads as another level.
 
 const CEILING_CUT_ROLES = new Set(["ceiling", "wall", "opening", "beam", "line"]);
 const ROOF_CUT_ROLES = new Set(["roof"]);
@@ -66,8 +67,8 @@ const ROOF_CUT_ROLES = new Set(["roof"]);
  * ghost, underlay, site.
  */
 export function isolateShows(stationKind, role) {
-  if (role === "ghost" || role === "underlay") return false;
-  if (role === "site") return true;
+  if (role === "ghost") return false;
+  if (role === "site" || role === "underlay") return true;
   if (stationKind === "roof") return ROOF_CUT_ROLES.has(role);
   if (stationKind === "ceiling") return CEILING_CUT_ROLES.has(role);
   return true;

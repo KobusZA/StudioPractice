@@ -15,7 +15,7 @@ import { MIN_TRACE } from "./click-draw.js";
 import { objectByRef } from "./model.js";
 import { moveWallEnd } from "./modify.js";
 
-const TRIM_CATEGORIES = new Set(["wall", "boundarywall", "foundation"]);
+const TRIM_CATEGORIES = new Set(["wall", "boundarywall", "fence", "foundation"]);
 // A meeting further out than this is a graze, not a corner someone meant.
 const MEET_LIMIT = 80;
 // A click this close to the crossing, along the wall, does not say which half.

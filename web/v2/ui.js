@@ -32,8 +32,8 @@
 import { complianceGaps, normalizePackUnits, GEOMETRY_LENGTH_KEYS } from "./schema.js";
 import { RULE_PACK, evaluateCompliance, groupFindingsByPart, summarizeFindings } from "./rules.js";
 import { deriveBuildingLine, hitPropertyLine, setBuildingLine, setPropertyLine, setSgReference } from "./site.js?v=20261015-property";
-import { CONTEXT_TAB_ID, HINTS, firstTabId, placingTab, renderRibbon, selectionTab, tabWithStatus } from "./ribbon.js?v=20261108-status-readout";
-import { closeOverflowMenus, decorateRibbon, fitRibbon } from "./ribbon-fit.js?v=20261108-ribbon-settings";
+import { CONTEXT_TAB_ID, HINTS, firstTabId, placingTab, renderRibbon, selectionTab, sheetTab, tabWithStatus } from "./ribbon.js?v=20261108-edit-sheet";
+import { closeOverflowMenus, decorateRibbon, fitRibbon } from "./ribbon-fit.js?v=20261108-sheet-anchor";
 import {
   ghostContext,
   MAX_FLOORS_TO_ADD,
@@ -55,7 +55,7 @@ import {
   inspectorStations,
   selectedInspectorStationId,
   isolateShows,
-} from "./level-view.js?v=20261028-level";
+} from "./level-view.js?v=20261108-sheet-stays";
 import { foundationStorey, foundationsOffStorey, isFoundationLevel as levelIsFoundation, placementHintOverride } from "./placement-warn.js";
 import {
   alignSelection,
@@ -78,9 +78,9 @@ import {
   splitSelection,
   splitWallAt,
   MIN_WALL_SPLIT_M,
-} from "./modify.js?v=20261107-joinhold";
+} from "./modify.js?v=20261108-ridge";
 import { planTrimCorner, planTrimSingle, trimToBoundary, trimToCorner, wallCanTrim } from "./trim-extend.js?v=20261107-trim2";
-import { applyCircleTrim, planCircleTrim } from "./circle-trim.js?v=20261107-trim-circle2";
+import { applyCircleTrim, planCircleTrim } from "./circle-trim.js?v=20261108-joinery";
 import {
   calibrate,
   activateSheetForLevel,
@@ -139,8 +139,8 @@ import {
   snapUnderlayWorld,
   snapReferencePixel,
 } from "./underlay.js?v=20261028-eye";
-import { alignablePages, applyCeilingHeights, setCeilingHeight, isPlanPage, mirrorLegacySource, pagesOfSource, sameSheetGeometry } from "./sheet-set.js";
-import { createSheetUi } from "./sheet-ui.js?v=20261103-history-names";
+import { alignablePages, applyCeilingHeights, setCeilingHeight, isPlanPage, mirrorLegacySource, pagesOfSource, sameSheetGeometry, setPageShown } from "./sheet-set.js";
+import { createSheetUi } from "./sheet-ui.js?v=20261108-sheet-tab";
 import { SATELLITE_ATTRIBUTION, locateSuggestion, suggestAddresses } from "./satellite.js?v=20261015-geocode";
 import { pickedDimension, planDimensionLines } from "./dimensions.js?v=20260917-measure";
 import {
@@ -168,7 +168,7 @@ import {
   radiusFromSweep,
   wallDraftAngle,
   wallJointAngle,
-} from "./click-draw.js?v=20261107-arc2";
+} from "./click-draw.js?v=20261108-joinery";
 import {
   armPlacement,
   nextTraceView,
@@ -181,9 +181,9 @@ import {
   wallPlanColour,
   WALL_EXISTING_EDGE,
 } from "./drawing-defaults.js?v=20261107-wall-join";
-import { area as polyArea, bbox, clampDeltaInside, clampToPoly, clipPolygon, clipSegToRect, distToSeg, fitPolygonToHost, formatLengthMm, headingDeg, parseLengthMm, pointInPoly, roundGrid, translatePolyEdge } from "./geom.js?v=20261103-bos14";
+import { area as polyArea, bbox, clampDeltaInside, clampToPoly, clipPolygon, clipSegToRect, distToSeg, fitPolygonToHost, formatLengthMm, headingDeg, parseLengthMm, pointInPoly, roundGrid, translatePolyEdge } from "./geom.js?v=20261108-ridge";
 import { SNAP_PIXEL_TOL, GAP_MAX_M, ALIGN_ORIGIN_MAX_M, CHAIN_GUIDE_DEG, NICE_MIN_STEP_M, PROBE_VECTORS, applyNicePoint, bestLinearMoveSnap, chainAngleTarget, collectSnapEdges, collectSnapTargets, isExactPointSnap, nearestAlignments, resolveProbes, snapEdgeToLine, snapLengthFrom, snapLinearEnd, snapNiceDelta, snapPoint, snapToFace } from "./snap.js?v=20261107-wall-jump3";
-import { DEFAULT_ROOF_PITCH, ROOF_CUT_MIN_AREA, normalizeRoofCutKind, roofGuideLines, roofPlanAreas } from "./roof.js";
+import { DEFAULT_ROOF_OVERHANG_MM, DEFAULT_ROOF_PITCH, ROOF_CUT_MIN_AREA, applyRoofOverhang, commitRoofAnchors, gableProfile, normalizeRoofCutKind, roofEdgeFromBase, roofGuideLines, roofHasBase, roofOffsetMm, roofOverhangMm, roofPitch2Deg, roofPlanAreas, roofRidgeAlongX, roofRidgeOffsetMm } from "./roof.js?v=20261108-ridge";
 import {
   ATTACHABLE_KINDS,
   PlanStore,
@@ -210,16 +210,16 @@ import {
   hostedFinishRegionsOf,
   carryFinishRegionsToLevel,
   translateShape,
-} from "./model.js?v=20261107-arc";
+} from "./model.js?v=20261108-ridge";
 import { historyAction, historyListHtml } from "./history-panel.js?v=20261103-history-icons";
-import { clearShapeLink, enclosedFace, footprintFace, spaceAt, syncRoomBounds } from "./room-bound.js?v=20261103-bos11";
+import { clearShapeLink, enclosedFace, exteriorOuterFaces, footprintFace, footprintOuterFace, spaceAt, syncRoomBounds } from "./room-bound.js?v=20261108-ridge";
 import { REGION_CONVENTIONS, regionConvention } from "./region.js";
-import { ELEVATION_SNAP, FINISH_MIN_M, OPENING_MIN_M, addFoundationUnderWall, alignOutlineShift, applyBandEdit, applyOpeningEdit, applyOutlinePoints, applyTypedGap, applyWallTopEdit, axisAlignedOutline, dropGuideZ, elevationModel, faceRefForSelection, foundationTypes, includeDropGuide, maxTypedGap, openingSnapEdges, resizeArchRise, resizeOpeningCorner, snapElevation, translateOutlineEdge } from "./wall-elevation.js?v=20261108-face-length";
+import { ELEVATION_SNAP, FINISH_MIN_M, OPENING_MIN_M, addFoundationUnderWall, alignOutlineShift, applyBandEdit, applyJoineryFaceEdit, applyOpeningEdit, applyOutlinePoints, applyTypedGap, applyWallTopEdit, axisAlignedOutline, dropGuideZ, elevationModel, faceRefForSelection, foundationTypes, includeDropGuide, maxTypedGap, openingSnapEdges, resizeArchRise, resizeOpeningCorner, snapElevation, translateOutlineEdge } from "./wall-elevation.js?v=20261108-joinery";
 import { FACE_CORNER_ALONG, FACE_CORNER_TRAVEL, FACE_CUE_INTRO_MS, FACE_CUE_PULSE_MS, FACE_CUE_REST_ALPHA, FACE_PAN_MS, faceCornerMarks, faceCueZoom, faceFrameShift } from "./face-plan-cue.js?v=20261107-face-frame";
 import { createFinishRegion, createFinishRun, dependentsOfWalls, faceArcScale, finishBillNote, finishEditRing, finishProductById, floorCoverage, libraryLine, materializeFinishRing, planWallFinishMarks, presetFromRoom, roomsBySide, rulesFromPreset, savePreset } from "./finish-model.js?v=20261108-face-length";
 import { FINISH_CATEGORIES, finishId, finishSwatch, normalizeFinishProducts, normalizeFinishSettings } from "./finish-data.js";
 import { HEIGHT_PRESETS, bandFaceLine, compareBands, draftBandPreviewHtml, faceFinishHtml, finishCalloutHtml, floorOpenHtml, formatFloorArea, openingCalloutHtml, floorProductSuggestions, parseTarget, productsHtml, roomFinishHtml, slabFinishHtml, targetOptions } from "./finish-panel.js?v=20261108-face-length";
-import { alignCameraShift, clampElevationView, edgeResizeCursor, elevationSvg, faceScreenCenter, faceTrack, finishLocate, nudgeIntoView, planFaceFrame, trackFaceCenter, zoomElevationView } from "./wall-elevation-render.js?v=20261108-face-length";
+import { alignCameraShift, clampElevationView, edgeResizeCursor, elevationSvg, faceScreenCenter, faceTrack, finishLocate, nudgeIntoView, planFaceFrame, trackFaceCenter, zoomElevationView } from "./wall-elevation-render.js?v=20261108-joinery";
 import { FLOOR_TYPE_GROUPS, alignFloorPoint, faceToPlan, floorBox, floorFaceOf, floorFrameFromHold, floorHoldCentered, floorPictureSvg, planToFace, resolveFloorFinishOpen, trackFloorHold } from "./floor-picture.js?v=20261108-floor-scale";
 import { CORNER_JOIN_TOL, deriveWalls, drawnSegmentFromWall, drawnWallThickness, isStripFooting, selectionAngleJoint, selectionSideGaps, skuDrawnHeight, statusVisible, wallThicknessLabel } from "./walls.js?v=20261108-listen";
 import { findJoinTarget, resolveJoin, sideTowardTarget } from "./wall-join.js?v=20261022-corner-b";
@@ -238,8 +238,30 @@ import {
   pointOnOpeningSymbol,
   wallForOpening,
   wallNormal,
-} from "./openings.js?v=20261107-arch-rise2";
+  wallT,
+} from "./openings.js?v=20261108-joinery";
 import { paintFixture } from "./plan-symbols.js?v=20261105-sans";
+import {
+  applyJoineryEdit,
+  commitJoineryRun,
+  joineryBounds,
+  joineryDashed,
+  joineryAlong,
+  joineryDepth,
+  joineryDepthGaps,
+  joineryDraftAt,
+  joineryHandlePoints,
+  joineryHeights,
+  joineryIsRun,
+  joineryLabel,
+  joineryPolygon,
+  joinerySideGaps,
+  mergeJoinerySkus,
+  slideJoineryRun,
+  stretchJoineryDepth,
+  stretchJoineryRun,
+  syncHostedJoinery,
+} from "./joinery.js?v=20261108-cupboard-snap";
 import { paintSanitaryPreview, sanitaryPreview } from "./type-preview.js?v=20261106-san-preview";
 import {
   floorSocketDraft,
@@ -257,11 +279,11 @@ import {
   levelElevation,
   objectLabel,
   resolvedBase,
-} from "./compile.js?v=20261107-arc";
+} from "./compile.js?v=20261108-ridge";
 import { exportDxf } from "./dxf.js";
 import { exportIfc } from "./ifc.js";
 import { boqRows, bomRows, scheduleTotal } from "./schedule.js";
-import { createMassingView, lookFromClicks, EYE_HEIGHT_M, facesFromPayload, faceStyle, massingLayer, hatchPolygon, strokeFaceEdges } from "./massing.js?v=20261108-roofover";
+import { createMassingView, lookFromClicks, EYE_HEIGHT_M, facesFromPayload, faceStyle, massingLayer, hatchPolygon, strokeFaceEdges } from "./massing.js?v=20261108-ridge";
 import {
   MAX_VISUALIZE_PROMPT,
   VISUALIZE_BUILTIN,
@@ -427,6 +449,7 @@ const el = {
   underlayRotateCcw: document.getElementById("v2-underlay-rotate-ccw"),
   underlayRotateCw: document.getElementById("v2-underlay-rotate-cw"),
   underlayPin: document.getElementById("v2-underlay-pin"),
+  underlayShow: document.getElementById("v2-underlay-show"),
   calibrateDistanceWrap: document.getElementById("v2-calibrate-distance-wrap"),
   calibrateDistance: document.getElementById("v2-calibrate-distance"),
   calibrateRestart: document.getElementById("v2-calibrate-restart"),
@@ -549,6 +572,17 @@ const el = {
   roofCutKindWrap: document.getElementById("v2-ctx-roof-cut-kind"),
   roofCutKindBar: document.getElementById("v2-roof-cut-kind"),
   shapeLink: document.getElementById("v2-shape-link"),
+  roofOverhang: document.getElementById("v2-roof-overhang"),
+  roofOverhangMm: document.getElementById("v2-roof-overhang-mm"),
+  ctxRidgePos: document.getElementById("v2-ctx-ridgepos"),
+  ctxRidgePosWrap: document.getElementById("v2-ctx-ridgepos-wrap"),
+  ctxPitch2: document.getElementById("v2-ctx-pitch2"),
+  ctxPitch2Wrap: document.getElementById("v2-ctx-pitch2-wrap"),
+  ctxRidgeNote: document.getElementById("v2-ctx-ridge-note"),
+  ctxOverhang: document.getElementById("v2-ctx-overhang"),
+  ctxOverhangWrap: document.getElementById("v2-ctx-overhang-wrap"),
+  ctxPlate: document.getElementById("v2-ctx-plate"),
+  ctxPlateWrap: document.getElementById("v2-ctx-plate-wrap"),
   ctxType: document.getElementById("v2-ctx-type"),
   ctxTypeWrap: document.getElementById("v2-ctx-type-wrap"),
   ctxStatusWrap: document.getElementById("v2-ctx-status-wrap"),
@@ -746,7 +780,7 @@ const sync = new DocSync({ onState: drawSyncState });
 const store = new PlanStore(emptyDoc(), { sink: sync });
 const persistDoc = store.persist.bind(store);
 store.persist = () => {
-  if (pack) syncHostedSockets(store.doc, pack);
+  if (pack) syncHosts();
   persistDoc();
 };
 const cloud = createCloud();
@@ -805,6 +839,9 @@ let drag = null;
 // Click–click wall: first click writes the start, the free end follows the
 // pointer with the button up, second click commits and chains from that end.
 let wallDraft = null;
+// First click of a joinery run (BIC, kitchen units) on a wall. The second
+// click along the same wall commits it.
+let joineryDraft = null;
 // Where the line under the cursor sits on the wall being drawn: "center",
 // "exterior" or "interior" (see click-draw.js). The stored segment is always
 // the centreline, and a face choice is kept on it as `location`. Remembered
@@ -852,8 +889,32 @@ let roofCutKind = "hole";
 let editingRoofCut = null;
 let selectedRoofCutVertex = null;
 // How the floor and roof tools place the next outline. Sketch is freehand.
-// Room copies a room. External walls follow the building footprint.
+// Floors stay on Sketch until the user picks another. Roofs start on Along
+// walls: the clicks are the bearing line, and the edge sits out by the overhang.
 let shapePlaceMode = "sketch";
+let roofPlaceMode = "walls";
+// The options-bar overhang, millimetres. Kept between roofs. Null until the pack is read.
+let roofOverhangSetting = null;
+
+function outlinePlaceMode() {
+  return tool === "roof" ? roofPlaceMode : shapePlaceMode;
+}
+
+function currentOverhangMm() {
+  if (roofOverhangSetting == null) {
+    const fromPack = Number(pack?.system?.roofOverhang);
+    roofOverhangSetting = Number.isFinite(fromPack) && fromPack >= 0 ? fromPack : DEFAULT_ROOF_OVERHANG_MM;
+  }
+  return roofOverhangSetting;
+}
+
+/** A typed millimetre value, or null when it is not a number. Zero is allowed. */
+function parseMm(raw) {
+  const cleaned = String(raw ?? "").trim().replace(",", ".").replace(/mm$/i, "").trim();
+  if (!cleaned) return null;
+  const n = Number(cleaned);
+  return Number.isFinite(n) ? n : null;
+}
 let beamStart = null;
 // Document > Lines > Model / Annotate: the first click of a line, while
 // tool === "model-line" or "annot-line". Same bare-point shape as beamStart -
@@ -1080,7 +1141,7 @@ let wallFinishExtents = new Map();
 let snapToPdf = true;
 
 function pdfSnapAvailable() {
-  return hasOpenPdf() && Number.isInteger(store.doc?.underlay?.sheetPage) && underlayIsVisible();
+  return hasOpenPdf() && Number.isInteger(store.doc?.underlay?.sheetPage) && underlayIsVisible() && !currentSheetConcealed();
 }
 
 function requestPdfLinework(pageIndex = store.doc?.underlay?.sheetPage) {
@@ -1152,10 +1213,10 @@ let activeLevel = null;
 
 // Off (default): ghost the neighbouring level, like Revit's look-down
 // underlay — or look-up when nothing sits below, so a foundation plan can
-// still see the walls it carries. On: this cut only. The neighbour, the
-// tracing sheet, and (on a ceiling or roof cut) the rest of the storey are
-// not drawn. Hit-testing stays on what is drawn. The widget checkbox and
-// the ribbon command share this flag.
+// still see the walls it carries. On: this cut only. The neighbour and (on
+// a ceiling or roof cut) the rest of the storey are not drawn. The tracing
+// sheet stays; Hide sheet is what takes it off. Hit-testing stays on what
+// is drawn. The widget checkbox and the ribbon command share this flag.
 let isolateCurrentLevel = window.localStorage.getItem("v2-level-isolate") === "1";
 
 // Document -> Annotate -> Dimensions: automatic room/overall strings, shown
@@ -1318,12 +1379,12 @@ async function boot() {
   paintSplashJob(takeSplashJob());
   if (plannerSplashSkipped()) document.getElementById("splash")?.remove();
   try {
-    const res = await fetch("../samples/tsp-pack.json?v=20261106-plain-opening");
+    const res = await fetch("../samples/tsp-pack.json?v=20261108-boundary");
     if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
     // The pack on disk states geometry in millimetres (sp.pack/3); everything
     // downstream of here (walls.js, compile.js, openings.js, ...) still works in
     // metres, so this is the one place that boundary gets crossed.
-    templatePack = normalizePackUnits(await res.json());
+    templatePack = normalizePackUnits(mergeJoinerySkus(await res.json()));
     pack = templatePack;
   } catch (err) {
     el.healthDot.classList.remove("ok");
@@ -1582,6 +1643,9 @@ function applyOpenedJob({ project, drawing }) {
   if (next !== `${location.pathname}${location.search}`) history.replaceState(null, "", next);
   frameDrawing(store.doc);
   render();
+  // A loaded plan sheet is selected, so Modify | Sheet is on the row. Import
+  // does the same. Esc returns to the tab that was open before it.
+  revealImportedSheet();
 }
 
 /** After Open / Create, put the whole drawing on screen. A plan sheet counts even when nothing has been traced yet, so the PDF is in view. New empty jobs stay put. */
@@ -2568,6 +2632,39 @@ function serviceRouteFrom() {
   return (store.doc.serviceNodes || []).find((n) => n.id === serviceRoute.fromNodeId) || null;
 }
 
+/** Outside corners, then outside faces, ahead of the usual snaps. */
+function snapOutsideWall(wx, wy, tol) {
+  if (!pack) return null;
+  const faces = exteriorOuterFaces(store.doc, pack, activeLevel);
+  let best = null;
+  let bestD = tol;
+  for (const face of faces) {
+    for (const [x, y] of face) {
+      const d = Math.hypot(x - wx, y - wy);
+      if (d <= bestD) {
+        bestD = d;
+        best = { x, y };
+      }
+    }
+  }
+  if (best) return best;
+  for (const face of faces) {
+    for (let i = 0; i < face.length; i += 1) {
+      const a = face[i];
+      const b = face[(i + 1) % face.length];
+      const d = distToSeg(a[0], a[1], b[0], b[1], wx, wy);
+      if (d > bestD) continue;
+      const abx = b[0] - a[0];
+      const aby = b[1] - a[1];
+      const ab2 = abx * abx + aby * aby || 1;
+      const t = Math.min(1, Math.max(0, ((wx - a[0]) * abx + (wy - a[1]) * aby) / ab2));
+      bestD = d;
+      best = { x: a[0] + abx * t, y: a[1] + aby * t };
+    }
+  }
+  return best;
+}
+
 /**
  * Resolve a candidate world point to where it should actually land: an exact
  * join with another wall/beam endpoint or room corner, an alignment guide
@@ -2576,8 +2673,34 @@ function serviceRouteFrom() {
  * magnetic; 1 mm values stay reachable once the zoom tightens the magnet.
  * Always writes `snapGuide` so tracking lines and offset labels can follow
  * the pointer before the first click, not only mid-drag.
+ * A roof drawn along the walls tries the outside face before any of that.
  */
 function applySnap(wx, wy, exclude) {
+  const tol = SNAP_PIXEL_TOL / cam.scale;
+  if (tool === "roof" && roofPlaceMode === "walls") {
+    const outer = snapOutsideWall(wx, wy, tol);
+    if (outer) {
+      snapGuide = {
+        x: outer.x,
+        y: outer.y,
+        guideX: null,
+        guideY: null,
+        guideXPoint: null,
+        guideYPoint: null,
+        snapped: true,
+        snapX: false,
+        snapY: false,
+        exactJoin: true,
+        origin: null,
+        dx: null,
+        dy: null,
+        probes: [],
+        tol,
+        chaseHeld: false,
+      };
+      return outer;
+    }
+  }
   let targets = collectSnapTargets(store.doc, snapOpts(exclude));
   // Corners already placed on the finish being drawn are not in the document
   // yet. They still align, the same way the other corners of a floor do.
@@ -2588,7 +2711,6 @@ function applySnap(wx, wy, exclude) {
   // a thickness across that wall; its face corners are the points that line up.
   if (tool === "wall" && isFaceLocation(wallLocation)) targets = targets.filter((p) => p.kind !== "endpoint");
   const edges = collectSnapEdges(store.doc, snapOpts(exclude));
-  const tol = SNAP_PIXEL_TOL / cam.scale;
   const pdfHit = pdfSnapTarget(wx, wy);
   if (pdfHit) targets.push(pdfHit);
   let result = snapPoint(wx, wy, targets, tol);
@@ -2731,6 +2853,10 @@ function snapPreviewTool() {
 }
 
 function itemRect(item, sku) {
+  if (item?.host === "joinery") {
+    const wall = (wallsCache.length ? wallsCache : currentWalls()).find((w) => w.id === item.wallId);
+    return joineryBounds(item, sku, wall);
+  }
   const g = sku.geometry || {};
   const w = g.width || 0.4;
   const d = g.depth || g.width || 0.4;
@@ -2847,7 +2973,7 @@ function segmentCategory(seg) {
 /** A drawn wall or boundary wall can be moved onto another location line. */
 function segmentHasFaceControl(seg) {
   const cat = segmentCategory(seg);
-  return cat === "wall" || cat === "boundarywall";
+  return cat === "wall" || cat === "boundarywall" || cat === "fence";
 }
 
 function sharedWallLocation(refs) {
@@ -2892,8 +3018,14 @@ function snapOpts(extra = {}) {
   };
 }
 
+function syncHosts(walls) {
+  if (!pack) return;
+  syncHostedSockets(store.doc, pack, walls);
+  syncHostedJoinery(store.doc, pack, walls);
+}
+
 function currentWalls() {
-  if (pack && syncRoomBounds(store.doc, pack)) syncHostedSockets(store.doc, pack);
+  if (pack && syncRoomBounds(store.doc, pack)) syncHosts();
   wallsCache = pack ? deriveWalls(store.doc, pack) : [];
   return wallsCache;
 }
@@ -3708,7 +3840,7 @@ function draw() {
   drawGrid(rect);
   drawSiteLines();
   const walls = currentWalls();
-  syncHostedSockets(store.doc, pack, walls);
+  syncHosts(walls);
   pruneInvisibleSelection();
   const levelWalls = walls.filter((w) => onActiveLevel(w) && keptByCut(w, "wall"));
 
@@ -3811,7 +3943,10 @@ function draw() {
     drawShapeEdgeLengths();
   }
   if (tool === "room" && roomDraft?.length) drawPolyDraft(roomDraft, "#b2451e");
-  if ((tool === "slab" || tool === "roof") && boundaryDraft?.length) drawPolyDraft(boundaryDraft, tool === "roof" ? "#6e6458" : "#8a5a32");
+  if ((tool === "slab" || tool === "roof") && boundaryDraft?.length) {
+    if (tool === "roof" && roofPlaceMode === "walls") drawRoofAnchorDraft(boundaryDraft);
+    else drawPolyDraft(boundaryDraft, tool === "roof" ? "#6e6458" : "#8a5a32");
+  }
   if (tool === "roof-cut" && roofCutDraft?.points?.length) {
     drawPolyDraft(roofCutDraft.points, roofCutKind === "remove" ? "#8a3a1e" : "#5c5348");
   }
@@ -3838,6 +3973,8 @@ function draw() {
     drawPdfSnapMarker(hoverPoint.x, hoverPoint.y, hoverPoint.kind);
   }
   drawOpeningDraft(walls);
+  drawJoineryMeasures();
+  drawJoineryHandles();
   if (isSatelliteUnderlay(store.doc) && underlayIsVisible()) drawSatelliteAttribution(rect);
   if (store.doc.sheetSet && underlayIsVisible()) drawSheetCaption(rect);
   refreshSpaceNow();
@@ -3856,7 +3993,7 @@ const UNDERLAY_DRAG_KINDS = new Set(["underlay-move", "underlay-scale", "underla
 
 /** Corner handles while the sheet is selected, and again once both scale points are down so the measured length can be resized into. */
 function underlayHandlesActive() {
-  if (!underlayIsVisible()) return false;
+  if (!underlayIsVisible() || currentSheetConcealed()) return false;
   // A pinned sheet has no handles to grab, which is how it reads as locked.
   if (store.doc.underlay?.pinned) return false;
   if (tool === "select" && underlaySelected) return true;
@@ -3865,7 +4002,7 @@ function underlayHandlesActive() {
 }
 
 function drawUnderlayHandles() {
-  const pinnedView = tool === "select" && underlaySelected && underlayIsVisible() && Boolean(store.doc.underlay?.pinned);
+  const pinnedView = tool === "select" && underlaySelected && underlayIsVisible() && !currentSheetConcealed() && Boolean(store.doc.underlay?.pinned);
   if (!underlayHandlesActive() && !pinnedView) return;
   if (drag && !UNDERLAY_DRAG_KINDS.has(drag.kind)) return;
   const corners = underlayCorners(store.doc);
@@ -4122,6 +4259,9 @@ function selectionKindKeys() {
  *  Existing and Proposed sit on that tab. A room has no other tab, so those
  *  two buttons are the one it opens. */
 function currentContextTab() {
+  // The sheet is not in store.selected. Its tab is open for as long as an
+  // underlay mode is: Adjust (the sheet is selected), Set scale, Align sheets.
+  if (currentUnderlayMode()) return sheetTab();
   if (!panMode && tool !== "select") {
     const placing = placingTab(activeFunction);
     if (placing) return tabWithStatus(placing);
@@ -4192,6 +4332,8 @@ function ribbonStateKey() {
   const one = store.selected.length === 1 ? objByRef(store.primary) : null;
   return [
     ribbonHasSelection() ? 1 : 0,
+    store.doc?.underlay ? 1 : 0,
+    currentUnderlayMode() || "",
     store.selected.length,
     placeStatus,
     sharedSelectionStatus(),
@@ -4310,7 +4452,9 @@ let alignSheetsSignature = "";
 function currentUnderlayMode() {
   if (tool === "calibrate") return "scale";
   if (tool === "align") return "align";
-  if (tool === "select" && underlaySelected && underlayIsVisible()) return "adjust";
+  // A hidden sheet stays selected, so its opacity can be changed without drawing it.
+  // A plan set's Hide flag is on the set, not on the page, so it counts too.
+  if (tool === "select" && underlaySelected && store.doc?.underlay && (underlayIsVisible() || currentSheetConcealed() || isUnderlayHidden(store.doc))) return "adjust";
   return null;
 }
 
@@ -4356,7 +4500,7 @@ function syncModeBar() {
   const showingPage = set?.pages.find((p) => p.index === u?.sheetPage) || null;
   const bar = el.modeBar;
   for (const group of bar.querySelectorAll(".mode-controls")) group.hidden = group.dataset.mode !== mode;
-  el.modeName.textContent = MODE_NAMES[mode];
+  // The mode name is the ribbon group's caption, not a pill in the bar. The pill reads as a button and does nothing.
 
   let step = "";
   let prompt = "";
@@ -4396,17 +4540,28 @@ function syncModeBar() {
 
   if (mode === "adjust") {
     const pinned = Boolean(u?.pinned);
+    const concealed = currentSheetConcealed();
     step = showingPage?.label || u?.name || "";
-    prompt = pinned
-      ? "Pinned. Unpin to move, resize or rotate."
-      : "Drag to move. Corners resize, the top handle rotates.";
+    prompt = concealed
+      ? "Hidden. Opacity still changes this sheet. Show it to move it."
+      : pinned
+        ? "Pinned. Unpin to move, resize or rotate."
+        : "Drag to move. Corners resize, the top handle rotates.";
     escLabel = "Esc = Done";
     sheetUi.syncPanel(el.modeSheet);
     if (u && activeEl() !== el.underlayOpacity) el.underlayOpacity.value = String(Math.round((u.opacity ?? 0.55) * 100));
     if (u && activeEl() !== el.underlayRotation) el.underlayRotation.value = String(Math.round(((u.rotation || 0) % 360) * 10) / 10);
     el.underlayPin.setAttribute("aria-pressed", String(pinned));
     el.underlayPin.textContent = pinned ? "Pinned" : "Pin";
-    for (const control of [el.underlayRotation, el.underlayRotateCcw, el.underlayRotateCw]) control.disabled = pinned;
+    el.underlayPin.disabled = concealed;
+    if (el.underlayShow) {
+      el.underlayShow.textContent = concealed ? "Show" : "Hide";
+      el.underlayShow.setAttribute("aria-pressed", String(concealed));
+      el.underlayShow.title = concealed
+        ? "Show this sheet."
+        : "Hide this sheet. Its opacity can still be changed.";
+    }
+    for (const control of [el.underlayRotation, el.underlayRotateCcw, el.underlayRotateCw]) control.disabled = pinned || concealed;
   }
 
   if (mode === "align") {
@@ -4449,12 +4604,23 @@ function syncModeBar() {
     el.modeSnapNote.textContent = status === "loading" ? " (reading…)" : status === "empty" ? " (no vector lines)" : status === "failed" ? " (could not read)" : "";
   }
 
+  el.modeName.hidden = true;
+  // Adjust's bar is the controls. The caption under the group is the name, so the sheet name and the instruction line are not repeated here.
+  el.modeStep.hidden = mode === "adjust";
+  el.modePrompt.hidden = mode === "adjust";
   el.modeStep.textContent = step;
   el.modePrompt.textContent = prompt;
+  el.modePrompt.title = prompt;
   el.modeDone.textContent = primary;
   el.modeDone.disabled = primaryDisabled;
   el.modeEsc.textContent = escLabel;
   el.modeCancel.hidden = mode === "adjust" && !barSnapshotChanged();
+  mountModeBar();
+  const modeLabel = el.ribbonFunctions?.querySelector(":scope > .ribbon-mode .ribbon-group-label");
+  if (modeLabel) {
+    modeLabel.textContent = MODE_NAMES[mode];
+    modeLabel.title = mode === "adjust" ? prompt : "";
+  }
 }
 
 /** Adjust only offers Cancel once something moved, so the common case is a single Done. */
@@ -4502,7 +4668,9 @@ function cancelUnderlayMode(message) {
   }
   calibration = null;
   if (tool === "calibrate" || tool === "align") tool = "select";
-  underlaySelected = false;
+  // Set scale and Align sheets run inside Modify | Sheet. Cancelling one of
+  // them returns to the sheet, still selected. Cancelling Adjust leaves it.
+  underlaySelected = (mode === "scale" || mode === "align") && Boolean(store.doc?.underlay);
   setGhostSheets([]);
   store.persist();
   syncToolButtons();
@@ -4612,7 +4780,7 @@ function drawPlanLevel(levelId, walls, { ghost = false, look = "down", allow = (
     for (const roof of store.doc.roofs.filter((r) => onLevel(r, levelId) && planObjectVisible(r))) {
       const poly = shapePolygon(roof.shape);
       drawPolyFill(poly, COLOUR.roof, statusStroke(objectStatus(roof)));
-      drawRoofGuides(bbox(poly), roof.form, roof.ridge);
+      drawRoofGuides(bbox(poly), roof.form, roof.ridge, roofGuideOpts(roof));
       drawRoofCuts(roof, poly);
     }
   }
@@ -4657,6 +4825,19 @@ function drawPlanLevel(levelId, walls, { ghost = false, look = "down", allow = (
   }
   if (!ghost && allow("item")) {
     for (const item of store.doc.items.filter((i) => onLevel(i, levelId) && planObjectVisible(i))) drawItem(item);
+  }
+  if (!ghost && joineryDraft && hoverPoint && joineryIsRun(skuById(placeSkuId))) {
+    const sku = skuById(placeSkuId);
+    const wall = walls.find((w) => w.id === joineryDraft.wallId);
+    const preview = wall && commitJoineryRun({
+      sku, start: joineryDraft, endT: wallT(wall, hoverPoint.x, hoverPoint.y), wall, id: "draft",
+    });
+    if (preview) {
+      ctx.save();
+      ctx.globalAlpha = 0.7;
+      drawItem(preview);
+      ctx.restore();
+    }
   }
   if (allow("opening")) {
     for (const opening of store.doc.openings.filter((o) => openingOnLevel(o, walls, levelId) && planObjectVisible(o))) {
@@ -5410,6 +5591,113 @@ function drawOpeningSideGaps(draft, walls) {
   }
 }
 
+function selectedJoinery() {
+  if (store.selected.length !== 1 || store.primary?.kind !== "item") return null;
+  const item = objByRef(store.primary);
+  if (!item || item.host !== "joinery") return null;
+  const wall = wallsCache.find((w) => w.id === item.wallId) || currentWalls().find((w) => w.drawn && w.id === item.wallId);
+  const sku = skuById(item.sku);
+  if (!wall || !sku) return null;
+  return { item, wall, sku };
+}
+
+function joineryNeighborsOnWall(wall, item) {
+  const out = [];
+  const len = wall.length || 1;
+  for (const other of store.doc.items || []) {
+    if (!other || other.id === item.id || other.host !== "joinery" || other.wallId !== wall.id) continue;
+    out.push({ t0: Math.min(other.t0, other.t1), t1: Math.max(other.t0, other.t1) });
+  }
+  for (const opening of store.doc.openings || []) {
+    const host = wallForOpening(store.doc, pack, wallsCache, opening);
+    if (!host || host.id !== wall.id) continue;
+    const placed = openingOnWall(store.doc, pack, opening, host);
+    if (!placed) continue;
+    const half = (Number(placed.width) || 0) / 2 / len;
+    out.push({ t0: placed.t - half, t1: placed.t + half });
+  }
+  return out;
+}
+
+function liveJoineryMeasure() {
+  const sku = skuById(placeSkuId);
+  if (tool === "place" && hoverPoint && joineryIsRun(sku)) {
+    const walls = currentWalls().filter(onActiveLevel);
+    if (joineryDraft) {
+      const wall = walls.find((w) => w.id === joineryDraft.wallId);
+      const preview = wall && commitJoineryRun({
+        sku, start: joineryDraft, endT: wallT(wall, hoverPoint.x, hoverPoint.y), wall, id: "draft",
+      });
+      if (preview && wall) return { item: preview, wall, sku };
+    }
+  }
+  if (drag?.kind === "socket" || drag?.kind === "joinery-end") {
+    const item = (store.doc.items || []).find((i) => i.id === drag.id);
+    if (item?.host === "joinery") {
+      const wall = currentWalls().find((w) => w.drawn && w.id === item.wallId);
+      const hosted = skuById(item.sku);
+      if (wall && hosted) return { item, wall, sku: hosted };
+    }
+  }
+  return selectedJoinery();
+}
+
+function drawJoineryMeasures() {
+  const live = liveJoineryMeasure();
+  if (!live) return;
+  const neighbors = joineryNeighborsOnWall(live.wall, live.item);
+  for (const gap of joinerySideGaps(live.wall, live.item, neighbors)) {
+    drawGapDimension(gap.x1, gap.y1, gap.x2, gap.y2);
+  }
+  const depths = joineryDepthGaps(live.item, live.sku, live.wall);
+  if (!depths.length) return;
+  const midScreenY = (gap) => {
+    const [, ay] = worldToScreen(gap.x1, gap.y1);
+    const [, by] = worldToScreen(gap.x2, gap.y2);
+    return (ay + by) / 2;
+  };
+  let pick = depths[0];
+  for (const gap of depths) {
+    if (midScreenY(gap) < midScreenY(pick)) pick = gap;
+  }
+  const dx = Math.abs(pick.x2 - pick.x1);
+  const dy = Math.abs(pick.y2 - pick.y1);
+  drawGapDimension(pick.x1, pick.y1, pick.x2, pick.y2, dx >= dy ? "h" : "v");
+}
+
+function drawJoineryHandles() {
+  if (drag || attachPick || tool !== "select") return;
+  const sel = selectedJoinery();
+  if (!sel) return;
+  for (const handle of joineryHandlePoints(sel.item, sel.sku, sel.wall)) {
+    const [hx, hy] = worldToScreen(handle.x, handle.y);
+    ctx.save();
+    ctx.fillStyle = "#f4ede1";
+    ctx.strokeStyle = COLOUR.selection;
+    ctx.lineWidth = 1.6;
+    ctx.fillRect(hx - HANDLE / 2, hy - HANDLE / 2, HANDLE, HANDLE);
+    ctx.strokeRect(hx - HANDLE / 2, hy - HANDLE / 2, HANDLE, HANDLE);
+    ctx.restore();
+  }
+}
+
+function joineryHandleHit(wx, wy) {
+  if (attachPick || tool !== "select") return null;
+  const sel = selectedJoinery();
+  if (!sel) return null;
+  const tol = (HANDLE / 2 + 4) / cam.scale;
+  let best = null;
+  let bestD = tol;
+  for (const handle of joineryHandlePoints(sel.item, sel.sku, sel.wall)) {
+    const d = Math.hypot(handle.x - wx, handle.y - wy);
+    if (d <= bestD) {
+      best = handle;
+      bestD = d;
+    }
+  }
+  return best;
+}
+
 function drawOpening(opening, walls, { preview = false } = {}) {
   const wall = wallForOpening(store.doc, pack, walls, opening);
   if (!wall) return;
@@ -5774,15 +6062,44 @@ function drawItem(item) {
   // SANS 10143 sanitary symbol at the measured size. Anything without a
   // conventional mark stays the footprint rectangle and its type name.
   if (!paintFixture(ctx, item, sku, (x, y) => worldToScreen(x, y), cam.scale)) {
-    const box = itemRect(item, sku);
-    const [sx, sy] = worldToScreen(box.x, box.y);
-    const [ex, ey] = worldToScreen(box.x + box.w, box.y + box.h);
-    ctx.fillStyle = "rgba(58, 95, 122, 0.12)";
-    ctx.fillRect(sx, sy, ex - sx, ey - sy);
-    ctx.strokeRect(sx, sy, ex - sx, ey - sy);
-    ctx.font = "10px Source Sans 3, sans-serif";
-    ctx.fillStyle = "#5c5348";
-    ctx.fillText(sku.name, sx, sy - 3);
+    const wall = item.host === "joinery"
+      ? wallsCache.find((w) => w.id === item.wallId)
+      : null;
+    const poly = item.host === "joinery" ? joineryPolygon(item, sku, wall) : null;
+    const timber = sku.drawing?.colourClass === "timber";
+    ctx.fillStyle = timber
+      ? (objectStatus(item) === "existing" ? "rgba(255,255,255,0.85)" : "rgba(232, 196, 64, 0.35)")
+      : "rgba(58, 95, 122, 0.12)";
+    if (joineryDashed(sku)) ctx.setLineDash([6, 4]);
+    if (poly?.length >= 4) {
+      ctx.beginPath();
+      poly.forEach((p, i) => {
+        const [sx, sy] = worldToScreen(p[0], p[1]);
+        if (i === 0) ctx.moveTo(sx, sy);
+        else ctx.lineTo(sx, sy);
+      });
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      const mid = poly.reduce((a, p) => [a[0] + p[0] / 4, a[1] + p[1] / 4], [0, 0]);
+      const [lx, ly] = worldToScreen(mid[0], mid[1]);
+      ctx.setLineDash([]);
+      ctx.font = "10px Source Sans 3, sans-serif";
+      ctx.fillStyle = "#5c5348";
+      ctx.textAlign = "center";
+      ctx.fillText(joineryLabel(sku), lx, ly + 3);
+      ctx.textAlign = "start";
+    } else {
+      const box = itemRect(item, sku);
+      const [sx, sy] = worldToScreen(box.x, box.y);
+      const [ex, ey] = worldToScreen(box.x + box.w, box.y + box.h);
+      ctx.fillRect(sx, sy, ex - sx, ey - sy);
+      ctx.strokeRect(sx, sy, ex - sx, ey - sy);
+      ctx.setLineDash([]);
+      ctx.font = "10px Source Sans 3, sans-serif";
+      ctx.fillStyle = "#5c5348";
+      ctx.fillText(joineryLabel(sku) === sku.name ? sku.name : joineryLabel(sku), sx, sy - 3);
+    }
   }
   ctx.restore();
 }
@@ -5801,6 +6118,16 @@ function drawSelectionHighlights(walls) {
     ctx.lineWidth = 2.4;
     ctx.setLineDash([]);
     if (ref.kind === "room" || ref.kind === "slab" || ref.kind === "roof") {
+      if (ref.kind === "roof" && roofHasBase(obj)) {
+        ctx.save();
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = COLOUR.selection;
+        pathForPoly(obj.base.points);
+        ctx.stroke();
+        ctx.restore();
+        ctx.lineWidth = 2.4;
+        ctx.strokeStyle = COLOUR.selection;
+      }
       pathForPoly(shapePolygon(obj.shape));
       ctx.stroke();
       // A selected finish owns the corners. The floor outline waits until Floor
@@ -5815,6 +6142,22 @@ function drawSelectionHighlights(walls) {
           ctx.fillRect(hx - HANDLE / 2, hy - HANDLE / 2, HANDLE, HANDLE);
           ctx.strokeRect(hx - HANDLE / 2, hy - HANDLE / 2, HANDLE, HANDLE);
         }
+      }
+      // A gable's ridge has its own handle, a diamond so it is not read as a corner.
+      const ridge = showCorners && ref.kind === "roof" ? roofRidgeHandle(obj) : null;
+      if (ridge) {
+        const [rx, ry] = worldToScreen(ridge.x, ridge.y);
+        const r = HANDLE / 2 + 1;
+        ctx.fillStyle = "#f4ede1";
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.moveTo(rx, ry - r);
+        ctx.lineTo(rx + r, ry);
+        ctx.lineTo(rx, ry + r);
+        ctx.lineTo(rx - r, ry);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
       }
     } else if (ref.kind === "region") {
       pathForPoly(shapePolygon(obj.shape));
@@ -5973,8 +6316,61 @@ function drawShapeDraft() {
   if (isRoof) drawRoofGuides(r, "gable", "long");
 }
 
-function drawRoofGuides(rect, form, ridge) {
-  const lines = roofGuideLines(rect, form, ridge);
+/** What the plan guide lines need beyond the outline: where the walls are, and the ridge offset. */
+function roofGuideOpts(roof) {
+  return { overhangMm: roofOverhangMm(roof), ridgeOffsetMm: roofRidgeOffsetMm(roof) };
+}
+
+/**
+ * The drag handle on a selected gable's ridge: the middle of the ridge line,
+ * plus what a drag needs to turn a pointer position back into a distance.
+ * Null for any other roof.
+ */
+function roofRidgeHandle(roof) {
+  if (!roof || roof.form !== "gable") return null;
+  const poly = shapePolygon(roof.shape);
+  if (poly.length < 3) return null;
+  const rect = bbox(poly);
+  if (!(rect.w > 0.2) || !(rect.h > 0.2)) return null;
+  const alongX = roofRidgeAlongX(rect, roof.ridge);
+  const overhangM = roofOverhangMm(roof) / 1000;
+  const prof = gableProfile({
+    span: alongX ? rect.h : rect.w,
+    overhangM,
+    pitchDeg: roof.pitch,
+    pitch2Deg: roofPitch2Deg(roof),
+    ridgeOffsetMm: roofRidgeOffsetMm(roof),
+  });
+  return {
+    alongX,
+    rect,
+    overhangM,
+    prof,
+    x: alongX ? rect.x + rect.w / 2 : rect.x + prof.ridgeT,
+    y: alongX ? rect.y + prof.ridgeT : rect.y + rect.h / 2,
+  };
+}
+
+/**
+ * "Slopes 49° and 21°. The wall on the short side rises 0.75 m." Plain words
+ * for the result of the ridge position, shown in the inspector and after a drag.
+ */
+function ridgeStatusText(roof) {
+  const handle = roofRidgeHandle(roof);
+  if (!handle) return "";
+  const { prof } = handle;
+  const low = Math.round(prof.lowDeg);
+  const high = Math.round(prof.highDeg);
+  const lowRaise = Math.max(0, prof.lowWallRise);
+  const highRaise = Math.max(0, prof.highWallRise);
+  const raise = Math.max(lowRaise, highRaise);
+  const slopes = low === high ? `Both slopes ${low}°.` : `Slopes ${low}° and ${high}°.`;
+  if (raise < 0.01) return slopes;
+  return `${slopes} The wall nearest the ridge rises ${raise.toFixed(2)} m to meet the roof.`;
+}
+
+function drawRoofGuides(rect, form, ridge, opts = {}) {
+  const lines = roofGuideLines(rect, form, ridge, opts);
   if (!lines.length) return;
   ctx.save();
   ctx.strokeStyle = "#3a5f7a";
@@ -7197,6 +7593,7 @@ function shapeEditTol() {
 
 /** The outline to hit-test: stored corners, or the rectangle's four corners. */
 function shapeOutlinePoints(obj) {
+  if (roofHasBase(obj)) return obj.base.points;
   if (!obj?.shape) return null;
   if (obj.shape.kind === "poly" && Array.isArray(obj.shape.points) && obj.shape.points.length >= 3) return obj.shape.points;
   const poly = shapePolygon(obj.shape);
@@ -8203,6 +8600,7 @@ const CATEGORY_NOTE = {
   wall: "wall",
   foundation: "foundation",
   boundarywall: "boundary wall",
+  fence: "fence",
   beam: "beam",
   column: "column",
 };
@@ -8362,6 +8760,50 @@ function drawFinishHost() {
   ctx.fill();
   ctx.stroke();
   ctx.restore();
+}
+
+/** Anchors thin, the roof edge solid, warn-coloured when the overhang folds. */
+function drawRoofAnchorDraft(points) {
+  const end = snapGuide ? { x: snapGuide.x, y: snapGuide.y } : hoverPoint;
+  const chain = points.map((p) => ({ x: p.x, y: p.y }));
+  const last = chain[chain.length - 1];
+  if (end && (!last || Math.hypot(end.x - last.x, end.y - last.y) > 0.02)) chain.push(end);
+  ctx.save();
+  ctx.strokeStyle = "#6e6458";
+  ctx.fillStyle = "#6e6458";
+  ctx.lineWidth = 1;
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  chain.forEach((p, i) => {
+    const [sx, sy] = worldToScreen(p.x, p.y);
+    if (i === 0) ctx.moveTo(sx, sy);
+    else ctx.lineTo(sx, sy);
+  });
+  ctx.stroke();
+  for (const p of points) {
+    const [sx, sy] = worldToScreen(p.x, p.y);
+    ctx.fillRect(sx - 2, sy - 2, 4, 4);
+  }
+  if (chain.length >= 3) {
+    const edge = roofEdgeFromBase(chain.map((p) => [p.x, p.y]), currentOverhangMm());
+    ctx.lineWidth = 2;
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    const ring = edge || chain.map((p) => [p.x, p.y]);
+    ring.forEach((p, i) => {
+      const [sx, sy] = worldToScreen(p[0], p[1]);
+      if (i === 0) ctx.moveTo(sx, sy);
+      else ctx.lineTo(sx, sy);
+    });
+    ctx.closePath();
+    ctx.strokeStyle = edge ? "#3a5f7a" : "#9a6b1f";
+    ctx.stroke();
+  }
+  ctx.restore();
+  for (let i = 1; i < points.length; i += 1) {
+    drawLengthLabel(points[i - 1].x, points[i - 1].y, points[i].x, points[i].y);
+  }
+  if (end && last) drawLengthLabel(last.x, last.y, end.x, end.y);
 }
 
 function drawPolyDraft(points, colour) {
@@ -8661,9 +9103,49 @@ function underlayIsVisible() {
   return Boolean(store.doc.underlay && underlayBitmap() && !isUnderlayHidden(store.doc));
 }
 
+/** The plan page this menu is about, when the underlay is one page of a set. */
+function showingPlanPage() {
+  const doc = store.doc;
+  const index = doc?.underlay?.sheetPage;
+  if (!doc?.sheetSet || !Number.isInteger(index)) return null;
+  const page = doc.sheetSet.pages.find((p) => p.index === index);
+  return page && isPlanPage(page) ? page : null;
+}
+
+/**
+ * This sheet is off the plan, but still the one Adjust is editing.
+ * A plan page uses its own eye (`suppressed`). A single image uses the
+ * underlay's hidden flag. The whole set's Hide sheet is separate.
+ */
+function currentSheetConcealed() {
+  if (!store.doc?.underlay) return false;
+  const page = showingPlanPage();
+  if (page) return Boolean(page.suppressed);
+  return isUnderlayHidden(store.doc);
+}
+
+/** Show or hide the sheet Adjust is editing. `on` is whether it should be drawn. */
+function setCurrentSheetVisible(on) {
+  const doc = store.doc;
+  if (!doc?.underlay || currentSheetConcealed() === !on) return;
+  const page = showingPlanPage();
+  if (page) setPageShown(doc.sheetSet, page.index, on, page.index);
+  else setUnderlayHidden(doc, !on);
+}
+
+/** Hide or show the sheet Adjust is editing, and leave that menu open. */
+function toggleCurrentSheetVisible() {
+  if (!store.doc?.underlay) return;
+  const concealed = currentSheetConcealed();
+  store.pushUndo(concealed ? "Showed the sheet" : "Hid the sheet");
+  setCurrentSheetVisible(concealed);
+  store.persist();
+  render();
+}
+
 /** True if the point falls inside the placed (and possibly rotated) sheet. */
 function hitUnderlay(wx, wy) {
-  if (!underlayIsVisible()) return false;
+  if (!underlayIsVisible() || currentSheetConcealed()) return false;
   const corners = underlayCorners(store.doc);
   if (!corners) return false;
   return pointInPoly(wx, wy, corners.map((c) => [c.x, c.y]));
@@ -8905,7 +9387,7 @@ function attachObjectAt(wx, wy) {
 // --- palette ---------------------------------------------------------------
 
 const CATEGORY_LABEL = {
-  wall: "Walls", boundarywall: "Boundary walls", foundation: "Foundations", floor: "Floors",
+  wall: "Walls", boundarywall: "Boundary walls", fence: "Fences", foundation: "Foundations", floor: "Floors",
   ceiling: "Ceilings", roof: "Roofs", door: "Doors", window: "Windows", opening: "Openings", beam: "Beams",
   column: "Columns", stair: "Stairs", sanitary: "Sanitary", waterheater: "Water heating",
   drainage: "Drainage", electrical: "Electrical", furniture: "Furniture", casework: "Casework",
@@ -8916,6 +9398,7 @@ const CATEGORY_LABEL = {
 const INSPECT_KIND_LABEL = {
   wall: "Wall",
   boundarywall: "Boundary wall",
+  fence: "Fence",
   foundation: "Foundation",
   floor: "Floor",
   ceiling: "Ceiling",
@@ -9009,6 +9492,7 @@ function skuDimLabel(sku) {
   if (isStripFooting(sku) && g.width && g.depth) {
     return `${Math.round(g.width * 1000)} × ${Math.round(g.depth * 1000)} mm`;
   }
+  if (sku.category === "fence" && g.height) return `${Math.round(g.height * 1000)} mm high`;
   if (sku.category === "wall" || sku.category === "foundation" || sku.category === "boundarywall") {
     const label = wallThicknessLabel(sku);
     if (label) return label;
@@ -9205,7 +9689,7 @@ function onSkuClick(sku) {
     wallDraft = null;
     shapeDraft = null;
     if (sku.category !== "door") doorHandSign = 1;
-    if (sku.category === "wall" || sku.category === "foundation" || sku.category === "boundarywall") {
+    if (sku.category === "wall" || sku.category === "foundation" || sku.category === "boundarywall" || sku.category === "fence") {
       tool = "wall";
     } else if (sku.category === "floor" || sku.category === "pool") {
       tool = "slab";
@@ -9257,7 +9741,7 @@ function applySkuToSelection(sku) {
 // photo exists. See PLAN discussion: "drawing options full screen" - kept
 // opt-in to avoid fatiguing users who already know the type.
 const TYPE_DETAIL_ICON = {
-  wall: "\u25A4", boundarywall: "\u25A4", foundation: "\u2593", floor: "\u25A6",
+  wall: "\u25A4", boundarywall: "\u25A4", fence: "\u2500", foundation: "\u2593", floor: "\u25A6",
   ceiling: "\u25A6", roof: "\u25B2", door: "\u25AB", window: "\u25A2", opening: "\u25A1", beam: "\u2500",
   column: "\u25A0", stair: "\u2261", sanitary: "\u25CE", waterheater: "\u25CE",
   drainage: "\u2933", electrical: "\u26A1", furniture: "\u25A3", casework: "\u25A3",
@@ -9602,7 +10086,46 @@ function skuCount(categories) {
 }
 
 /** The running command's controls. They live outside the ribbon so a redraw, which replaces the row's HTML, cannot destroy them. */
-const RIBBON_SETTING_NODES = ["roofCutKindBar", "shapeLink", "wallOpts", "moveDisjoin"];
+const RIBBON_SETTING_NODES = ["roofCutKindBar", "shapeLink", "roofOverhang", "wallOpts", "moveDisjoin"];
+
+/** The Adjust / Set scale / Align strip. It lives in the ribbon row, not under it. */
+function modeBarPark() {
+  return document.getElementById("v2-mode-bar-park");
+}
+
+function parkModeBar() {
+  const park = modeBarPark();
+  const bar = el.modeBar;
+  if (!park || !bar) return;
+  if (bar.parentElement !== park) park.appendChild(bar);
+  el.ribbonFunctions?.querySelector(":scope > .ribbon-mode")?.remove();
+}
+
+/** Show the underlay controls in the ribbon's fixed-height row. A redraw replaces that row, so this runs again afterwards. */
+function mountModeBar() {
+  const row = el.ribbonFunctions;
+  const bar = el.modeBar;
+  if (!row || !bar || bar.hidden) {
+    parkModeBar();
+    return;
+  }
+  const host = row.querySelector(":scope > .ribbon-mode");
+  if (host?.contains(bar)) return;
+  host?.remove();
+  const wrap = document.createElement("div");
+  wrap.className = "ribbon-group ribbon-mode";
+  wrap.dataset.fit = "fixed";
+  wrap.dataset.kind = "settings";
+  const items = document.createElement("div");
+  items.className = "ribbon-group-items ribbon-mode-items";
+  items.appendChild(bar);
+  const label = document.createElement("span");
+  label.className = "ribbon-group-label";
+  label.textContent = "Adjust";
+  wrap.append(items, label);
+  row.appendChild(wrap);
+  requestAnimationFrame(() => fitRibbon(row));
+}
 
 function parkRibbonSettings() {
   const park = el.ribbonSettingsPark;
@@ -9633,7 +10156,7 @@ function mountRibbonSettings(force = false) {
   parkRibbonSettings();
   host?.remove();
 
-  const pieces = [el.roofCutKindBar, el.shapeLink, el.wallOpts].filter((node) => node && !node.hidden);
+  const pieces = [el.roofCutKindBar, el.shapeLink, el.roofOverhang, el.wallOpts].filter((node) => node && !node.hidden);
   const moveBtn = row.querySelector('[data-function="move"]');
   if (el.moveDisjoin && !el.moveDisjoin.hidden) {
     if (moveBtn) moveBtn.insertAdjacentElement("afterend", el.moveDisjoin);
@@ -9663,11 +10186,11 @@ function ribbonSettingsMounted(row, host) {
     const inSettings = Boolean(host?.contains(el.moveDisjoin));
     if (moveBtn ? !besideMove : !inSettings) return false;
   }
-  for (const node of [el.roofCutKindBar, el.shapeLink, el.wallOpts]) {
+  for (const node of [el.roofCutKindBar, el.shapeLink, el.roofOverhang, el.wallOpts]) {
     if (node && !node.hidden && !host?.contains(node)) return false;
   }
   if (host) {
-    const held = [el.roofCutKindBar, el.shapeLink, el.wallOpts, el.moveDisjoin].some((node) => node && host.contains(node));
+    const held = [el.roofCutKindBar, el.shapeLink, el.roofOverhang, el.wallOpts, el.moveDisjoin].some((node) => node && host.contains(node));
     if (!held) return false;
   }
   return true;
@@ -9678,6 +10201,7 @@ function drawRibbon() {
   // Park first: renderRibbon replaces the row's HTML, and the settings are
   // mounted back on afterwards.
   parkRibbonSettings();
+  parkModeBar();
   syncContextTab();
   lastRibbonKey = ribbonStateKey();
   const contextTab = currentContextTab();
@@ -9688,6 +10212,7 @@ function drawRibbon() {
     skuCount,
     commandState: ribbonCommandState,
     hasSelection: ribbonHasSelection,
+    hasUnderlay: () => Boolean(store.doc?.underlay),
     onTab: (id) => {
       activeTab = id;
       // Going to a permanent tab by hand is where Esc should come back to.
@@ -9702,10 +10227,32 @@ function drawRibbon() {
   });
   decorateRibbon(el.ribbonFunctions);
   mountRibbonSettings(true);
+  mountModeBar();
   // Measuring box widths needs layout, which is not settled until the
   // browser has painted this render, so the fit runs a frame later.
   requestAnimationFrame(() => fitRibbon(el.ribbonFunctions));
+  syncSheetToggles();
   updateRibbonHint();
+}
+
+/** Hide / Show and Model / Sheet, on the plan strip while a sheet is loaded. They change how the plan looks, so they are not on the Sheet tab. */
+function syncSheetToggles() {
+  const hide = document.getElementById("v2-sheet-hide");
+  const view = document.getElementById("v2-sheet-view");
+  const loaded = Boolean(store.doc?.underlay);
+  if (hide) {
+    const hidden = loaded && isUnderlayHidden(store.doc);
+    hide.hidden = !loaded;
+    hide.textContent = hidden ? "Show sheet" : "Hide sheet";
+    hide.title = hidden ? "Show the underlay" : "Hide the underlay without removing it";
+  }
+  if (view) {
+    view.hidden = !loaded;
+    const state = ribbonCommandState({ id: "trace-view" });
+    view.textContent = state?.label === "Sheet" ? "Show walls on top" : "Show sheet on top";
+    view.disabled = Boolean(state?.disabled);
+    view.title = state?.title || "";
+  }
 }
 
 /** Second sentence on a snap tool's hint: which side the live measurement
@@ -9838,17 +10385,26 @@ function updateRibbonHint() {
     return;
   }
   if ((tool === "slab" || tool === "roof") && boundaryDraft?.length) {
-    setRibbonHint("Click the next corner. Enter closes the outline.");
+    setRibbonHint(tool === "roof" && roofPlaceMode === "walls"
+      ? "Click the next outside corner. The edge follows the overhang. Enter closes the roof."
+      : "Click the next corner. Enter closes the outline.");
     return;
   }
   if ((tool === "slab" || tool === "roof") && !shapeDraft) {
     const noun = tool === "roof" ? "roof" : "floor";
-    if (shapePlaceMode === "room") {
+    const mode = outlinePlaceMode();
+    if (mode === "room") {
       setRibbonHint(`Click a room. The ${noun} takes that outline.`);
       return;
     }
-    if (shapePlaceMode === "footprint") {
-      setRibbonHint(`Click inside the external walls. The ${noun} follows them.`);
+    if (mode === "footprint") {
+      setRibbonHint(tool === "roof"
+        ? "Click inside the external walls. The roof follows the outside face, out by the overhang."
+        : `Click inside the external walls. The ${noun} follows them.`);
+      return;
+    }
+    if (mode === "walls") {
+      setRibbonHint("Click each outside corner. The edge sits out by the overhang. Enter closes the roof.");
       return;
     }
     setRibbonHint(`Click each corner. Enter closes the ${noun}. Follow external walls in the inspector to tie it to the walls.`);
@@ -9905,6 +10461,10 @@ function updateRibbonHint() {
     setRibbonHint("Click a wall. On the elevation, drag a corner to change the size.");
     return;
   }
+  if (tool === "select" && store.selected.length === 1 && store.primary?.kind === "item" && objByRef(store.primary)?.host === "joinery") {
+    setRibbonHint("Drag along the wall to move it. Drag an end to change the length, or the outer edge for depth.");
+    return;
+  }
   if (tool === "select" && store.selected.length === 1 && store.primary?.kind === "opening") {
     if (selectedDoor()) {
       setRibbonHint("Drag the door along the wall to move it. Drag it to the other side to flip the swing. Space flips the hinge.");
@@ -9930,7 +10490,24 @@ function updateRibbonHint() {
     }
   }
   if (tool === "place") {
-    const surface = socketSurface(skuById(placeSkuId));
+    const sku = skuById(placeSkuId);
+    if (joineryIsRun(sku)) {
+      const walls = currentWalls().filter(onActiveLevel);
+      const near = hoverPoint
+        ? joineryDraftAt(walls, sku, hoverPoint.x, hoverPoint.y, { preferId: joineryDraft?.wallId })
+        : null;
+      if (joineryDraft) {
+        setRibbonHint(near && near.wallId === joineryDraft.wallId
+          ? "Click the other end of the run on this wall. Esc cancels."
+          : "Stay on this wall. A cupboard cannot sit off the wall.", !near || near.wallId !== joineryDraft.wallId);
+      } else {
+        setRibbonHint(near
+          ? "Click the wall, then the other end of the run."
+          : "Click a wall. A cupboard cannot sit off the wall.", !near);
+      }
+      return;
+    }
+    const surface = socketSurface(sku);
     if (surface === "wall") {
       setRibbonHint("Click a wall. The plug stays on that wall.");
       return;
@@ -10118,6 +10695,13 @@ function ribbonCommandState(item) {
       title: has ? "Show or hide the list of pages in the inspector." : "Import a multi-page PDF first.",
     };
   }
+  if (item.id === "reference") {
+    const has = Boolean(store.doc.sheetSet);
+    return {
+      disabled: !has,
+      title: has ? HINTS.reference : "Import a multi-page PDF first.",
+    };
+  }
   if (item.id === "align-floors") {
     const can = Number.isInteger(store.doc.underlay?.sheetPage);
     return {
@@ -10157,7 +10741,7 @@ function ribbonCommandState(item) {
     return {
       active: underlaySelected && tool === "select",
       disabled: hidden,
-      title: hidden ? "Show the underlay first." : "Move, rotate or drag a corner to resize.",
+      title: hidden ? "Show the underlay first." : "Edit this sheet. Its scale, alignment and removal are on Modify | Sheet.",
     };
   }
   if (item.id === "calibrate") {
@@ -10197,6 +10781,7 @@ function onRibbonFunction(item) {
   beamStart = null;
   lineStart = null;
   wallDraft = null;
+  joineryDraft = null;
   shapeDraft = null;
   sizeDraft = null;
   roomDraft = null;
@@ -12283,6 +12868,7 @@ const sheetUi = createSheetUi({
     if (tool === "align") return;
     fitUnderlayView();
   },
+  revealSheet: () => revealImportedSheet(),
   onListVisible: () => drawRibbon(),
 });
 
@@ -12877,6 +13463,14 @@ function drawAlignmentMarks() {
   }
 }
 
+/** Select the sheet that is on this floor, which opens Modify | Sheet. No-op while a sheet mode is already running, or while a draw tool is armed. */
+function revealImportedSheet() {
+  if (currentUnderlayMode()) return;
+  if (tool !== "select") return;
+  if (!store.doc?.underlay || isUnderlayHidden(store.doc)) return;
+  startUnderlayAdjust();
+}
+
 function startUnderlayAdjust() {
   if (!store.doc.underlay) {
     setStatusMessage("Load an underlay first.", "warn");
@@ -13064,7 +13658,6 @@ async function removeUnderlay() {
     setStatusMessage("Nothing to remove.", "warn");
     return;
   }
-  leaveUnderlayMode(null);
   const { title, message } = describeUnderlayRemoval();
   const choice = await sheetUi.ask({
     title,
@@ -13075,8 +13668,19 @@ async function removeUnderlay() {
       { id: "remove", label: "Remove" },
     ],
   });
+  // Cancel leaves Set scale, Align sheets, or the sheet menu exactly as it was.
   if (choice === "hide") {
-    if (store.doc.underlay && !isUnderlayHidden(store.doc)) toggleUnderlayVisibility();
+    if (store.doc.underlay && !isUnderlayHidden(store.doc)) {
+      if (tool === "calibrate" || tool === "align") cancelUnderlayMode();
+      toggleUnderlayHidden(store.doc);
+      underlaySelected = true;
+      tool = "select";
+      store.persist();
+      syncToolButtons();
+      drawRibbon();
+      render();
+      setStatusMessage("Underlay hidden.", "ok");
+    }
     return;
   }
   if (choice !== "remove") return;
@@ -13466,7 +14070,7 @@ function finishMove() {
   }
   const stopped = moveSession.stopped;
   const kind = moveSession.kind;
-  if (pack) syncHostedSockets(store.doc, pack);
+  if (pack) syncHosts();
   if (kind === "segment") rehomeConnectedNodes(store.doc, pack);
   store.persist();
   endMoveTool();
@@ -14129,7 +14733,7 @@ function beginPan(ev) {
 // Drags that edit geometry already in the document mutate it live, off the
 // speculative undo entry pushed on pointer-down. Cancelling one therefore
 // means rolling that entry back, not just forgetting the drag.
-const REVERTIBLE_DRAGS = new Set(["move", "segment-end", "shape-vertex", "shape-edge", "roof-cut-vertex", "roof-cut-move", "region-vertex", "region-edge", "region-move", "property-vertex", "property-move", "underlay-move", "underlay-scale", "underlay-rotate"]);
+const REVERTIBLE_DRAGS = new Set(["move", "segment-end", "joinery-end", "roof-ridge", "shape-vertex", "shape-edge", "roof-cut-vertex", "roof-cut-move", "region-vertex", "region-edge", "region-move", "property-vertex", "property-move", "underlay-move", "underlay-scale", "underlay-rotate"]);
 
 /**
  * Drop the in-progress click–click segment (or last property-line vertex)
@@ -14139,10 +14743,11 @@ const REVERTIBLE_DRAGS = new Set(["move", "segment-end", "shape-vertex", "shape-
 function abortClickDraft() {
   if (!hasClickDraft({
     wallDraft, shapeDraft, beamStart, lineStart, siteDraft, roomDraft, boundaryDraft, roofCutDraft, regionDraft, cameraDraft, sectionDraft, calloutDraft, revisionCloudDraft, measureDraft, calibration,
-    serviceRoute, serviceConnect,
+    serviceRoute, serviceConnect, joineryDraft,
   })) return false;
   if (serviceRoute?.fromNodeId) finishServiceRoute();
   else if (serviceConnect?.nodeId) serviceConnect = null;
+  else if (joineryDraft) joineryDraft = null;
   else if (wallDraft) wallDraft = null;
   else if (shapeDraft) shapeDraft = null;
   else if (beamStart) beamStart = null;
@@ -14335,6 +14940,8 @@ function cancelDrawing() {
 
 function wireToolbar() {
   document.getElementById("v2-pan")?.addEventListener("click", () => setPanMode(!panMode));
+  document.getElementById("v2-sheet-hide")?.addEventListener("click", () => toggleUnderlayVisibility());
+  document.getElementById("v2-sheet-view")?.addEventListener("click", () => toggleTraceView());
   document.querySelectorAll("[data-tool]").forEach((btn) => {
     btn.addEventListener("click", () => {
       setPanMode(false);
@@ -14585,6 +15192,18 @@ function onPointerDown(ev) {
 
   // Endpoint handles are the selection's own; while a target pick or draw
   // tool is armed the click belongs to that tool, not to stretching a wall.
+  const joineryGrab = (attachPick || tool !== "select" || ev.shiftKey) ? null : joineryHandleHit(wx, wy);
+  if (joineryGrab) {
+    const sel = selectedJoinery();
+    if (sel) {
+      store.pushUndo(historyDid(joineryGrab.end === "depth" ? "Set the depth of" : "Set the length of"), { pending: true });
+      drag = { kind: "joinery-end", id: sel.item.id, end: joineryGrab.end, x0: wx, y0: wy, moved: false };
+      el.canvas.setPointerCapture(ev.pointerId);
+      render();
+      return;
+    }
+  }
+
   const handle = (attachPick || tool !== "select") ? null : endpointHandleHit(wx, wy);
   if (handle && !ev.shiftKey) {
     const obj = objByRef({ kind: handle.target, id: handle.id });
@@ -14634,6 +15253,19 @@ function onPointerDown(ev) {
   if (tool === "select" && !attachPick && !editingFinishRegion()) {
     const editable = editableShapeRef();
     if (!ev.shiftKey) selectedShapeVertex = null;
+    // The ridge handle first: on a narrow roof it can sit near a corner.
+    const ridgeHandle = editable?.ref.kind === "roof" ? roofRidgeHandle(editable.obj) : null;
+    if (ridgeHandle && Math.hypot(wx - ridgeHandle.x, wy - ridgeHandle.y) <= shapeEditTol() * 1.4) {
+      selectedShapeEdge = null;
+      selectedShapeVertex = null;
+      editingRoofCut = null;
+      selectedRoofCutVertex = null;
+      store.pushUndo(historyDid("Moved the ridge of"), { pending: true });
+      drag = { kind: "roof-ridge", ref: editable.ref, moved: false };
+      el.canvas.setPointerCapture(ev.pointerId);
+      render();
+      return;
+    }
     if (editable) {
       const ring = editable.points;
       const vi = hitPolyVertexIndex(ring, wx, wy, shapeEditTol());
@@ -14680,6 +15312,27 @@ function onPointerDown(ev) {
             finishSnap,
           };
           started = true;
+        } else if (roofHasBase(editable.obj)) {
+          const points = editable.obj.base.points.map(([x, y]) => [x, y]);
+          const insertAt = ei + 1;
+          points.splice(insertAt, 0, pointOnRingEdge(points, ei, wx, wy));
+          if (!commitRoofAnchors(editable.obj, points)) {
+            store.dropUndo();
+            setStatusMessage("That overhang is too big for this corner.", "warn");
+          } else {
+            clearShapeLink(editable.obj);
+            selectedShapeEdge = null;
+            selectedShapeVertex = { ref: editable.ref, index: insertAt };
+            drag = {
+              kind: "shape-vertex",
+              ref: editable.ref,
+              index: insertAt,
+              moved: false,
+              inserted: true,
+              finishSnap,
+            };
+            started = true;
+          }
         } else {
           const points = materializeShapePoly(editable);
           if (!points) store.dropUndo();
@@ -14935,13 +15588,13 @@ function onPointerDown(ev) {
   }
   if (tool === "slab" || tool === "roof") {
     underlaySelected = false;
-    if (shapePlaceMode === "room") {
+    if (outlinePlaceMode() === "room") {
       if (!placeOutlineFromRoom(wx, wy)) {
         setStatusMessage(tool === "roof" ? "Click a room to put the roof on it." : "Click a room to put the floor on it.", "warn");
       }
       return;
     }
-    if (shapePlaceMode === "footprint") {
+    if (outlinePlaceMode() === "footprint") {
       if (!placeOutlineFromFootprint(wx, wy)) {
         setStatusMessage("Click inside the external walls.", "warn");
       }
@@ -15041,7 +15694,7 @@ function onPointerDown(ev) {
     store.pushUndo(historyDid("Moved"), { pending: true });
     const slideId = hit.kind === "opening" && store.selected.every((r) => r.kind === "opening") ? hit.id : null;
     const socketItem = hit.kind === "item" ? (store.doc.items || []).find((i) => i.id === hit.id) : null;
-    const slideSocket = socketItem?.host === "wall"
+    const slideSocket = (socketItem?.host === "wall" || socketItem?.host === "joinery")
       && store.selected.length === 1
       && store.selected[0].kind === "item"
       && store.selected[0].id === socketItem.id;
@@ -15555,10 +16208,28 @@ function placeOutlineFromRoom(wx, wy) {
 }
 
 function placeOutlineFromFootprint(wx, wy) {
-  const face = footprintFace(store.doc, pack, activeLevel, wx, wy);
+  const roof = tool === "roof";
+  const face = roof
+    ? footprintOuterFace(store.doc, pack, activeLevel, wx, wy)
+    : footprintFace(store.doc, pack, activeLevel, wx, wy);
   if (!face || face.length < 3) return false;
+  let shape = polyShape(face);
+  let base = null;
+  let overhang = null;
+  if (roof) {
+    const edge = roofEdgeFromBase(face, currentOverhangMm());
+    if (!edge) {
+      setStatusMessage("That overhang is too big for this corner.", "warn");
+      return false;
+    }
+    base = polyShape(face);
+    shape = polyShape(edge);
+    overhang = currentOverhangMm();
+  }
   const row = commitLinkedOutline(tool, {
-    shape: polyShape(face),
+    shape,
+    base,
+    overhang,
     bound: true,
     link: "footprint",
     seed: { x: wx, y: wy },
@@ -15790,6 +16461,25 @@ function finishBoundaryDraft() {
     return;
   }
   const points = boundaryDraft.map((p) => [p.x, p.y]);
+  if (tool === "roof" && roofPlaceMode === "walls") {
+    const edge = roofEdgeFromBase(points, currentOverhangMm());
+    if (!edge) {
+      setStatusMessage("That overhang is too big for this corner.", "warn");
+      render();
+      return;
+    }
+    boundaryDraft = null;
+    const row = commitLinkedOutline(tool, {
+      shape: polyShape(edge),
+      base: polyShape(points),
+      overhang: currentOverhangMm(),
+    });
+    if (!row) return;
+    setStatusMessage("Roof placed.", "ok");
+    updateRibbonHint();
+    render();
+    return;
+  }
   boundaryDraft = null;
   const row = commitLinkedOutline(tool, { shape: polyShape(points) });
   if (!row) return;
@@ -16387,6 +17077,8 @@ function handleWallEditClick(wx, wy) {
  *  their own cursors. A floor or finish edge uses the elevation's corner and
  *  line cursors: copy to add a corner, or the arrow that pushes that edge. */
 function planSelectCursor(wx, wy, uHandle) {
+  const joineryGrab = joineryHandleHit(wx, wy);
+  if (joineryGrab) return joineryGrab.end === "depth" ? "ns-resize" : "ew-resize";
   if (endpointHandleHit(wx, wy)) return "ew-resize";
   if (uHandle?.kind === "underlay-rotate") return "grab";
   if (uHandle?.kind === "underlay-scale") return "nwse-resize";
@@ -16546,6 +17238,15 @@ function onPointerMove(ev) {
     render();
     return;
   }
+  if (tool === "place") {
+    hoverPoint = { x: wx, y: wy };
+    el.canvas.style.cursor = "crosshair";
+    if (joineryDraft || joineryIsRun(skuById(placeSkuId))) {
+      updateRibbonHint();
+      render();
+      return;
+    }
+  }
   hover = hitTest(wx, wy);
 
   if (drag?.kind === "marquee") {
@@ -16570,7 +17271,26 @@ function onPointerMove(ev) {
       drag.moved = true;
       const item = (store.doc.items || []).find((i) => i.id === drag.id);
       const wall = item && currentWalls().find((w) => w.drawn && w.id === item.wallId);
-      if (item && wall) slideWallSocket(item, wall, skuById(item.sku), wx, wy);
+      if (item && wall) {
+        if (item.host === "joinery") slideJoineryRun(item, wall, skuById(item.sku), wx, wy);
+        else slideWallSocket(item, wall, skuById(item.sku), wx, wy);
+      }
+    }
+    render();
+    return;
+  }
+  if (drag?.kind === "joinery-end") {
+    el.canvas.style.cursor = "grabbing";
+    if (Math.hypot(wx - drag.x0, wy - drag.y0) * cam.scale > 3) {
+      drag.moved = true;
+      const item = (store.doc.items || []).find((i) => i.id === drag.id);
+      const wall = item && currentWalls().find((w) => w.drawn && w.id === item.wallId);
+      const sku = item && skuById(item.sku);
+      if (item && wall && sku) {
+        const tol = SNAP_PIXEL_TOL / cam.scale;
+        if (drag.end === "depth") stretchJoineryDepth(item, wall, sku, wx, wy, tol);
+        else stretchJoineryRun(item, wall, sku, drag.end, wx, wy, tol);
+      }
     }
     render();
     return;
@@ -16709,6 +17429,33 @@ function onPointerMove(ev) {
     render();
     return;
   }
+  if (drag?.kind === "roof-ridge") {
+    const roof = objByRef(drag.ref);
+    const handle = roofRidgeHandle(roof);
+    if (roof && handle) {
+      const t = handle.alongX ? wy - handle.rect.y : wx - handle.rect.x;
+      const middle = handle.prof.wallSpan / 2;
+      let distance = t - handle.overhangM;
+      // A drag that comes close to the middle lands on it.
+      const nearMiddle = Math.abs(distance - middle) * cam.scale < 8;
+      if (nearMiddle) distance = middle;
+      const wanted = Math.round((distance * 1000) / 10) * 10;
+      const held = gableProfile({
+        span: handle.prof.span,
+        overhangM: handle.overhangM,
+        ridgeOffsetMm: Math.max(1, wanted),
+      }).lowRun;
+      const next = nearMiddle ? null : Math.round(held * 1000);
+      const now = roofRidgeOffsetMm(roof);
+      if (next !== now) {
+        drag.moved = true;
+        if (next == null) delete roof.ridgeOffset;
+        else roof.ridgeOffset = next;
+      }
+    }
+    render();
+    return;
+  }
   if (drag?.kind === "shape-edge") {
     const obj = objByRef(drag.ref);
     const origin = drag.origin;
@@ -16717,7 +17464,7 @@ function onPointerMove(ev) {
       const j = (i + 1) % origin.length;
       const a0 = origin[i];
       const b0 = origin[j];
-      const live = obj.shape?.points;
+      const live = roofHasBase(obj) ? obj.base.points : obj.shape?.points;
       const a = live?.[i] || a0;
       const b = live?.[j] || b0;
       const push = perpendicularEdgeMove(a0[0], a0[1], b0[0], b0[1], wx - drag.grabX, wy - drag.grabY);
@@ -16730,9 +17477,20 @@ function onPointerMove(ev) {
       if (Math.hypot(at[0] - a0[0], at[1] - a0[1]) * cam.scale > 2) drag.moved = true;
       if (drag.moved) {
         if (snapGuide && (Math.abs(at[0] - p.x) > 1e-6 || Math.abs(at[1] - p.y) > 1e-6)) snapGuide = null;
-        clearShapeLink(obj);
-        obj.shape = polyShape(next);
-        applyFinishShapeSnapshot(drag.finishSnap);
+        if (roofHasBase(obj)) {
+          if (!commitRoofAnchors(obj, next)) {
+            commitRoofAnchors(obj, origin);
+            drag.folded = true;
+            drag.moved = false;
+          } else {
+            drag.folded = false;
+            clearShapeLink(obj);
+          }
+        } else {
+          clearShapeLink(obj);
+          obj.shape = polyShape(next);
+          applyFinishShapeSnapshot(drag.finishSnap);
+        }
       } else snapGuide = null;
     }
     render();
@@ -16740,7 +17498,7 @@ function onPointerMove(ev) {
   }
   if (drag?.kind === "shape-vertex") {
     const obj = objByRef(drag.ref);
-    const pt = obj?.shape?.points?.[drag.index] || drag.origin?.[drag.index];
+    const pt = (roofHasBase(obj) ? obj.base.points?.[drag.index] : obj?.shape?.points?.[drag.index]) || drag.origin?.[drag.index];
     if (obj && pt) {
       // Keep the other corners of this floor (so a shared X or Y still draws
       // one guide) but not this corner or the outline itself — those are
@@ -16750,13 +17508,27 @@ function onPointerMove(ev) {
       });
       if (Math.hypot(p.x - pt[0], p.y - pt[1]) * cam.scale > 2) drag.moved = true;
       if (drag.moved) {
-        clearShapeLink(obj);
-        if (obj.shape?.kind !== "poly" || !Array.isArray(obj.shape.points)) {
-          obj.shape = polyShape((drag.origin || []).map(([x, y]) => [x, y]));
+        if (roofHasBase(obj)) {
+          const next = (drag.origin || []).map(([x, y]) => [x, y]);
+          next[drag.index] = [p.x, p.y];
+          if (!commitRoofAnchors(obj, next)) {
+            commitRoofAnchors(obj, drag.origin);
+            drag.folded = true;
+            drag.moved = false;
+          } else {
+            drag.folded = false;
+            clearShapeLink(obj);
+            selectedShapeVertex = { ref: drag.ref, index: drag.index };
+          }
+        } else {
+          clearShapeLink(obj);
+          if (obj.shape?.kind !== "poly" || !Array.isArray(obj.shape.points)) {
+            obj.shape = polyShape((drag.origin || []).map(([x, y]) => [x, y]));
+          }
+          obj.shape.points[drag.index] = [p.x, p.y];
+          selectedShapeVertex = { ref: drag.ref, index: drag.index };
+          applyFinishShapeSnapshot(drag.finishSnap);
         }
-        obj.shape.points[drag.index] = [p.x, p.y];
-        selectedShapeVertex = { ref: drag.ref, index: drag.index };
-        applyFinishShapeSnapshot(drag.finishSnap);
       }
     }
     render();
@@ -16857,11 +17629,12 @@ function rectFromDrag(x0, y0, wx, wy) {
 /** A press counts as a history step only once the pointer has changed the drawing. */
 function gestureBecomesStep(live) {
   if (!live) return false;
-  if (live.kind === "move" || live.kind === "opening" || live.kind === "socket") return Boolean(live.moved);
+  if (live.kind === "move" || live.kind === "opening" || live.kind === "socket" || live.kind === "joinery-end") return Boolean(live.moved);
   if (live.kind === "underlay-move" || live.kind === "underlay-scale" || live.kind === "underlay-rotate") return Boolean(live.moved);
   if (live.kind === "segment-end") return live.target !== "segment" || Boolean(live.moved);
   if (live.kind === "shape-vertex" || live.kind === "shape-edge") return Boolean(live.moved || live.inserted);
   if (live.kind === "roof-cut-vertex" || live.kind === "roof-cut-move") return Boolean(live.moved);
+  if (live.kind === "roof-ridge") return Boolean(live.moved);
   if (live.kind === "region-vertex" || live.kind === "region-edge" || live.kind === "region-move") return Boolean(live.moved || live.inserted);
   if (live.kind === "property-vertex" || live.kind === "property-move") return Boolean(live.moved);
   return false;
@@ -16907,12 +17680,15 @@ function onPointerUp(ev) {
         store.dropUndo({ pendingOnly: true });
       }
     } else {
-      if (pack) syncHostedSockets(store.doc, pack);
+      if (pack) syncHosts();
       settleServicesAfterMove(drag.snaps);
     }
   } else if (drag.kind === "opening" || drag.kind === "socket") {
     if (!drag.moved) store.dropUndo({ pendingOnly: true });
     else if (drag.kind === "socket") rehomeConnectedNodes(store.doc, pack);
+  } else if (drag.kind === "joinery-end") {
+    if (!drag.moved) store.dropUndo({ pendingOnly: true });
+    else store.persist();
   } else if (drag.kind === "underlay-move" || drag.kind === "underlay-scale" || drag.kind === "underlay-rotate") {
     if (!drag.moved) store.dropUndo({ pendingOnly: true }); // no-op click: drop the speculative undo entry
   } else if (drag.kind === "segment-end") {
@@ -16922,12 +17698,20 @@ function onPointerUp(ev) {
     } else store.persist();
   } else if (drag.kind === "roof-cut-vertex" || drag.kind === "roof-cut-move") {
     if (!drag.moved) store.dropUndo({ pendingOnly: true });
+  } else if (drag.kind === "roof-ridge") {
+    if (!drag.moved) store.dropUndo({ pendingOnly: true });
+    else {
+      const roof = objByRef(drag.ref);
+      const handle = roofRidgeHandle(roof);
+      setStatusMessage(handle ? ridgeStatusText(roof) : "Ridge moved.", "ok");
+    }
   } else if (drag.kind === "shape-vertex" || drag.kind === "shape-edge") {
+    if (drag.folded) setStatusMessage("That overhang is too big for this corner.", "warn");
     if (!drag.moved && !drag.inserted) {
       store.dropUndo({ pendingOnly: true });
       const obj = objByRef(drag.ref);
       if (!obj?.shape?.points) selectedShapeVertex = null;
-      if (drag.kind === "shape-edge") {
+      if (drag.kind === "shape-edge" && !drag.folded) {
         setStatusMessage("This edge is selected. Drag it to move the line. The other corners stay.", "ok");
       }
     } else if (drag.inserted) setStatusMessage("Corner added. Drag it, or click another edge. Delete removes the selected corner.", "ok");
@@ -17188,10 +17972,25 @@ function deleteSelection() {
     const vref = selectedShapeVertex;
     selectedShapeVertex = null;
     const obj = objByRef(vref.ref);
-    const pts = obj?.shape?.points;
+    const anchored = roofHasBase(obj);
+    const pts = anchored ? obj.base.points : obj?.shape?.points;
     if (pts && store.isSelected(vref.ref.kind, vref.ref.id)) {
       if (pts.length <= 3) {
         setStatusMessage("A shape needs at least three corners.", "warn");
+        return;
+      }
+      if (anchored) {
+        const next = pts.filter((_, i) => i !== vref.index).map(([x, y]) => [x, y]);
+        store.pushUndo(historyDid("Removed a corner of"));
+        if (!commitRoofAnchors(obj, next)) {
+          store.dropUndo();
+          setStatusMessage("That overhang is too big for this corner.", "warn");
+          return;
+        }
+        clearShapeLink(obj);
+        store.persist();
+        setStatusMessage("Corner removed.", "ok");
+        render();
         return;
       }
       store.pushUndo(historyDid("Removed a corner of"));
@@ -17282,7 +18081,7 @@ function commitSelectionDelete() {
   const deletedSlabs = store.selected.filter((r) => !isService(r) && r.kind === "slab").map((r) => r.id);
   const goneSockets = new Set();
   for (const item of store.doc.items || []) {
-    if (item.host === "wall" && deletedSegments.includes(item.wallId)) goneSockets.add(item.id);
+    if ((item.host === "wall" || item.host === "joinery") && deletedSegments.includes(item.wallId)) goneSockets.add(item.id);
     if (item.host === "slab" && deletedSlabs.includes(item.slabId)) goneSockets.add(item.id);
   }
   if (goneSockets.size) store.doc.items = store.doc.items.filter((item) => !goneSockets.has(item.id));
@@ -17589,7 +18388,7 @@ function commitRoom(rect) {
   return Boolean(commitRoomRecord({ shape: rectShape(rect.x, rect.y, rect.w, rect.h) }));
 }
 
-function commitLinkedOutline(kind, { shape, bound = false, link = null, seed = null }) {
+function commitLinkedOutline(kind, { shape, bound = false, link = null, seed = null, base = null, overhang = null }) {
   if (!placeSkuId) placeSkuId = defaultSkuFor(kind);
   if (!shape) return null;
   store.pushUndo(historyPlaced("Drew", kind === "roof" ? "roof" : "floor"));
@@ -17612,6 +18411,10 @@ function commitLinkedOutline(kind, { shape, bound = false, link = null, seed = n
     row.form = "gable";
     row.pitch = DEFAULT_ROOF_PITCH;
     row.ridge = "long";
+    if (base?.kind === "poly" && base.points?.length >= 3) {
+      row.base = base;
+      row.overhang = Number.isFinite(Number(overhang)) ? Number(overhang) : currentOverhangMm();
+    }
     store.doc.roofs.push(row);
     store.selectOne({ kind: "roof", id: row.id });
   } else {
@@ -17755,6 +18558,55 @@ function placeOpening(wx, wy) {
 
 function placeItem(wx, wy) {
   const sku = skuById(placeSkuId);
+  if (joineryIsRun(sku)) {
+    const walls = currentWalls().filter(onActiveLevel);
+    const preferId = joineryDraft?.wallId
+      || (store.selected.length === 1 && store.primary?.kind === "segment" ? store.primary.id : null);
+    const hit = joineryDraftAt(walls, sku, wx, wy, { preferId });
+    if (!hit) {
+      setStatusMessage(joineryDraft
+        ? "Stay on this wall. A cupboard cannot sit off the wall."
+        : "Click a wall. A cupboard cannot sit off the wall.", "warn");
+      updateRibbonHint();
+      render();
+      return;
+    }
+    if (!joineryDraft) {
+      joineryDraft = { wallId: hit.wallId, t: hit.t, side: hit.side };
+      setStatusMessage("Click the other end of the run on this wall.", "ok");
+      render();
+      return;
+    }
+    const wall = walls.find((w) => w.id === joineryDraft.wallId) || hit.wall;
+    if (!wall || hit.wallId !== joineryDraft.wallId) {
+      joineryDraft = { wallId: hit.wallId, t: hit.t, side: hit.side };
+      setStatusMessage("Click the other end of the run on this wall.", "ok");
+      render();
+      return;
+    }
+    const item = commitJoineryRun({
+      sku,
+      start: joineryDraft,
+      endT: hit.t,
+      wall,
+      status: placementStatus(),
+      level: activeLevel,
+      id: nid("i"),
+    });
+    joineryDraft = null;
+    if (!item) {
+      setStatusMessage("That run is too short.", "warn");
+      render();
+      return;
+    }
+    store.pushUndo(historyPlaced("Placed", "item"));
+    store.doc.items.push(item);
+    store.selectOne({ kind: "item", id: item.id });
+    store.persist();
+    setStatusMessage(`${sku.name} placed. Drag it along the wall, or open the face to set the height.`, "ok");
+    render();
+    return;
+  }
   const surface = socketSurface(sku);
   if (surface === "wall") {
     const walls = currentWalls().filter(onActiveLevel);
@@ -18053,7 +18905,7 @@ function setHidden(node, hidden) {
 
 function catsForContext(kind, skuId) {
   if (kind === "beam") return ["beam", "column"];
-  if (kind === "segment" || kind === "wall") return ["wall", "foundation", "boundarywall"];
+  if (kind === "segment" || kind === "wall") return ["wall", "foundation", "boundarywall", "fence"];
   if (kind === "roof") return ["roof", "carport"];
   const cat = skuById(skuId)?.category;
   if (kind === "slab") return cat ? [cat] : ["floor", "pool", "ceiling"];
@@ -18368,6 +19220,25 @@ function syncHeightFields(obj, kind) {
   setHidden(el.ctxOHeightWrap, !opening);
   setHidden(el.ctxORiseWrap, !arch);
   setHidden(el.ctxOSizeNote, !size?.nonStandard);
+  const joineryItem = kind === "item" && obj?.host === "joinery" ? obj : null;
+  const joinerySku = joineryItem ? skuById(joineryItem.sku) : null;
+  const joineryWall = joineryItem ? wallsCache.find((w) => w.id === joineryItem.wallId) : null;
+  setFieldLead(el.ctxSillWrap, joineryItem ? "Bottom" : "Sill");
+  setFieldLead(el.ctxOWidthWrap, joineryItem ? "Length" : "Width");
+  setFieldLead(el.ctxOHeightWrap, "Height");
+  if (joineryItem && joinerySku && joineryWall) {
+    setHidden(el.ctxSillWrap, false);
+    setHidden(el.ctxOWidthWrap, false);
+    setHidden(el.ctxOHeightWrap, false);
+    const heights = joineryHeights(joineryItem, joinerySku, joineryWall.height);
+    const putJ = (input, metres) => {
+      if (input && activeEl() !== input) input.value = Number.isFinite(metres) ? formatLengthMm(metres) : "";
+    };
+    putJ(el.ctxSill, heights.bottom);
+    putJ(el.ctxOWidth, joineryAlong(joineryItem, joineryWall));
+    putJ(el.ctxOHeight, heights.top - heights.bottom);
+    return;
+  }
   if (!opening) return;
   const put = (input, metres) => {
     if (input && activeEl() !== input) input.value = Number.isFinite(metres) ? formatLengthMm(metres) : "";
@@ -18445,9 +19316,50 @@ function setOpeningSize(field, raw, { allowZero = false } = {}) {
   store.persist();
   render();
 }
-el.ctxSill?.addEventListener("change", (e) => setOpeningSize("sill", e.target.value, { allowZero: true }));
-el.ctxOWidth?.addEventListener("change", (e) => setOpeningSize("width", e.target.value));
-el.ctxOHeight?.addEventListener("change", (e) => setOpeningSize("height", e.target.value));
+function setFieldLead(wrap, text) {
+  if (!wrap) return;
+  const node = [...wrap.childNodes].find((n) => n.nodeType === 3);
+  if (node) node.textContent = `${text}\n`;
+}
+
+function setJoinerySize(field, raw, { allowZero = false } = {}) {
+  const item = soleOf("item");
+  if (!item || item.host !== "joinery") return false;
+  const value = typedMm(raw, { allowZero });
+  if (value === undefined) { render(); return true; }
+  const wall = wallsCache.find((w) => w.id === item.wallId);
+  const sku = skuById(item.sku);
+  if (!wall || !sku) return true;
+  const heights = joineryHeights(item, sku, wall.height);
+  const t0 = Math.min(item.t0, item.t1);
+  const edit = {};
+  if (field === "sill") edit.bottom = value == null ? 0 : value;
+  else if (field === "height") {
+    const bottom = heights.bottom;
+    edit.top = value == null ? bottom + (sku.geometry?.height || 0.9) : bottom + value;
+  } else if (field === "width") {
+    const next = value == null ? (sku.geometry?.width || 0.6) : value;
+    edit.from = t0 * (wall.length || 0);
+    edit.to = edit.from + next;
+  } else if (field === "depth") {
+    edit.depth = value == null ? (sku.geometry?.depth || 0.6) : value;
+  }
+  store.pushUndo(`Set the ${field === "sill" ? "bottom" : field} of ${historyThing(store.primary)} to ${String(raw).trim()} mm`);
+  applyJoineryEdit(item, sku, wall, edit, wall.height);
+  store.persist();
+  render();
+  return true;
+}
+
+el.ctxSill?.addEventListener("change", (e) => {
+  if (!setJoinerySize("sill", e.target.value, { allowZero: true })) setOpeningSize("sill", e.target.value, { allowZero: true });
+});
+el.ctxOWidth?.addEventListener("change", (e) => {
+  if (!setJoinerySize("width", e.target.value)) setOpeningSize("width", e.target.value);
+});
+el.ctxOHeight?.addEventListener("change", (e) => {
+  if (!setJoinerySize("height", e.target.value)) setOpeningSize("height", e.target.value);
+});
 el.ctxORise?.addEventListener("change", (e) => setOpeningSize("rise", e.target.value));
 
 el.ctxRemove?.addEventListener("click", () => {
@@ -18514,9 +19426,30 @@ function followExternalWalls() {
   const obj = ref && (ref.kind === "slab" || ref.kind === "roof") ? objByRef(ref) : null;
   if (!obj || !pack) return;
   const seed = interiorPoint(shapePolygon(obj.shape));
-  const face = seed && footprintFace(store.doc, pack, effectiveLevel(obj, pack), seed.x, seed.y);
+  const face = seed && (ref.kind === "roof"
+    ? footprintOuterFace(store.doc, pack, effectiveLevel(obj, pack), seed.x, seed.y)
+    : footprintFace(store.doc, pack, effectiveLevel(obj, pack), seed.x, seed.y));
   if (!face) {
     setStatusMessage("These walls do not close around this outline.", "warn");
+    render();
+    return;
+  }
+  if (ref.kind === "roof") {
+    const edge = roofEdgeFromBase(face, roofOverhangMm(obj));
+    if (!edge) {
+      setStatusMessage("That overhang is too big for this corner.", "warn");
+      render();
+      return;
+    }
+    store.pushUndo(historyDid("Set to follow the external walls for"));
+    obj.bound = true;
+    obj.link = "footprint";
+    obj.seed = seed;
+    obj.base = polyShape(face);
+    obj.overhang = roofOverhangMm(obj);
+    obj.shape = polyShape(edge);
+    store.persist();
+    setStatusMessage("The roof follows the external walls.", "ok");
     render();
     return;
   }
@@ -18557,8 +19490,10 @@ function toggleFollowWalls() {
 
 el.shapeLink?.addEventListener("click", (ev) => {
   const mode = ev.target.closest?.("[data-shape-link]")?.dataset.shapeLink;
-  if (mode !== "sketch" && mode !== "room" && mode !== "footprint") return;
-  shapePlaceMode = mode;
+  const modes = tool === "roof" ? ["walls", "sketch", "room", "footprint"] : ["sketch", "room", "footprint"];
+  if (!modes.includes(mode)) return;
+  if (tool === "roof") roofPlaceMode = mode;
+  else shapePlaceMode = mode;
   boundaryDraft = null;
   updateRibbonHint();
   render();
@@ -18945,6 +19880,28 @@ function selectedOpeningId() {
   return store.selected.length === 1 && store.primary?.kind === "opening" ? store.primary.id : null;
 }
 
+function selectedJoineryId() {
+  if (store.selected.length !== 1 || store.primary?.kind !== "item") return null;
+  const item = objByRef(store.primary);
+  return item?.host === "joinery" ? item.id : null;
+}
+
+function selectedElevObjectId() {
+  return selectedOpeningId() || selectedJoineryId();
+}
+
+function selectElevHosted(id) {
+  if ((store.doc.openings || []).some((o) => o.id === id)) {
+    store.selectOne({ kind: "opening", id });
+    return "opening";
+  }
+  if ((store.doc.items || []).some((i) => i.id === id && i.host === "joinery")) {
+    store.selectOne({ kind: "item", id });
+    return "joinery";
+  }
+  return null;
+}
+
 /** A new finish is waiting on this face. The arch, door, or window that was clicked is not the subject. */
 function placingFinishOn(wallId) {
   return Boolean(wallId && faceAddPending && faceAddPending.wallId === wallId);
@@ -19116,6 +20073,13 @@ function elevationDragEdit(d) {
   const dy = -(d.y - d.y0) / scaleY; // up is positive
   const o = d.orig;
   const face = { length: d.wallLength, height: d.wallHeight };
+  if (d.joinery) {
+    const from = o.from + (d.part === "move" || d.part.includes("l") ? dx : 0);
+    const to = o.to + (d.part === "move" || d.part.includes("r") ? dx : 0);
+    const bottom = o.bottom + (d.part === "move" || d.part.includes("b") ? dy : 0);
+    const top = o.top + (d.part === "move" || d.part.includes("t") ? dy : 0);
+    return { from, to, bottom, top };
+  }
   switch (d.part) {
     // A finish band's edges: a run's ends, and the top and bottom of a run or a room rule.
     // `edgeAt` is the snapped position. Without it, the edge follows the pointer.
@@ -19167,6 +20131,7 @@ function applyElevationDrag(doc, face, d) {
   const edit = elevationDragEdit(d);
   if (d.part === "wall-top") return applyWallTopEdit(doc, pack, face, edit.height, wallsCache);
   if (d.band) applyBandEdit(doc, pack, face, d.id, edit, wallsCache);
+  else if (d.joinery) applyJoineryFaceEdit(doc, pack, face, d.id, edit, wallsCache);
   else applyOpeningEdit(doc, pack, face, d.id, edit, wallsCache);
   return null;
 }
@@ -19183,6 +20148,7 @@ function elevationModelNow(face) {
     const preview = {
       ...store.doc,
       openings: structuredClone(store.doc.openings || []),
+      items: structuredClone(store.doc.items || []),
       finishRuns: structuredClone(store.doc.finishRuns || []),
       rooms: structuredClone(store.doc.rooms || []),
       segments: structuredClone(store.doc.segments || []),
@@ -20874,7 +21840,7 @@ function syncElevationDock() {
   }
   const w = el.elevBody.clientWidth;
   const h = el.elevBody.clientHeight;
-  const selectedId = selectedOpeningId();
+  const selectedId = selectedElevObjectId();
   const draft = elevFinishDraft && elevFinishDraft.face.wallId === face.wallId ? elevFinishDraft : null;
   const placingFinish = placingFinishOn(face.wallId);
   // While a finish is being placed, the elevation is the whole wall. An arch
@@ -21523,10 +22489,10 @@ function onElevationPointerDown(ev, layout) {
     faceAddPending = null;
     if (openingHit?.dataset.elevId) {
       selectedBandId = null;
-      if (selectedOpeningId() !== openingHit.dataset.elevId) store.selectOne({ kind: "opening", id: openingHit.dataset.elevId });
+      if (selectedElevObjectId() !== openingHit.dataset.elevId) selectElevHosted(openingHit.dataset.elevId);
     } else {
       clearFinishPick();
-      if (store.primary?.kind === "opening") focusElevationWall();
+      if (store.primary?.kind === "opening" || selectedJoineryId()) focusElevationWall();
     }
     openWallFace();
     render();
@@ -21649,13 +22615,14 @@ function onElevationPointerDown(ev, layout) {
     announceSelectedFinish(band.id);
   }
   const row = !bandId && part !== "wall-top" ? model?.openings.find((o) => o.id === id) : null;
+  const joineryRow = !bandId && part !== "wall-top" ? model?.joinery?.find((j) => j.id === id) : null;
   if (part === "wall-top") {
     if (!model?.canDragTop || !faceWallSelected) return;
     faceAddPending = null;
     selectedBandId = null;
     selectedElevVertex = null;
     faceWallSelected = true;
-  } else if (!band && !row) {
+  } else if (!band && !row && !joineryRow) {
     return;
   }
   if (row) {
@@ -21665,11 +22632,19 @@ function onElevationPointerDown(ev, layout) {
       render();
     }
   }
+  if (joineryRow) {
+    faceWallSelected = false;
+    if (selectedJoineryId() !== id) {
+      store.selectOne({ kind: "item", id });
+      render();
+    }
+  }
   const p = elevationPointer(ev, ev.currentTarget);
   elevationDrag = {
     id: part === "wall-top" ? model.wallId : id,
     part,
     band: Boolean(band),
+    joinery: Boolean(joineryRow),
     face: { ...elevationFace },
     scale: layout.scale,
     scaleX: layout.scaleX || layout.scale,
@@ -21688,7 +22663,9 @@ function onElevationPointerDown(ev, layout) {
       ? { height: model.height }
       : band
         ? { from: band.from, to: band.to, bottom: band.bottom, top: band.top }
-        : { left: row.offset, width: row.width, sill: row.sill, height: row.height, rise: row.rise, category: row.category },
+        : joineryRow
+          ? { from: joineryRow.from, to: joineryRow.to, bottom: joineryRow.bottom, top: joineryRow.top }
+          : { left: row.offset, width: row.width, sill: row.sill, height: row.height, rise: row.rise, category: row.category },
   };
   ev.currentTarget.setPointerCapture(ev.pointerId);
   ev.preventDefault();
@@ -22927,10 +23904,10 @@ function syncElevationPreview() {
   const draft = elevFinishDraft && elevFinishDraft.face.wallId === face.wallId ? elevFinishDraft : null;
   el.ctxElev?.classList.toggle("is-drawing", Boolean(draft));
   const locate = elevationLocate(model);
-  const key = `${w}|${selectedOpeningId()}|${selectedBandId}|${JSON.stringify(model)}|${JSON.stringify(draft)}|${JSON.stringify(locate)}`;
+  const key = `${w}|${selectedElevObjectId()}|${selectedBandId}|${JSON.stringify(model)}|${JSON.stringify(draft)}|${JSON.stringify(locate)}`;
   if (key === elevPreviewKey) return;
   elevPreviewKey = key;
-  const drawn = elevationSvg(model, { width: w, height: 130, selectedId: selectedOpeningId(), selectedBandId, draft, guides: elevationGuides(), locate, dropGuide: dropGuideZ(model.height, elevDropMm) });
+  const drawn = elevationSvg(model, { width: w, height: 130, selectedId: selectedElevObjectId(), selectedBandId, draft, guides: elevationGuides(), locate, dropGuide: dropGuideZ(model.height, elevDropMm) });
   elevPreviewLayout = { scale: drawn.scale, scaleX: drawn.scaleX, scaleY: drawn.scaleY, originX: drawn.originX, originY: drawn.originY };
   el.ctxElev.innerHTML = drawn.svg;
 }
@@ -24698,9 +25675,17 @@ function syncRoofCutInspector(roof) {
 function syncShapeLinkControl() {
   const placing = (tool === "slab" || tool === "roof") && !serviceDockActive();
   setHidden(el.shapeLink, !placing);
+  const roofing = tool === "roof" && !serviceDockActive();
+  setHidden(el.roofOverhang, !roofing);
+  if (el.roofOverhangMm && document.activeElement !== el.roofOverhangMm) {
+    el.roofOverhangMm.value = String(currentOverhangMm());
+  }
   if (!el.shapeLink) return;
+  const mode = outlinePlaceMode();
   for (const btn of el.shapeLink.querySelectorAll("[data-shape-link]")) {
-    const on = btn.dataset.shapeLink === shapePlaceMode;
+    const walls = btn.dataset.shapeLink === "walls";
+    btn.hidden = walls && tool !== "roof";
+    const on = btn.dataset.shapeLink === mode;
     btn.classList.toggle("active", on);
     btn.setAttribute("aria-pressed", on ? "true" : "false");
   }
@@ -24721,6 +25706,7 @@ function syncPlanContext() {
   syncServiceProfileDock();
   if (serviceDockActive()) {
     setHidden(el.shapeLink, true);
+    setHidden(el.roofOverhang, true);
     setHidden(el.wallOpts, true);
     setHidden(el.roofCutKindBar, true);
     setHidden(el.moveDisjoin, true);
@@ -24766,6 +25752,7 @@ function syncPlanContext() {
   const opening = Boolean(obj && ref.kind === "opening");
   setHidden(el.inspectBack, !openingHostSegment());
   const item = Boolean(obj && ref.kind === "item");
+  const joinerySel = Boolean(item && obj.host === "joinery");
   const rect = (room || slab || roof) && obj.shape?.kind === "rect";
   const shapePoly = (room || slab || roof) && obj.shape?.kind === "poly";
   const floorSlab = slab && skuById(obj.sku)?.category !== "ceiling";
@@ -24931,6 +25918,11 @@ function syncPlanContext() {
     setHidden(el.ctxFormWrap, true);
     setHidden(el.ctxPitchWrap, true);
     setHidden(el.ctxRidgeWrap, true);
+    setHidden(el.ctxRidgePosWrap, true);
+    setHidden(el.ctxPitch2Wrap, true);
+    setHidden(el.ctxRidgeNote, true);
+    setHidden(el.ctxOverhangWrap, true);
+    setHidden(el.ctxPlateWrap, true);
     setHidden(el.ctxTypeWrap, true);
     setHidden(el.ctxOLevelWrap, true);
     setHidden(el.ctxTopWrap, true);
@@ -24952,21 +25944,30 @@ function syncPlanContext() {
   setHidden(el.ctxNameWrap, !room);
   setHidden(el.ctxUseWrap, !room);
   setHidden(el.ctxRegionWrap, !region);
-  setHidden(el.ctxLenWrap, !(linear || placingSep || placing));
+  setHidden(el.ctxLenWrap, !(linear || placingSep || placing || joinerySel));
   setHidden(el.ctxAngWrap, !((linear || placingSep) && !placing));
-  setHidden(el.ctxWWrap, !(rect || linear) || placing);
+  setHidden(el.ctxWWrap, !(rect || linear || joinerySel) || placing);
   setHidden(el.ctxHWrap, !(rect || linear) || placing);
-  if (el.ctxW) el.ctxW.readOnly = linear;
+  if (el.ctxW) el.ctxW.readOnly = linear && !joinerySel;
   if (el.ctxH) el.ctxH.readOnly = linear;
-  if (el.ctxWWrap) el.ctxWWrap.classList.toggle("readonly", linear);
+  if (el.ctxWWrap) el.ctxWWrap.classList.toggle("readonly", linear && !joinerySel);
   if (el.ctxHWrap) el.ctxHWrap.classList.toggle("readonly", linear);
+  setFieldLead(el.ctxLenWrap, "Length");
+  setFieldLead(el.ctxWWrap, joinerySel ? "Depth" : "Width");
   if (shapePoly) polyHintText = "Drag a corner to reshape it. Click an edge to add a corner there. Delete removes the selected corner.";
   syncFollowControl((slab || roof) ? obj : null);
   setHidden(el.ctxFormWrap, !roof);
+  setHidden(el.ctxOverhangWrap, !roof);
+  setHidden(el.ctxPlateWrap, !roof);
   syncRoofCutInspector(roof ? obj : null);
   const pitched = Boolean(roof && obj && obj.form !== "flat");
   setHidden(el.ctxPitchWrap, !pitched);
   setHidden(el.ctxRidgeWrap, !pitched);
+  // The ridge position and second slope are a gable's. Hip and shed keep their form.
+  const gabled = Boolean(roof && obj && obj.form === "gable");
+  setHidden(el.ctxRidgePosWrap, !gabled);
+  setHidden(el.ctxPitch2Wrap, !gabled);
+  setHidden(el.ctxRidgeNote, !gabled);
   setHidden(el.ctxTypeWrap, true);
   syncInspectStatus(
     faceEditing ? null : (multi ? (showMultiStatus ? multiStatusObjs : null) : ((showInspect || creating) ? obj : null)),
@@ -25024,6 +26025,15 @@ function syncPlanContext() {
 
   if (placing) {
     syncMoveDistanceField();
+  } else if (joinerySel) {
+    const wall = wallsCache.find((w) => w.id === obj.wallId);
+    const sku = skuById(obj.sku);
+    if (activeEl() !== el.ctxLen) {
+      el.ctxLen.value = wall ? formatLengthMm(joineryAlong(obj, wall)) : "";
+    }
+    if (activeEl() !== el.ctxW) {
+      el.ctxW.value = sku ? formatLengthMm(joineryDepth(obj, sku)) : "";
+    }
   } else if (linear && arcGesture()) {
     syncArcFields();
   } else if (linear) {
@@ -25059,6 +26069,19 @@ function syncPlanContext() {
     if (activeEl() !== el.ctxForm) el.ctxForm.value = obj.form;
     if (activeEl() !== el.ctxPitch) el.ctxPitch.value = String(obj.pitch);
     if (el.ctxRidge && activeEl() !== el.ctxRidge) el.ctxRidge.value = obj.ridge === "short" ? "short" : "long";
+    if (el.ctxOverhang && activeEl() !== el.ctxOverhang) {
+      el.ctxOverhang.value = String(roofHasBase(obj) ? Math.round(Number(obj.overhang) || 0) : 0);
+    }
+    if (el.ctxRidgePos && activeEl() !== el.ctxRidgePos) {
+      const at = roofRidgeOffsetMm(obj);
+      el.ctxRidgePos.value = at == null ? "" : String(Math.round(at));
+    }
+    if (el.ctxPitch2 && activeEl() !== el.ctxPitch2) {
+      const second = roofPitch2Deg(obj);
+      el.ctxPitch2.value = second == null ? "" : String(second);
+    }
+    if (el.ctxRidgeNote) el.ctxRidgeNote.textContent = obj.form === "gable" ? ridgeStatusText(obj) : "";
+    if (el.ctxPlate && activeEl() !== el.ctxPlate) el.ctxPlate.value = String(Math.round(roofOffsetMm(obj)));
   }
   finishPlanContext();
 }
@@ -25109,6 +26132,7 @@ el.ctxLen?.addEventListener("input", (ev) => {
 
 el.ctxLen?.addEventListener("change", (ev) => {
   if (arcGesture() || wallDraft || tool === "move" || tool === "copy") return;
+  if (setJoinerySize("width", ev.target.value)) return;
   const sel = soleLinearSelection();
   if (!sel) return;
   store.pushUndo(historyDid("Set the length of"));
@@ -25308,6 +26332,7 @@ el.ctxRegion?.addEventListener("change", (e) => {
 });
 
 el.ctxW?.addEventListener("change", (e) => {
+  if (setJoinerySize("depth", e.target.value)) return;
   const obj = soleOf("room") || soleOf("slab") || soleOf("roof");
   if (!obj?.shape || obj.shape.kind !== "rect") return;
   store.pushUndo(historyDid("Set the width of"));
@@ -25350,6 +26375,114 @@ el.ctxRidge?.addEventListener("change", (e) => {
   if (!roof) return;
   store.pushUndo(`Set the ridge of ${historyThing(store.primary)} to ${e.target.value === "short" ? "short" : "long"}`);
   roof.ridge = e.target.value === "short" ? "short" : "long";
+  // The span the ridge was measured across is now the other way round.
+  delete roof.ridgeOffset;
+  store.persist();
+  render();
+});
+
+el.ctxRidgePos?.addEventListener("change", (e) => {
+  const roof = soleOf("roof");
+  const handle = roofRidgeHandle(roof);
+  if (!roof || !handle) return;
+  const shown = () => {
+    const at = roofRidgeOffsetMm(roof);
+    return at == null ? "" : String(Math.round(at));
+  };
+  const text = String(e.target.value || "").trim();
+  if (text === "") {
+    if (roofRidgeOffsetMm(roof) == null) return;
+    store.pushUndo(`Put the ridge of ${historyThing(store.primary)} in the middle`);
+    delete roof.ridgeOffset;
+  } else {
+    const mm = parseMm(text);
+    if (mm == null || mm <= 0) {
+      e.target.value = shown();
+      return;
+    }
+    // Held between 5% and 95% of the span, and the box shows what was kept.
+    const held = Math.round(gableProfile({
+      span: handle.prof.span,
+      overhangM: handle.overhangM,
+      ridgeOffsetMm: mm,
+    }).lowRun * 1000);
+    if (held === roofRidgeOffsetMm(roof)) {
+      e.target.value = shown();
+      return;
+    }
+    store.pushUndo(`Moved the ridge of ${historyThing(store.primary)} to ${held} mm`);
+    roof.ridgeOffset = held;
+  }
+  store.persist();
+  e.target.value = shown();
+  render();
+});
+
+el.ctxPitch2?.addEventListener("change", (e) => {
+  const roof = soleOf("roof");
+  if (!roof) return;
+  const text = String(e.target.value || "").trim();
+  const n = Number(text.replace(",", "."));
+  if (text !== "" && !(n > 0)) {
+    const second = roofPitch2Deg(roof);
+    e.target.value = second == null ? "" : String(second);
+    return;
+  }
+  const next = text === "" ? null : Math.min(60, Math.max(5, n));
+  if (next === roofPitch2Deg(roof)) return;
+  store.pushUndo(`Set the second slope of ${historyThing(store.primary)} to ${next == null ? "the same pitch" : `${next}°`}`);
+  if (next == null) delete roof.pitch2;
+  else roof.pitch2 = next;
+  store.persist();
+  e.target.value = next == null ? "" : String(next);
+  render();
+});
+
+el.roofOverhangMm?.addEventListener("change", (e) => {
+  const mm = parseMm(e.target.value);
+  if (mm == null || mm < 0) {
+    e.target.value = String(currentOverhangMm());
+    return;
+  }
+  roofOverhangSetting = mm;
+  e.target.value = String(mm);
+  render();
+});
+
+el.ctxOverhang?.addEventListener("change", (e) => {
+  const roof = soleOf("roof");
+  if (!roof) return;
+  const mm = parseMm(e.target.value);
+  const shown = roofHasBase(roof) ? Math.round(Number(roof.overhang) || 0) : 0;
+  if (mm == null || mm < 0) {
+    e.target.value = String(shown);
+    return;
+  }
+  if (mm === shown) return;
+  store.pushUndo(`Set the overhang of ${historyThing(store.primary)} to ${mm} mm`);
+  if (!applyRoofOverhang(roof, mm)) {
+    store.dropUndo();
+    e.target.value = String(shown);
+    setStatusMessage("That overhang is too big for this corner.", "warn");
+    render();
+    return;
+  }
+  store.persist();
+  render();
+});
+
+el.ctxPlate?.addEventListener("change", (e) => {
+  const roof = soleOf("roof");
+  if (!roof) return;
+  const mm = parseMm(e.target.value);
+  if (mm == null) {
+    e.target.value = String(Math.round(roofOffsetMm(roof)));
+    return;
+  }
+  if (mm === roofOffsetMm(roof)) return;
+  store.pushUndo(`Set the plate height of ${historyThing(store.primary)} to ${mm} mm`);
+  if (mm === 0) delete roof.offset;
+  else roof.offset = mm;
   store.persist();
   render();
 });
@@ -25429,6 +26562,11 @@ el.ctxOLevel?.addEventListener("change", (e) => {
 
 el.underlayOpacity?.addEventListener("input", (ev) => {
   if (!store.doc.underlay) return;
+  // Moving the slider is how you look at the result, so a hidden sheet comes back.
+  if (currentSheetConcealed()) {
+    store.pushUndo("Showed the sheet");
+    setCurrentSheetVisible(true);
+  }
   setUnderlayOpacity(store.doc, Number(ev.target.value) / 100);
   render();
 });
@@ -25477,12 +26615,13 @@ el.calibrateRestart?.addEventListener("click", () => {
 });
 el.underlayPin?.addEventListener("click", () => {
   const u = store.doc.underlay;
-  if (!u) return;
+  if (!u || currentSheetConcealed()) return;
   store.pushUndo(u.pinned ? "Unpinned the sheet" : "Pinned the sheet");
   setUnderlayPinned(store.doc, !u.pinned);
   store.persist();
   render();
 });
+el.underlayShow?.addEventListener("click", () => toggleCurrentSheetVisible());
 el.alignNext?.addEventListener("click", () => {
   const index = Number(el.alignNext.dataset.index);
   if (Number.isInteger(index)) sheetUi.goToSheet(index, { fit: false });

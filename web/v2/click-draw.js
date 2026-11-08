@@ -436,5 +436,6 @@ export function hasClickDraft(state) {
     || state.serviceRoute?.fromNodeId
     || state.serviceConnect?.nodeId
     || (state.calibration?.a && !state.calibration?.b)
+    || state.joineryDraft
   );
 }

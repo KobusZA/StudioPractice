@@ -3342,6 +3342,10 @@ button.fin-kind {
 .elev-level { stroke: #8a8174; stroke-width: 1; stroke-dasharray: 6 4; }
 .elev-level-reference { stroke: #3c7a52; }
 .elev-level-label { font-size: 10px; fill: #665d52; }
+.elev-joinery { fill: rgba(232, 196, 64, 0.4); stroke: #1a1612; stroke-width: 1.2; cursor: pointer; }
+.elev-dock-body .elev-joinery { cursor: move; }
+.elev-joinery.is-selected { stroke: var(--copper, #b2451e); stroke-width: 2; }
+.elev-joinery-label { fill: #1a1612; font: 600 10px "Source Sans 3", sans-serif; pointer-events: none; }
 .elev-opening { stroke: #1a1612; stroke-width: 1.2; cursor: pointer; }
 .elev-dock-body .elev-opening { cursor: move; }
 .elev-window { fill: rgba(150, 195, 225, 0.55); }
@@ -3866,6 +3870,21 @@ input.level-station-elev:focus {
   gap: 2px;
 }
 
+/* Between the ways in (PDF / image, Satellite) and Edit sheet. */
+.ribbon-anchor-split {
+  flex: 0 0 auto;
+  width: 1px;
+  margin: 6px 4px;
+  background: var(--line);
+}
+
+.ribbon-group[data-anchors="stack"] .ribbon-anchor-split,
+.ribbon-group[data-scale="collapsed"].is-open .ribbon-anchor-split {
+  width: auto;
+  height: 1px;
+  margin: 3px 8px;
+}
+
 .ribbon-rest {
   align-self: center;
 }
@@ -3874,10 +3893,12 @@ input.level-station-elev:focus {
   display: none;
 }
 
-/* Anchors stacked: two medium buttons one above the other. */
+/* Anchors stacked: one column, sharing the row height. Two when only the
+   ways in are showing, three once Sheet joins them. */
 .ribbon-group[data-anchors="stack"] .ribbon-anchors {
   display: grid;
-  grid-template-rows: repeat(2, 1fr);
+  grid-template-columns: 1fr;
+  grid-auto-rows: minmax(0, 1fr);
 }
 
 .ribbon-group[data-anchors="stack"] .ribbon-anchors .ribbon-item {
@@ -4251,6 +4272,13 @@ input.level-station-elev:focus {
   color: var(--ink-soft);
 }
 
+/* Read-only result of a roof setting, such as the two slopes of an off-centre ridge. */
+.plan-context-note {
+  font-size: 0.7rem;
+  color: var(--ink-soft);
+  align-self: center;
+}
+
 .plan-loc {
   display: flex;
   align-items: center;
@@ -4267,25 +4295,49 @@ input.level-station-elev:focus {
   gap: 4px 12px;
 }
 
+.plan-loc .seg {
+  border-width: 2px;
+  background: #fff;
+}
+
+.plan-loc .seg button[hidden] {
+  display: none !important;
+}
+
 .plan-loc .seg button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  padding: 5px 8px;
+  font-size: 0.8rem;
+  border-right-width: 2px;
 }
-.plan-loc .seg button svg { display: block; }
-.plan-loc .seg button.active { background: #e8dcc6; box-shadow: inset 0 0 0 2px #1c1a17; }
+.plan-loc .seg button svg {
+  display: block;
+  width: 22px;
+  height: 22px;
+}
+/* Beige (#e8dcc6) was the selected fill. On the green contextual ribbon it
+   disappeared, and it matched the wall-diagram fill so the icon did too.
+   Words take the same ink fill as every other segment. Diagrams stay on
+   white, with a heavy frame, so the drawing keeps its colours. */
+.plan-loc .seg button.active {
+  background: var(--ink);
+  color: var(--paper);
+  box-shadow: none;
+}
+.plan-loc:not(.words) .seg button.active {
+  background: #fff;
+  color: var(--ink);
+  box-shadow: inset 0 0 0 3px var(--ink);
+}
 
 .plan-loc[hidden] {
   display: none !important;
 }
 
 .plan-loc.words .seg button {
-  padding: 3px 8px;
-}
-
-.plan-loc .seg button {
-  padding: 3px 5px;
-  font-size: 0.72rem;
+  padding: 6px 12px;
 }
 
 /* The running command's settings, as a ribbon group. It does not shrink
@@ -4309,6 +4361,36 @@ input.level-station-elev:focus {
   text-transform: none;
   color: var(--ink);
   white-space: nowrap;
+}
+
+.ribbon-group .roof-overhang {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  height: var(--row, 24px);
+  margin: 0;
+  padding: 0 4px;
+  font-size: 0.72rem;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.ribbon-group .roof-overhang input {
+  width: 4.2rem;
+  margin: 0;
+  padding: 2px 6px;
+  font: inherit;
+  color: var(--ink);
+  background: var(--paper, #fffdf8);
+  border: 1px solid var(--line, #d9c7b0);
+  border-radius: 2px;
+}
+
+.ribbon-group .roof-overhang[hidden] {
+  display: none !important;
 }
 
 .ribbon-group .move-disjoin input {
@@ -7069,10 +7151,16 @@ input.sheet-set-list-name:hover, input.sheet-set-list-name:focus { border-color:
 .sheet-set-ref-resize::after { content: ""; position: absolute; right: 3px; bottom: 3px; width: 7px; height: 7px; border-right: 2px solid #5c5348; border-bottom: 2px solid #5c5348; }
 .sheet-set-measure-readout { font-weight: 600; color: var(--copper); }
 /* --- Underlay mode bar: Set scale, Adjust, Align sheets --------------------
-   Docked above the plan (not floating over the sheet) so it never covers what
-   is being traced. The copper pill, the lit ribbon button and the outline on
-   the plan all say the same thing: a mode is on. */
-.mode-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-height: 46px; padding: 6px 10px; background: #fbf1ea; border-bottom: 1px solid rgba(178, 69, 30, 0.45); font-size: 0.86rem; }
+   It sits in the ribbon row (see .ribbon-mode), in the same 104px as every
+   other modify tab. It does not take a strip under the menu, so the drawing
+   does not jump when Adjust opens. The group's caption names the mode.
+   The outline on the plan says the same thing: a mode is on. */
+.mode-bar { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px 10px; min-height: 0; padding: 4px 8px; background: rgba(251, 241, 234, 0.96); border: 1px solid rgba(178, 69, 30, 0.4); border-radius: 4px; font-size: 0.78rem; }
+.ribbon-mode { flex: 1 1 auto; min-width: 0; border-right: none; }
+.ribbon-mode-items { align-items: center; min-width: 0; }
+.ribbon-functions .mode-bar { flex: 1 1 auto; width: 100%; min-width: 0; overflow: hidden; }
+.ribbon-functions .mode-bar .mode-prompt { flex: 1 1 8ch; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ribbon-functions .mode-bar .mode-controls { flex-wrap: nowrap; padding-left: 8px; }
 .mode-bar[hidden], .mode-bar [hidden] { display: none !important; }
 .mode-pill { padding: 4px 10px; background: var(--copper, #b2451e); color: #fff; font-weight: 600; border-radius: 4px; white-space: nowrap; }
 .mode-step { color: #6b6256; font-size: 0.78rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -7082,6 +7170,8 @@ input.sheet-set-list-name:hover, input.sheet-set-list-name:focus { border-color:
 .mode-controls input[type="text"] { width: 4.6rem; font: inherit; padding: 4px 6px; border: 1px solid var(--ink, #1a1612); border-radius: 3px; text-align: right; }
 .mode-controls input[type="range"] { width: 6rem; }
 .mode-bar button { font: inherit; padding: 5px 10px; border: 1px solid var(--ink, #1a1612); background: #fff; border-radius: 3px; cursor: pointer; }
+/* Show and Hide are the same width, bold or not, so the buttons beside it stay put. */
+.mode-bar button.mode-show { flex: 0 0 4.6rem; width: 4.6rem; padding-left: 0; padding-right: 0; text-align: center; font-weight: 600; border-color: var(--copper, #b2451e); color: var(--copper, #b2451e); }
 .mode-bar button:disabled { opacity: 0.45; cursor: default; }
 .mode-bar button.primary { background: var(--copper, #b2451e); border-color: var(--copper, #b2451e); color: #fff; font-weight: 600; }
 .mode-bar button[aria-pressed="true"], .mode-seg button.is-on { background: rgba(178, 69, 30, 0.14); border-color: var(--copper, #b2451e); color: var(--copper, #b2451e); font-weight: 600; }

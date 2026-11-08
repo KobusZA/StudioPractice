@@ -899,6 +899,7 @@ export class PlanStore {
       if (obj.shape) snaps.push({
         ref,
         shape: clone(obj.shape),
+        base: obj.base ? clone(obj.base) : null,
         seed: obj.seed ? clone(obj.seed) : null,
         cuts: Array.isArray(obj.cuts) ? clone(obj.cuts) : null,
       });
@@ -926,6 +927,7 @@ export class PlanStore {
       if (!obj) continue;
       if (snap.shape) {
         obj.shape = translateShape(snap.shape, dx, dy, grid);
+        if (snap.base) obj.base = translateShape(snap.base, dx, dy, grid);
         if (snap.seed) obj.seed = { x: snapVal(snap.seed.x + dx), y: snapVal(snap.seed.y + dy) };
         if (Array.isArray(snap.cuts)) {
           obj.cuts = snap.cuts.map((cut) => ({
@@ -1066,6 +1068,52 @@ function normalizeFileUnderlay(raw) {
   };
 }
 
+/** A poly outline worth keeping. Anything else is dropped rather than half-stored. */
+function polyField(shape) {
+  const points = shape?.kind === "poly" && Array.isArray(shape.points) ? shape.points : null;
+  if (!points || points.length < 3) return null;
+  const clean = [];
+  for (const p of points) {
+    const x = Number(p?.[0]);
+    const y = Number(p?.[1]);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    clean.push([x, y]);
+  }
+  return { kind: "poly", points: clean };
+}
+
+/**
+ * Anchors, overhang and plate height. A roof saved with no `base` keeps none
+ * of them: its outline is already the edge. `offset` of 0 is left off the
+ * record; readers treat a missing plate as the level.
+ */
+function roofBearingFields(roof) {
+  const offset = Number(roof?.offset);
+  const offsetField = Number.isFinite(offset) && offset !== 0 ? { offset } : {};
+  const base = polyField(roof?.base);
+  if (!base) return offsetField;
+  const overhang = Number(roof.overhang);
+  return {
+    base,
+    overhang: Number.isFinite(overhang) && overhang > 0 ? overhang : 0,
+    ...offsetField,
+  };
+}
+
+/**
+ * A gable's ridge off the middle (mm from the low wall) and its second slope
+ * (degrees). Both are optional; a bad value is dropped, so the roof falls back
+ * to a centred ridge and one pitch.
+ */
+function roofGableFields(roof) {
+  const ridge = Number(roof?.ridgeOffset);
+  const second = Number(roof?.pitch2);
+  return {
+    ...(Number.isFinite(ridge) && ridge > 0 ? { ridgeOffset: ridge } : {}),
+    ...(Number.isFinite(second) && second > 0 ? { pitch2: Math.min(60, Math.max(5, second)) } : {}),
+  };
+}
+
 /** A slab or roof follows walls only when it was asked to, and the seed survived. */
 function shapeLinkFields(row) {
   const seed = Number.isFinite(row?.seed?.x) && Number.isFinite(row?.seed?.y)
@@ -1147,12 +1195,14 @@ export function normalizeDoc(raw) {
   }));
 
   doc.slabs = mapShaped(raw.slabs, "sl").map((row) => ({ ...row, ...shapeLinkFields(row) }));
-  doc.roofs = mapShaped(raw.roofs, "rf").map((roof) => ({
+  doc.roofs = mapShaped(raw.roofs, "rf").map(({ ridgeOffset: _ridge, pitch2: _second, ...roof }) => ({
     ...roof,
     form: roof.form || "flat",
     pitch: Number.isFinite(roof.pitch) ? roof.pitch : 30,
     ridge: roof.ridge === "short" ? "short" : "long",
     ...shapeLinkFields(roof),
+    ...roofBearingFields(roof),
+    ...roofGableFields({ ridgeOffset: _ridge, pitch2: _second }),
   }));
 
   doc.openings = (raw.openings || []).map((o) => migrateOpening(o));

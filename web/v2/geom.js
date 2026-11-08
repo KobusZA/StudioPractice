@@ -564,6 +564,95 @@ export function offsetPolygonInward(poly, distance) {
   return clean;
 }
 
+/** True when two segments cross in their interiors. Shared endpoints do not count. */
+function segmentsCross(a, b, c, d) {
+  const rx = b[0] - a[0];
+  const ry = b[1] - a[1];
+  const sx = d[0] - c[0];
+  const sy = d[1] - c[1];
+  const den = rx * sy - ry * sx;
+  if (Math.abs(den) < 1e-12) return false;
+  const t = ((c[0] - a[0]) * sy - (c[1] - a[1]) * sx) / den;
+  const u = ((c[0] - a[0]) * ry - (c[1] - a[1]) * rx) / den;
+  const eps = 1e-8;
+  return t > eps && t < 1 - eps && u > eps && u < 1 - eps;
+}
+
+/** A notch that closed on itself. Adjacent edges are allowed to meet at a corner. */
+function outlineFolds(poly) {
+  const n = poly.length;
+  for (let i = 0; i < n; i += 1) {
+    const a = poly[i];
+    const b = poly[(i + 1) % n];
+    for (let j = i + 1; j < n; j += 1) {
+      if (j === i + 1 || (i === 0 && j === n - 1)) continue;
+      const c = poly[j];
+      const d = poly[(j + 1) % n];
+      if (segmentsCross(a, b, c, d)) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Uniform outward offset. The same edge-offset as `offsetPolygonInward`,
+ * pushed the other way. Winding is normalised first, so a clockwise click
+ * order offsets the same shape. A result that crosses itself, or that lands
+ * back inside the original, is a fold (a notch narrower than twice the
+ * overhang). That returns null: a wrong outline is not a roof edge.
+ */
+export function offsetPolygonOutward(poly, distance) {
+  const ccw = normalizeWinding(simplify(poly));
+  if (ccw.length < 3) return null;
+  if (!(distance > 0)) return ccw;
+
+  const lines = polyEdges(ccw).map(({ a, b }) => {
+    const n = segNormal(a[0], a[1], b[0], b[1], -1);
+    return { p: [a[0] + n.x * distance, a[1] + n.y * distance], d: [b[0] - a[0], b[1] - a[1]] };
+  });
+
+  const n = lines.length;
+  const out = [];
+  for (let i = 0; i < n; i += 1) {
+    const prev = lines[(i - 1 + n) % n];
+    const cur = lines[i];
+    const pt = intersectLines(prev.p, prev.d, cur.p, cur.d);
+    if (!pt) return null;
+    out.push(pt);
+  }
+
+  // Each new edge is the offset of the source edge at the same index. When a
+  // notch is narrower than twice the overhang those edges pass each other and
+  // one of them runs backwards. The result is still a simple polygon, so the
+  // crossing test below does not see it.
+  const nSrc = ccw.length;
+  for (let i = 0; i < nSrc; i += 1) {
+    const sx = ccw[(i + 1) % nSrc][0] - ccw[i][0];
+    const sy = ccw[(i + 1) % nSrc][1] - ccw[i][1];
+    const rx = out[(i + 1) % nSrc][0] - out[i][0];
+    const ry = out[(i + 1) % nSrc][1] - out[i][1];
+    if (sx * rx + sy * ry <= 1e-8) return null;
+  }
+
+  const clean = simplify(out);
+  if (clean.length < 3 || !isCCW(clean) || area(clean) <= area(ccw) + EPS) return null;
+  if (outlineFolds(clean)) return null;
+  for (const pt of clean) {
+    if (!pointInPoly(pt[0], pt[1], ccw)) continue;
+    let onEdge = false;
+    for (let i = 0; i < ccw.length; i += 1) {
+      const a = ccw[i];
+      const b = ccw[(i + 1) % ccw.length];
+      if (distToSeg(a[0], a[1], b[0], b[1], pt[0], pt[1]) < 1e-6) {
+        onEdge = true;
+        break;
+      }
+    }
+    if (!onEdge) return null;
+  }
+  return clean;
+}
+
 // --- polygon intersection ---------------------------------------------------
 //
 // Used to say how much of a floor two finishes share. The clip polygon is cut

@@ -4340,6 +4340,606 @@
         ],
         "scheduleName": null
       }
+    },
+    {
+      "id": "TSP_BND_BRICK_220_PLASTER_1800",
+      "name": "Stock brick 220 mm, plastered, 1.8 m",
+      "family": "Boundary wall",
+      "category": "boundarywall",
+      "unit": "m3",
+      "draw": "wall",
+      "revit": {
+        "category": "Walls",
+        "family": "Boundary wall",
+        "type": "Stock brick 220 mm, plastered, 1.8 m",
+        "placedCount": 0
+      },
+      "geometry": {
+        "thickness": 240,
+        "height": 1800,
+        "coreThickness": 220
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "loadBearing": false,
+        "plastered": true
+      },
+      "drawing": {
+        "colourClass": "masonry",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "length",
+          "area",
+          "volume",
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_BND_FACE_220_1800",
+      "name": "Face brick 220 mm, 1.8 m",
+      "family": "Boundary wall",
+      "category": "boundarywall",
+      "unit": "m3",
+      "draw": "wall",
+      "revit": {
+        "category": "Walls",
+        "family": "Boundary wall",
+        "type": "Face brick 220 mm, 1.8 m",
+        "placedCount": 0
+      },
+      "geometry": {
+        "thickness": 220,
+        "height": 1800
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "loadBearing": false,
+        "plastered": false
+      },
+      "drawing": {
+        "colourClass": "masonry",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "length",
+          "area",
+          "volume",
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_BND_BRICK_110_PIERS_1800",
+      "name": "Stock brick 110 mm, plastered, with brick piers, 1.8 m",
+      "family": "Boundary wall",
+      "category": "boundarywall",
+      "unit": "m3",
+      "draw": "wall",
+      "revit": {
+        "category": "Walls",
+        "family": "Boundary wall",
+        "type": "Stock brick 110 mm, plastered, with brick piers, 1.8 m",
+        "placedCount": 0
+      },
+      "geometry": {
+        "thickness": 130,
+        "height": 1800,
+        "coreThickness": 110
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "loadBearing": false,
+        "plastered": true
+      },
+      "drawing": {
+        "colourClass": "masonry",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "length",
+          "area",
+          "volume",
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_BND_BLOCK_140_PIERS_1800",
+      "name": "Concrete block 140 mm, plastered, with piers, 1.8 m",
+      "family": "Boundary wall",
+      "category": "boundarywall",
+      "unit": "m3",
+      "draw": "wall",
+      "revit": {
+        "category": "Walls",
+        "family": "Boundary wall",
+        "type": "Concrete block 140 mm, plastered, with piers, 1.8 m",
+        "placedCount": 0
+      },
+      "geometry": {
+        "thickness": 160,
+        "height": 1800,
+        "coreThickness": 140
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "loadBearing": false,
+        "plastered": true
+      },
+      "drawing": {
+        "colourClass": "concrete",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "length",
+          "area",
+          "volume",
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_BND_BLOCK_190_PIERS_1800",
+      "name": "Concrete block 190 mm, plastered, with piers, 1.8 m",
+      "family": "Boundary wall",
+      "category": "boundarywall",
+      "unit": "m3",
+      "draw": "wall",
+      "revit": {
+        "category": "Walls",
+        "family": "Boundary wall",
+        "type": "Concrete block 190 mm, plastered, with piers, 1.8 m",
+        "placedCount": 0
+      },
+      "geometry": {
+        "thickness": 210,
+        "height": 1800,
+        "coreThickness": 190
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "loadBearing": false,
+        "plastered": true
+      },
+      "drawing": {
+        "colourClass": "concrete",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "length",
+          "area",
+          "volume",
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_BND_PRECAST_1500",
+      "name": "Precast concrete panels 50 mm, 1.5 m",
+      "family": "Boundary wall",
+      "category": "boundarywall",
+      "unit": "m3",
+      "draw": "wall",
+      "revit": {
+        "category": "Walls",
+        "family": "Boundary wall",
+        "type": "Precast concrete panels 50 mm, 1.5 m",
+        "placedCount": 0
+      },
+      "geometry": {
+        "thickness": 50,
+        "height": 1500
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "loadBearing": false,
+        "plastered": false
+      },
+      "drawing": {
+        "colourClass": "concrete",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "length",
+          "area",
+          "volume",
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_BND_PRECAST_1800",
+      "name": "Precast concrete panels 50 mm, 1.8 m",
+      "family": "Boundary wall",
+      "category": "boundarywall",
+      "unit": "m3",
+      "draw": "wall",
+      "revit": {
+        "category": "Walls",
+        "family": "Boundary wall",
+        "type": "Precast concrete panels 50 mm, 1.8 m",
+        "placedCount": 0
+      },
+      "geometry": {
+        "thickness": 50,
+        "height": 1800
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "loadBearing": false,
+        "plastered": false
+      },
+      "drawing": {
+        "colourClass": "concrete",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "length",
+          "area",
+          "volume",
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_BND_PRECAST_2100",
+      "name": "Precast concrete panels 50 mm, 2.1 m",
+      "family": "Boundary wall",
+      "category": "boundarywall",
+      "unit": "m3",
+      "draw": "wall",
+      "revit": {
+        "category": "Walls",
+        "family": "Boundary wall",
+        "type": "Precast concrete panels 50 mm, 2.1 m",
+        "placedCount": 0
+      },
+      "geometry": {
+        "thickness": 50,
+        "height": 2100
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "loadBearing": false,
+        "plastered": false
+      },
+      "drawing": {
+        "colourClass": "concrete",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "length",
+          "area",
+          "volume",
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_BND_PRECAST_2400",
+      "name": "Precast concrete panels 50 mm, 2.4 m",
+      "family": "Boundary wall",
+      "category": "boundarywall",
+      "unit": "m3",
+      "draw": "wall",
+      "revit": {
+        "category": "Walls",
+        "family": "Boundary wall",
+        "type": "Precast concrete panels 50 mm, 2.4 m",
+        "placedCount": 0
+      },
+      "geometry": {
+        "thickness": 50,
+        "height": 2400
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "loadBearing": false,
+        "plastered": false
+      },
+      "drawing": {
+        "colourClass": "concrete",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "length",
+          "area",
+          "volume",
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_BND_PRECAST_BRICK_PIERS_1800",
+      "name": "Precast concrete panels 50 mm between brick piers, 1.8 m",
+      "family": "Boundary wall",
+      "category": "boundarywall",
+      "unit": "m3",
+      "draw": "wall",
+      "revit": {
+        "category": "Walls",
+        "family": "Boundary wall",
+        "type": "Precast concrete panels 50 mm between brick piers, 1.8 m",
+        "placedCount": 0
+      },
+      "geometry": {
+        "thickness": 50,
+        "height": 1800
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "loadBearing": false,
+        "plastered": false
+      },
+      "drawing": {
+        "colourClass": "concrete",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "length",
+          "area",
+          "volume",
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_BND_PRECAST_BLOCK_PIERS_1800",
+      "name": "Precast concrete panels 50 mm between block piers, 1.8 m",
+      "family": "Boundary wall",
+      "category": "boundarywall",
+      "unit": "m3",
+      "draw": "wall",
+      "revit": {
+        "category": "Walls",
+        "family": "Boundary wall",
+        "type": "Precast concrete panels 50 mm between block piers, 1.8 m",
+        "placedCount": 0
+      },
+      "geometry": {
+        "thickness": 50,
+        "height": 1800
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "loadBearing": false,
+        "plastered": false
+      },
+      "drawing": {
+        "colourClass": "concrete",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "length",
+          "area",
+          "volume",
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_BND_BRICK_220_PALISADE_1200",
+      "name": "Stock brick 220 mm, plastered, 1.2 m, with steel palisade above",
+      "family": "Boundary wall",
+      "category": "boundarywall",
+      "unit": "m3",
+      "draw": "wall",
+      "revit": {
+        "category": "Walls",
+        "family": "Boundary wall",
+        "type": "Stock brick 220 mm, plastered, 1.2 m, with steel palisade above",
+        "placedCount": 0
+      },
+      "geometry": {
+        "thickness": 240,
+        "height": 1200,
+        "coreThickness": 220
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "loadBearing": false,
+        "plastered": true
+      },
+      "drawing": {
+        "colourClass": "masonry",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "length",
+          "area",
+          "volume",
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_BND_BRICK_220_CLEARVU_1200",
+      "name": "Stock brick 220 mm, plastered, 1.2 m, with ClearVu above",
+      "family": "Boundary wall",
+      "category": "boundarywall",
+      "unit": "m3",
+      "draw": "wall",
+      "revit": {
+        "category": "Walls",
+        "family": "Boundary wall",
+        "type": "Stock brick 220 mm, plastered, 1.2 m, with ClearVu above",
+        "placedCount": 0
+      },
+      "geometry": {
+        "thickness": 240,
+        "height": 1200,
+        "coreThickness": 220
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "loadBearing": false,
+        "plastered": true
+      },
+      "drawing": {
+        "colourClass": "masonry",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "length",
+          "area",
+          "volume",
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_FEN_PALISADE_1800",
+      "name": "Steel palisade, 1.8 m",
+      "family": "Fence",
+      "category": "fence",
+      "unit": "m",
+      "draw": "wall",
+      "revit": {
+        "category": "Fences",
+        "family": "Fence",
+        "type": "Steel palisade, 1.8 m",
+        "placedCount": 0
+      },
+      "geometry": {
+        "thickness": 50,
+        "height": 1800
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "loadBearing": false
+      },
+      "drawing": {
+        "colourClass": "steel",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "length",
+          "count"
+        ],
+        "scheduleName": null
+      }
+    },
+    {
+      "id": "TSP_FEN_CLEARVU_1800",
+      "name": "ClearVu welded mesh, 1.8 m",
+      "family": "Fence",
+      "category": "fence",
+      "unit": "m",
+      "draw": "wall",
+      "revit": {
+        "category": "Fences",
+        "family": "Fence",
+        "type": "ClearVu welded mesh, 1.8 m",
+        "placedCount": 0
+      },
+      "geometry": {
+        "thickness": 50,
+        "height": 1800
+      },
+      "cost": {
+        "rateRef": null,
+        "wasteFactor": null
+      },
+      "compliance": {
+        "loadBearing": false
+      },
+      "drawing": {
+        "colourClass": "steel",
+        "hatch": null,
+        "symbol": null
+      },
+      "schedule": {
+        "report": [
+          "length",
+          "count"
+        ],
+        "scheduleName": null
+      }
     }
   ],
   "recipes": {

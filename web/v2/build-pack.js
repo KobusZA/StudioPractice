@@ -17,6 +17,8 @@
 // The catalog is the file Export Catalog writes, not TSP/output (that copy is stale).
 
 import { readFileSync, writeFileSync } from "node:fs";
+import { BOUNDARY_SKUS } from "./boundaries.js";
+import { JOINERY_SKUS } from "./joinery.js";
 import { PLAIN_OPENING_SKUS } from "./openings.js";
 import {
   complianceFactsFor,
@@ -86,7 +88,7 @@ const EXCLUDED = new Set([
 ]);
 
 const DRAW_BY_CATEGORY = {
-  wall: "wall", boundarywall: "wall", foundation: "wall",
+  wall: "wall", boundarywall: "wall", fence: "wall", foundation: "wall",
   floor: "fill", pool: "fill", ceiling: "fill", roof: "roof",
   door: "door", window: "window", opening: "opening", beam: "beam", column: "beam",
   stair: "stair", drainage: "pipe", carport: "roof",
@@ -95,7 +97,7 @@ const DRAW_BY_CATEGORY = {
 };
 
 const UNIT_BY_CATEGORY = {
-  wall: "m3", boundarywall: "m3", foundation: "m3", floor: "m2", ceiling: "m2",
+  wall: "m3", boundarywall: "m3", fence: "m", foundation: "m3", floor: "m2", ceiling: "m2",
   roof: "m2", pool: "m2", carport: "m2", beam: "m", column: "m", drainage: "m",
 };
 
@@ -110,7 +112,7 @@ const MATERIAL_PATTERNS = [
 ];
 
 const COLOUR_BY_CATEGORY = {
-  wall: "masonry", boundarywall: "masonry", foundation: "concrete",
+  wall: "masonry", boundarywall: "masonry", fence: "steel", foundation: "concrete",
   floor: "concrete", ceiling: "other", roof: "concrete", beam: "concrete",
   column: "concrete", stair: "concrete", window: "glass", door: "other",
   drainage: "drain", sanitary: "other", waterheater: "other",
@@ -510,6 +512,15 @@ export function buildPack(catalog, { includeUnplaced = false, id, name, version 
   // A plain opening and an arch are not in the Revit catalog export. They
   // live in the Doors list: a hole, and the same hole with an arched head.
   for (const sku of PLAIN_OPENING_SKUS) {
+    if (!skus.some((existing) => existing.id === sku.id)) skus.push(structuredClone(sku));
+  }
+  // Erf walls and fences are not in the Revit catalog. See boundaries.js.
+  for (const sku of BOUNDARY_SKUS) {
+    if (!skus.some((existing) => existing.id === sku.id)) skus.push(structuredClone(sku));
+  }
+  // Joinery the template does not place: BIC, kitchen units, a vanity, and a
+  // few layout pieces. See joinery.js.
+  for (const sku of JOINERY_SKUS) {
     if (!skus.some((existing) => existing.id === sku.id)) skus.push(structuredClone(sku));
   }
 

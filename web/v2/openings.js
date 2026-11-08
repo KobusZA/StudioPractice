@@ -267,6 +267,7 @@ export function nearestPlaceWall(walls, pack, x, y, skuId) {
   let best = null;
   let bestD = Infinity;
   for (const wall of walls) {
+    if (wall.category === "fence") continue;
     if (!hostOk(pack, skuId, wall)) continue;
     const d = distToWall(wall, x, y);
     if (d < bestD && d < wallSnapDist(wall) && wall.length >= need) {

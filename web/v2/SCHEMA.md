@@ -142,7 +142,7 @@ A SKU:
 are all enumerated in [schema.js](schema.js) and enforced by `validatePack()`.
 
 Categories now include the non-SACAP work types the first release targets:
-`boundarywall`, `pool`, `carport`, plus `stair`, `ceiling`, `sanitary`,
+`boundarywall`, `fence`, `pool`, `carport`, plus `stair`, `ceiling`, `sanitary`,
 `waterheater`, `drainage` and `column`, none of which existed in v1.
 
 ## What the migration found

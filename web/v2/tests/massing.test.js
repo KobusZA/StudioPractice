@@ -514,6 +514,81 @@ test("a gable-end wall follows the ridge on the face outside the plate", () => {
   assert.equal(stuck.length, 0, "the eave wall stays at the plate");
 });
 
+function wallBox(pack) {
+  const level = pack.levels[0].id;
+  const sku = pack.system.defaultWallSku;
+  const half = 0.11;
+  const seg = (id, x1, y1, x2, y2) => ({ id, sku, level, x1, y1, x2, y2, status: "planned" });
+  return [
+    seg("south", half, half, 10 - half, half),
+    seg("east", 10 - half, half, 10 - half, 8 - half),
+    seg("north", 10 - half, 8 - half, half, 8 - half),
+    seg("west", half, 8 - half, half, half),
+  ];
+}
+
+test("the eave drops by the overhang and the long walls stay at the plate", () => {
+  const base = [[0, 0], [10, 0], [10, 8], [0, 8]];
+  const tan = Math.tan((30 * Math.PI) / 180);
+  const plate = pack.system.wallHeight;
+  const eave = plate - 0.6 * tan;
+  const doc = normalizeDoc({
+    segments: wallBox(pack),
+    roofs: [{
+      id: "rf1",
+      sku: pack.system.defaultRoofSku,
+      level: "01 GFL",
+      form: "gable",
+      pitch: 30,
+      overhang: 600,
+      base: { kind: "poly", points: base },
+      shape: { kind: "poly", points: base.map(([x, y]) => [x + (x === 0 ? -0.6 : 0.6), y + (y === 0 ? -0.6 : 0.6)]) },
+    }],
+  });
+  const payload = compile(doc, pack);
+  const roof = payload.sketchForms.find((f) => f.elementId === "rf1");
+  assert.ok(Math.abs(roof.plate - plate) < 1e-6);
+  assert.ok(Math.abs(roof.elevation - eave) < 1e-6, "the shell is handed the eave");
+  const faces = facesFromPayload(payload);
+  const roofPts = faces.filter((f) => f.id === "rf1").flatMap((f) => f.pts);
+  assert.ok(roofPts.some((p) => Math.abs(p[2] - eave) < 0.02), "the eave is drawn at the edge");
+  const south = faces.filter((f) => f.id === "south").flatMap((f) => f.pts).filter((p) => p[2] > 1);
+  assert.ok(south.length > 0);
+  assert.ok(south.every((p) => p[2] > plate - 0.05 && p[2] < plate + 0.2), "the long wall stays at the plate");
+  const north = faces.filter((f) => f.id === "north").flatMap((f) => f.pts).filter((p) => p[2] > 1);
+  assert.ok(north.every((p) => p[2] > plate - 0.05 && p[2] < plate + 0.2));
+  const east = faces.filter((f) => f.id === "east").flatMap((f) => f.pts);
+  const ridge = plate + 4 * tan;
+  assert.ok(east.some((p) => Math.abs(p[1] - 4) < 0.4 && Math.abs(p[2] - ridge) < 0.2), "the gable wall runs up to the ridge");
+
+  doc.roofs[0].overhang = 900;
+  doc.roofs[0].shape = {
+    kind: "poly",
+    points: base.map(([x, y]) => [x + (x === 0 ? -0.9 : 0.9), y + (y === 0 ? -0.9 : 0.9)]),
+  };
+  const wider = compile(doc, pack);
+  const dropped = wider.sketchForms.find((f) => f.elementId === "rf1");
+  assert.ok(Math.abs(dropped.elevation - (plate - 0.9 * tan)) < 1e-6);
+  const southAgain = facesFromPayload(wider).filter((f) => f.id === "south").flatMap((f) => f.pts).filter((p) => p[2] > 1);
+  assert.ok(southAgain.every((p) => p[2] > plate - 0.05 && p[2] < plate + 0.2), "a bigger overhang does not change the wall");
+
+  doc.roofs[0].offset = 150;
+  const stepped = compile(doc, pack).sketchForms.find((f) => f.elementId === "rf1");
+  assert.ok(Math.abs(stepped.plate - (plate + 0.15)) < 1e-6);
+  assert.ok(Math.abs(stepped.elevation - (plate + 0.15 - 0.9 * tan)) < 1e-6);
+});
+
+test("a plate step is named from the plate, not from a lower eave", () => {
+  assert.deepEqual(plateCallouts([
+    { id: "low", plateZ: 2.8, eaveZ: 2.45 },
+    { id: "same", plateZ: 2.8, eaveZ: 2.2 },
+  ]), []);
+  assert.deepEqual(plateCallouts([
+    { id: "low", plateZ: 2.8, eaveZ: 2.45 },
+    { id: "step", plateZ: 2.95, eaveZ: 2.6 },
+  ]), [{ id: "step", text: "Plate +150 mm" }]);
+});
+
 test("a plate step is named on the higher roof, and a storey is not", () => {
   assert.deepEqual(plateCallouts([
     { id: "low", eaveZ: 2.8 },

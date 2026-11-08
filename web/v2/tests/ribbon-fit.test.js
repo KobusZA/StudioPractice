@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import { LADDERS, maxStep, planSteps, shrinkKey } from "../ribbon-fit.js";
 import { readFileSync } from "node:fs";
-import { CONTEXT_TABS, GROUP_PRIORITY, RIBBON, placingTab, ribbonItems, selectionTab, tabWithStatus } from "../ribbon.js";
+import { CONTEXT_TABS, GROUP_PRIORITY, RIBBON, placingTab, ribbonItems, selectionTab, sheetTab, tabWithStatus } from "../ribbon.js";
 
 // A toy width model: each group's width depends on its kind and step, so the
 // planner can be exercised without a browser. Wider = nicer.
@@ -27,14 +27,29 @@ const GROUPS = [
   { kind: "stack", prio: 0 }, // Services
 ];
 
-test("full Add drawing keeps once-a-sheet commands in the group menu", () => {
+test("Add drawing on Build is the two ways in, plus a Sheet button only once a sheet is loaded", () => {
   const add = RIBBON.find((t) => t.id === "build").groups.find((g) => g.label === "Add drawing");
-  assert.deepEqual(add.menu, ["sheet-list", "underlay-toggle", "underlay-off"]);
-  const ids = add.items.map((item) => item.id);
-  for (const id of add.menu) assert.ok(ids.includes(id), id);
-  assert.deepEqual(ids.filter((id) => !add.menu.includes(id)), [
-    "underlay", "satellite", "underlay-adjust", "trace-view", "calibrate", "reference", "align-floors",
-  ]);
+  assert.equal(add.menu, undefined);
+  const onRow = add.items.filter((item) => !item.contextOnly);
+  assert.deepEqual(onRow.map((item) => item.id), ["underlay", "satellite", "underlay-adjust"]);
+  assert.deepEqual(onRow.filter((item) => item.needsUnderlay).map((item) => item.id), ["underlay-adjust"]);
+  assert.deepEqual(onRow.filter((item) => item.anchor).map((item) => item.id), ["underlay", "satellite", "underlay-adjust"]);
+  assert.equal(onRow.find((item) => item.id === "underlay-adjust").label, "Edit sheet");
+  assert.equal(onRow.find((item) => item.id === "underlay-adjust").splitBefore, true);
+});
+
+test("Modify | Sheet holds the sheet's commands, defined once in RIBBON", () => {
+  const tab = sheetTab();
+  assert.equal(tab.key, "sheet");
+  assert.equal(tab.label, "Sheet");
+  const ids = tab.groups.flatMap((g) => g.items.map((item) => item.id));
+  assert.deepEqual(ids, ["calibrate", "underlay-off", "sheet-list", "align-floors", "reference"]);
+  // Hide and Model / Sheet are view toggles on the plan strip, not here.
+  assert.equal(ids.includes("underlay-toggle"), false);
+  assert.equal(ids.includes("trace-view"), false);
+  // And no sheet command is left on Build.
+  const build = RIBBON.find((t) => t.id === "build").groups.flatMap((g) => g.items).filter((item) => !item.contextOnly);
+  for (const id of ids) assert.equal(build.some((item) => item.id === id), false, id);
 });
 
 test("DWG and CAD sit on Output with the export commands", () => {

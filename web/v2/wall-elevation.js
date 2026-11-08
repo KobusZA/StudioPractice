@@ -26,6 +26,7 @@ import {
 import { joinedWallPolygon } from "./drawing-defaults.js";
 import { deriveWalls, drawnSegmentFromWall, skuDrawnHeight } from "./walls.js";
 import { faceArcScale, faceFinishBands, reanchorRun } from "./finish-model.js";
+import { applyJoineryEdit as writeJoineryEdit, elevationJoinery } from "./joinery.js";
 
 /** Drags and typed values snap to this, metres. */
 export const ELEVATION_SNAP = 0.05;
@@ -74,6 +75,9 @@ export function faceRefForSelection(doc, pack, walls, ref, prefer = null) {
     const opening = (doc.openings || []).find((o) => o.id === ref.id);
     const wall = opening ? wallForOpening(doc, pack, walls, opening) : null;
     wallId = wall?.id ?? null;
+  } else if (ref.kind === "item") {
+    const item = (doc.items || []).find((i) => i.id === ref.id);
+    if (item?.host === "joinery") wallId = item.wallId ?? null;
   }
   if (!wallId || !walls.some((w) => w.id === wallId)) return null;
   const side = prefer?.wallId === wallId ? normSide(prefer.side) : 1;
@@ -200,6 +204,7 @@ export function elevationModel(doc, pack, faceRef, walls = null, foundationSku =
     });
   }
   openings.sort((a, b) => a.offset - b.offset);
+  const joinery = elevationJoinery(doc, pack, wall, side, flip);
 
   const foundations = foundationsUnder(doc, pack, wall, all, base, flip);
   // Nothing under this wall yet, and it starts on the ground storey: the
@@ -243,6 +248,9 @@ export function elevationModel(doc, pack, faceRef, walls = null, foundationSku =
     attachedTo: resolved.attachedTo?.label || null,
     heightConflict: wall.heightConflict || null,
     openings,
+    // Joinery on this face (BIC, kitchen units). Same stations as a finish
+    // band: along the wall, up from the base. Not a finish.
+    joinery,
     // Foundations on this line, in viewing order. `from`/`to` run along the
     // face; `base` and `top` are absolute, and `top` never rises above this wall.
     foundations,
@@ -688,6 +696,33 @@ export function applyOpeningEdit(doc, pack, faceRef, openingId, edit, walls = nu
     if (sku?.category === "window" || sku?.category === "opening") store("sill", sill);
   }
   return { left, width, sill, height };
+}
+
+/**
+ * Move or resize a joinery run from the elevation. Viewing coordinates,
+ * same as a finish band: `from`/`to` along the face, `bottom`/`top` up from
+ * the wall base.
+ */
+export function applyJoineryFaceEdit(doc, pack, faceRef, itemId, edit, walls = null) {
+  const model = elevationModel(doc, pack, faceRef, walls);
+  const row = model?.joinery?.find((j) => j.id === itemId);
+  const item = (doc.items || []).find((i) => i.id === itemId);
+  if (!model || !row || !item) return null;
+  const all = walls || deriveWalls(doc, pack);
+  const wall = all.find((w) => w.id === model.wallId);
+  const sku = skuById(pack, item.sku);
+  if (!wall || !sku) return null;
+  const pick = (v, fallback) => (Number.isFinite(v) ? snapElevation(v) : fallback);
+  let from = pick(edit.from, row.from);
+  let to = pick(edit.to, row.to);
+  let bottom = pick(edit.bottom, row.bottom);
+  let top = edit.top === null ? null : pick(edit.top, row.top);
+  if (model.flip) {
+    const mirroredFrom = model.length - to;
+    to = model.length - from;
+    from = mirroredFrom;
+  }
+  return writeJoineryEdit(item, sku, wall, { from, to, bottom, top }, model.height);
 }
 
 /**

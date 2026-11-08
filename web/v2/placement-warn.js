@@ -11,10 +11,10 @@ export function isFoundationLevel(level) {
 }
 
 /** Categories that belong on a foundation storey: the foundation itself and
- * a boundary wall (a property-line fact, not tied to a storey). Everything
- * else - rooms, floors, ceilings, roofs, openings, services - is the
+ * a boundary wall or fence (a property-line fact, not tied to a storey).
+ * Everything else - rooms, floors, ceilings, roofs, openings, services - is the
  * "ordinary walls, rooms and ceilings underground" mistake. */
-export const FOUNDATION_OK_CATEGORIES = new Set(["foundation", "boundarywall"]);
+export const FOUNDATION_OK_CATEGORIES = new Set(["foundation", "boundarywall", "fence"]);
 
 /** A ceiling or roof cut is a view of the owning storey, not a place to draw
  * something that sits on the floor or in the ground. Walls stay allowed

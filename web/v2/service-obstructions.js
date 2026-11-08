@@ -23,6 +23,7 @@
 
 import { compile } from "./compile.js";
 import { openingSize, skuById } from "./openings.js";
+import { gableForForm } from "./roof.js";
 
 /** Plan distance, metres, from the route within which an opening is reported. */
 export const OBSTRUCTION_NEAR = 1;
@@ -310,9 +311,8 @@ export function roofUndersideAt(form, x, y) {
   if (shape === "shed") {
     surface = alongX ? eave + (y1 - y) * tan : eave + (x1 - x) * tan;
   } else if (shape === "gable") {
-    surface = alongX
-      ? eave + (h / 2 - Math.abs(y - (y0 + h / 2))) * tan
-      : eave + (w / 2 - Math.abs(x - (x0 + w / 2))) * tan;
+    const { plate, profile } = gableForForm(form, alongX ? h : w);
+    surface = plate + profile.z(alongX ? y - y0 : x - x0);
   } else {
     surface = eave + Math.min(x - x0, x1 - x, y - y0, y1 - y) * tan;
   }

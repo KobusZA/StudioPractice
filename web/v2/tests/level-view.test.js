@@ -65,10 +65,10 @@ test("an unknown or empty stack has nothing to ghost", () => {
   assert.equal(lookDownLevelId([], "01 GFL"), null);
 });
 
-test("show-only-this-level drops the neighbour and the tracing sheet on every cut", () => {
+test("show-only-this-level drops the neighbour and keeps the tracing sheet on every cut", () => {
   for (const kind of ["floor", "foundation", "ceiling", "roof"]) {
     assert.equal(isolateShows(kind, "ghost"), false);
-    assert.equal(isolateShows(kind, "underlay"), false);
+    assert.equal(isolateShows(kind, "underlay"), true);
     assert.equal(isolateShows(kind, "site"), true);
   }
 });

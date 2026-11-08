@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { emptyDoc, normalizeDoc, roomArea, roomPolygon, roomTagLines } from "../model.js";
-import { clearShapeLink, enclosedFace, footprintFace, spaceAt, syncRoomBounds } from "../room-bound.js";
+import { clearShapeLink, enclosedFace, exteriorOuterFaces, footprintFace, footprintOuterFace, spaceAt, syncRoomBounds } from "../room-bound.js";
 import { compile } from "../compile.js";
 import { deriveWalls, drawnWallThickness } from "../walls.js";
 import { normalizePackUnits } from "../schema.js";
@@ -208,6 +208,30 @@ test("the footprint is the external walls, not the room a partition makes", () =
   const bare = footprintFace(squareDoc(), pack, LEVEL, 2, 2);
   const bareRoom = enclosedFace(squareDoc(), pack, LEVEL, 2, 2);
   assert.ok(Math.abs(roomArea({ shape: { kind: "poly", points: bare } }) - roomArea({ shape: { kind: "poly", points: bareRoom } })) < 0.05);
+});
+
+test("a face join still has an outside face outside the centreline", () => {
+  const half = drawnWallThickness(pack.skus.find((s) => s.id === WALL)) / 2;
+  const doc = emptyDoc();
+  doc.segments = [
+    wall("s", -half, 0, 4 + half, 0),
+    wall("e", 4, half, 4, 4 + half),
+    wall("n", 4 + half, 4, -half, 4),
+    wall("w", 0, 4 - half, 0, half),
+  ];
+  const outer = footprintOuterFace(doc, pack, LEVEL, 2, 2);
+  const inner = footprintFace(doc, pack, LEVEL, 2, 2);
+  assert.ok(outer && inner);
+  const xs = outer.map((p) => p[0]);
+  const ys = outer.map((p) => p[1]);
+  assert.ok(Math.min(...xs) < -half + 0.01);
+  assert.ok(Math.max(...xs) > 4 + half - 0.01);
+  assert.ok(Math.min(...ys) < -half + 0.01);
+  assert.ok(Math.max(...ys) > 4 + half - 0.01);
+  assert.ok(Math.min(...inner.map((p) => p[0])) > 0);
+  const faces = exteriorOuterFaces(doc, pack, LEVEL);
+  assert.equal(faces.length, 1);
+  assert.ok(Math.min(...faces[0].map((p) => p[0])) < 0);
 });
 
 test("a footprint floor follows an external wall and ignores a partition", () => {

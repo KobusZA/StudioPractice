@@ -26,7 +26,7 @@
 
 import { archRise, archVoidPolygon } from "./arch-head.js";
 import { clipPolygon, pointInPoly } from "./geom.js";
-import { roofRidgeAlongX } from "./roof.js";
+import { gableForForm, roofRidgeAlongX } from "./roof.js";
 import {
   SECTION_FAR_M,
   SECTION_U_PAD,
@@ -114,8 +114,9 @@ const PLATE_STEP_MAX_M = 1.2;
 export function plateCallouts(roofs) {
   const byId = new Map();
   for (const roof of roofs || []) {
-    if (!roof?.id || !Number.isFinite(roof.eaveZ)) continue;
-    if (!byId.has(roof.id)) byId.set(roof.id, roof.eaveZ);
+    const z = Number.isFinite(roof?.plateZ) ? roof.plateZ : roof?.eaveZ;
+    if (!roof?.id || !Number.isFinite(z)) continue;
+    if (!byId.has(roof.id)) byId.set(roof.id, z);
   }
   const list = [...byId.entries()]
     .map(([id, eaveZ]) => ({ id, eaveZ }))
@@ -940,7 +941,11 @@ function pushRoofFaces(faces, form, z0, id, status) {
   const start = faces.length;
   pushRoofShell(faces, form, z0, id, status);
   openRoofHoles(faces, start, form.roofCuts);
-  for (let i = start; i < faces.length; i += 1) faces[i].eaveZ = z0;
+  const plate = Number(form.plate);
+  for (let i = start; i < faces.length; i += 1) {
+    faces[i].eaveZ = z0;
+    faces[i].plateZ = Number.isFinite(plate) ? plate : z0;
+  }
 }
 
 function pushRoofShell(faces, form, z0, id, status) {
@@ -1005,17 +1010,22 @@ function pushRoofShell(faces, form, z0, id, status) {
 
   if (shape === "gable") {
     const span = alongX ? rect.h : rect.w;
-    const rise = (span / 2) * tan;
-    const ridgeZ = eave + rise;
+    // One profile for plan, 3D and walls. With the ridge in the middle and one
+    // pitch it is the plain gable; moved or with a second pitch, the two eaves
+    // sit at different heights.
+    const { plate, profile } = gableForForm(form, span);
+    const ridgeZ = plate + profile.rise;
+    const eaveLow = plate + profile.z(0);
+    const eaveHigh = plate + profile.z(span);
     const drop = ([x, y, z]) => pt(x, y, z - thick);
     if (alongX) {
-      const mid = y0 + rect.h / 2;
+      const mid = y0 + profile.ridgeT;
       const r0 = pt(x0, mid, ridgeZ);
       const r1 = pt(x1, mid, ridgeZ);
-      const a = pt(x0, y0, eave);
-      const b = pt(x1, y0, eave);
-      const c = pt(x1, y1, eave);
-      const d = pt(x0, y1, eave);
+      const a = pt(x0, y0, eaveLow);
+      const b = pt(x1, y0, eaveLow);
+      const c = pt(x1, y1, eaveHigh);
+      const d = pt(x0, y1, eaveHigh);
       quad(a, b, r1, r0, fillA);
       quad(r0, r1, c, d, fillB);
       quad(drop(a), drop(r0), drop(r1), drop(b), side);
@@ -1026,13 +1036,13 @@ function pushRoofShell(faces, form, z0, id, status) {
       quad(a, b, drop(b), drop(a), side);
       quad(d, drop(d), drop(c), c, side);
     } else {
-      const mid = x0 + rect.w / 2;
+      const mid = x0 + profile.ridgeT;
       const r0 = pt(mid, y0, ridgeZ);
       const r1 = pt(mid, y1, ridgeZ);
-      const a = pt(x0, y0, eave);
-      const b = pt(x1, y0, eave);
-      const c = pt(x1, y1, eave);
-      const d = pt(x0, y1, eave);
+      const a = pt(x0, y0, eaveLow);
+      const b = pt(x1, y0, eaveHigh);
+      const c = pt(x1, y1, eaveHigh);
+      const d = pt(x0, y1, eaveLow);
       quad(a, r0, r1, d, fillA);
       quad(r0, b, c, r1, fillB);
       quad(drop(a), drop(d), drop(r1), drop(r0), side);
@@ -1191,6 +1201,7 @@ function roofModel(form) {
   const tan = Math.tan((deg * Math.PI) / 180);
   const alongX = roofRidgeAlongX(rect, form.roofRidge);
   const eave = Number(form.elevation) || 0;
+  const plate = Number.isFinite(Number(form.plate)) ? Number(form.plate) : eave;
   const holes = (form.roofCuts || []).filter((ring) => ring.length >= 3);
   const { x, y, w, h } = rect;
   const kinks = [
@@ -1203,9 +1214,12 @@ function roofModel(form) {
     for (let i = 0; i < hole.length; i += 1) kinks.push([hole[i], hole[(i + 1) % hole.length]]);
   }
   const inset = Math.min(w, h) / 2;
+  let gable = null;
   if (shape === "gable") {
-    if (alongX) kinks.push([[x, y + h / 2], [x + w, y + h / 2]]);
-    else kinks.push([[x + w / 2, y], [x + w / 2, y + h]]);
+    gable = gableForForm(form, alongX ? h : w);
+    const at = gable.profile.ridgeT;
+    if (alongX) kinks.push([[x, y + at], [x + w, y + at]]);
+    else kinks.push([[x + at, y], [x + at, y + h]]);
   } else if (shape === "hip") {
     const pyramid = Math.min(w, h) - inset * 2 < 0.08;
     if (pyramid) {
@@ -1224,7 +1238,7 @@ function roofModel(form) {
     }
   }
   // The break has to cross the face that sits just outside the outline.
-  return { rect, shape, tan, alongX, eave, holes, kinks: kinks.map((seg) => extendKink(seg[0], seg[1], ROOF_EDGE_MARGIN)) };
+  return { rect, shape, tan, alongX, eave, plate, holes, gable, kinks: kinks.map((seg) => extendKink(seg[0], seg[1], ROOF_EDGE_MARGIN)) };
 }
 
 function extendKink(a, b, extra) {
@@ -1267,9 +1281,9 @@ function roofHeightAt(model, x, y) {
     if (model.alongX) return eave + (rect.y + rect.h - y) * tan;
     return eave + (rect.x + rect.w - x) * tan;
   }
-  if (shape === "gable") {
-    if (model.alongX) return eave + (rect.h / 2 - Math.abs(y - (rect.y + rect.h / 2))) * tan;
-    return eave + (rect.w / 2 - Math.abs(x - (rect.x + rect.w / 2))) * tan;
+  if (shape === "gable" && model.gable) {
+    const t = model.alongX ? y - rect.y : x - rect.x;
+    return model.gable.plate + model.gable.profile.z(t);
   }
   if (shape === "hip") {
     const inset = Math.min(rect.w, rect.h) / 2;
@@ -1402,7 +1416,10 @@ function conformWallsToRoofs(faces, forms) {
         for (const roof of roofs) {
           const s = roofSurfaceZ(roof, p[0], p[1]);
           if (s == null) continue;
-          const attaches = zTop >= roof.eave - ROOF_ATTACH_TOL;
+          // The plate, not the eave. A dropped eave must not pull a wall up
+          // off the bearing line, or down onto the overhang.
+          const bearing = Number.isFinite(roof.plate) ? roof.plate : roof.eave;
+          const attaches = zTop >= bearing - ROOF_ATTACH_TOL;
           if (attaches && onTop) {
             result = set ? Math.min(result, s) : s;
             set = true;
@@ -1783,7 +1800,7 @@ export function hatchPolygon(ctx, pts, stroke) {
 function paintPlateCallouts(ctx, projected, width, height) {
   const seen = new Map();
   for (const item of projected) {
-    const z = item.face?.eaveZ;
+    const z = Number.isFinite(item.face?.plateZ) ? item.face.plateZ : item.face?.eaveZ;
     const id = item.face?.id;
     if (!id || !Number.isFinite(z)) continue;
     let rec = seen.get(id);

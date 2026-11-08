@@ -14,7 +14,7 @@
 // from `explodeRecipes` below (a foundation nobody drew has nothing to click).
 
 import { area as polyArea, perimeter as polyPerimeter, pointInPoly } from "./geom.js";
-import { roofPlanAreas } from "./roof.js";
+import { roofEaveDropM, roofOffsetMm, roofOverhangMm, roofPitch2Deg, roofPlanAreas, roofRidgeOffsetMm } from "./roof.js";
 import { syncRoomBounds } from "./room-bound.js";
 import { levelAboveRise, lookDownLevelId } from "./level-view.js";
 import {
@@ -48,6 +48,7 @@ import { deriveDrawnWalls, deriveWalls, isExternalWall, skuDrawnHeight } from ".
 import { arcPoints } from "./click-draw.js";
 import { edgeHomeLevel, runGradient, serviceTakeoff } from "./services.js";
 import { finishRegionAreas, resolveFinishes, wallFaceFills } from "./finish-model.js";
+import { joineryAlong, joineryHeights, joineryIsRun, joineryPolygon } from "./joinery.js";
 
 const CATEGORY_TO_SCHEDULE = {
   wall: "Walls",
@@ -68,6 +69,7 @@ const CATEGORY_TO_SCHEDULE = {
   furniture: "Furniture",
   casework: "Casework",
   boundarywall: "Walls",
+  fence: "Fences",
   pool: "Floors",
   carport: "Roofs",
 };
@@ -524,7 +526,10 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
     const a = areas.retained;
     const form = roof.form || "flat";
     const levelZ = levelElevation(pack, roof.level);
-    const elevation = levelZ < 0.05 ? (pack.system.wallHeight || 2.8) : levelZ;
+    // The plate is where the roof meets the wall. The number handed to the
+    // shell is the eave, which sits lower by the overhang times the slope.
+    const plate = (levelZ < 0.05 ? (pack.system.wallHeight || 2.8) : levelZ) + roofOffsetMm(roof) / 1000;
+    const elevation = plate - roofEaveDropM(roof);
 
     sketchForms.push({
       kind: "Roof",
@@ -533,9 +538,15 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
       isSolid: true,
       depth: sku.geometry?.thickness || 0.125,
       elevation,
+      plate,
       roofForm: form,
       roofPitch: form === "flat" ? 0 : Math.min(60, Math.max(5, roof.pitch ?? 30)),
       roofRidge: roof.ridge === "short" ? "short" : "long",
+      // Gable only: the overhang (metres) the shell works its eaves from, the
+      // ridge off the middle (mm from the low wall), and the second slope.
+      roofOverhang: roofOverhangMm(roof) / 1000,
+      ...(form === "gable" && roofRidgeOffsetMm(roof) != null ? { roofRidgeOffset: roofRidgeOffsetMm(roof) } : {}),
+      ...(form === "gable" && roofPitch2Deg(roof) != null ? { roofPitch2: roofPitch2Deg(roof) } : {}),
       // Plan cuts, in metres. The 3D roof stops at these. A hole and a
       // remove are the same absence of roof; the plan still tells them apart.
       roofCuts: (roof.cuts || [])
@@ -714,25 +725,36 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
     const sku = skuById(pack, item.sku);
     if (!sku) continue;
     const row = baseRow(pack, sku, item.id, objectStatus(item));
-    applyMeasures(row, sku, { count: 1 });
+    const wall = item.host === "joinery"
+      ? walls.find((w) => w.id === item.wallId)
+      : null;
+    const measures = { count: 1 };
+    if (joineryIsRun(sku) && wall) measures.length = joineryAlong(item, wall);
+    applyMeasures(row, sku, measures);
     row.level = effectiveLevel(item, pack);
     row.kind = "item";
     instances.push(row);
 
-    const box = itemRect(item, sku);
+    const poly = item.host === "joinery" ? joineryPolygon(item, sku, wall) : null;
+    const box = poly?.length >= 4 ? null : itemRect(item, sku);
+    const heights = joineryHeights(item, sku, wall?.height);
+    const depth = joineryIsRun(sku) ? (heights.top - heights.bottom) : (sku.geometry?.height || 0.4);
+    const elevation = levelElevation(pack, effectiveLevel(item, pack)) + (joineryIsRun(sku) ? heights.bottom : 0);
     sketchForms.push({
       kind: "Extrusion",
       elementId: item.id,
       name: sku.name,
       isSolid: true,
-      depth: sku.geometry?.height || 0.4,
-      elevation: levelElevation(pack, effectiveLevel(item, pack)),
-      profileLoops: [polyLoop([
-        [box.x, box.y],
-        [box.x + box.w, box.y],
-        [box.x + box.w, box.y + box.h],
-        [box.x, box.y + box.h],
-      ])],
+      depth,
+      elevation,
+      profileLoops: [polyLoop(poly?.length >= 4
+        ? poly
+        : [
+          [box.x, box.y],
+          [box.x + box.w, box.y],
+          [box.x + box.w, box.y + box.h],
+          [box.x, box.y + box.h],
+        ])],
       status: objectStatus(item),
     });
   }

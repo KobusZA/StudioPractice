@@ -10,7 +10,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,560&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="../shared/tokens.css" />
   <link rel="stylesheet" href="../shared/splash.css" />
-  <link rel="stylesheet" href="./v2.css?v=20261108-floor-card-width" />
+  <link rel="stylesheet" href="./v2.css?v=20261108-edit-sheet" />
   <!-- Painted before the stylesheet arrives, so a cold load is ink rather
        than a white flash. A reload of this tab skips it. -->
   <style>
@@ -120,11 +120,16 @@
           </div>
           <div class="plan-loc words" id="v2-shape-link" hidden>
             <div class="seg" role="group" aria-label="How this outline is drawn">
+              <button type="button" data-shape-link="walls" hidden aria-pressed="false" title="Click the outside corners of the walls. The roof edge sits out by the overhang. Enter closes it.">Along walls</button>
               <button type="button" data-shape-link="sketch" class="active" aria-pressed="true" title="Click each corner of the outline. Enter closes it. It does not follow the walls until you ask.">Sketch</button>
               <button type="button" data-shape-link="room" aria-pressed="false" title="Click a room. The outline copies that room and follows it when the room follows the walls.">Room</button>
               <button type="button" data-shape-link="footprint" aria-pressed="false" title="Click inside the building. The outline follows the external walls.">External walls</button>
             </div>
           </div>
+          <label class="roof-overhang" id="v2-roof-overhang" hidden>Overhang
+            <input id="v2-roof-overhang-mm" type="text" inputmode="decimal" autocomplete="off" aria-label="Overhang in millimetres" />
+            mm
+          </label>
           <div class="wall-opts" id="v2-wall-opts" hidden>
           <div class="plan-loc" id="v2-wall-loc" hidden>
             <div class="seg" role="group" aria-label="Draw on">
@@ -147,15 +152,10 @@
             Disjoin
           </label>
       </div>
-    </nav>
-  </div>
-
-  <main class="layout layout-planner view-page" id="v2-app">
-    <section class="panel planner-stage">
-      <!-- Mode bar: one strip for every modal underlay tool (Set scale, Adjust,
-           Align sheets). Hidden when none is on; when one is, it names the
-           mode, the step, what to click next, and how to get out. Driven by
-           syncModeBar() in ui.js. -->
+      <!-- Parked while no underlay mode is running. syncModeBar moves this
+           into the ribbon row, so Adjust / Set scale / Align do not add a
+           strip under the menu and the drawing does not jump. -->
+      <div id="v2-mode-bar-park" hidden>
       <div class="mode-bar" id="v2-mode-bar" role="toolbar" aria-label="Underlay tool" aria-live="polite" hidden>
         <span class="mode-pill" id="v2-mode-name"></span>
         <span class="mode-step" id="v2-mode-step"></span>
@@ -172,6 +172,7 @@
           <label>Opacity
             <input id="v2-underlay-opacity" type="range" min="0" max="100" step="1" />
           </label>
+          <button type="button" id="v2-underlay-show" class="mode-show" aria-pressed="false" title="Hide this sheet. Its opacity can still be changed.">Hide</button>
           <label>Rotation
             <input id="v2-underlay-rotation" type="text" inputmode="decimal" autocomplete="off" aria-label="Rotation in degrees" />
             °
@@ -196,6 +197,12 @@
           <button type="button" class="mode-close" id="v2-mode-close" aria-label="Close" title="Close">✕</button>
         </span>
       </div>
+      </div>
+    </nav>
+  </div>
+
+  <main class="layout layout-planner view-page" id="v2-app">
+    <section class="panel planner-stage">
       <div class="stage-row" id="v2-stage-row">
         <aside class="level-widget panel" id="v2-level-widget" hidden>
           <h2>Active cut</h2>
@@ -204,7 +211,7 @@
             <span id="v2-cut-elev">—</span>
             <span class="level-kind-chip" id="v2-cut-kind">—</span>
           </p>
-          <label class="level-isolate" title="Show only this cut. Off ghosts the neighbouring level and keeps the tracing sheet.">
+          <label class="level-isolate" title="Show only this cut. Off ghosts the neighbouring level. The tracing sheet stays.">
             <input type="checkbox" id="v2-level-isolate" />
             Show only this level
           </label>
@@ -225,6 +232,10 @@
           <button type="button" id="v2-undo">Undo</button>
           <button type="button" id="v2-redo" disabled>Redo</button>
           <button type="button" id="v2-history-toggle" aria-pressed="true" title="Show or hide the history (F6)">History</button>
+          <!-- How you look at the loaded sheet, not commands on it. Shown only
+               while a sheet is loaded; synced by syncSheetToggles() in ui.js. -->
+          <button type="button" id="v2-sheet-hide" hidden></button>
+          <button type="button" id="v2-sheet-view" hidden></button>
           <div class="seg" role="group" aria-label="Show on plan">
             <button type="button" data-plan-status="both" class="active">Both</button>
             <button type="button" data-plan-status="existing">Existing</button>
@@ -572,6 +583,31 @@
               <option value="long">along long side</option>
               <option value="short">along short side</option>
             </select>
+          </label>
+          <label id="v2-ctx-ridgepos-wrap" hidden title="How far the ridge sits from the wall at the top (or left) of the roof in plan. Empty is the middle.">Ridge from top/left wall
+            <span class="plan-context-field">
+              <input id="v2-ctx-ridgepos" type="text" inputmode="decimal" autocomplete="off" placeholder="middle" />
+              <span>mm</span>
+            </span>
+          </label>
+          <label id="v2-ctx-pitch2-wrap" hidden title="The slope of the shorter side. Empty uses the same pitch on both sides.">Other slope
+            <span class="plan-context-field">
+              <input id="v2-ctx-pitch2" type="text" inputmode="decimal" autocomplete="off" placeholder="same" />
+              <span>°</span>
+            </span>
+          </label>
+          <span id="v2-ctx-ridge-note" class="plan-context-note" hidden></span>
+          <label id="v2-ctx-overhang-wrap" hidden>Overhang
+            <span class="plan-context-field">
+              <input id="v2-ctx-overhang" type="text" inputmode="decimal" autocomplete="off" />
+              <span>mm</span>
+            </span>
+          </label>
+          <label id="v2-ctx-plate-wrap" hidden>Plate height
+            <span class="plan-context-field">
+              <input id="v2-ctx-plate" type="text" inputmode="decimal" autocomplete="off" />
+              <span>mm</span>
+            </span>
           </label>
           <div id="v2-ctx-roof-cut" hidden>
             <fieldset class="planner-status" id="v2-ctx-roof-cut-kind" hidden>
@@ -1253,6 +1289,6 @@
     </form>
   </div>
 
-  <script type="module" src="./ui.js?v=20261108-listen"></script>
+  <script type="module" src="./ui.js?v=20261108-edit-sheet"></script>
 </body>
 </html>
