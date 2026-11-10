@@ -790,6 +790,9 @@ function renderChrome() {
   // only as its parent section.
   pill.classList.toggle("is-here", inJob);
   pill.setAttribute("aria-current", inJob ? "page" : "false");
+  // Inside a job, Log time is the solid copper action. New job returns to
+  // that role on the list screens.
+  el("new-project").classList.toggle("btn-primary", !inJob);
   el("nav").querySelector('[data-view="register"]')?.classList.toggle("is-parent", inJob);
   el("nav").classList.toggle("in-job", inJob);
   if (inJob) {

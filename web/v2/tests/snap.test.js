@@ -768,6 +768,96 @@ test("a run clear of a corner and of straight keeps its aim", () => {
   assert.ok(Math.abs(got - 20 * Math.PI / 180) < 1e-8);
 });
 
+test("a run near 45° is stored on 45°", () => {
+  const from = { x: 1, y: 2 };
+  const p = aim(46.5, 4);
+  const point = snapLinearEnd(from.x + p.x, from.y + p.y, {
+    from, originsX: [0], originsY: [0], tolWorld: 10 / 40, lines: [],
+  });
+  const got = Math.atan2(point.y - from.y, point.x - from.x) * 180 / Math.PI;
+  assert.ok(Math.abs(got - 45) < 1e-8, got);
+  assert.equal(point.angle, 45);
+});
+
+test("every 45° step is caught, in any quadrant", () => {
+  const from = { x: 0, y: 0 };
+  for (const deg of [135, 225, 315]) {
+    const p = aim(deg + 1, 4);
+    const point = snapLinearEnd(p.x, p.y, {
+      from, originsX: [0], originsY: [0], tolWorld: 10 / 40, lines: [],
+    });
+    let got = Math.atan2(point.y, point.x) * 180 / Math.PI;
+    if (got < 0) got += 360;
+    assert.ok(Math.abs(got - deg) < 1e-8, `${deg}: ${got}`);
+    assert.equal(point.angle, deg);
+  }
+});
+
+test("a 15° step catches only close in", () => {
+  const from = { x: 0, y: 0 };
+  const opts = { from, originsX: [0], originsY: [0], tolWorld: 10 / 40, lines: [] };
+  const near = aim(30.8, 4);
+  const caught = snapLinearEnd(near.x, near.y, opts);
+  assert.ok(Math.abs(Math.atan2(caught.y, caught.x) * 180 / Math.PI - 30) < 1e-8);
+  assert.equal(caught.angle, 30);
+  const off = aim(32.5, 4);
+  const free = snapLinearEnd(off.x, off.y, opts);
+  assert.ok(Math.abs(Math.atan2(free.y, free.x) * 180 / Math.PI - 32.5) < 1e-8);
+  assert.equal(free.angle, null);
+});
+
+test("a short run on screen is not caught on every angle step", () => {
+  // Zoomed far out: 10 px is a metre, so the distance rule alone would catch
+  // nearly any aim. The angle cap still lets 40° through.
+  const from = { x: 0, y: 0 };
+  const p = aim(40, 3);
+  const point = snapLinearEnd(p.x, p.y, {
+    from, originsX: [0], originsY: [0], tolWorld: 1, lines: [],
+  });
+  const got = Math.atan2(point.y, point.x) * 180 / Math.PI;
+  assert.ok(Math.abs(got - 40) < 0.5, got);
+  assert.equal(point.angle, null);
+});
+
+test("Shift keeps the run horizontal or vertical", () => {
+  const from = { x: 1, y: 1 };
+  const flat = snapLinearEnd(5.2, 2.4, {
+    from, ortho: true, originsX: [0], originsY: [0], tolWorld: 10 / 80, lines: [],
+  });
+  assert.equal(flat.y, 1);
+  assert.equal(flat.ortho, "x");
+  assert.ok(Math.abs(flat.x - 5.2) < 0.01);
+  const tall = snapLinearEnd(2.4, -3.1, {
+    from, ortho: true, originsX: [0], originsY: [0], tolWorld: 10 / 80, lines: [],
+  });
+  assert.equal(tall.x, 1);
+  assert.equal(tall.ortho, "y");
+  // 4.1 m is pulled to the round 4 m.
+  assert.ok(Math.abs(tall.y - -3) < 1e-9, tall.y);
+});
+
+test("Shift wins over a 45° catch and the chain jump", () => {
+  const from = { x: 0, y: 0 };
+  const p = aim(44, 4);
+  const point = snapLinearEnd(p.x, p.y, {
+    from, ortho: true, prev: { x: 1, y: 1 }, originsX: [0], originsY: [0], tolWorld: 10 / 40, lines: [],
+  });
+  assert.equal(point.y, 0);
+  assert.equal(point.angle, null);
+  assert.equal(point.jump, null);
+  assert.equal(point.latch, null);
+});
+
+test("Shift with the pointer on a corner ends level with that corner", () => {
+  const from = { x: 0, y: 0 };
+  const join = snapPoint(4.02, 2.98, [{ x: 4, y: 3 }], 0.1);
+  const point = snapLinearEnd(4.02, 2.98, {
+    from, join, ortho: true, originsX: [0], originsY: [0], tolWorld: 0.1, lines: [],
+  });
+  assert.equal(point.x, 4);
+  assert.equal(point.y, 0);
+});
+
 test("another wall's line wins over the angle jump", () => {
   const prev = { x: 1, y: 0 };
   const from = { x: 0, y: 0 };

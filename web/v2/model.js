@@ -207,6 +207,9 @@ export function emptyDoc() {
     // project": just the ground floor and its foundation, never every
     // storey the template happens to define, even on a four-level pack.
     floorsRevealed: 0,
+    // Floor build-up on the ground storey, mm from FFL to the slab top. Null
+    // is not stated: the DPC is then taken at FFL, and Check says so.
+    floorBuildUp: null,
     // Storeys this document added beyond the ones the template names - see
     // level-view.js's insertLevel(). Kept on the document, never merged into
     // the pack, because the pack is regenerated from the template.
@@ -1151,6 +1154,8 @@ export function normalizeDoc(raw) {
     ceilingSku: room.ceilingSku || null,
     // This room's wall height in metres; null follows the wall type / level above.
     wallHeight: Number.isFinite(room.wallHeight) && room.wallHeight > 0 ? room.wallHeight : null,
+    // Floor offset from the level, millimetres. Absent means on the level.
+    ...(Number.isFinite(room.offset) && room.offset !== 0 ? { offset: room.offset } : {}),
     // Finish rules: what goes on this room's walls and floor.
     finishes: normalizeRoomFinishes(room.finishes),
     // A bound room keeps the point the user clicked inside the walls. Absent
@@ -1179,6 +1184,7 @@ export function normalizeDoc(raw) {
       y2: seg.y2,
       status: seg.status === "existing" ? "existing" : "planned",
       top: seg.top === "level-above" ? "level-above" : null,
+      ...(seg.foundation === false ? { foundation: false } : {}),
       ...(location === "exterior" || location === "interior" ? { location } : {}),
       ...(arc ? { arc } : {}),
       ...baseAttachFields(seg),
@@ -1194,7 +1200,14 @@ export function normalizeDoc(raw) {
       : rectShape(row.rect?.x ?? 0, row.rect?.y ?? 0, row.rect?.w ?? 1, row.rect?.h ?? 1),
   }));
 
-  doc.slabs = mapShaped(raw.slabs, "sl").map((row) => ({ ...row, ...shapeLinkFields(row) }));
+  doc.slabs = mapShaped(raw.slabs, "sl").map((row) => {
+    const next = { ...row, ...shapeLinkFields(row) };
+    // Only an explicit true survives. Anything else is a floor on its storey.
+    if (row.atEaves === true) next.atEaves = true;
+    else delete next.atEaves;
+    if (!(Number.isFinite(row.offset) && row.offset !== 0)) delete next.offset;
+    return next;
+  });
   doc.roofs = mapShaped(raw.roofs, "rf").map(({ ridgeOffset: _ridge, pitch2: _second, ...roof }) => ({
     ...roof,
     form: roof.form || "flat",
@@ -1379,6 +1392,8 @@ export function normalizeDoc(raw) {
     clientName: infoStr(raw.projectInfo?.clientName),
   };
   doc.floorsRevealed = Number.isInteger(raw.floorsRevealed) && raw.floorsRevealed >= 0 ? raw.floorsRevealed : 0;
+  // Millimetres from FFL down to the slab top on the ground storey. Null is not stated.
+  doc.floorBuildUp = Number.isFinite(raw.floorBuildUp) && raw.floorBuildUp >= 0 ? raw.floorBuildUp : null;
   // `num` rather than `Number(x)`: null and "" both coerce to 0, which would
   // silently turn an unstated floor-to-ceiling into a floor-to-ceiling of zero.
   const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);

@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { emptyDoc, normalizeDoc } from "../model.js";
-import { RIBBON, ribbonItems } from "../ribbon.js";
+import { ribbonItems } from "../ribbon.js";
 import {
   createSection,
   ensureSections,
@@ -125,19 +125,12 @@ test("setSheetView refuses a section view with no sectionId, falling back to pla
 
 // --- ribbon wiring ----------------------------------------------------
 
-test("view-section is a live command, not a Week 3 todo, once sheets can hold a view", () => {
+test("Sheets is the one sheets button, on Output > Print", () => {
   const items = ribbonItems();
-  const viewSection = items.get("view-section");
-  assert.equal(viewSection.command, "view-section");
-  assert.equal(viewSection.todo, undefined);
-});
-
-test("nothing in the customer's ribbon still calls view-section unfinished", () => {
-  for (const tab of RIBBON) {
-    for (const group of tab.groups) {
-      for (const item of group.items) {
-        if (item.id === "view-section") assert.equal(item.todo, undefined);
-      }
-    }
-  }
+  assert.equal(items.has("view-section"), false);
+  const sheets = items.get("sheets");
+  assert.equal(sheets.command, "sheets");
+  assert.equal(sheets.tabId, "output");
+  assert.equal(sheets.group, "Print");
+  assert.equal(sheets.todo, undefined);
 });

@@ -593,14 +593,14 @@ test("floor coverage reports bare floor and overlap, including a concave outline
   assert.equal(side.overlapCount, 0);
 });
 
-test("Rooms sit between Walls and Finishes on Build", () => {
+test("Rooms follow the walls, and finishes sit with the fit-out on Build", () => {
   const build = RIBBON.find((t) => t.id === "build");
   const names = build.groups.map((g) => g.label);
-  assert.equal(names[names.indexOf("Walls") + 1], "Rooms");
-  assert.equal(names[names.indexOf("Rooms") + 1], "Finishes");
+  assert.equal(names[names.indexOf("Walls & openings") + 1], "Rooms");
+  assert.equal(names.at(-1), "Interiors");
   assert.deepEqual(build.groups.find((g) => g.label === "Rooms").items.map((i) => i.id), ["rooms", "room-sep"]);
-  const fin = build.groups.find((g) => g.label === "Finishes");
-  assert.deepEqual(fin.items.map((i) => i.id), ["wall-finishes", "finishes"]);
+  const fin = build.groups.find((g) => g.label === "Interiors");
+  assert.deepEqual(fin.items.slice(-2).map((i) => i.id), ["wall-finishes", "finishes"]);
   const document = RIBBON.find((t) => t.id === "document");
   assert.equal(document.groups.find((g) => g.label === "Rooms"), undefined);
   const project = document.groups.find((g) => g.label === "Project");

@@ -9,7 +9,20 @@ import { normalizePackUnits } from "../schema.js";
 import { deriveWalls } from "../walls.js";
 import { createFinishRun } from "../finish-model.js";
 import { addFoundationUnderWall, alignOutlineShift, applyOpeningEdit, applyTypedGap, applyWallTopEdit, axisAlignedOutline, dropGuideZ, elevationModel, faceRefForSelection, foundationTypes, includeDropGuide, maxTypedGap, openingSnapEdges, resizeOpeningCorner, snapElevation, translateOutlineEdge } from "../wall-elevation.js";
-import { elevationSvg, faceScreenCenter, planFaceFrame } from "../wall-elevation-render.js";
+import { centerVerticalFrame, elevationSvg, faceScreenCenter, planFaceFrame } from "../wall-elevation-render.js";
+
+test("flipping the face reads the opposite edge from the other end", async () => {
+  const { viewedFaceCorners } = await import("../wall-elevation.js");
+  const poly = [
+    { x: 0, y: 0 },
+    { x: 5, y: 1 },
+    { x: 4.8, y: 1.4 },
+    { x: -0.2, y: 0.4 },
+  ];
+  assert.deepEqual(viewedFaceCorners(poly, 1), [poly[0], poly[1]], "side 1 walks the near edge from the first end");
+  assert.deepEqual(viewedFaceCorners(poly, -1), [poly[2], poly[3]], "the other face starts at the second end");
+  assert.equal(viewedFaceCorners(null, 1), null);
+});
 
 test("a guideline is measured down from the top of the wall and is a snap target", () => {
   assert.equal(dropGuideZ(2.4, 750), 1.65);
@@ -391,6 +404,40 @@ test("a window corner keeps the opposite edge and at least 200 mm", () => {
   assert.deepEqual(edges.z, [orig.sill + orig.height], "the sill is not a target for itself");
 });
 
+test("a mirrored face keeps each corner on the station it edits", () => {
+  const doc = drawnDoc([{ id: "o1", sku: "TSP_WN1212", wallId: "w1", t: 0.25 }]);
+  const walls = deriveWalls(doc, pack);
+  const run = createFinishRun(doc, walls[0], -1, { category: "paint", from: 1, to: 4, bottom: 0, top: 1 });
+  const model = elevationModel(doc, pack, { wallId: "w1", side: -1 }, walls);
+  const frame = planFaceFrame({ ...walls[0], side: -1 }, { scale: 40, ox: 100, oy: 80 }, 0);
+  assert.equal(frame.dir, -1);
+  const drawn = elevationSvg(model, { width: 800, height: 500, interactive: true, selectedId: "o1", frame });
+  assert.match(drawn.svg, /class="elev-svg is-mirrored elev-host"/);
+  const opening = model.openings[0];
+  const hx = (part) => {
+    const at = drawn.svg.indexOf(`class="elev-handle elev-handle-${part}" data-elev-op="${part}"`);
+    assert.ok(at > 0, part);
+    const rect = drawn.svg.slice(drawn.svg.lastIndexOf("<rect", at), at);
+    return Number(rect.match(/x="([^"]+)"/)[1]);
+  };
+  const xOf = (s) => drawn.originX + s * drawn.scaleX;
+  const left = xOf(opening.offset);
+  const right = xOf(opening.offset + opening.width);
+  assert.ok(left > right, "the left station is the right-hand end on this face");
+  assert.ok(Math.abs((hx("tl") - hx("tr")) - (left - right)) < 1e-6, "the top corners stay on their jambs");
+  assert.ok(Math.abs((hx("bl") - hx("br")) - (left - right)) < 1e-6, "the bottom corners stay on their jambs");
+  assert.ok(Math.abs(hx("tl") - hx("bl")) < 1e-6, "a jamb's two corners share its station");
+
+  const band = model.finishBands.find((b) => b.sourceId === run.id);
+  const edges = elevationSvg(model, { width: 800, height: 500, interactive: true, frame });
+  const ex = (part) => {
+    const tag = edges.svg.match(new RegExp(`<rect x="([^"]+)"[^>]*data-elev-op="band-${part}" data-elev-band="${band.id}"`));
+    assert.ok(tag, part);
+    return Number(tag[1]);
+  };
+  assert.ok(Math.abs((ex("left") - ex("right")) - (xOf(band.from) - xOf(band.to))) < 1e-6, "the finish ends stay on their stations");
+});
+
 test("the SVG draws the wall and each opening, with handles only when interactive and selected", async () => {
   const { elevationSvg } = await import("../wall-elevation-render.js");
   const doc = drawnDoc([{ id: "o1", sku: "TSP_WN1212", wallId: "w1", t: 0.5 }]);
@@ -751,6 +798,11 @@ test("the open face matches the plan scale and lines up with the wall", async ()
   assert.equal(vertical.dir, 1);
   const raised = planFaceFrame({ x1: 2, y1: 0, x2: 2, y2: 3, side: 1 }, cam, 50);
   assert.ok(raised.originX < vertical.originX, "moving the wall up moves the face sideways");
+  const centered = centerVerticalFrame(vertical, 0, 3, 1, 800);
+  const mid = centered.originX + centered.dir * 1.5 * centered.scale;
+  assert.equal(mid, 400, "a vertical wall is centred in the strip");
+  assert.equal(centered.originX - vertical.originX, 400 - (vertical.originX + 1.5 * vertical.scale), "every station shifts by the same amount");
+  assert.equal(centerVerticalFrame({ ...vertical, vertical: false }, 0, 3, 1, 800).originX, vertical.originX, "a horizontal wall keeps the plan's x");
 
   const angled = planFaceFrame({ x1: 0, y1: 0, x2: 3, y2: 4, side: 1 }, cam, 0);
   const angledFace = { ...face, length: 5, height: 2.5, top: 2.5 };
@@ -762,6 +814,43 @@ test("the open face matches the plan scale and lines up with the wall", async ()
   assert.ok(Math.abs(Number(arect[3]) - 5 * 40) < 1e-6, "an angled wall is its full screen length");
   assert.ok(Number(arect[3]) > 4 * 40, "longer than the up-down projection");
   assert.ok(Math.abs(Number(arect[4]) - 2.5 * 40) < 1e-6);
+
+  const { elevationGuideLayout } = await import("../wall-elevation-render.js");
+  const stationX = (s) => angled.originX + angled.dir * s * angled.scale;
+  const skewMarks = [0, 2.5, 5].map((s) => ({
+    planX: cam.ox + 3 * (s / 5) * cam.scale,
+    planY: cam.oy + 4 * (s / 5) * cam.scale,
+    elevX: stationX(s),
+  }));
+  assert.ok(Math.abs(skewMarks[2].elevX - skewMarks[0].elevX - 5 * 40) < 1e-6, "the guides are five metres apart");
+  assert.ok(Math.abs(skewMarks[2].planY - skewMarks[0].planY - 4 * 40) < 1e-6, "the plan only rises four metres");
+  assert.ok(Math.abs(skewMarks[2].planX - skewMarks[2].elevX) > 1, "a plumb line from the plan end misses the elevation");
+  const skewGuides = elevationGuideLayout(skewMarks);
+  assert.equal(skewGuides.across.length, 3, "a skew wall bends across before dropping");
+  assert.ok(Math.abs(skewGuides.fold.x2 - skewGuides.fold.x1 - 5 * 40) < 1e-6, "the fold spans the true length");
+  assert.ok(Math.abs(skewGuides.down[2].x - skewGuides.down[0].x - 5 * 40) < 1e-6);
+
+  const flat = planFaceFrame({ x1: 0, y1: 2, x2: 6, y2: 2, side: 1 }, cam, 0);
+  const flatGuides = elevationGuideLayout([0, 3, 6].map((s) => ({
+    planX: cam.ox + s * cam.scale,
+    planY: cam.oy + 2 * cam.scale,
+    elevX: flat.originX + flat.dir * s * flat.scale,
+  })));
+  assert.equal(flatGuides.across.length, 0, "a horizontal wall drops straight down");
+  assert.equal(flatGuides.fold, null);
+
+  const shallow = planFaceFrame({ x1: 0, y1: 0, x2: 4, y2: 3, side: 1 }, cam, 0);
+  assert.equal(shallow.vertical, false, "a wall closer to horizontal is not the vertical case");
+  const shallowMarks = [0, 2.5, 5].map((s) => ({
+    planX: cam.ox + 4 * (s / 5) * cam.scale,
+    planY: cam.oy + 3 * (s / 5) * cam.scale,
+    elevX: shallow.originX + shallow.dir * s * shallow.scale,
+  }));
+  assert.ok(Math.abs(shallowMarks[2].elevX - shallowMarks[0].elevX - 5 * 40) < 1e-6, "still five metres in the elevation");
+  assert.ok(Math.abs(shallowMarks[2].planX - shallowMarks[0].planX - 4 * 40) < 1e-6, "the plan only runs four metres across");
+  const shallowGuides = elevationGuideLayout(shallowMarks);
+  assert.equal(shallowGuides.across.length, 3, "a shallow skew bends the same way a vertical wall does");
+  assert.ok(Math.abs(shallowGuides.fold.x2 - shallowGuides.fold.x1 - 5 * 40) < 1e-6);
 
   const px = frame.originX + 40;
   const py = 500 - 14 - 40;
@@ -1130,4 +1219,61 @@ test("a coat and a paint on the same rectangle read as two finishes", async () =
   assert.match(preview, /data-elev-fill="paint"/);
   assert.doesNotMatch(preview, /elev-coat-/, "the stack mark is only on the open elevation");
   assert.doesNotMatch(preview, />\d+ finishes</);
+});
+
+test("fit whole wall keeps one scale and stays inside the strip", async () => {
+  const { elevationFitFrame, elevationSvg } = await import("../wall-elevation-render.js");
+  const model = elevationModel(drawnDoc(), pack, { wallId: "w1" });
+  const wide = elevationFitFrame(model, 240, 280);
+  const drawn = elevationSvg(model, { width: 240, height: 280, interactive: true, frame: wide });
+  assert.ok(Math.abs(Math.abs(drawn.scaleX) - drawn.scaleY) < 1e-9, "a metre along matches a metre up");
+  const wall = drawn.svg.match(/<rect x="([^"]+)" y="([^"]+)" width="([^"]+)" height="([^"]+)" class="elev-wall"/);
+  assert.ok(wall, "wall rect");
+  const left = Number(wall[1]);
+  const top = Number(wall[2]);
+  const right = left + Number(wall[3]);
+  const bottom = top + Number(wall[4]);
+  assert.ok(left >= 13 && right <= 227, "the length fits across the strip");
+  assert.ok(top >= 13 && bottom <= 267, "the height fits in the strip");
+
+  const tallDoc = drawnDoc();
+  tallDoc.segments[0].height = 12;
+  tallDoc.segments[0].x2 = 2;
+  const tall = elevationModel(tallDoc, pack, { wallId: "w1" });
+  const tight = elevationFitFrame(tall, 400, 160);
+  const tallDrawn = elevationSvg(tall, { width: 400, height: 160, interactive: true, frame: tight });
+  const tallWall = tallDrawn.svg.match(/<rect x="([^"]+)" y="([^"]+)" width="([^"]+)" height="([^"]+)" class="elev-wall"/);
+  assert.ok(tallWall, "tall wall rect");
+  const tallTop = Number(tallWall[2]);
+  const tallBottom = tallTop + Number(tallWall[4]);
+  assert.ok(tallTop >= 13 && tallBottom <= 147, "a tall wall fits the short strip");
+  assert.ok(Math.abs(Math.abs(tallDrawn.scaleX) - tallDrawn.scaleY) < 1e-9);
+});
+
+test("lining the elevation up with the plan does not move the plan", () => {
+  const src = readFileSync(new URL("../ui.js", import.meta.url), "utf8");
+  const alignAt = src.indexOf("function alignWallToElevation()");
+  const fitAt = src.indexOf("function fitWholeWall()");
+  const stationAt = src.indexOf("function faceStationScreen(");
+  assert.ok(alignAt > 0 && fitAt > 0 && stationAt > alignAt);
+  const align = src.slice(alignAt, stationAt);
+  const fit = src.slice(fitAt, alignAt);
+  assert.doesNotMatch(align, /cam\.(ox|oy|scale)\s*[\+\-]?=/, "align leaves the plan camera");
+  assert.doesNotMatch(fit, /cam\.(ox|oy|scale)\s*[\+\-]?=/, "fit leaves the plan camera");
+  assert.match(align, /elevationLink = "plan"/);
+  assert.match(fit, /elevationLink = "fitted"/);
+  assert.match(src, /function detachElevationFromPlan\(\)/);
+  const flash = src.slice(src.indexOf("function flashElevationAlignment()"), src.indexOf("function alignFloorToPicture()"));
+  assert.match(flash, /is-fold/);
+  assert.match(flash, /elevationGuideLayout/);
+  assert.match(flash, /forceBend: frame\.vertical/);
+  assert.match(flash, /planLinkedFrame/);
+  assert.match(flash, /elevationGuideKey/);
+  assert.match(flash, /viewedFacePlan/);
+  assert.match(src, /function viewedFacePlan\(/);
+  assert.match(src, /function planLinkedFrame\(/);
+  assert.match(src, /centerVerticalFrame\(frame, from, to, along, width\)/);
+  const dock = src.slice(src.indexOf("function syncElevationDock("), src.indexOf("function elevEdgesAdding("));
+  const early = dock.indexOf("if (key === elevationKey)");
+  assert.ok(early > 0 && dock.indexOf("syncElevationGuides(inScreen, w)", early) > early, "guides redraw after the plan slides, even when the elevation itself has not moved");
 });

@@ -9,33 +9,62 @@ import { CONTEXT_TABS, GROUP_PRIORITY, RIBBON, placingTab, ribbonItems, selectio
 // planner can be exercised without a browser. Wider = nicer.
 const WIDTHS = {
   large: [130, 110, 90, 40],
-  stack: [260, 220, 190, 90, 40],
-  mixed: [300, 260, 240, 220, 190, 170, 100, 40],
+  stack: [260, 240, 220, 190, 90, 40],
+  mixed: [300, 260, 200, 100, 40],
+  wide: [340, 300, 270, 160, 40],
+  settings: [240, 180, 110],
 };
 const widthOf = (g, step) => WIDTHS[g.kind][step];
 const total = (groups, steps) => groups.reduce((sum, g, i) => sum + widthOf(g, steps[i]), 0);
 const fitsIn = (groups, limit) => (steps) => total(groups, steps) <= limit;
 
-const GROUPS = [
-  { kind: "mixed", prio: 2 }, // Add drawing
-  { kind: "stack", prio: 1 }, // Levels
-  { kind: "stack", prio: -1 }, // Walls
-  { kind: "stack", prio: 3 }, // Finishes
-  { kind: "stack", prio: 3 }, // Floors & roofs
-  { kind: "stack", prio: 3 }, // Ceilings
-  { kind: "large", prio: 3 }, // Openings
-  { kind: "stack", prio: 0 }, // Services
-];
+// Build's row, in order, with its real kinds and priorities.
+const BUILD_KINDS = ["mixed", "stack", "wide", "mixed", "wide", "mixed", "stack", "wide"];
+const GROUPS = RIBBON.find((t) => t.id === "build").groups
+  .map((g, i) => ({ kind: BUILD_KINDS[i], prio: GROUP_PRIORITY[g.label] ?? 0, label: g.label }));
 
-test("Add drawing on Build is the two ways in, plus a Sheet button only once a sheet is loaded", () => {
-  const add = RIBBON.find((t) => t.id === "build").groups.find((g) => g.label === "Add drawing");
+test("Build is regrouped in drawing order, each modelling group led by one tool", () => {
+  const build = RIBBON.find((t) => t.id === "build");
+  assert.deepEqual(build.groups.map((g) => g.label), [
+    "Underlay", "Levels", "Walls & openings", "Rooms", "Floors & roofs", "Structure", "Services", "Interiors",
+  ]);
+  const onRow = (label) => build.groups.find((g) => g.label === label).items.filter((item) => !item.contextOnly);
+  const lead = (label) => onRow(label).filter((item) => item.anchor).map((item) => item.id);
+  assert.deepEqual(lead("Underlay"), ["underlay"]);
+  assert.deepEqual(lead("Walls & openings"), ["walls"]);
+  assert.deepEqual(lead("Rooms"), ["rooms"]);
+  assert.deepEqual(lead("Floors & roofs"), ["floors"]);
+  assert.deepEqual(lead("Structure"), ["columns"]);
+  assert.deepEqual(lead("Interiors"), ["furniture"]);
+  assert.deepEqual(lead("Levels"), []);
+  assert.deepEqual(lead("Services"), []);
+  assert.deepEqual(onRow("Walls & openings").map((i) => i.id), ["walls", "doors", "windows", "boundary", "foundations"]);
+  assert.deepEqual(onRow("Floors & roofs").map((i) => i.id), ["floors", "ceilings", "roofs", "roof-cut"]);
+  assert.deepEqual(onRow("Interiors").map((i) => i.id), ["furniture", "casework", "wall-finishes", "finishes"]);
+  assert.deepEqual(onRow("Levels").map((i) => i.label), ["Add level", "Remove level", "Insert level"]);
+  assert.equal(ribbonItems().get("room-sep").label, "Room separator");
+  assert.equal(build.groups.find((g) => g.label === "Walls & openings").short, "Walls");
+  assert.equal(build.groups.find((g) => g.label === "Floors & roofs").short, "Floors");
+  // Ramps and railings have no template types yet, so they are off the row.
+  assert.equal(ribbonItems().has("ramp"), false);
+  assert.equal(ribbonItems().has("railings"), false);
+});
+
+test("Underlay on Build is the two ways in, plus Edit sheet only once a sheet is loaded", () => {
+  const add = RIBBON.find((t) => t.id === "build").groups.find((g) => g.label === "Underlay");
   assert.equal(add.menu, undefined);
   const onRow = add.items.filter((item) => !item.contextOnly);
   assert.deepEqual(onRow.map((item) => item.id), ["underlay", "satellite", "underlay-adjust"]);
   assert.deepEqual(onRow.filter((item) => item.needsUnderlay).map((item) => item.id), ["underlay-adjust"]);
-  assert.deepEqual(onRow.filter((item) => item.anchor).map((item) => item.id), ["underlay", "satellite", "underlay-adjust"]);
   assert.equal(onRow.find((item) => item.id === "underlay-adjust").label, "Edit sheet");
-  assert.equal(onRow.find((item) => item.id === "underlay-adjust").splitBefore, true);
+});
+
+test("the Walls, Room and Furniture icons are the chosen ones", () => {
+  const source = readFileSync(new URL("../ribbon-fit.js", import.meta.url), "utf8");
+  // Stepped bricks, a plain outline, and a sofa.
+  assert.ok(source.includes('walls: \'<path d="M3 19V5h12v4.67h3v4.66h3V19z"/>'));
+  assert.ok(source.includes('rooms: \'<path d="M4 4h16v16H4z"/>\''));
+  assert.ok(source.includes('furniture: \'<path d="M5.5 11V7A1.5'));
 });
 
 test("Modify | Sheet holds the sheet's commands, defined once in RIBBON", () => {
@@ -63,8 +92,11 @@ test("route edits live on the Services tab and place-component is not a second p
   const ids = services.items.map((item) => item.id);
   assert.equal(ids.includes("service-place"), false);
   assert.deepEqual(services.items.filter((item) => !item.contextOnly).map((item) => item.id), [
-    "electrical", "plumbing", "waterheater", "drainage", "service-route",
+    "electrical", "plumbing", "drainage", "service-route",
   ]);
+  // Water heaters are placed from Plumbing.
+  assert.deepEqual(ribbonItems().get("plumbing").categories, ["sanitary", "waterheater"]);
+  assert.equal(ribbonItems().get("service-route").label, "Route");
   const route = CONTEXT_TABS.service.groups.find((g) => g.label === "Route");
   assert.deepEqual(route.items, ["service-node", "service-rise", "service-connect", "service-type", "service-slope"]);
   for (const id of route.items) assert.equal(services.items.find((item) => item.id === id).needs, undefined, id);
@@ -92,7 +124,7 @@ test("the Walls tab lists the agreed actions, and its Edit group is the last to 
   assert.deepEqual(selectionTab(new Set(["door"])).groups[0].items.map((i) => i.id), ["move", "copy", "align", "delete", "select-similar"]);
   assert.deepEqual(selectionTab(new Set(["door"])).groups[1].items.map((i) => i.id), ["flip-hinge", "flip-swing"]);
   assert.equal(GROUP_PRIORITY.Edit, -1);
-  assert.equal(GROUP_PRIORITY.Walls, -1);
+  assert.equal(GROUP_PRIORITY["Walls & openings"], -1);
 });
 
 test("a room and a site boundary get no tab, and nothing selected gets none", () => {
@@ -143,12 +175,13 @@ test("Multi-Select is the intersection of the kinds' Edit groups", () => {
 test("a placing tab is derived from the item's tool, not written out", () => {
   const walls = placingTab("walls");
   assert.equal(walls.label, "Place Wall");
-  assert.deepEqual(walls.groups[0].items.map((i) => i.id), ["walls", "boundary", "foundations"]);
+  assert.deepEqual(walls.groups[0].items.map((i) => i.id), ["walls", "doors", "windows", "boundary", "foundations"]);
+  assert.equal(walls.groups[0].short, "Walls");
   assert.equal(placingTab("doors").label, "Place Door");
   assert.equal(placingTab("windows").label, "Place Window");
   assert.equal(placingTab("floors").label, "Place Floor");
   assert.equal(placingTab("stairs").label, "Place Stair");
-  assert.equal(placingTab("waterheater").label, "Place Water heater");
+  assert.equal(placingTab("plumbing").label, "Place Plumbing");
   for (const [id, item] of ribbonItems()) {
     if (item.tool && item.tabId === "build" && id !== "roof-cut") assert.ok(placingTab(id), id);
     else assert.equal(placingTab(id), null, id);
@@ -156,6 +189,43 @@ test("a placing tab is derived from the item's tool, not written out", () => {
   // Trims arm a tool but do not place anything. Cut roof edits a roof.
   assert.equal(placingTab("trim-corner"), null);
   assert.equal(placingTab("roof-cut"), null);
+});
+
+test("the permanent Modify tab keeps only the commands with no other home", () => {
+  const tab = RIBBON.find((t) => t.id === "modify");
+  assert.equal(tab.label, "Modify");
+  assert.deepEqual(tab.groups.map((g) => g.label), ["Modify", "Arrange"]);
+  const visible = tab.groups.flatMap((g) => g.items.filter((item) => !item.contextOnly).map((item) => item.id));
+  assert.deepEqual(visible, [
+    "trim-corner", "trim-single", "trim-circle", "join", "cut", "merge", "split", "align", "group", "ungroup",
+  ]);
+  assert.equal(ribbonItems().has("undo"), false);
+  assert.equal(ribbonItems().has("redo"), false);
+  assert.equal(ribbonItems().has("contour"), false);
+});
+
+test("Call out sits with Section, and site tools share one Site group", () => {
+  const document = RIBBON.find((t) => t.id === "document");
+  const views = document.groups.find((g) => g.label === "Views");
+  assert.deepEqual(views.items.map((item) => item.id), ["section", "elevation", "callout", "grids"]);
+  const site = document.groups.find((g) => g.label === "Site");
+  assert.deepEqual(site.items.map((item) => item.id), ["property-line", "sg-coords", "building-line", "contours", "platform"]);
+  const output = RIBBON.find((t) => t.id === "output");
+  assert.deepEqual(output.groups.find((g) => g.label === "3D").items.map((item) => item.id), ["view-3d", "view-camera"]);
+  const check = RIBBON.find((t) => t.id === "check").groups.find((g) => g.label === "Compliance");
+  assert.deepEqual(check.items.map((item) => item.id), ["check"]);
+  assert.equal(check.items[0].label, "Run checks");
+});
+
+test("a floor or a roof can be split or merged from its own tab", () => {
+  const floor = selectionTab(new Set(["floor"]));
+  assert.deepEqual(floor.groups.find((g) => g.label === "Floor").items.map((i) => i.id), [
+    "edit-poly", "follow-walls", "finishes", "split", "merge",
+  ]);
+  const roof = selectionTab(new Set(["roof"]));
+  assert.deepEqual(roof.groups.find((g) => g.label === "Roof").items.map((i) => i.id), [
+    "roof-cut-here", "edit-poly", "split", "merge",
+  ]);
 });
 
 test("only the agreed commands wait for a selection", () => {
@@ -179,12 +249,15 @@ test("every id on a contextual tab has its own icon", () => {
   }
 });
 
-test("only Openings opts into large buttons", () => {
+test("no group opts into all-large buttons: size comes from one lead tool", () => {
   const labels = RIBBON
     .flatMap((tab) => tab.groups)
     .filter((group) => group.large)
     .map((group) => group.label);
-  assert.deepEqual([...new Set(labels)], ["Openings"]);
+  assert.deepEqual(labels, []);
+  for (const group of RIBBON.flatMap((tab) => tab.groups)) {
+    assert.ok(group.items.filter((item) => item.anchor).length <= 1, group.label);
+  }
 });
 
 test("every ladder width table matches its ladder length", () => {
@@ -218,21 +291,29 @@ test("no dead space: no group could take one step back and still fit", () => {
   }
 });
 
-test("Finishes, floors, ceilings and openings step before Add drawing stacks its anchors", () => {
+test("Interiors gives up the first step, and only Interiors, when the row is just too wide", () => {
   const first = GROUPS.map(() => 0);
-  // Narrow just enough that one step is needed.
   const limit = total(GROUPS, first) - 10;
   const steps = planSteps(GROUPS, fitsIn(GROUPS, limit));
-  assert.equal(steps[0], 0, "Add drawing stays side by side");
-  assert.equal(steps[6], 1, "Openings, the rightmost priority-3 group, steps first");
-  assert.deepEqual(steps.slice(1, 6), [0, 0, 0, 0, 0]);
-  assert.equal(steps[7], 0);
+  assert.deepEqual(steps, GROUPS.map((g) => (g.label === "Interiors" ? 1 : 0)));
 });
 
-test("priority 3 gives up its first step no later than Add drawing gives up side-by-side anchors", () => {
-  assert.ok(shrinkKey("stack", 3, 0) <= shrinkKey("mixed", 2, 0));
-  assert.ok(shrinkKey("large", 3, 0) <= shrinkKey("mixed", 2, 0));
-  assert.ok(shrinkKey("stack", 3, 0) < shrinkKey("stack", 1, 0));
+test("Build's groups take each step in the agreed order, Walls & openings last", () => {
+  for (const step of [0, 1, 2]) {
+    const order = [...GROUPS]
+      .sort((a, b) => shrinkKey(a.kind, a.prio, step) - shrinkKey(b.kind, b.prio, step))
+      .map((g) => g.label);
+    assert.deepEqual(order, [
+      "Interiors", "Services", "Underlay", "Structure", "Levels", "Floors & roofs", "Rooms", "Walls & openings",
+    ], `step ${step}`);
+  }
+  // Walls & openings is a whole step behind: its first step comes after every
+  // other group's second.
+  const walls = GROUPS.find((g) => g.label === "Walls & openings");
+  for (const g of GROUPS) {
+    if (g === walls) continue;
+    assert.ok(shrinkKey(g.kind, g.prio, 1) < shrinkKey(walls.kind, walls.prio, 0), g.label);
+  }
 });
 
 test("protected groups hold their size longer than low-priority ones", () => {
@@ -255,7 +336,27 @@ test("it stops when nothing is left to shrink", () => {
   steps.forEach((s, i) => assert.equal(s, maxStep(GROUPS[i].kind)));
 });
 
-test("mixed groups lose side-by-side anchors before anything else; anchor comfort goes late", () => {
-  assert.ok(shrinkKey("mixed", 0, 0) < shrinkKey("stack", 1, 0));
-  assert.ok(shrinkKey("mixed", 0, 5) > shrinkKey("large", 0, 1));
+test("wall settings tighten before other groups shrink, and fold only once those groups are spent", () => {
+  assert.ok(shrinkKey("settings", 0, 0) < shrinkKey("mixed", 2, 0));
+  assert.ok(shrinkKey("settings", 0, 1) > shrinkKey("stack", -1, maxStep("stack")));
+  const row = [...GROUPS, { kind: "settings", prio: 0 }];
+  const wide = total(row, row.map(() => 0));
+  const steps = planSteps(row, fitsIn(row, wide - 10));
+  assert.deepEqual(steps.slice(0, -1), GROUPS.map(() => 0));
+  assert.equal(steps.at(-1), 1);
+});
+
+test("names stay as long as they can: tile first, then the lead folds in, then icons", () => {
+  for (const kind of ["stack", "mixed", "wide"]) {
+    const ladder = LADDERS[kind];
+    const tile = ladder.findIndex((s) => s.lone === "tile");
+    const icons = ladder.findIndex((s) => s.icons);
+    assert.equal(tile, 1, kind);
+    assert.ok(icons > tile, kind);
+    assert.ok(ladder.at(-1).collapsed, kind);
+  }
+  const inline = LADDERS.mixed.findIndex((s) => s.anchors === "inline");
+  assert.ok(inline > 1 && inline < LADDERS.mixed.findIndex((s) => s.icons));
+  // A wide group keeps its lead large, captioned, until it folds away.
+  assert.ok(LADDERS.wide.every((s) => s.collapsed || (!s.anchors && s.icons !== "all")));
 });

@@ -113,7 +113,8 @@ mapping and the pack only states the material class.
   id, name, version, revision,
   locale:  { country, municipality, energyZone },
   system:  { wallHeight, defaultWallSku, defaultFloorSku, defaultFoundationSku,
-             defaultRoofSku, defaultCeilingSku, defaultLevel },
+             defaultRoofSku, defaultCeilingSku, defaultLevel,
+             defaultFoundationWallSku, foundationWallThickness },
   levels:  [ { id, name, elevation, floorToFloor, floorToCeiling } ], // metres
   skus:    [ SKU ],
   recipes: { requires, allowedHosts, maxSpan, minLength }
@@ -122,6 +123,14 @@ mapping and the pack only states the material class.
 
 `system.wallHeight` is millimetres (see the changelog above); `levels[].elevation`/
 `.floorToFloor`/`.floorToCeiling` are metres.
+
+`system.defaultFoundationWallSku` is the type the planner gives the foundation
+walls it derives under ground floor masonry walls (a foundation-category type
+that is not a strip footing). `system.foundationWallThickness` is the thickness
+those walls are drawn and priced at, in millimetres, like `wallHeight`: 220
+from the firm's brief, even where the type states 240 (see
+[../../TEMPLATE-ASKS.md](../../TEMPLATE-ASKS.md)). Both are optional; a pack
+without them falls back to the first such foundation type and 220.
 
 A SKU:
 
@@ -249,6 +258,27 @@ supplied fact, the same as a calibration distance or an erf number. What is
 level are null rather than copied from the storey below, and the status message
 says so when the level is created rather than letting the Part C check be the
 first place the user finds out.
+
+### Floor offsets, floor build-up and foundation walls
+
+A step in a floor is not a level. A room or slab may carry `offset`, in
+millimetres from its level (`-170` for a sunk lounge), the same way a roof
+carries its plate offset. Absent or 0 means on the level, and is not stored.
+A ceiling slab's `offset` moves only that ceiling; a sunk room keeps the
+ceiling above it, so the room reads taller.
+
+`doc.floorBuildUp` is the screed and finish on the ground floor slab, in
+millimetres, or null when not stated. The slab top, and with it the DPC and
+the base of every ground storey wall, sits that far below finished floor level.
+Null is treated as 0 and Check says it was not stated.
+
+Every masonry wall on the ground storey gets a derived foundation wall
+(`deriveFoundationWalls` in [walls.js](walls.js)) from the foundation level up
+to that wall's resolved base. They are not stored: they move and go with their
+wall. A drawn wall opts out with `foundation: false`; a foundation wall drawn
+by hand along the wall replaces the derived one. All of this is additive, with
+no `DOC_SCHEMA` bump: a document saved earlier has no offsets and no build-up,
+so it draws as before apart from the derived foundation walls.
 
 ## Week 2: the compliance rule engine
 
@@ -702,7 +732,7 @@ offline when geometry editing is not. The table exists; the route is step 8.
 | [ribbon.js](ribbon.js) | The customer's four toolbars plus Check |
 | [rules.js](rules.js) | Week 2: the SANS rule pack and `evaluateCompliance()` |
 | [site.js](site.js) | Week 2: property line, SG reference, building line |
-| [sheets.js](sheets.js) | Week 3: A0-A4 title blocks, scale, revisions, and `view-section`'s plan/section/elevation/callout viewport chooser |
+| [sheets.js](sheets.js) | Week 3: A0-A4 title blocks, scale, revisions, and the Sheets button's plan/section/elevation/callout viewport chooser |
 | [elevation.js](elevation.js) | Week 3: compass-direction elevation cuts, reusing section.js's u/v projection |
 | [callout.js](callout.js) | Week 3: boxed detail crop of the plan and its own blow-up scale - no projection maths, unlike section/elevation |
 | [revision.js](revision.js) | Week 3: revision cloud - a drawn, scalloped annotation linked to a sheet's already-issued revision letter |

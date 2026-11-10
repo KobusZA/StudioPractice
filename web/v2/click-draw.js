@@ -25,6 +25,74 @@ export function chainStart(end) {
 }
 
 /**
+ * What follows a placed wall. With chain on, the next segment starts at the
+ * end that was clicked, so the run continues. With chain off, the tool waits
+ * for a new start and the next wall does not begin at this end.
+ */
+export function nextWallDraft(end, { chain = true, prev = null, prevId = null } = {}) {
+  if (!chain || !end) return null;
+  return {
+    ...chainStart(end),
+    chained: true,
+    ...(prev ? { prev } : {}),
+    ...(prevId ? { prevId } : {}),
+  };
+}
+
+/**
+ * The line a wall is placed on, shifted sideways from the line the cursor
+ * tracked. Positive `distance` (metres) is to the left of start→end, the
+ * exterior side: the side a positive offset uses. Zero leaves the line
+ * where it was drawn.
+ */
+export function offsetPlacementLine(a, b, distance) {
+  return offsetRun(a?.x ?? 0, a?.y ?? 0, b?.x ?? a?.x ?? 0, b?.y ?? a?.y ?? 0, Number(distance) || 0);
+}
+
+function lineParam(line, point) {
+  const dx = line.x2 - line.x1;
+  const dy = line.y2 - line.y1;
+  const len2 = dx * dx + dy * dy;
+  if (len2 < 1e-18) return null;
+  return ((point.x - line.x1) * dx + (point.y - line.y1) * dy) / len2;
+}
+
+function lineIntersect(a, b) {
+  const dax = a.x2 - a.x1;
+  const day = a.y2 - a.y1;
+  const dbx = b.x2 - b.x1;
+  const dby = b.y2 - b.y1;
+  const den = dax * dby - day * dbx;
+  if (Math.abs(den) < 1e-12) return null;
+  const t = ((b.x1 - a.x1) * dby - (b.y1 - a.y1) * dbx) / den;
+  return { x: a.x1 + t * dax, y: a.y1 + t * day };
+}
+
+/**
+ * The corner where two chained walls meet once each has been shifted by the
+ * same offset. The shifted lines do not share the clicked corner, so both
+ * are extended or shortened to their crossing. A turn away from the offset
+ * lengthens them; a turn toward it shortens them. Null when the lines are
+ * parallel, or the crossing would swallow a wall or land far past the turn.
+ */
+export function offsetChainCorner(prev, next) {
+  if (!prev || !next) return null;
+  const hit = lineIntersect(prev, next);
+  if (!hit) return null;
+  const tPrev = lineParam(prev, hit);
+  const tNext = lineParam(next, hit);
+  if (tPrev == null || tNext == null) return null;
+  if (tPrev <= 0.05 || tNext >= 0.95) return null;
+  const end = { x: prev.x2, y: prev.y2 };
+  const start = { x: next.x1, y: next.y1 };
+  const gap = Math.hypot(end.x - start.x, end.y - start.y);
+  const reach = Math.max(gap * 4, 0.5);
+  if (Math.hypot(hit.x - end.x, hit.y - end.y) > reach) return null;
+  if (Math.hypot(hit.x - start.x, hit.y - start.y) > reach) return null;
+  return hit;
+}
+
+/**
  * Revit's location line, reduced to what a single-thickness wall has: the
  * centreline and its two faces. Exterior is the face on your left as you walk
  * from the start to the end, so a run drawn clockwise round a building puts
@@ -185,7 +253,8 @@ export function wallJointAngle(prev, start, end) {
   const wallX = dx / len;
   const wallY = dy / len;
   const turn = Math.atan2(refX * wallY - refY * wallX, refX * wallX + refY * wallY);
-  return { interior: 180 - Math.abs(turn * 180 / Math.PI), turn, wallX, wallY, refX, refY };
+  const deflection = Math.abs(turn * 180 / Math.PI);
+  return { interior: 180 - deflection, deflection, turn, wallX, wallY, refX, refY };
 }
 
 /** `round` snaps the length. The end stays on the heading, including 0°. */
@@ -222,8 +291,26 @@ export function canCommitRect(rect, kind) {
 /**
  * In-progress click–click geometry, as opposed to an armed tool with no
  * first click yet. First Escape should drop this; a second Escape leaves
- * the tool.
+ * the tool. A polygon outline is the exception: the first Escape asks for
+ * Finish and the second discards the whole outline (`nextPolygonEscape`).
+ * Backspace removes the last corner.
  */
+
+/** A click this close to the first corner, in metres, closes the outline. */
+export const POLY_CLOSE_M = 0.3;
+
+export function polyCanClose(points, cursor, tol = POLY_CLOSE_M) {
+  if (!cursor || !points || points.length < 3) return false;
+  const first = points[0];
+  if (!first) return false;
+  return Math.hypot(cursor.x - first.x, cursor.y - first.y) < tol;
+}
+
+/** First Escape on a polygon outline asks for Finish. The next discards it. */
+export function nextPolygonEscape(nudged) {
+  return nudged ? "discard" : "nudge";
+}
+
 /** A bulge smaller than this, in metres, is still a straight wall. */
 export const ARC_MIN_SAGITTA = 0.02;
 

@@ -16,11 +16,12 @@ export function isFoundationLevel(level) {
  * "ordinary walls, rooms and ceilings underground" mistake. */
 export const FOUNDATION_OK_CATEGORIES = new Set(["foundation", "boundarywall", "fence"]);
 
-/** A ceiling or roof cut is a view of the owning storey, not a place to draw
- * something that sits on the floor or in the ground. Walls stay allowed
- * (same storey, different view, which is how Revit works). Foundations and
- * floor slabs on that cut are never the right place to work. */
-const WRONG_ON_CEILING_OR_ROOF = new Set(["foundation", "floor", "pool"]);
+/** A ceiling cut is a view of the owning storey, not a place to draw a floor
+ * or a foundation. A roof cut is the same for a foundation or a pool. A floor
+ * on that cut is allowed: it sits at the eaves, which is what the cut names.
+ * Walls stay allowed on both (same storey, different view). */
+const WRONG_ON_CEILING = new Set(["foundation", "floor", "pool"]);
+const WRONG_ON_ROOF = new Set(["foundation", "pool"]);
 
 function cutPhrase(stationKind) {
   if (stationKind === "ceiling") return "ceiling plan";
@@ -80,10 +81,8 @@ export function placementHintOverride({ tool, stationKind, level, levels, catego
     return `The level switcher is on "${name}", a foundation storey. Switch levels before placing this here.`;
   }
 
-  if (
-    (stationKind === "ceiling" || stationKind === "roof")
-    && categories.some((c) => WRONG_ON_CEILING_OR_ROOF.has(c))
-  ) {
+  const wrongHere = stationKind === "ceiling" ? WRONG_ON_CEILING : stationKind === "roof" ? WRONG_ON_ROOF : null;
+  if (wrongHere && categories.some((c) => wrongHere.has(c))) {
     const what = categories.includes("foundation") ? "a foundation" : "this";
     return `The cut is a ${cutPhrase(stationKind)}. Switch to a floor or foundation plan before placing ${what} here.`;
   }

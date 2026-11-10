@@ -9,11 +9,19 @@ import {
   MAX_FLOORS_TO_ADD,
   floorsAvailableToAdd,
   canAddFloor,
+  canRemoveFloor,
+  topRevealedStorey,
+  floorsRevealedAfterRemove,
+  floorRemovalTarget,
+  floorWork,
+  floorRemovalMessage,
+  applyFloorRemoval,
   visibleLevels,
   mergedLevels,
   validateLevelInsert,
   insertLevel,
   buildHouseStations,
+  roofEavesElevation,
   inspectorStations,
   selectedInspectorStationId,
   applyLevelElevations,
@@ -96,11 +104,8 @@ test("a roof plan keeps only the roof", () => {
   }
 });
 
-test("this-level-only is a ribbon command, not a drawing tool", () => {
-  const item = ribbonItems().get("level-isolate");
-  assert.equal(item?.command, "level-isolate");
-  assert.equal(item?.label, "This level only");
-  assert.equal(item?.tool, undefined);
+test("this level only is the Active cut checkbox, not a ribbon button", () => {
+  assert.equal(ribbonItems().has("level-isolate"), false);
 });
 
 // A new document (or one that has never touched "+ Add floor") shows only
@@ -127,6 +132,95 @@ test("+ Add floor caps at MAX_FLOORS_TO_ADD even if more storeys exist", () => {
     ["00 FOUNDATION", "01 GFL", "02 L1", "03 L2"],
     "revealing past the cap never surfaces a third added storey"
   );
+});
+
+test("Remove floor hides the top added storey and never the ground floor", () => {
+  assert.equal(canRemoveFloor(levels, 0), false);
+  assert.equal(topRevealedStorey(levels, 0), null);
+  assert.equal(topRevealedStorey(levels, 1).id, "02 L1");
+  assert.equal(topRevealedStorey(levels, 2).id, "03 L2");
+  assert.equal(floorsRevealedAfterRemove(levels, 2), 1);
+  assert.equal(floorsRevealedAfterRemove(levels, 1), 0);
+  assert.equal(floorsRevealedAfterRemove(levels, 99), 1, "a counter past the cap drops to the storey on screen, then hides it");
+  const target = floorRemovalTarget(levels, 2, { activeLevelId: "01 GFL" });
+  assert.equal(target.kind, "revealed");
+  assert.equal(target.level.id, "03 L2");
+  assert.equal(floorRemovalTarget(levels, 0), null);
+});
+
+test("Remove floor on an empty storey only lowers the counter", () => {
+  const doc = emptyDoc();
+  doc.floorsRevealed = 1;
+  doc.segments = [{ id: "g", level: "01 GFL" }];
+  const target = floorRemovalTarget(levels, doc.floorsRevealed);
+  assert.equal(floorWork(doc, levels, target.levelIds).empty, true);
+  applyFloorRemoval(doc, target);
+  assert.equal(doc.floorsRevealed, 0);
+  assert.deepEqual(doc.segments.map((s) => s.id), ["g"]);
+});
+
+test("Remove floor deletes work on that storey and leaves the ground floor", () => {
+  const doc = emptyDoc();
+  doc.floorsRevealed = 2;
+  doc.segments = [{ id: "g", level: "01 GFL" }, { id: "a", level: "02 L1" }, { id: "b", level: "03 L2" }];
+  doc.openings = [{ id: "og", wallId: "g" }, { id: "ob", wallId: "b" }];
+  doc.items = [{ id: "plug", wallId: "b" }, { id: "keep", wallId: "g" }];
+  doc.groups = [{ id: "grp", members: [{ kind: "segment", id: "g" }, { kind: "segment", id: "b" }] }];
+  doc.sheetSet = {
+    pages: [{ index: 3, levelId: "03 L2", role: "plan", placement: { x: 1 }, verified: true, anchor: { x: 2 } }],
+    activeByLevel: { "03 L2": 3 },
+    ceilingHeights: { "03 L2": 2.6 },
+  };
+  doc.levelElevations = { "03 L2": 6.2, "01 GFL": 0.1 };
+  doc.levels = [{ id: "Garage", name: "Garage", elevation: 5.8, parentId: "03 L2", userSupplied: true }];
+  const merged = mergedLevels(levels, doc.levels);
+  const target = floorRemovalTarget(merged, doc.floorsRevealed, { activeLevelId: "01 GFL" });
+  const work = floorWork(doc, merged, target.levelIds);
+  assert.equal(work.empty, false);
+  assert.deepEqual(work.gone, ["1 wall", "1 opening", "1 placed item"]);
+  assert.equal(work.sheets, 1);
+  assert.deepEqual(work.splits, ["Garage"]);
+  assert.equal(work.ceiling, true);
+  assert.equal(work.elevation, true);
+  assert.match(floorRemovalMessage("03 L2", work), /1 wall, 1 opening and 1 placed item on it will be deleted/);
+  assert.match(floorRemovalMessage("03 L2", work), /1 sheet comes off this floor and stays in the sheet list/);
+  assert.match(floorRemovalMessage("03 L2", work), /Garage is a split of this floor/);
+  assert.match(floorRemovalMessage("03 L2", work), /The ground floor stays/);
+  applyFloorRemoval(doc, target);
+  assert.equal(doc.floorsRevealed, 1);
+  assert.deepEqual(doc.segments.map((s) => s.id), ["g", "a"]);
+  assert.deepEqual(doc.openings.map((o) => o.id), ["og"]);
+  assert.deepEqual(doc.items.map((i) => i.id), ["keep"]);
+  assert.deepEqual(doc.groups, []);
+  assert.equal(doc.sheetSet.pages[0].levelId, null);
+  assert.equal(doc.sheetSet.pages[0].placement, null);
+  assert.equal(doc.sheetSet.pages[0].role, "unused");
+  assert.equal(doc.sheetSet.ceilingHeights["03 L2"], undefined);
+  assert.equal(doc.levelElevations["03 L2"], undefined);
+  assert.equal(doc.levelElevations["01 GFL"], 0.1);
+  assert.deepEqual(doc.levels, []);
+});
+
+test("standing on an inserted level removes that level and not a revealed floor", () => {
+  const doc = emptyDoc();
+  doc.floorsRevealed = 1;
+  doc.levels = [{ id: "Mezz", name: "Mezz", elevation: 1.5, userSupplied: true }];
+  doc.segments = [{ id: "m", level: "Mezz" }, { id: "up", level: "02 L1" }];
+  const merged = mergedLevels(levels, doc.levels);
+  const target = floorRemovalTarget(merged, doc.floorsRevealed, { activeLevelId: "Mezz" });
+  assert.equal(target.kind, "inserted");
+  assert.equal(target.level.id, "Mezz");
+  applyFloorRemoval(doc, target);
+  assert.equal(doc.floorsRevealed, 1, "the revealed template storey stays");
+  assert.deepEqual(doc.levels, []);
+  assert.deepEqual(doc.segments.map((s) => s.id), ["up"]);
+});
+
+test("remove floor is a ribbon command beside add floor", () => {
+  const item = ribbonItems().get("remove-floor");
+  assert.equal(item?.command, "remove-floor");
+  assert.equal(item?.label, "Remove level");
+  assert.equal(item?.group, "Levels");
 });
 
 test("canAddFloor and floorsAvailableToAdd agree on when the button should disable", () => {
@@ -228,6 +322,14 @@ test("a fresh document's cuts are foundation, ground floor, its ceiling and the 
     "Roof · eaves",
   ]);
   assert.equal(stations.find((s) => s.kind === "roof").levelId, "01 GFL");
+  assert.equal(stations.find((s) => s.kind === "roof").elevation, roofEavesElevation(namedLevels[1]));
+  assert.equal(stations.find((s) => s.kind === "roof").elevation, 3.12);
+});
+
+test("a storey with no floor-to-floor still has a roof eaves cut", () => {
+  const lone = [{ id: "04 L3", name: "04 L3", elevation: 9, floorToFloor: null }];
+  assert.equal(roofEavesElevation(lone[0]), 9.12);
+  assert.equal(buildHouseStations(lone).find((s) => s.kind === "roof").elevation, 9.12);
 });
 
 test("the inspector lists those cuts, not the four template storey names", () => {

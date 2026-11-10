@@ -1,9 +1,10 @@
-// Toolbar information architecture, transcribed from the customer's
-// "TSP Build Pro - Business Requirements" sheet (02 Sept 2026).
-//
-// Their four toolbars are reproduced in their order and wording, plus a fifth
-// Check tab that the sheet does not ask for. Compliance checking is the thing
+// Toolbar information architecture. It started as the customer's four
+// toolbars ("TSP Build Pro - Business Requirements", 02 Sept 2026) plus a
+// Check tab the sheet does not ask for. Compliance checking is the thing
 // Revit cannot do, so it gets a tab rather than being hidden in a panel.
+//
+// Commands have since moved onto the contextual Modify tabs, the plan strip
+// and the Active cut panel. This file is what is on the row now.
 //
 // A function is one of three things:
 //   categories  - filters the type list and arms a drawing tool
@@ -18,17 +19,18 @@ export const RIBBON = [
     label: "Build",
     groups: [
       {
-        label: "Add drawing",
+        label: "Underlay",
         // With nothing loaded this group is the two ways in, and nothing
-        // else. Once a sheet is loaded, Edit sheet sits past a divider. It
-        // selects the sheet, which opens Modify | Sheet (SHEET_TAB below).
+        // else. Once a sheet is loaded, Edit sheet joins them. It selects
+        // the sheet, which opens Modify | Sheet (SHEET_TAB below).
         // Hide and Model / Sheet are on the plan strip. DWG and CAD live on Output.
         items: [
-          // `anchor` items are the group's lead buttons: they render large,
-          // stacked or side by side depending on room (see ribbon-fit.js).
+          // `anchor` marks a group's one lead button: the tool used most in
+          // it. It renders large; the rest sit beside it as small rows, and
+          // ribbon-fit.js shrinks the lead last.
           { id: "underlay", label: "PDF / image", command: "underlay", anchor: true },
-          { id: "satellite", label: "Satellite", command: "satellite", anchor: true },
-          { id: "underlay-adjust", label: "Edit sheet", command: "underlay-adjust", anchor: true, needsUnderlay: true, splitBefore: true },
+          { id: "satellite", label: "Satellite", command: "satellite" },
+          { id: "underlay-adjust", label: "Edit sheet", command: "underlay-adjust", needsUnderlay: true },
           { id: "trace-view", label: "Model", command: "trace-view", contextOnly: true },
           { id: "calibrate", label: "Set scale", command: "calibrate", contextOnly: true },
           { id: "reference", label: "Elevations & sections", command: "reference", contextOnly: true },
@@ -41,18 +43,23 @@ export const RIBBON = [
       {
         label: "Levels",
         items: [
-          { id: "level-isolate", label: "This level only", command: "level-isolate" },
-          // Two different jobs: "+ Add floor" reveals a storey the template
+          // Two different jobs: "Add level" reveals a storey the template
           // already defines, "Insert level" adds one it does not. The template
-          // is the default stack, not the limit (PHILOSOPHY.md).
-          { id: "add-floor", label: "+ Add floor", command: "add-floor" },
+          // is the default stack, not the limit (PHILOSOPHY.md). "Floor" is
+          // kept for slabs, so a storey is always a level on the ribbon.
+          { id: "add-floor", label: "Add level", command: "add-floor" },
+          { id: "remove-floor", label: "Remove level", command: "remove-floor" },
           { id: "levels", label: "Insert level", command: "insert-level" },
         ],
       },
       {
-        label: "Walls",
+        // Doors and windows are hosted by a wall, so they sit with it.
+        label: "Walls & openings",
+        short: "Walls",
         items: [
-          { id: "walls", label: "Walls", tool: "wall", categories: ["wall"] },
+          { id: "walls", label: "Walls", tool: "wall", categories: ["wall"], anchor: true },
+          { id: "doors", label: "Doors", tool: "door", categories: ["door", "opening"] },
+          { id: "windows", label: "Windows", tool: "window", categories: ["window"] },
           { id: "boundary", label: "Boundary", tool: "wall", categories: ["boundarywall", "fence"] },
           { id: "foundations", label: "Foundations", tool: "wall", categories: ["foundation"] },
         ],
@@ -62,70 +69,46 @@ export const RIBBON = [
         // walls, not with the drawing marks.
         label: "Rooms",
         items: [
-          { id: "rooms", label: "Room", tool: "room", categories: ["floor"] },
-          { id: "room-sep", label: "Separate", command: "room-sep" },
+          { id: "rooms", label: "Room", tool: "room", categories: ["floor"], anchor: true },
+          { id: "room-sep", label: "Room separator", command: "room-sep" },
         ],
       },
       {
-        // A drawing action, next to the walls it finishes. Document → Project
-        // keeps the paperwork (project information) only.
-        label: "Finishes",
-        items: [
-          { id: "wall-finishes", label: "Wall finishes", command: "wall-finishes" },
-          { id: "finishes", label: "Floor finishes", command: "finishes" },
-        ],
-      },
-      {
+        // A ceiling draws at floor-to-ceiling height above the active level's
+        // datum, not flush with it. Its hint says so on hover, since it now
+        // sits next to Floors. See floor-levels.js's roomCeilingHeight.
         label: "Floors & roofs",
+        short: "Floors",
         items: [
-          { id: "floors", label: "Floors", tool: "slab", categories: ["floor", "pool"] },
+          { id: "floors", label: "Floors", tool: "slab", categories: ["floor", "pool"], anchor: true },
+          { id: "ceilings", label: "Ceilings", tool: "slab", categories: ["ceiling"], hint: "Draws at floor-to-ceiling height above this level, not at floor level." },
           { id: "roofs", label: "Roofs", tool: "roof", categories: ["roof", "carport"] },
           { id: "roof-cut", label: "Cut roof", tool: "roof-cut" },
         ],
       },
       {
-        // Deliberately its own group, not folded into "Floors & roofs": a
-        // ceiling reads at floor-to-ceiling height above the active level's
-        // datum, not flush with it, and drawing it right next to Floors
-        // invited exactly that confusion. See compile.js's ceilingHeightFor.
-        label: "Ceilings",
-        items: [
-          { id: "ceilings", label: "Ceiling", tool: "slab", categories: ["ceiling"], hint: "Draws at floor-to-ceiling height above this level, not at floor level." },
-        ],
-      },
-      {
-        // Opt in to the tall icon-over-caption buttons. Every other one- or
-        // two-command group stacks as small rows (see renderRibbon).
-        label: "Openings",
-        large: true,
-        items: [
-          { id: "doors", label: "Doors", tool: "door", categories: ["door", "opening"] },
-          { id: "windows", label: "Windows", tool: "window", categories: ["window"] },
-        ],
-      },
-      {
+        // Ramps and railings are left off until the template has types for
+        // them, rather than sitting greyed out on the row.
         label: "Structure",
         items: [
+          { id: "columns", label: "Columns", tool: "beam", categories: ["column"], anchor: true },
+          { id: "stairs", label: "Staircases", tool: "place", categories: ["stair"] },
           { id: "beams", label: "Beams", tool: "beam", categories: ["beam"] },
-          { id: "columns", label: "Columns", tool: "beam", categories: ["column"] },
-          { id: "stairs", label: "Staircase", tool: "place", categories: ["stair"] },
-          { id: "ramp", label: "Ramp", todo: "No ramp type exists in the template; the firm must supply one." },
-          { id: "railings", label: "Railings", todo: "Railings are a stair sub-object, not a SKU category yet." },
         ],
       },
       {
         label: "Services",
         items: [
           { id: "electrical", label: "Electrical", tool: "place", categories: ["electrical"] },
-          { id: "plumbing", label: "Plumbing", tool: "place", categories: ["sanitary"] },
-          { id: "waterheater", label: "Water heating", tool: "place", categories: ["waterheater"] },
+          // Water heaters are plumbing fixtures: one button, both categories.
+          { id: "plumbing", label: "Plumbing", tool: "place", categories: ["sanitary", "waterheater"] },
           { id: "drainage", label: "Drainage", tool: "place", categories: ["drainage"] },
           // 2.5D routing.
-          // The four buttons above already place a component with the palette
-          // filtered to one trade. Draw route is the other create action.
+          // The three buttons above already place a component with the palette
+          // filtered to one trade. Route is the other create action.
           // The rest edit a route that exists, so they live on the contextual
           // Modify | Services tab (`contextOnly`), not on this row.
-          { id: "service-route", label: "Draw route", command: "service-route" },
+          { id: "service-route", label: "Route", command: "service-route" },
           { id: "service-node", label: "Add node", command: "service-node", contextOnly: true },
           { id: "service-rise", label: "Rise / drop", command: "service-rise", contextOnly: true },
           { id: "service-connect", label: "Connect", command: "service-connect", contextOnly: true },
@@ -134,10 +117,14 @@ export const RIBBON = [
         ],
       },
       {
-        label: "Components",
+        // Finishes are applied last, once the shell is drawn, so they sit
+        // with the fit-out rather than next to the walls.
+        label: "Interiors",
         items: [
-          { id: "furniture", label: "Furniture", tool: "place", categories: ["furniture"] },
+          { id: "furniture", label: "Furniture", tool: "place", categories: ["furniture"], anchor: true },
           { id: "casework", label: "Casework", tool: "place", categories: ["casework"] },
+          { id: "wall-finishes", label: "Wall finishes", command: "wall-finishes" },
+          { id: "finishes", label: "Floor finishes", command: "finishes" },
         ],
       },
     ],
@@ -166,6 +153,8 @@ export const RIBBON = [
         items: [
           { id: "section", label: "Section", command: "section" },
           { id: "elevation", label: "Elevation", command: "elevation" },
+          // Drawn on the plan, the same way a section is, so it sits with them.
+          { id: "callout", label: "Call out", command: "callout" },
           { id: "grids", label: "Grids", todo: "Week 3, with the TSP grid head." },
         ],
       },
@@ -182,45 +171,40 @@ export const RIBBON = [
           { id: "sg-coords", label: "SG diagram coordinates", command: "sg-coords" },
           { id: "building-line", label: "Building line", command: "building-line" },
           { id: "contours", label: "Contours", todo: "Tier 3: needs a terrain model." },
+          { id: "platform", label: "Platform cut-out", todo: "A cut and fill platform needs the terrain model that contours provide." },
         ],
       },
     ],
   },
   {
     id: "modify",
-    label: "Site & modify",
+    label: "Modify",
     groups: [
-      {
-        label: "Site",
-        items: [
-          { id: "contour", label: "Contour", todo: "Tier 3: needs a terrain model." },
-          { id: "platform", label: "Platform cut-out", todo: "A cut and fill platform needs the terrain model that contours provide." },
-        ],
-      },
       {
         label: "Modify",
         items: [
-          // `needsSelection` items grey out until something is selected.
-          // Align, Join, Split and the trims ask you to pick as you go, so
-          // they stay live.
-          { id: "move", label: "Move", command: "move", needsSelection: true },
-          { id: "select-similar", label: "Select same type", command: "select-similar", needsSelection: true },
-          { id: "rotate", label: "Rotate", command: "rotate", needsSelection: true },
-          { id: "mirror", label: "Mirror", command: "mirror", needsSelection: true },
-          { id: "copy", label: "Copy", command: "copy", needsSelection: true },
-          { id: "align", label: "Align", command: "align" },
-          { id: "merge", label: "Merge", command: "merge" },
-          { id: "split", label: "Split", command: "split" },
-          { id: "cut", label: "Cut", command: "cut" },
-          { id: "join", label: "Join", command: "join" },
+          // On this row: the trims pick as you go, and Join, Cut, Merge,
+          // Split and Align have no fuller home. Move, Copy, Rotate, Mirror,
+          // Select same type, Attach and Detach are on the contextual tab
+          // for the selection (`contextOnly`), so they are not drawn twice.
           { id: "trim-corner", label: "Trim to corner", tool: "trim-corner" },
           { id: "trim-single", label: "Trim single", tool: "trim-single" },
           { id: "trim-circle", label: "Trim circle", tool: "trim-circle" },
-          { id: "attach", label: "Attach base", command: "attach", needsSelection: true },
-          { id: "detach", label: "Detach base", command: "detach", needsSelection: true },
+          { id: "join", label: "Join", command: "join" },
+          { id: "cut", label: "Cut", command: "cut" },
+          { id: "merge", label: "Merge", command: "merge" },
+          { id: "split", label: "Split", command: "split" },
+          { id: "align", label: "Align", command: "align" },
+          { id: "move", label: "Move", command: "move", needsSelection: true, contextOnly: true },
+          { id: "select-similar", label: "Select same type", command: "select-similar", needsSelection: true, contextOnly: true },
+          { id: "rotate", label: "Rotate", command: "rotate", needsSelection: true, contextOnly: true },
+          { id: "mirror", label: "Mirror", command: "mirror", needsSelection: true, contextOnly: true },
+          { id: "copy", label: "Copy", command: "copy", needsSelection: true, contextOnly: true },
+          { id: "attach", label: "Attach base", command: "attach", needsSelection: true, contextOnly: true },
+          { id: "detach", label: "Detach base", command: "detach", needsSelection: true, contextOnly: true },
           // Defined here once, shown only on the contextual tabs
           // (`contextOnly`): they act on one kind of selection.
-          // "Split here" drags along the selected wall. "Split" above picks as you go.
+          // "Split here" drags along the selected wall. "Split" above halves a room, floor or roof.
           { id: "split-wall", label: "Split here", command: "split-wall", contextOnly: true },
           { id: "snap", label: "Snap end", command: "snap", needsSelection: true, contextOnly: true },
           // Opens the elevation strip under the plan. The name says that.
@@ -242,9 +226,10 @@ export const RIBBON = [
         items: [
           { id: "group", label: "Group", command: "group", needsSelection: true },
           { id: "ungroup", label: "Ungroup", command: "ungroup", needsSelection: true },
-          { id: "undo", label: "Undo", command: "undo" },
-          { id: "redo", label: "Redo", command: "redo" },
-          { id: "delete", label: "Delete", command: "delete", needsSelection: true },
+          // Undo and Redo are on the plan strip, the History panel, and
+          // Ctrl+Z / Ctrl+Y. Delete is the Delete key, and on every
+          // contextual tab, so it stays defined here only for those tabs.
+          { id: "delete", label: "Delete", command: "delete", needsSelection: true, contextOnly: true },
         ],
       },
     ],
@@ -254,12 +239,10 @@ export const RIBBON = [
     label: "Output",
     groups: [
       {
-        label: "Views",
+        label: "3D",
         items: [
           { id: "view-3d", label: "3D", command: "view-3d" },
           { id: "view-camera", label: "Camera", command: "view-camera" },
-          { id: "callout", label: "Call out", command: "callout" },
-          { id: "view-section", label: "Section", command: "view-section" },
         ],
       },
       {
@@ -295,12 +278,11 @@ export const RIBBON = [
     label: "Check",
     groups: [
       {
+        // One command. The panel already groups the findings under Part C,
+        // Part O, Part M and Zoning, so four buttons would all open the same thing.
         label: "Compliance",
         items: [
-          { id: "part-c", label: "Part C dimensions", command: "check" },
-          { id: "part-o", label: "Part O light & vent", command: "check" },
-          { id: "part-m", label: "Part M stairs", command: "check" },
-          { id: "zoning", label: "Zoning & setbacks", command: "check" },
+          { id: "check", label: "Run checks", command: "check" },
         ],
       },
       {
@@ -343,10 +325,9 @@ export const HINTS = {
   "underlay-toggle": "Hide the sheet without removing it.",
   "trace-view": "Switch between the sheet and the modelled walls. The sheet view keeps PDF openings visible.",
   "underlay-off": "Remove the sheet, or the whole imported plan set, from the plan. Asks first, and can be undone for a few seconds.",
-  "level-isolate": "Show only this cut. A ceiling plan keeps the ceiling and walls; a roof plan keeps the roof. Off ghosts the neighbouring level. The tracing sheet stays; Hide sheet takes it off.",
-  walls: "Click to start a wall, click again to end. Draw on the centreline or a face. Space flips the face. Esc to stop.",
-  boundary: "Click to start a boundary wall or a fence, click again to end. Draw on the centreline or a face. Space flips the face. Esc to stop.",
-  foundations: "Click to start a foundation, click again to end. Draw on the centreline or a face. Space flips the face. Esc to stop.",
+  walls: "Click to start a wall, click again to end. Chain continues from the last end; untick it to start each wall fresh. Offset shifts the wall off the line you click. Draw on the centreline or a face. Space flips the face. Hold Shift to keep it square. Esc to stop.",
+  boundary: "Click to start a boundary wall or a fence, click again to end. Draw on the centreline or a face. Space flips the face. Hold Shift to keep it square. Esc to stop.",
+  foundations: "Click to start a foundation, click again to end. Draw on the centreline or a face. Space flips the face. Hold Shift to keep it square. Esc to stop.",
   floors: "Click around a room to draw a floor slab.",
   roofs: "Click around the outline to draw a roof.",
   "roof-cut": "Click inside a roof, then around the part to cut. Enter closes it. Hole leaves the roof with an opening. Remove takes that part off. Esc steps back.",
@@ -355,8 +336,7 @@ export const HINTS = {
   windows: "Click a wall to place a window.",
   stairs: "Click to place a stair.",
   electrical: "Click to place an electrical fitting.",
-  plumbing: "Click to place sanitary ware.",
-  waterheater: "Click to place a water heater.",
+  plumbing: "Click to place sanitary ware or a water heater.",
   drainage: "Click to place a drainage fitting.",
   "service-route": "Click to start a route, click to add points. Enter or Esc finishes. Click an existing point to join it.",
   "service-node": "Click on a route run to add a node there. Drag a node to move it; select it and press Delete to remove it (the run joins up). Use Rise / drop on a node to change its height.",
@@ -390,6 +370,7 @@ export const HINTS = {
   compile: "Build the bill of quantities from what you have drawn.",
   boq: "Bill of quantities: priced schedule of what you have drawn, one line per SKU.",
   bom: "Bill of materials: unpriced takeoff of what you have drawn, one line per SKU.",
+  check: "Run Part C, Part O, Part M and the zoning checks. The panel groups the findings under each part.",
   gaps: "List facts the template still needs before compliance can run.",
   sheets: "Manage print sheets (A0–A4) and their title blocks.",
   "export-dxf": "Download a DXF. In Revit: open the template, then Insert → Link CAD (not File → Open).",
@@ -400,24 +381,24 @@ export const HINTS = {
  * How many steps ahead of the others a group gives up size when the window is
  * too narrow (see ribbon-fit.js). Positive = shrinks early (set up once per
  * job); negative = protected (drawn all day). Unlisted groups are 0.
+ *
+ * Build's groups all take the same step before any takes the next, so a
+ * fraction only sets the order within a step: Interiors first, then Services,
+ * Underlay, Structure, Levels, Floors & roofs and Rooms. Walls & openings is
+ * a whole step behind them all.
  */
 export const GROUP_PRIORITY = {
-  "Add drawing": 2,
+  Interiors: 0.7,
+  Services: 0.6,
+  Underlay: 0.5,
+  Structure: 0.4,
+  Levels: 0.3,
+  "Floors & roofs": 0.2,
+  Rooms: 0.1,
+  "Walls & openings": -1,
   Sheet: 2,
-  Levels: 1,
-  Walls: -1,
   // The contextual tabs' Edit group is the one drawn all day: last to shrink.
   Edit: -1,
-  // 3 ties Add drawing's first mixed step (shrink key step - 3). These groups
-  // sit to its right, and a tie shrinks the rightmost, so they give up a step
-  // before PDF / image and Satellite leave side by side. They are already
-  // compact stacks, except Openings, which stays large until the row overflows.
-  Finishes: 3,
-  "Floors & roofs": 3,
-  Ceilings: 3,
-  Openings: 3,
-  Structure: 1,
-  Components: 1,
 };
 
 /** First tab id: the permanent tab a first load opens on. */
@@ -472,14 +453,14 @@ export const CONTEXT_TABS = {
     label: "Floors",
     groups: [
       { label: "Edit", items: EDIT_COMMON },
-      { label: "Floor", items: ["edit-poly", "follow-walls", "finishes"] },
+      { label: "Floor", items: ["edit-poly", "follow-walls", "finishes", "split", "merge"] },
     ],
   },
   roof: {
     label: "Roofs",
     groups: [
       { label: "Edit", items: EDIT_COMMON },
-      { label: "Roof", items: ["roof-cut-here", "edit-poly"] },
+      { label: "Roof", items: ["roof-cut-here", "edit-poly", "split", "merge"] },
     ],
   },
   service: {
@@ -576,13 +557,9 @@ function singular(label) {
   return /[^s]s$/i.test(label) ? label.slice(0, -1) : label;
 }
 
-/**
- * Captions that do not singularise into the thing you place. "Staircase"
- * is not "Staircas", and "Water heating" is the trade, not the heater.
- */
+/** Captions that do not singularise into the thing you place. */
 const PLACE_NAMES = {
   stairs: "Stair",
-  waterheater: "Water heater",
 };
 
 function placeName(item) {
@@ -603,7 +580,7 @@ export function placingTab(itemId) {
     id: CONTEXT_TAB_ID,
     key: `place:${item.id}`,
     label: `Place ${placeName(item)}`,
-    groups: [{ label: item.group, large: group?.large, items }],
+    groups: [{ label: item.group, short: group?.short, large: group?.large, items }],
   };
 }
 
@@ -622,6 +599,8 @@ function permanentGroups(tab) {
  * permanent Modify tab, and `state.activeTab === CONTEXT_TAB_ID` shows it.
  * `state.hasSelection()` greys out the `needsSelection` items.
  * `state.hasUnderlay()` shows the `needsUnderlay` items (the Edit sheet button).
+ * A loaded plan set counts even when this floor is not drawing a sheet, so
+ * the button is still there to open the list and show one.
  * `state.skuCount(categories)` decides whether a catalog-backed function has
  * anything behind it: a function pointing at an empty category is disabled and
  * says so, rather than opening a blank palette.
@@ -661,12 +640,8 @@ export function renderRibbon(tabsEl, functionsEl, state) {
   for (const group of groups) {
     const wrap = document.createElement("div");
     wrap.className = "ribbon-group";
-    // How the group lays out (and how ribbon-fit.js shrinks it) follows from
-    // what is in it: anchors -> "mixed", an opted-in one- or two-command group
-    // -> "large", everything else (including one- and two-command groups) -> "stack".
     const hasAnchors = group.items.some((it) => it.anchor);
     const large = group.large && group.items.length <= 2;
-    wrap.dataset.kind = hasAnchors ? "mixed" : large ? "large" : "stack";
     wrap.dataset.prio = String(GROUP_PRIORITY[group.label] ?? 0);
 
     const items = document.createElement("div");
@@ -685,6 +660,7 @@ export function renderRibbon(tabsEl, functionsEl, state) {
     const menuEl = document.createElement("div");
     menuEl.className = "ribbon-menu";
     let menuCount = 0;
+    let rowCount = 0;
     for (const item of group.items) {
       // Acts on a loaded sheet: with none, it is not on the row at all.
       if (item.needsUnderlay && !state.hasUnderlay?.()) continue;
@@ -722,16 +698,16 @@ export function renderRibbon(tabsEl, functionsEl, state) {
         menuEl.appendChild(btn);
         menuCount += 1;
       } else {
-        const home = hasAnchors ? (item.anchor ? anchorsEl : restEl) : items;
-        if (item.splitBefore && home.childElementCount) {
-          const split = document.createElement("span");
-          split.className = "ribbon-anchor-split";
-          split.setAttribute("aria-hidden", "true");
-          home.appendChild(split);
-        }
-        home.appendChild(btn);
+        (hasAnchors ? (item.anchor ? anchorsEl : restEl) : items).appendChild(btn);
+        rowCount += 1;
       }
     }
+    // How the group lays out (and how ribbon-fit.js shrinks it) follows from
+    // what is on the row: a lead button with up to two others -> "mixed",
+    // which can fold the lead into one column with them; a lead with more ->
+    // "wide", which keeps the lead large; an opted-in one- or two-command
+    // group -> "large"; everything else -> "stack".
+    wrap.dataset.kind = hasAnchors ? (rowCount + (menuCount ? 1 : 0) <= 3 ? "mixed" : "wide") : large ? "large" : "stack";
     if (menuCount) {
       // The menu is a child of the More button's cell, so it opens under
       // that button rather than at the left edge of the group.
@@ -752,6 +728,11 @@ export function renderRibbon(tabsEl, functionsEl, state) {
     const label = document.createElement("span");
     label.className = "ribbon-group-label";
     label.textContent = group.label;
+    // ribbon-fit.js swaps in the short caption once the group is icons only.
+    if (group.short) {
+      label.dataset.full = group.label;
+      label.dataset.short = group.short;
+    }
 
     wrap.append(items, label);
     functionsEl.appendChild(wrap);

@@ -15,6 +15,7 @@
 
 import { area as polyArea, perimeter as polyPerimeter, pointInPoly } from "./geom.js";
 import { roofEaveDropM, roofOffsetMm, roofOverhangMm, roofPitch2Deg, roofPlanAreas, roofRidgeOffsetMm } from "./roof.js";
+import { roofEavesElevation } from "./level-view.js";
 import { syncRoomBounds } from "./room-bound.js";
 import { levelAboveRise, lookDownLevelId } from "./level-view.js";
 import {
@@ -37,6 +38,7 @@ import {
   beamHostsOk,
   hostOk,
   doorSwing,
+  doorSwings,
   isArchHead,
   openingOnWall,
   openingSize,
@@ -45,6 +47,13 @@ import {
   wallForOpening,
 } from "./openings.js";
 import { deriveDrawnWalls, deriveWalls, isExternalWall, skuDrawnHeight } from "./walls.js";
+import {
+  ceilingElevation,
+  floorLevel,
+  groundWallBase,
+  roomCeilingHeight,
+  spotLevelLabel,
+} from "./floor-levels.js";
 import { arcPoints } from "./click-draw.js";
 import { edgeHomeLevel, runGradient, serviceTakeoff } from "./services.js";
 import { finishRegionAreas, resolveFinishes, wallFaceFills } from "./finish-model.js";
@@ -220,7 +229,12 @@ export function attachPreview(doc, pack, obj, targetRef) {
  */
 export function resolvedBase(doc, pack, obj, height) {
   const datum = levelElevation(pack, effectiveLevel(obj, pack));
-  const flat = { elevation: datum + (obj?.baseOffset || 0), height, attachedTo: null, warning: null };
+  // A ground-storey wall starts at the slab top beside it. Its top stays put,
+  // so the drop is added to its height.
+  const ground = groundWallBase(doc, pack, obj);
+  const flat = ground === null
+    ? { elevation: datum + (obj?.baseOffset || 0), height, attachedTo: null, warning: null }
+    : { elevation: ground, height: height + (datum - ground), attachedTo: null, warning: null };
   const link = resolveBaseAttach(doc, obj);
   if (link.reason === "none") return flat;
 
@@ -405,6 +419,8 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
     const floor = skuById(pack, room.floorSku) || skuById(pack, pack.system.defaultFloorSku);
     const level = room.level || defaultLevelFor(pack, floor);
     const use = roomUse(room.use);
+    const ffl = floorLevel(pack, room, level);
+    const spot = spotLevelLabel(pack, room, level);
 
     sketchForms.push({
       kind: "Room",
@@ -412,7 +428,8 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
       name: room.name,
       isSolid: false,
       depth: 0.18,
-      elevation: levelElevation(pack, level),
+      elevation: ffl,
+      ...(spot ? { spotLevel: spot } : {}),
       profileLoops: [polyLoop(poly)],
       status: objectStatus(room),
     });
@@ -428,7 +445,8 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
       minDimension: roomMinDimension(room),
       minDimensionExact: roomMinDimensionIsExact(room),
       centroid: roomCentroid(room),
-      ceilingHeight: ceilingHeightFor(pack, level, room),
+      floorLevel: ffl,
+      ceilingHeight: roomCeilingHeight(doc, pack, room, level, roomCentroid(room)),
       status: objectStatus(room),
     });
 
@@ -477,13 +495,19 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
     // A ceiling is not a floor: it sits at floor-to-ceiling height above its
     // level's datum, not flush with it. Without this offset a ceiling and a
     // floor on the same level land at the identical elevation - the exact
-    // "ceiling drawn at floor height" bug this fixes. Falls back the same
-    // way ceilingHeightFor already does for the compliance-facing number, so
-    // this never introduces a second, inconsistent guess.
+    // "ceiling drawn at floor height" bug this fixes. The Part C height reads
+    // the same `ceilingElevation`, so the two never disagree.
     const isCeiling = sku.category === "ceiling";
-    const elevation = isCeiling
-      ? levelElevation(pack, level) + (ceilingHeightFor(pack, level, null) || 0)
-      : levelElevation(pack, level);
+    // A floor drawn on the roof-eaves cut is still owned by the top storey,
+    // but it sits at that cut, not on the storey floor. A ceiling never does.
+    const levelRec = (pack.levels || []).find((l) => l.id === level || l.name === level);
+    const eavesZ = !isCeiling && slab.atEaves === true ? roofEavesElevation(levelRec) : null;
+    const elevation = eavesZ != null
+      ? eavesZ
+      : isCeiling
+        ? ceilingElevation(pack, slab, level)
+        : floorLevel(pack, slab, level);
+    const spot = !isCeiling && eavesZ == null ? spotLevelLabel(pack, slab, level) : null;
     if (isCeiling && !levelsWithRooms.has(level)) {
       const levelName = (pack.levels || []).find((l) => l.id === level)?.name || level;
       warnings.push(`Ceiling "${sku.name}" is on ${levelName}, which has no rooms drawn yet - check the level switcher before drawing ceilings.`);
@@ -496,6 +520,7 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
       isSolid: true,
       depth: sku.geometry?.thickness || 0.085,
       elevation,
+      ...(spot ? { spotLevel: spot } : {}),
       profileLoops: [polyLoop(poly)],
       status: objectStatus(slab),
     });
@@ -617,6 +642,10 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
     // shared wall exists only for the duration of this compile and has
     // nothing on the plan a click could select, so it carries no kind.
     row.kind = wall.drawn ? "segment" : null;
+    if (wall.derived) {
+      row.derived = true;
+      row.hostWallId = wall.hostWallId;
+    }
     instances.push(row);
 
     sketchForms.push({
@@ -689,7 +718,7 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
       tick.head = "arch";
       tick.rise = size.rise;
     }
-    if (sku.category === "door") {
+    if (doorSwings(sku)) {
       const swing = doorSwing(wall, placed, opening);
       tick.profileLoops[0].curves.push({
         kind: "Arc",
@@ -872,7 +901,7 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
   }
   warnings.push(...takeoff.warnings);
 
-  explodeRecipes(doc, pack, instances, walls.filter((w) => !w.drawn));
+  explodeRecipes(doc, pack, instances, walls.filter((w) => !w.drawn && !w.derived));
 
   return {
     documentKind: "Planner",
@@ -923,13 +952,6 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
       sketchForms,
     }],
   };
-}
-
-function ceilingHeightFor(pack, levelId, room) {
-  if (Number.isFinite(room?.ceilingHeight)) return room.ceilingHeight;
-  const level = (pack.levels || []).find((l) => l.id === levelId);
-  if (Number.isFinite(level?.floorToCeiling)) return level.floorToCeiling;
-  return pack.system.wallHeight ?? null;
 }
 
 /**

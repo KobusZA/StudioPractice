@@ -4,12 +4,13 @@
 // back into metres.
 //
 // The preview fits the wall to the graph: the face spans the level lines, and
-// the height is fitted on its own. The open strip passes `frame`. The face is
-// then as long on screen as the wall, and exactly as tall for its height, so
-// the ratio follows the plan's scale. The strip holds that face: panning the
-// plan leaves it, moving the wall carries it, and Align is what lines the two
-// centres up. Level lines still cross the whole strip. The floor sits on the
-// bottom; anything above the strip is clipped.
+// the height is fitted on its own. The open strip passes `frame`. While the
+// elevation is lined up with the plan, that frame is the wall's place and
+// scale on the plan, so panning or zooming the plan carries the elevation
+// with it. Fit whole wall passes a frame that fits the whole face in the
+// strip at one scale, and the plan is left where it is. Level lines still
+// cross the whole strip. With a frame, the floor sits on the bottom; anything
+// above the strip is clipped.
 //
 // `view.zoom` magnifies either drawing, and `view.panX` / `view.panY` slide it.
 // Zoom 1 with no pan is the fit, or the plan match when a frame is set.
@@ -22,6 +23,20 @@ import { archVoidPolygon } from "./arch-head.js";
 
 const PAD = 14;
 const HANDLE = 5;
+
+/** Four corner handles, named by station. `xOf` carries a mirrored face, so the
+ *  left station can sit on the right of the screen and the handle still edits it. */
+function cornerHandles(parts, id, leftS, rightS, bottomZ, topZ, xOf, yOf, base) {
+  const hs = [
+    ["tl", xOf(leftS), yOf(base + topZ)],
+    ["tr", xOf(rightS), yOf(base + topZ)],
+    ["br", xOf(rightS), yOf(base + bottomZ)],
+    ["bl", xOf(leftS), yOf(base + bottomZ)],
+  ];
+  for (const [part, hx, hy] of hs) {
+    parts.push(`<rect x="${hx - HANDLE}" y="${hy - HANDLE}" width="${HANDLE * 2}" height="${HANDLE * 2}" class="elev-handle elev-handle-${part}" data-elev-op="${part}" data-elev-id="${esc(id)}"/>`);
+  }
+}
 
 /** Far enough out to see a long face with the storeys around it. */
 export const ELEV_ZOOM_MIN = 1 / 16;
@@ -141,6 +156,21 @@ export function faceScreenCenter(originX, span) {
 }
 
 /**
+ * A wall that runs up the plan has no screen x to share, so its elevation sits
+ * in the middle of the strip. Every station moves by the same amount, so the
+ * fold stays one straight line. `from` and `to` are centreline stations, in
+ * metres; `along` stretches a curve. A horizontal wall is returned unchanged.
+ */
+export function centerVerticalFrame(frame, from, to, along, width) {
+  if (!frame?.vertical || !(width > 2) || !(frame.scale > 0)) return frame;
+  const a = Number.isFinite(from) ? from : 0;
+  const b = Number.isFinite(to) ? to : a;
+  const factor = along > 0 ? along : 1;
+  const center = frame.originX + frame.dir * ((a + b) / 2) * factor * frame.scale;
+  return { ...frame, originX: frame.originX + (width / 2 - center) };
+}
+
+/**
  * The axis the strip tracks, and the wall's midpoint on it. A wall that runs
  * more up-down is tracked by its y. The midpoint is the same on either face.
  */
@@ -189,6 +219,30 @@ export function alignCameraShift(vertical, projected, centerX) {
 }
 
 /**
+ * How the alignment guides join plan points to elevation stations.
+ * Each mark is `{ planX, planY, elevX }` in one pixel space. `elevX` values
+ * are spaced by the wall's true length, not by its plan projection.
+ * A horizontal wall already has each plan point above its station, so the
+ * guide drops straight down. Any other wall — vertical or skew — runs across
+ * to the station's x and then down, and those bends sit on one fold line.
+ * `forceBend` keeps the fold for a vertical wall even when a coordinate
+ * happens to match.
+ */
+export function elevationGuideLayout(marks, { forceBend = false } = {}) {
+  const list = Array.isArray(marks) ? marks : [];
+  const down = list.map((m) => ({ x: m.elevX, y: m.planY }));
+  const bend = forceBend || list.some((m) => Math.abs(m.planX - m.elevX) > 1.5);
+  if (!bend || list.length < 2) return { down, across: [], fold: null };
+  const first = list[0];
+  const last = list[list.length - 1];
+  return {
+    down,
+    across: list.map((m) => ({ y: m.planY, x0: m.planX, x1: m.elevX })),
+    fold: { x1: first.elevX, y1: first.planY, x2: last.elevX, y2: last.planY },
+  };
+}
+
+/**
  * How far to slide the span `[a, b]` so it lies inside `[lo, hi]`.
  * A span longer than the view is centred. A span already inside does not move.
  */
@@ -213,6 +267,50 @@ function mm(metres) {
 /** Centreline stations become metres along this face. A straight wall is 1. */
 function faceScaleOf(model) {
   return model?.faceScale > 0 ? model.faceScale : 1;
+}
+
+/**
+ * The vertical reach of a framed elevation: footing below the floor, and the
+ * guide or the levels above the wall. The same span the framed drawing uses,
+ * so a fit scale that divides the strip by this keeps the floor on the bottom
+ * and the top inside the strip.
+ */
+function framedVerticalSpan(model) {
+  const guide = model.guide && Number.isFinite(model.guide.elevation) ? model.guide : null;
+  const spanTop = Math.max(model.top, guide?.elevation ?? model.top);
+  const near = (model.levels || []).filter((l) => l.elevation >= model.base - 0.6 && l.elevation <= spanTop + 0.6);
+  const offer = model.foundationOffer || null;
+  const footBases = (model.foundations || []).map((f) => f.base);
+  if (offer) footBases.push(offer.base);
+  const zHi = Math.max(spanTop, ...near.map((l) => l.elevation), model.top) + 0.2;
+  const footing = Math.max(
+    0,
+    ...((model.foundations || []).map((f) => model.base - f.base)),
+    offer ? Number(offer.depth) || 0 : 0,
+  );
+  return { zHi, footing, span: Math.max(footing + (zHi - model.base), 0.1) };
+}
+
+/**
+ * A frame that fits one face inside the strip at a single scale, so a metre
+ * along the wall matches a metre of height. The face is centred across the
+ * strip. The floor stays on the bottom, which the framed drawing already does,
+ * and the scale is small enough that the top still lands inside the strip.
+ * `dir` is +1: station 0 is the left end, in viewing order.
+ */
+export function elevationFitFrame(model, width, height) {
+  const W = Math.max(80, Math.round(width) || 0);
+  const H = Math.max(60, Math.round(height) || 0);
+  if (!model || !(model.length > 0)) return { scale: 1, originX: PAD, dir: 1 };
+  const faceScale = faceScaleOf(model);
+  const faceFrom = Number.isFinite(model.faceFrom) ? model.faceFrom : 0;
+  const faceTo = Number.isFinite(model.faceTo) ? model.faceTo : model.length;
+  const faceSpan = Math.max(Math.abs(faceTo - faceFrom) * faceScale, 0.1);
+  const { span } = framedVerticalSpan(model);
+  const scale = Math.max(1e-3, Math.min((W - PAD * 2) / faceSpan, (H - PAD * 2) / span));
+  const spanPx = Math.abs(faceTo - faceFrom) * faceScale * scale;
+  const originX = (W - spanPx) / 2 - Math.min(faceFrom, faceTo) * faceScale * scale;
+  return { scale, originX, dir: 1 };
 }
 
 /** The resize arrow for pushing an edge sideways, the same cursors as a wall top.
@@ -956,10 +1054,9 @@ export function elevationSvg(model, { width, height, interactive = false, select
       parts.push(`<text x="${x + w / 2}" y="${y + Math.min(h - 4, h / 2 + 4)}" text-anchor="middle" class="elev-joinery-label" pointer-events="none">${esc(j.label)}</text>`);
     }
     if (interactive && sel) {
-      const hs = [["tl", x, y], ["tr", x + w, y], ["br", x + w, y + h], ["bl", x, y + h]];
-      for (const [part, hx, hy] of hs) {
-        parts.push(`<rect x="${hx - HANDLE}" y="${hy - HANDLE}" width="${HANDLE * 2}" height="${HANDLE * 2}" class="elev-handle elev-handle-${part}" data-elev-op="${part}" data-elev-id="${esc(j.id)}"/>`);
-      }
+      // Named by station, not by the screen box. A face drawn right to left
+      // puts the left station on the right, and the handle has to follow it.
+      cornerHandles(parts, j.id, j.from, j.to, j.bottom, j.top, xOf, yOf, model.base);
     }
   }
 
@@ -994,17 +1091,17 @@ export function elevationSvg(model, { width, height, interactive = false, select
       // The left ones move the offset and keep the right edge; the bottom
       // ones move the sill and keep the head. A door keeps its type width
       // and has no sill, so only the head handle is drawn.
-      const hs = o.category === "door"
-        ? [["t", x + w / 2, y]]
-        : [["tl", x, y], ["tr", x + w, y], ["br", x + w, y + h], ["bl", x, y + h]];
-      for (const [part, hx, hy] of hs) {
-        parts.push(`<rect x="${hx - HANDLE}" y="${hy - HANDLE}" width="${HANDLE * 2}" height="${HANDLE * 2}" class="elev-handle elev-handle-${part}" data-elev-op="${part}" data-elev-id="${esc(o.id)}"/>`);
+      if (o.category === "door") {
+        const hx = xOf(o.offset + o.width / 2);
+        parts.push(`<rect x="${hx - HANDLE}" y="${y - HANDLE}" width="${HANDLE * 2}" height="${HANDLE * 2}" class="elev-handle elev-handle-t" data-elev-op="t" data-elev-id="${esc(o.id)}"/>`);
+      } else {
+        cornerHandles(parts, o.id, o.offset, o.offset + o.width, o.sill, o.sill + o.height, xOf, yOf, model.base);
       }
       // The spring is where the curve leaves the jambs. Dragging it changes
       // the rise and leaves the crown where it is.
       if (o.head === "arch" && o.rise > 0) {
         const sy = yOf(model.base + o.sill + o.height - o.rise);
-        const hx = x + w / 2;
+        const hx = xOf(o.offset + o.width / 2);
         parts.push(`<line x1="${x + 6}" y1="${sy}" x2="${x + w - 6}" y2="${sy}" class="elev-spring"/>`);
         parts.push(`<rect x="${hx - HANDLE}" y="${sy - HANDLE}" width="${HANDLE * 2}" height="${HANDLE * 2}" class="elev-handle elev-handle-spring" data-elev-op="spring" data-elev-id="${esc(o.id)}"><title>Rise</title></rect>`);
       }
@@ -1054,8 +1151,8 @@ export function elevationSvg(model, { width, height, interactive = false, select
       edge("top", bx, byTop - EDGE / 2, bw, EDGE);
       edge("bottom", bx, byBottom - EDGE / 2, bw, EDGE);
       if (b.source === "run") {
-        edge("left", bx - EDGE / 2, byTop, EDGE, byBottom - byTop);
-        edge("right", bx + bw - EDGE / 2, byTop, EDGE, byBottom - byTop);
+        edge("left", xOf(b.from) - EDGE / 2, byTop, EDGE, byBottom - byTop);
+        edge("right", xOf(b.to) - EDGE / 2, byTop, EDGE, byBottom - byTop);
       }
     }
     for (const b of model.finishBands) {
@@ -1168,7 +1265,7 @@ export function elevationSvg(model, { width, height, interactive = false, select
     : "";
   const label = `Wall elevation, ${mm(shownLength)} long, ${mm(model.height)} high, ${model.openings.length} opening${model.openings.length === 1 ? "" : "s"}${footing}`;
   return {
-    svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}" class="elev-svg${selectedId ? " elev-host" : ""}">${parts.join("")}</svg>`,
+    svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}" class="elev-svg${scaleX < 0 ? " is-mirrored" : ""}${selectedId ? " elev-host" : ""}">${parts.join("")}</svg>`,
     scale,
     scaleX,
     scaleY,

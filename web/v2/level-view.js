@@ -3,6 +3,8 @@
 // upper floor can be aligned to the footprint they sit on, and "what sits
 // immediately above" so a foundation plan can see the walls it carries.
 
+import { unplacePage } from "./sheet-set.js";
+
 function orderedLevels(levels) {
   const list = Array.isArray(levels) ? levels : [];
   if (!list.every((l) => Number.isFinite(l.elevation))) return list;
@@ -129,9 +131,227 @@ export function visibleLevels(levels, floorsRevealed) {
   const all = orderedLevels(levels);
   const storeys = templateStoreyLevels(all);
   if (!storeys.length) return all;
-  const revealed = Math.max(0, Math.min(floorsRevealed || 0, MAX_FLOORS_TO_ADD));
+  const revealed = floorsShown(levels, floorsRevealed);
   const shown = new Set(storeys.slice(0, 1 + revealed).map((l) => l.id));
   return all.filter((l) => l.elevation < 0 || l.userSupplied || shown.has(l.id));
+}
+
+/** How many template storeys above the ground floor are actually on screen.
+ * A counter past the cap, or past what the template defines, still only
+ * shows the storeys `visibleLevels` would. */
+export function floorsShown(levels, floorsRevealed) {
+  return Math.max(0, Math.min(floorsRevealed || 0, MAX_FLOORS_TO_ADD, floorsAvailableToAdd(levels)));
+}
+
+/** The template storey "+ Add floor" most recently put on screen, or null
+ * when the switcher is still ground floor and foundation only. */
+export function topRevealedStorey(levels, floorsRevealed) {
+  const n = floorsShown(levels, floorsRevealed);
+  if (n < 1) return null;
+  return templateStoreyLevels(levels)[n] || null;
+}
+
+/** True while Remove floor has a template storey it can hide. The ground
+ * floor and the foundation are never one of those. */
+export function canRemoveFloor(levels, floorsRevealed) {
+  return topRevealedStorey(levels, floorsRevealed) != null;
+}
+
+/** `floorsRevealed` after one Remove floor. A counter stuck above the cap
+ * drops to the storey actually on screen, then hides that one. */
+export function floorsRevealedAfterRemove(levels, floorsRevealed) {
+  return Math.max(0, floorsShown(levels, floorsRevealed) - 1);
+}
+
+/** The storey Remove floor would take, plus any split level hanging off it.
+ * An inserted level you are standing on wins: that is the one you can see.
+ * Otherwise it is the top storey "+ Add floor" revealed. Null when neither
+ * exists — the ground floor and the foundation are not removable. */
+export function floorRemovalTarget(levels, floorsRevealed, { activeLevelId } = {}) {
+  const active = (levels || []).find((l) => l.id === activeLevelId);
+  if (active?.userSupplied) {
+    return {
+      kind: "inserted",
+      level: active,
+      levelIds: levelAndSplits(levels, active.id),
+      nextRevealed: floorsRevealed || 0,
+    };
+  }
+  const level = topRevealedStorey(levels, floorsRevealed);
+  if (!level) return null;
+  return {
+    kind: "revealed",
+    level,
+    levelIds: levelAndSplits(levels, level.id),
+    nextRevealed: floorsRevealedAfterRemove(levels, floorsRevealed),
+  };
+}
+
+function levelAndSplits(levels, id) {
+  const ids = [id];
+  for (const level of levels || []) {
+    if (level.parentId === id && level.id !== id) ids.push(level.id);
+  }
+  return ids;
+}
+
+const FLOOR_OWNED = [
+  ["segments", "wall", "walls"],
+  ["rooms", "room", "rooms"],
+  ["slabs", "floor slab", "floor slabs"],
+  ["roofs", "roof", "roofs"],
+  ["openings", "opening", "openings"],
+  ["beams", "beam", "beams"],
+  ["stairs", "staircase", "staircases"],
+  ["lines", "line", "lines"],
+  ["separations", "room separation", "room separations"],
+  ["regions", "region", "regions"],
+  ["finishRegions", "floor finish", "floor finishes"],
+  ["finishRuns", "wall finish", "wall finishes"],
+  ["items", "placed item", "placed items"],
+  ["dimensions", "dimension", "dimensions"],
+  ["revisionClouds", "revision cloud", "revision clouds"],
+  ["serviceNodes", "service point", "service points"],
+];
+
+function tally(n, one, many) {
+  if (!n) return null;
+  return n === 1 ? `1 ${one}` : `${n} ${many}`;
+}
+
+function belongsTo(ids, obj) {
+  return ids.has(obj?.level);
+}
+
+/**
+ * Work that would disappear with these levels. Openings, finishes and
+ * fittings count with the wall or slab they sit on, even when their own
+ * level says something else. A sheet is counted apart from `gone`: it
+ * leaves the plan and stays in the sheet list.
+ */
+export function floorWork(doc, levels, levelIds) {
+  const ids = new Set(levelIds || []);
+  const primary = levelIds?.[0];
+  const walls = new Set((doc?.segments || []).filter((row) => belongsTo(ids, row)).map((row) => row.id));
+  const slabs = new Set((doc?.slabs || []).filter((row) => belongsTo(ids, row)).map((row) => row.id));
+  const gone = [];
+  const countOf = (key) => {
+    const rows = doc?.[key] || [];
+    if (key === "openings") return rows.filter((row) => walls.has(row.wallId) || belongsTo(ids, row)).length;
+    if (key === "finishRuns") return rows.filter((row) => walls.has(row.wallId) || belongsTo(ids, row)).length;
+    if (key === "items") return rows.filter((row) => walls.has(row.wallId) || slabs.has(row.slabId) || belongsTo(ids, row)).length;
+    if (key === "finishRegions") return rows.filter((row) => slabs.has(row.slabId) || belongsTo(ids, row)).length;
+    if (key === "serviceNodes") return rows.filter((row) => belongsTo(ids, row)).length;
+    return rows.filter((row) => belongsTo(ids, row)).length;
+  };
+  for (const [key, one, many] of FLOOR_OWNED) {
+    const phrase = tally(countOf(key), one, many);
+    if (phrase) gone.push(phrase);
+  }
+  const sheets = (doc?.sheetSet?.pages || []).filter((page) => ids.has(page.levelId)).length;
+  const splits = (levels || [])
+    .filter((level) => ids.has(level.id) && level.id !== primary)
+    .map((level) => level.name || level.id);
+  const ceiling = (levelIds || []).some((id) => Number.isFinite(doc?.sheetSet?.ceilingHeights?.[id]));
+  const elevation = (levelIds || []).some((id) => Number.isFinite(doc?.levelElevations?.[id]));
+  return {
+    empty: gone.length === 0 && sheets === 0 && splits.length === 0 && !ceiling && !elevation,
+    gone,
+    sheets,
+    splits,
+    ceiling,
+    elevation,
+  };
+}
+
+function removalJoin(parts) {
+  if (parts.length <= 1) return parts[0] || "";
+  if (parts.length === 2) return `${parts[0]} and ${parts[1]}`;
+  return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+}
+
+/** The question Remove floor asks when the storey is not empty. */
+export function floorRemovalMessage(name, work) {
+  const sentences = [];
+  if (work?.gone?.length) sentences.push(`${removalJoin(work.gone)} on it will be deleted.`);
+  if (work?.sheets) {
+    sentences.push(work.sheets === 1
+      ? "1 sheet comes off this floor and stays in the sheet list."
+      : `${work.sheets} sheets come off this floor and stay in the sheet list.`);
+  }
+  if (work?.splits?.length) {
+    sentences.push(work.splits.length === 1
+      ? `${work.splits[0]} is a split of this floor and is removed with it.`
+      : `${removalJoin(work.splits)} are splits of this floor and are removed with it.`);
+  }
+  if (work?.ceiling) sentences.push("The ceiling height you typed for it is cleared.");
+  if (work?.elevation) sentences.push("The elevation you typed for it is cleared.");
+  sentences.push("The ground floor stays.");
+  return sentences.join(" ");
+}
+
+/**
+ * Hide the top added floor, or delete an inserted level, and take the work
+ * on it with it. Mutates `doc`. A revealed template storey is not deleted
+ * from the pack — `floorsRevealed` drops so the switcher stops offering it.
+ * An inserted level is removed from `doc.levels`. Sheets are unplaced, not
+ * thrown out of the file.
+ */
+export function applyFloorRemoval(doc, target) {
+  if (!doc || !target?.levelIds?.length) return doc;
+  const ids = new Set(target.levelIds);
+  const walls = new Set((doc.segments || []).filter((row) => belongsTo(ids, row)).map((row) => row.id));
+  const slabs = new Set((doc.slabs || []).filter((row) => belongsTo(ids, row)).map((row) => row.id));
+  const removedIds = new Set([...walls, ...slabs]);
+  const take = (key, extra = () => false) => {
+    if (!Array.isArray(doc[key])) return;
+    const stay = [];
+    for (const row of doc[key]) {
+      if (!belongsTo(ids, row) && !extra(row)) stay.push(row);
+      else if (row?.id) removedIds.add(row.id);
+    }
+    doc[key] = stay;
+  };
+  for (const key of ["rooms", "segments", "slabs", "roofs", "beams", "stairs", "lines", "separations", "regions", "dimensions", "revisionClouds"]) {
+    take(key);
+  }
+  take("openings", (row) => walls.has(row.wallId));
+  take("finishRuns", (row) => walls.has(row.wallId));
+  take("finishRegions", (row) => slabs.has(row.slabId));
+  take("items", (row) => walls.has(row.wallId) || slabs.has(row.slabId));
+  const nodeIds = new Set((doc.serviceNodes || []).filter((row) => belongsTo(ids, row)).map((row) => row.id));
+  for (const id of nodeIds) removedIds.add(id);
+  if (nodeIds.size) {
+    doc.serviceEdges = (doc.serviceEdges || []).filter((edge) => !nodeIds.has(edge.fromNode) && !nodeIds.has(edge.toNode));
+    doc.serviceNodes = doc.serviceNodes.filter((row) => !nodeIds.has(row.id));
+    const live = new Set(doc.serviceNodes.map((row) => row.networkId));
+    doc.serviceNetworks = (doc.serviceNetworks || []).filter((row) => live.has(row.id));
+  }
+  if (Array.isArray(doc.groups)) {
+    doc.groups = doc.groups
+      .map((group) => ({ ...group, members: (group.members || []).filter((member) => !removedIds.has(member.id)) }))
+      .filter((group) => group.members.length >= 2);
+  }
+  if (Array.isArray(doc.levels)) doc.levels = doc.levels.filter((level) => !ids.has(level.id));
+  if (doc.levelElevations) {
+    for (const id of ids) delete doc.levelElevations[id];
+  }
+  const set = doc.sheetSet;
+  if (set) {
+    for (const page of set.pages || []) {
+      if (!ids.has(page.levelId)) continue;
+      if (page.placement) unplacePage(set, page.index);
+      else page.levelId = null;
+    }
+    if (set.ceilingHeights) {
+      for (const id of ids) delete set.ceilingHeights[id];
+    }
+    if (set.activeByLevel) {
+      for (const id of ids) delete set.activeByLevel[id];
+    }
+  }
+  if (target.kind === "revealed") doc.floorsRevealed = target.nextRevealed;
+  return doc;
 }
 
 // --- "Insert level": storeys the user supplies ---------------------------
@@ -232,14 +452,17 @@ export function fflLabel(levels, levelId) {
 /**
  * Height from `levelId`'s floor to the next storey above it, or null when
  * there is none (top storey). Reference and split levels are not storeys, so
- * a wall never tops out against them.
+ * a wall never tops out against them. A split level looks above its parent
+ * storey: a wall on a -170 step still runs up to the next floor.
  */
 export function levelAboveRise(levels, levelId) {
   const ordered = orderedLevels(levels);
   const self = ordered.find((l) => l.id === levelId);
   if (!self || !Number.isFinite(self.elevation)) return null;
+  const parent = self.parentId ? ordered.find((l) => l.id === self.parentId) : null;
+  const floor = Number.isFinite(parent?.elevation) ? Math.max(parent.elevation, self.elevation) : self.elevation;
   const above = ordered.find(
-    (l) => l.elevation > self.elevation + 1e-6 && !isReferenceLevel(l) && !l.parentId
+    (l) => l.elevation > floor + 1e-6 && !isReferenceLevel(l) && !l.parentId
   );
   return above ? above.elevation - self.elevation : null;
 }
@@ -374,11 +597,25 @@ export function buildHouseStations(levels) {
       levelId: top.id,
       levelIndex: list.length - 1,
       kind: "roof",
-      elevation: top.elevation + top.floorToFloor + 0.12,
+      elevation: roofEavesElevation(top),
       label: "Roof · eaves",
     });
   }
   return out;
+}
+
+/** How far the roof-eaves cut sits above the top of the top storey, so the
+ * tick is not on the same line as that storey's floor-to-floor. A floor the
+ * user places on this cut uses the same height. */
+export const ROOF_EAVES_LIFT_M = 0.12;
+
+/** Absolute elevation of the "Roof · eaves" cut for `level`, in metres.
+ * A storey with no floor-to-floor still gets the lift, so the cut stays a
+ * selectable height instead of disappearing. */
+export function roofEavesElevation(level) {
+  if (!Number.isFinite(level?.elevation)) return null;
+  const rise = Number.isFinite(level.floorToFloor) ? level.floorToFloor : 0;
+  return level.elevation + rise + ROOF_EAVES_LIFT_M;
 }
 
 /**

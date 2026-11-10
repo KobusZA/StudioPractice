@@ -221,6 +221,12 @@ export function roofOffsetMm(roof) {
   return Number.isFinite(n) ? n : 0;
 }
 
+/** A room's or slab's floor (or a ceiling), millimetres from its level. Missing means on the level. */
+export function floorOffsetMm(obj) {
+  const n = Number(obj?.offset);
+  return Number.isFinite(n) ? n : 0;
+}
+
 /**
  * The roof edge: `base` pushed out by `overhangMm`. Zero overhang returns the
  * anchors. A fold returns null — the caller keeps the previous edge.

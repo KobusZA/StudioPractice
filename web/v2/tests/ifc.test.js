@@ -80,11 +80,12 @@ test("every level in the pack becomes a building storey at its own elevation", (
   assert.ok(storeys.some((l) => l.includes("'02 L1'") && l.includes(",3.)")));
 });
 
-test("a room exports as four walls and one space", () => {
+test("a room exports as four walls, the four foundation walls under them, and one space", () => {
   const { text, report } = exportIfc(roomDoc(), pack);
-  assert.equal(entitiesOf(text, "IFCWALLSTANDARDCASE").length, 4);
+  assert.equal(entitiesOf(text, "IFCWALLSTANDARDCASE").length, 8);
+  assert.equal(entitiesOf(text, "IFCWALLSTANDARDCASE").filter((l) => l.includes("Foundation")).length, 4);
   assert.equal(entitiesOf(text, "IFCSPACE").length, 1);
-  assert.equal(report.counts.walls, 4);
+  assert.equal(report.counts.walls, 8);
   assert.equal(report.counts.rooms, 1);
   assert.deepEqual(report.skipped, []);
 });
@@ -113,8 +114,9 @@ test("walls land on the storey they were drawn on, not the default one", () => {
 
 test("each wall type carries a material layer set, which Revit needs to treat it as a wall", () => {
   const { text } = exportIfc(roomDoc(), pack);
-  assert.equal(entitiesOf(text, "IFCMATERIALLAYERSETUSAGE").length, 1);
-  assert.equal(entitiesOf(text, "IFCRELASSOCIATESMATERIAL").length, 1);
+  // The wall type and the foundation wall type under it.
+  assert.equal(entitiesOf(text, "IFCMATERIALLAYERSETUSAGE").length, 2);
+  assert.equal(entitiesOf(text, "IFCRELASSOCIATESMATERIAL").length, 2);
 });
 
 test("a wall carries both an axis and a body, so Revit imports it as a wall", () => {
@@ -125,9 +127,10 @@ test("a wall carries both an axis and a body, so Revit imports it as a wall", ()
 
 test("the wall's IFC type is named after the template's family and type", () => {
   const { text, report } = exportIfc(roomDoc(), pack);
-  assert.ok(entitiesOf(text, "IFCWALLSTANDARDCASE")
-    .every((l) => l.includes("'Basic Wall : Masonary wall 220mm (plaster)'")));
-  assert.equal(entitiesOf(text, "IFCWALLTYPE").length, 1);
+  const walls = entitiesOf(text, "IFCWALLSTANDARDCASE").filter((l) => !l.includes("Foundation"));
+  assert.equal(walls.length, 4);
+  assert.ok(walls.every((l) => l.includes("'Basic Wall : Masonary wall 220mm (plaster)'")));
+  assert.equal(entitiesOf(text, "IFCWALLTYPE").length, 2);
   assert.deepEqual(report.unmappedTypes, []);
 });
 
@@ -138,14 +141,16 @@ test("a SKU with no recorded template type is reported, never given a lookalike"
   assert.equal(report.unmappedTypes.length, 1);
   assert.match(report.unmappedTypes[0], /Masonary wall 220mm \(plaster\)/);
   // Falls back to the SKU's own name - never to another wall type in the pack.
-  assert.ok(entitiesOf(text, "IFCWALLSTANDARDCASE").every((l) => l.includes("'Masonary wall 220mm (plaster)'")));
+  assert.ok(entitiesOf(text, "IFCWALLSTANDARDCASE")
+    .filter((l) => !l.includes("Foundation"))
+    .every((l) => l.includes("'Masonary wall 220mm (plaster)'")));
 });
 
 test("a wall with no thickness is skipped and reported rather than guessed", () => {
   const thin = structuredClone(pack);
   thin.skus.find((s) => s.id === WALL).geometry.thickness = 0;
   const { text, report } = exportIfc(roomDoc(), thin);
-  assert.equal(entitiesOf(text, "IFCWALLSTANDARDCASE").length, 0);
+  assert.equal(entitiesOf(text, "IFCWALLSTANDARDCASE").filter((l) => !l.includes("Foundation")).length, 0);
   assert.equal(report.skipped.length, 4);
   assert.match(report.skipped[0], /states no thickness/);
 });

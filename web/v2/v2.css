@@ -45,6 +45,8 @@ body {
   position: sticky;
   top: 0;
   z-index: 5;
+  min-width: 0;
+  max-width: 100vw;
   background: rgba(243, 238, 228, 0.96);
   backdrop-filter: blur(8px);
   border-bottom: 1px solid var(--line);
@@ -2324,6 +2326,11 @@ body.library-home {
   transform-origin: 0 0;
 }
 
+/* The fold a vertical or skew wall's guides turn on. */
+.elev-align-line.is-fold {
+  opacity: 0.55;
+}
+
 .svc-profile-dock {
   position: relative;
   flex: 0 0 auto;
@@ -2556,6 +2563,15 @@ body.library-home {
 .plan-column.is-floor-face .svc-profile-head {
   padding-top: 2px;
   margin-bottom: 8px;
+}
+
+/* The wall labels are long. Wrap onto a second line rather than clipping them. */
+.plan-column.is-wall-face .svc-profile-head {
+  flex-wrap: wrap;
+}
+
+.plan-column.is-wall-face .svc-profile-head .svc-profile-all {
+  white-space: nowrap;
 }
 
 .face-editor-band {
@@ -3357,6 +3373,10 @@ button.fin-kind {
 .elev-handle-t, .elev-handle-b { cursor: ns-resize; }
 .elev-handle-tl, .elev-handle-br { cursor: nwse-resize; }
 .elev-handle-tr, .elev-handle-bl { cursor: nesw-resize; }
+.elev-svg.is-mirrored .elev-handle-tl,
+.elev-svg.is-mirrored .elev-handle-br { cursor: nesw-resize; }
+.elev-svg.is-mirrored .elev-handle-tr,
+.elev-svg.is-mirrored .elev-handle-bl { cursor: nwse-resize; }
 .elev-handle-spring { cursor: ns-resize; }
 .elev-spring { stroke: var(--copper, #b2451e); stroke-width: 1; stroke-dasharray: 3 2; pointer-events: none; }
 .elev-dim { font-size: 11px; fill: #1a1612; pointer-events: none; }
@@ -3434,7 +3454,7 @@ button.fin-kind {
 .level-isolate {
   flex-shrink: 0;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 6px;
   margin: 0 0 8px;
   font-size: 0.76rem;
@@ -3443,8 +3463,15 @@ button.fin-kind {
   line-height: 1.3;
 }
 
-.level-isolate input {
-  margin: 0.15em 0 0;
+/* Same box as Chain, Radius and the other ribbon checkboxes. */
+.level-isolate input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  accent-color: var(--ink);
   flex-shrink: 0;
 }
 
@@ -3474,6 +3501,21 @@ button.fin-kind {
   margin: 8px 0 10px;
   line-height: 1.4;
   padding: 0;
+}
+
+.level-build-up {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin: 8px 0 0;
+  font-size: 0.76rem;
+  color: var(--ink);
+}
+
+.level-build-up .plan-context-field input {
+  width: 5.5em;
 }
 
 .level-stations {
@@ -3622,11 +3664,14 @@ input.level-station-elev:focus {
 }
 
 .ribbon-functions.is-contextual {
-  background: #e5f3dc;
+  background: #eef6e8;
+  box-shadow: inset 0 2px 0 #6eaf4a;
 }
 
-.ribbon-functions.is-contextual .ribbon-group {
-  border-right-color: #c5ddb4;
+.ribbon-functions.is-contextual .ribbon-group,
+.ribbon-functions.is-contextual .ribbon-settings .plan-loc:not(.wall-place-top),
+.ribbon-functions.is-contextual .ribbon-settings .field-stack {
+  border-color: #cfe3c0;
 }
 
 /* Shrink-to-width row: groups never wrap to a second line or grow a
@@ -3640,6 +3685,8 @@ input.level-station-elev:focus {
   overflow: visible;
   align-items: stretch;
   gap: 0;
+  min-width: 0;
+  max-width: 100%;
   height: 104px;
   padding: 8px 18px 6px;
 }
@@ -3694,6 +3741,7 @@ input.level-station-elev:focus {
   padding: 6px 8px;
   font-size: 0.72rem;
   line-height: 1.1;
+  color: #2c2825;
 }
 
 .ribbon-item:hover:not(:disabled):not(.active) {
@@ -3701,16 +3749,14 @@ input.level-station-elev:focus {
   border-color: transparent;
 }
 
+/* Same white chip as the selected option in a .seg track, so the ribbon has
+   one way of saying "on". */
+.ribbon-item.active,
 .ribbon-item.active:hover:not(:disabled) {
-  background: var(--ink);
-  border-color: var(--ink);
-  color: var(--paper);
-}
-
-.ribbon-item.active {
-  background: var(--ink);
-  border-color: var(--ink);
-  color: var(--paper);
+  background: #fff;
+  border-color: transparent;
+  border-radius: 4px;
+  box-shadow: 0 1px 2px rgba(26, 22, 18, 0.12), 0 0 0 1px rgba(26, 22, 18, 0.1);
 }
 
 /* The dropdown trigger a collapsed group shows instead of its items. */
@@ -3729,6 +3775,7 @@ input.level-station-elev:focus {
   letter-spacing: 0.03em;
   text-transform: uppercase;
   line-height: 1.1;
+  color: #2c2825;
   white-space: normal;
   cursor: pointer;
 }
@@ -3779,7 +3826,6 @@ input.level-station-elev:focus {
 .ribbon-group[data-kind="large"] .ribbon-item,
 .ribbon-anchors .ribbon-item {
   min-width: var(--lgw);
-  font-weight: 600;
 }
 
 /* Small buttons: a three-row grid of icon + caption rows. This is every
@@ -3820,6 +3866,7 @@ input.level-station-elev:focus {
   border: 1px solid transparent;
   background: transparent;
   line-height: 1.1;
+  color: #2c2825;
 }
 
 .ribbon-group[data-kind="stack"] .ribbon-item .glyph,
@@ -3858,8 +3905,9 @@ input.level-station-elev:focus {
   gap: 4px;
 }
 
-/* Mixed: anchors beside a small-button grid. */
-.ribbon-group[data-kind="mixed"] .ribbon-group-items {
+/* Mixed and wide: the lead button beside a small-button grid. */
+.ribbon-group[data-kind="mixed"] .ribbon-group-items,
+.ribbon-group[data-kind="wide"] .ribbon-group-items {
   display: flex;
   gap: 4px;
   align-items: stretch;
@@ -3870,21 +3918,6 @@ input.level-station-elev:focus {
   gap: 2px;
 }
 
-/* Between the ways in (PDF / image, Satellite) and Edit sheet. */
-.ribbon-anchor-split {
-  flex: 0 0 auto;
-  width: 1px;
-  margin: 6px 4px;
-  background: var(--line);
-}
-
-.ribbon-group[data-anchors="stack"] .ribbon-anchor-split,
-.ribbon-group[data-scale="collapsed"].is-open .ribbon-anchor-split {
-  width: auto;
-  height: 1px;
-  margin: 3px 8px;
-}
-
 .ribbon-rest {
   align-self: center;
 }
@@ -3893,40 +3926,86 @@ input.level-station-elev:focus {
   display: none;
 }
 
-/* Anchors stacked: one column, sharing the row height. Two when only the
-   ways in are showing, three once Sheet joins them. */
-.ribbon-group[data-anchors="stack"] .ribbon-anchors {
+/* Lead folded in: the lead and the rest share one three-row grid of small
+   labelled buttons, lead first. */
+.ribbon-group[data-anchors="inline"] .ribbon-group-items {
   display: grid;
-  grid-template-columns: 1fr;
-  grid-auto-rows: minmax(0, 1fr);
+  grid-auto-flow: column;
+  grid-template-rows: repeat(3, var(--row));
+  gap: 0 2px;
+  align-content: center;
 }
 
-.ribbon-group[data-anchors="stack"] .ribbon-anchors .ribbon-item {
+.ribbon-group[data-anchors="inline"] .ribbon-anchors,
+.ribbon-group[data-anchors="inline"] .ribbon-rest {
+  display: contents;
+}
+
+.ribbon-group[data-anchors="inline"] .ribbon-item {
   flex-direction: row;
   justify-content: flex-start;
-  min-width: 104px;
-  min-height: 0;
-  padding: 0 10px;
-  gap: 8px;
-  font-size: 0.8rem;
+  align-items: center;
+  height: var(--row);
+  min-width: var(--colw);
+  padding: 0 8px;
+  gap: 6px;
+  font-size: var(--fs);
+  font-weight: 400;
   white-space: nowrap;
+  text-align: left;
 }
 
-.ribbon-group[data-anchors="stack"] .ribbon-anchors .ribbon-item .glyph {
+.ribbon-group[data-anchors="inline"] .ribbon-item .glyph {
+  width: var(--ico);
+  height: var(--ico);
+}
+
+.ribbon-group[data-anchors="inline"] .ribbon-item .caption {
+  max-width: none;
+}
+
+/* A small button alone in the last column of its grid (Foundations, Room
+   separator, Route) sits level with the middle row rather than the top. */
+.ribbon-rest > .ribbon-item:last-child:nth-child(3n + 1),
+.ribbon-group[data-kind="stack"] .ribbon-group-items > .ribbon-item:last-child:nth-child(3n + 1) {
+  grid-row: 1 / -1;
+  align-self: center;
+}
+
+/* Once the row is short of room it stands up as a tile across all three
+   rows: icon over a caption that breaks at its spaces, so it keeps its name
+   in about half the width of a row. */
+.ribbon-group[data-lone="tile"] .ribbon-rest > .ribbon-item:last-child:nth-child(3n + 1),
+.ribbon-group[data-kind="stack"][data-lone="tile"] .ribbon-group-items > .ribbon-item:last-child:nth-child(3n + 1) {
+  grid-row: 1 / -1;
+  align-self: stretch;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  height: auto;
+  min-width: 0;
+  padding: 2px 6px;
+  gap: 4px;
+  white-space: normal;
+  text-align: center;
+}
+
+.ribbon-group[data-lone="tile"] .ribbon-rest > .ribbon-item:last-child:nth-child(3n + 1) .glyph,
+.ribbon-group[data-kind="stack"][data-lone="tile"] .ribbon-group-items > .ribbon-item:last-child:nth-child(3n + 1) .glyph {
   width: 20px;
   height: 20px;
 }
 
-.ribbon-group[data-anchor-comfort="tight"] .ribbon-anchors .ribbon-item {
-  min-width: 0;
-  padding: 0 7px;
-  gap: 5px;
-  font-size: 0.72rem;
+.ribbon-group[data-lone="tile"] .ribbon-rest > .ribbon-item:last-child:nth-child(3n + 1) .caption,
+.ribbon-group[data-kind="stack"][data-lone="tile"] .ribbon-group-items > .ribbon-item:last-child:nth-child(3n + 1) .caption {
+  width: min-content;
+  line-height: 1.15;
 }
 
-.ribbon-group[data-anchor-comfort="tight"] .ribbon-anchors .ribbon-item .glyph {
-  width: 16px;
-  height: 16px;
+/* A folded group whose tool is the active one says so on its button. */
+.ribbon-overflow-btn.active {
+  border-color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--ink);
 }
 
 /* Icons only: captions are dropped and buttons shrink to their glyph. The
@@ -4065,22 +4144,18 @@ input.level-station-elev:focus {
    fields must not resize the sketch (a click on a type or the first wall
    click used to shove the canvas and the rubber-band jumped). Kept small and
    tucked in the top-left corner - out from under the pointer while
-   drawing - with room reserved on the right for the floated plan tools
-   (.plan-float-tools) so the two never sit on top of each other. */
+   drawing. The right edge is set from the plan toolbar's real width
+   (syncPlanHintInset), so a long hint wraps before Select / Pan / Undo. */
 .canvas-status {
   position: absolute;
   top: 8px;
   left: 8px;
-  /* Leave room for the Select/Undo/Both/Existing/Proposed toolbar floated at
-     top-right (.plan-float-tools) so the two never collide. The hint now
-     carries the arrow-key sentence as well, so this has to clear the whole
-     toolbar, not only a short chip. */
-  right: 340px;
+  right: 16px;
   z-index: 2;
   display: flex;
   flex-direction: row;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: flex-start;
   align-content: flex-start;
   justify-content: flex-start;
   gap: 4px 8px;
@@ -4094,32 +4169,90 @@ input.level-station-elev:focus {
 }
 
 /* Next-step hint once a category/tool function is armed (e.g. "Click a wall
-   to place a door."). One-shot commands surface their own feedback instead. */
-.ribbon-hint {
-  margin: 0;
+   to place a door."). One-shot commands surface their own feedback instead.
+   The i sits in the top-left corner and tucks the sentence away. */
+.ribbon-hint-slot {
+  display: flex;
+  align-items: flex-start;
+  flex: 0 1 auto;
   max-width: 100%;
   min-width: 0;
-  padding: 4px 8px;
-  font-size: 0.74rem;
-  text-align: left;
-  color: var(--ink-soft);
   background: rgba(243, 238, 228, 0.9);
   border: 1px solid var(--line);
   box-shadow: var(--shadow);
+  pointer-events: none;
+}
+
+.ribbon-hint-slot.is-collapsed {
+  flex: 0 0 auto;
+}
+
+.ribbon-hint-slot[hidden] {
+  display: none !important;
+}
+
+.ribbon-hint-slot.is-warn {
+  color: #7a4a05;
+  background: rgba(214, 158, 46, 0.16);
+  border-color: rgba(214, 158, 46, 0.45);
+}
+
+.ribbon-hint-info {
+  pointer-events: auto;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  margin: 3px 0 3px 3px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ink-soft);
+  font-family: Fraunces, Georgia, serif;
+  font-style: italic;
+  font-weight: 600;
+  font-size: 0.78rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.ribbon-hint-slot.is-collapsed .ribbon-hint-info {
+  margin: 3px;
+}
+
+.ribbon-hint-info:hover {
+  background: rgba(26, 22, 18, 0.06);
+  color: var(--ink);
+}
+
+.ribbon-hint-info[hidden] {
+  display: none !important;
+}
+
+.ribbon-hint {
+  margin: 0;
+  flex: 1 1 auto;
+  max-width: 100%;
+  min-width: 0;
+  padding: 4px 8px 4px 6px;
+  font-size: 0.74rem;
+  line-height: 1.35;
+  text-align: left;
+  color: var(--ink-soft);
+  background: none;
+  border: none;
+  box-shadow: none;
+  overflow-wrap: break-word;
 }
 
 .ribbon-hint[hidden] {
   display: none !important;
 }
 
-/* Overrides the plain next-step hint when the armed tool would place
-   something on a foundation storey - the one thing the level switcher can
-   rule out without guessing which real storey is meant. Same amber as
-   .compile-warnings .warn, so both read as "check this", not an error. */
-.ribbon-hint.ribbon-hint-warn {
+.ribbon-hint-slot.is-warn .ribbon-hint {
   color: #7a4a05;
-  background: rgba(214, 158, 46, 0.16);
-  border-color: rgba(214, 158, 46, 0.45);
 }
 
 #v2-rules .rules-part {
@@ -4288,6 +4421,15 @@ input.level-station-elev:focus {
   white-space: nowrap;
 }
 
+.plan-loc .draw-name,
+.field-stack .draw-name {
+  font-size: 0.62rem;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  line-height: 1;
+}
+
 .wall-opts {
   display: flex;
   flex-wrap: wrap;
@@ -4295,57 +4437,275 @@ input.level-station-elev:focus {
   gap: 4px 12px;
 }
 
-.plan-loc .seg {
-  border-width: 2px;
-  background: #fff;
-}
-
 .plan-loc .seg button[hidden] {
   display: none !important;
+}
+
+.plan-loc .seg {
+  gap: 2px;
+  align-items: center;
+  box-sizing: border-box;
+  height: 28px;
+  padding: 2px;
+  border: 1px solid rgba(26, 22, 18, 0.12);
+  border-radius: 6px;
+  background: rgba(26, 22, 18, 0.05);
 }
 
 .plan-loc .seg button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 5px 8px;
-  font-size: 0.8rem;
-  border-right-width: 2px;
-}
-.plan-loc .seg button svg {
-  display: block;
-  width: 22px;
   height: 22px;
+  min-width: 30px;
+  padding: 0 6px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 0.78rem;
 }
-/* Beige (#e8dcc6) was the selected fill. On the green contextual ribbon it
-   disappeared, and it matched the wall-diagram fill so the icon did too.
-   Words take the same ink fill as every other segment. Diagrams stay on
-   white, with a heavy frame, so the drawing keeps its colours. */
+
+.plan-loc .seg button:hover:not(.active) {
+  background: rgba(26, 22, 18, 0.06);
+  color: var(--ink);
+}
+
 .plan-loc .seg button.active {
-  background: var(--ink);
-  color: var(--paper);
-  box-shadow: none;
-}
-.plan-loc:not(.words) .seg button.active {
   background: #fff;
   color: var(--ink);
-  box-shadow: inset 0 0 0 3px var(--ink);
+  box-shadow: 0 1px 2px rgba(26, 22, 18, 0.12), 0 0 0 1px rgba(26, 22, 18, 0.06);
+}
+
+.plan-loc .seg button svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+}
+
+/* Join pictures two walls meeting; the filled one is the wall being drawn. */
+#v2-wall-corner .seg button {
+  color: var(--ink);
+}
+
+#v2-wall-corner .seg button:not(.active) svg {
+  opacity: 0.7;
+}
+
+#v2-wall-corner .seg button svg {
+  width: 20px;
+  height: 20px;
+}
+
+#v2-wall-corner .new-wall {
+  fill: currentColor;
+  fill-opacity: 0.28;
 }
 
 .plan-loc[hidden] {
   display: none !important;
 }
 
-.plan-loc.words .seg button {
-  padding: 6px 12px;
-}
-
-/* The running command's settings, as a ribbon group. It does not shrink
-   (data-fit="fixed"): location line, arc, corner, Hole / Remove, outline link.
+/* The running command's settings, as a ribbon group. ribbon-fit.js tightens
+   it, then folds Top and Height into the Top button, before anything clips.
    Disjoin sits in the Move button's own group instead. */
 .ribbon-settings .ribbon-settings-items {
+  align-items: flex-start;
+  gap: 0;
+}
+
+.ribbon-settings .wall-opts {
+  flex-wrap: nowrap;
+  align-items: flex-start;
+  gap: 0;
+}
+
+.ribbon-settings .plan-loc:not(.wall-place-top) {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  padding: 0 10px;
+  border-left: 1px solid rgba(26, 22, 18, 0.1);
+}
+
+.ribbon-settings .wall-opts > .plan-loc:first-child,
+.ribbon-settings .ribbon-settings-items > .plan-loc:first-child,
+.ribbon-settings .ribbon-settings-items > .field-stack:first-child {
+  border-left: none;
+  padding-left: 0;
+}
+
+.ribbon-settings .plan-loc.wall-place-top {
+  align-items: flex-start;
+  gap: 0;
+  padding: 0;
+  border-left: none;
+}
+
+/* Narrow window: same controls, less padding and shorter fields. */
+.ribbon-settings[data-density="tight"] .plan-loc:not(.wall-place-top),
+.ribbon-settings[data-density="tight"] .field-stack,
+.ribbon-settings[data-density="fold"] .plan-loc:not(.wall-place-top),
+.ribbon-settings[data-density="fold"] .field-stack {
+  padding-left: 4px;
+  padding-right: 4px;
+}
+
+.ribbon-settings[data-density="tight"],
+.ribbon-settings[data-density="fold"] {
+  padding-left: 6px;
+  padding-right: 6px;
+}
+
+.ribbon-settings[data-density="tight"] .unit-field input,
+.ribbon-settings[data-density="fold"] .unit-field input {
+  width: 4.2rem;
+}
+
+.ribbon-settings[data-density="tight"] .wall-place-top select,
+.ribbon-settings[data-density="fold"] .wall-place-top select {
+  max-width: 8rem;
+}
+
+.ribbon-settings .settings-more {
+  display: none;
+}
+
+/* Last resort: Top and Height leave the row and open from this button. */
+.ribbon-settings[data-density="fold"]:not(:has(#v2-wall-top[hidden])) .settings-more {
+  display: inline-flex;
   align-items: center;
-  gap: 10px;
+  height: 28px;
+  margin-top: calc(0.62rem + 5px);
+  padding: 0 10px;
+  border: 1px solid rgba(26, 22, 18, 0.12);
+  border-radius: 6px;
+  background: rgba(26, 22, 18, 0.05);
+  color: var(--ink);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.ribbon-settings[data-density="fold"] #v2-wall-top:not([hidden]) {
+  display: none;
+}
+
+.ribbon-settings[data-density="fold"].is-open #v2-wall-top:not([hidden]) {
+  display: flex;
+  position: absolute;
+  top: calc(100% - 4px);
+  right: 0;
+  z-index: 30;
+  gap: 8px;
+  padding: 8px 10px;
+  background: #eef6e8;
+  border: 1px solid #cfe3c0;
+  border-radius: 0 0 6px 6px;
+  box-shadow: 0 8px 18px rgba(26, 22, 18, 0.14);
+}
+
+.ribbon-settings .field-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 5px;
+  margin: 0;
+  padding: 0 10px;
+  border-left: 1px solid rgba(26, 22, 18, 0.1);
+  font-size: 0.72rem;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.cluster-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+}
+
+.check-slot {
+  display: flex;
+  align-items: center;
+  height: 28px;
+}
+
+.unit-field {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.unit-field .unit {
+  position: absolute;
+  right: 8px;
+  font-size: 0.68rem;
+  color: var(--ink-soft);
+  pointer-events: none;
+}
+
+.ribbon-functions input[type="checkbox"] {
+  accent-color: var(--ink);
+}
+
+/* Existing / Proposed is a choice of two, so it uses the same track as the
+   draw toggles instead of a ticked box beside a filled button. */
+.ribbon-group[data-kind="stack"]:not([data-scale="collapsed"]):has([data-function="mark-existing"]) {
+  justify-content: flex-start;
+}
+
+.ribbon-group[data-kind="stack"]:not([data-scale="collapsed"]):has([data-function="mark-existing"]) .ribbon-group-label {
+  margin-top: auto;
+}
+
+.ribbon-group[data-kind="stack"]:not([data-scale="collapsed"]):has([data-function="mark-existing"]) .ribbon-group-items {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-self: flex-start;
+  align-items: center;
+  box-sizing: border-box;
+  /* Sit on the same line as the settings controls, under a caption of the same size. */
+  margin-top: calc(0.62rem + 5px);
+  gap: 2px;
+  height: 28px;
+  padding: 2px;
+  border: 1px solid rgba(26, 22, 18, 0.12);
+  border-radius: 6px;
+  background: rgba(26, 22, 18, 0.05);
+}
+
+.ribbon-group[data-kind="stack"]:not([data-scale="collapsed"]):not([data-icons="all"]):has([data-function="mark-existing"]) .ribbon-item .glyph {
+  display: none;
+}
+
+.ribbon-group[data-kind="stack"]:not([data-scale="collapsed"]):has([data-function="mark-existing"]) .ribbon-item {
+  height: 22px;
+  min-width: 0;
+  padding: 0 10px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+
+.ribbon-group[data-kind="stack"]:not([data-scale="collapsed"]):has([data-function="mark-existing"]) .ribbon-item:hover:not(:disabled):not(.active) {
+  background: rgba(26, 22, 18, 0.06);
+  color: var(--ink);
+}
+
+.ribbon-group[data-kind="stack"]:not([data-scale="collapsed"]):has([data-function="mark-existing"]) .ribbon-item.active,
+.ribbon-group[data-kind="stack"]:not([data-scale="collapsed"]):has([data-function="mark-existing"]) .ribbon-item.active:hover:not(:disabled) {
+  background: #fff;
+  border-color: transparent;
+  color: var(--ink);
+  box-shadow: 0 1px 2px rgba(26, 22, 18, 0.12), 0 0 0 1px rgba(26, 22, 18, 0.06);
 }
 
 .ribbon-group .move-disjoin {
@@ -4368,7 +4728,8 @@ input.level-station-elev:focus {
   flex-direction: row;
   align-items: center;
   gap: 6px;
-  height: var(--row, 24px);
+  height: auto;
+  min-height: 28px;
   margin: 0;
   padding: 0 4px;
   font-size: 0.72rem;
@@ -4378,18 +4739,143 @@ input.level-station-elev:focus {
   white-space: nowrap;
 }
 
-.ribbon-group .roof-overhang input {
-  width: 4.2rem;
+.ribbon-group .roof-overhang input[type="text"] {
+  width: 5.6rem;
   margin: 0;
-  padding: 2px 6px;
-  font: inherit;
-  color: var(--ink);
-  background: var(--paper, #fffdf8);
-  border: 1px solid var(--line, #d9c7b0);
-  border-radius: 2px;
+}
+
+.ribbon-group .roof-overhang input[type="text"]:disabled {
+  opacity: 0.55;
+}
+
+.ribbon-group .roof-overhang input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
 }
 
 .ribbon-group .roof-overhang[hidden] {
+  display: none !important;
+}
+
+.ribbon-settings .roof-overhang.field-stack {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  height: auto;
+  padding: 0 10px;
+  border-left: 1px solid rgba(26, 22, 18, 0.1);
+}
+
+.wall-place-top label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 0.72rem;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink);
+}
+
+.wall-place-top select,
+.wall-place-top input,
+.unit-field input {
+  margin: 0;
+  height: 28px;
+  padding: 0 8px;
+  font: inherit;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid rgba(26, 22, 18, 0.16);
+  border-radius: 4px;
+}
+
+.wall-place-top input,
+.unit-field input {
+  width: 5.6rem;
+  padding-right: 2.1rem;
+  text-align: right;
+}
+
+.unit-field input::placeholder {
+  color: rgba(26, 22, 18, 0.55);
+}
+
+.wall-place-top select:focus,
+.wall-place-top input:focus,
+.unit-field input:focus {
+  outline: none;
+  border-color: var(--ink);
+  box-shadow: 0 0 0 3px rgba(26, 22, 18, 0.08);
+}
+
+.wall-place-top label[hidden] {
+  display: none;
+}
+
+.wall-place-top label.is-offset .draw-name {
+  color: var(--copper-dark);
+}
+
+.wall-place-top label.is-offset .unit-field input {
+  border-color: var(--copper);
+  background: var(--copper-tint-8);
+  box-shadow: 0 0 0 3px var(--copper-tint-16);
+}
+
+.wall-place-top label.is-offset .unit-field input:focus {
+  border-color: var(--copper-dark);
+  box-shadow: var(--focus-ring);
+}
+
+.unit-field input:disabled {
+  color: var(--ink-soft);
+  background: rgba(26, 22, 18, 0.04);
+}
+
+.wall-place-top select {
+  width: auto;
+  max-width: 12rem;
+  padding: 0 26px 0 8px;
+  text-align: left;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none' stroke='%231a1612' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+}
+
+.wall-place-top input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  accent-color: var(--ink);
+}
+
+/* A dimension on the selected wall, opened for typing. Placed over its label. */
+.temp-dim-input {
+  position: absolute;
+  z-index: 3;
+  box-sizing: border-box;
+  height: 22px;
+  margin: 0;
+  padding: 1px 6px;
+  font: 600 12px "Source Sans 3", sans-serif;
+  text-align: center;
+  color: #3a5f7a;
+  background: #fffdf8;
+  border: 1.5px solid #3a5f7a;
+  border-radius: 2px;
+  box-shadow: var(--shadow);
+}
+
+.temp-dim-input[hidden] {
   display: none !important;
 }
 
@@ -5011,6 +5497,39 @@ input.level-station-elev:focus {
 .mass-overlay[hidden] {
   display: none !important;
 }
+
+/* A section can sit on the plan instead of covering it. Clicks pass through
+   the page behind the panel. Drag the header to move it. */
+.mass-overlay.mass-overlay--float {
+  background: transparent;
+  pointer-events: none;
+  padding: 0;
+}
+
+.mass-overlay.mass-overlay--float .mass-panel {
+  pointer-events: auto;
+  position: fixed;
+  width: min(760px, calc(100vw - 32px));
+  height: min(540px, calc(100vh - 80px));
+  min-width: 420px;
+  min-height: 280px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  z-index: 41;
+  resize: both;
+  overflow: hidden;
+  box-shadow: 0 18px 50px rgba(26, 22, 18, 0.28);
+}
+
+.mass-overlay.mass-overlay--float .mass-panel > header {
+  cursor: grab;
+}
+
+.mass-overlay.mass-overlay--float .mass-panel > header:active {
+  cursor: grabbing;
+}
+
+.section-host { flex: 0 0 auto; }
 
 .mass-panel {
   width: min(1100px, 100%);
@@ -6373,6 +6892,7 @@ input.level-station-elev:focus {
   flex: 1;
   min-height: 16rem;
   position: relative;
+  background: #e6e0d6;
 }
 
 .sheet-revisions {
@@ -7064,9 +7584,10 @@ body.library-home .library-foot {
 .sheet-set-list-bar,
 .sheet-set-tabs { display: flex; align-items: stretch; height: 32px; min-height: 32px; box-sizing: border-box; border-top: 1px solid transparent; }
 .sheet-set-tabs { border-top-color: rgba(0, 0, 0, 0.15); }
-.sheet-set-list-head { flex: 1; min-width: 0; height: 100%; display: flex; align-items: center; text-align: left; font: inherit; font-weight: 600; font-size: 0.78rem; line-height: 1.35; padding: 0 10px; border: 0; background: transparent; cursor: pointer; }
-.sheet-set-list-head::after { content: " \25BE"; }
-.sheet-set-card.is-collapsed .sheet-set-list-head::after { content: " \25B8"; }
+.sheet-set-list-head { flex: 1; min-width: 0; height: 100%; display: flex; align-items: center; gap: 8px; text-align: left; font: inherit; font-weight: 600; font-size: 0.78rem; line-height: 1.35; padding: 0 10px; border: 0; background: transparent; color: var(--ink); cursor: pointer; }
+.sheet-set-list-head:hover { background: rgba(0, 0, 0, 0.06); }
+.sheet-set-list-chevron { flex: none; display: block; color: var(--ink); }
+.sheet-set-card.is-collapsed .sheet-set-list-chevron { transform: rotate(-90deg); }
 .sheet-set-list-close { flex: none; width: 32px; height: 100%; display: flex; align-items: center; justify-content: center; padding: 0; border: 0; border-left: 1px solid rgba(0, 0, 0, 0.12); background: transparent; color: #5c5348; font: inherit; font-size: 1.15rem; line-height: 1; cursor: pointer; }
 .sheet-set-list-close:hover { background: rgba(0, 0, 0, 0.06); }
 .sheet-set-tab { flex: 1; height: 100%; font: inherit; font-size: 0.78rem; line-height: 1.35; padding: 0 10px; border: 0; border-right: 1px solid rgba(0, 0, 0, 0.12); background: transparent; color: #5c5348; cursor: pointer; }
@@ -7151,10 +7672,12 @@ input.sheet-set-list-name:hover, input.sheet-set-list-name:focus { border-color:
 .sheet-set-ref-resize::after { content: ""; position: absolute; right: 3px; bottom: 3px; width: 7px; height: 7px; border-right: 2px solid #5c5348; border-bottom: 2px solid #5c5348; }
 .sheet-set-measure-readout { font-weight: 600; color: var(--copper); }
 /* --- Underlay mode bar: Set scale, Adjust, Align sheets --------------------
-   It sits in the ribbon row (see .ribbon-mode), in the same 104px as every
-   other modify tab. It does not take a strip under the menu, so the drawing
-   does not jump when Adjust opens. The group's caption names the mode.
-   The outline on the plan says the same thing: a mode is on. */
+   It sits in the Modify | Sheet row (see .ribbon-mode), in the same 104px as
+   every other modify tab. Other tabs do not carry it. It does not take a
+   strip under the menu, so the drawing does not jump when Adjust opens.
+   The group's caption names the mode. The outline on the plan says the same
+   thing: a mode is on. The same bar also mounts on a placing tab while a
+   room, roof, floor, cut or region outline is in progress. */
 .mode-bar { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px 10px; min-height: 0; padding: 4px 8px; background: rgba(251, 241, 234, 0.96); border: 1px solid rgba(178, 69, 30, 0.4); border-radius: 4px; font-size: 0.78rem; }
 .ribbon-mode { flex: 1 1 auto; min-width: 0; border-right: none; }
 .ribbon-mode-items { align-items: center; min-width: 0; }
@@ -7174,6 +7697,14 @@ input.sheet-set-list-name:hover, input.sheet-set-list-name:focus { border-color:
 .mode-bar button.mode-show { flex: 0 0 4.6rem; width: 4.6rem; padding-left: 0; padding-right: 0; text-align: center; font-weight: 600; border-color: var(--copper, #b2451e); color: var(--copper, #b2451e); }
 .mode-bar button:disabled { opacity: 0.45; cursor: default; }
 .mode-bar button.primary { background: var(--copper, #b2451e); border-color: var(--copper, #b2451e); color: #fff; font-weight: 600; }
+.mode-bar button.primary.is-nudge { animation: mode-finish-pulse 1s ease-in-out infinite; }
+@keyframes mode-finish-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(178, 69, 30, 0.55); }
+  50% { box-shadow: 0 0 0 5px rgba(178, 69, 30, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mode-bar button.primary.is-nudge { animation: none; box-shadow: 0 0 0 2px rgba(178, 69, 30, 0.45); }
+}
 .mode-bar button[aria-pressed="true"], .mode-seg button.is-on { background: rgba(178, 69, 30, 0.14); border-color: var(--copper, #b2451e); color: var(--copper, #b2451e); font-weight: 600; }
 .mode-bar button.mode-link { border: 0; background: none; color: #3a5f7a; text-decoration: underline; padding: 5px 2px; }
 .mode-seg { display: inline-flex; }
@@ -7749,6 +8280,64 @@ body.wall-screen {
 .wall-screen-face[hidden] { display: none; }
 body.wall-screen[data-link] .wall-screen-wait,
 body.wall-screen[data-link] .wall-screen-face { display: none; }
+
+/* The section in its own window. The plan tab draws #screen-canvas. */
+body.section-screen {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+.section-screen-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  flex: 0 0 auto;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--paper);
+}
+
+.section-screen-bar h1 {
+  margin: 0;
+  font-family: Fraunces, Georgia, serif;
+  font-size: 1.35rem;
+  font-weight: 560;
+}
+
+.section-screen-main {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.section-screen-view {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.section-screen-wait,
+.section-screen-note {
+  margin: auto;
+  max-width: 36ch;
+  padding: 24px;
+  text-align: center;
+  font-size: 1.05rem;
+  color: var(--ink-soft, #5c5348);
+}
+
+.section-screen-note p { margin: 0 0 12px; }
+
+.section-screen-wait[hidden],
+.section-screen-note[hidden],
+.section-screen-view[hidden] { display: none !important; }
+
+body.section-screen[data-link] .section-screen-bar,
+body.section-screen[data-link] .section-screen-wait,
+body.section-screen[data-link] .section-screen-view { display: none !important; }
 
 .wall-screen-face {
   flex: 1 1 auto;

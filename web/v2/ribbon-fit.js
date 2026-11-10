@@ -19,8 +19,8 @@
 
 const GLYPHS = {
   generic: '<rect x="5" y="5" width="14" height="14" rx="2"/>',
-  underlay: '<rect x="4" y="5" width="16" height="14" rx="1"/><path d="M4 15l4-4 3 3 4-5 5 6"/>',
-  satellite: '<circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c3 3 3 13 0 16M12 4c-3 3-3 13 0 16"/>',
+  underlay: '<path d="M14 3H7a1.5 1.5 0 0 0-1.5 1.5v15A1.5 1.5 0 0 0 7 21h10a1.5 1.5 0 0 0 1.5-1.5V7.5z"/><path d="M14 3v4.5h4.5"/><path d="M12 11v6M9.5 14.5 12 17l2.5-2.5"/>',
+  satellite: '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.5 2.6 2.5 14.4 0 17M12 3.5c-2.5 2.6-2.5 14.4 0 17"/>',
   calibrate: '<path d="M4 20L20 4"/><path d="M8 20h-4v-4M16 4h4v4"/>',
   "underlay-adjust": '<rect x="6" y="3" width="12" height="18" rx="1"/><path d="M6 16h12"/>',
   "underlay-toggle": '<path d="M3 12s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6z"/><circle cx="12" cy="12" r="2.2"/>',
@@ -28,35 +28,34 @@ const GLYPHS = {
   "underlay-off": '<path d="M6 6l12 12M18 6L6 18"/>',
   dwg: '<path d="M7 4h7l5 5v11H7z"/><path d="M14 4v5h5"/>',
   cad: '<path d="M7 4h7l5 5v11H7z"/><path d="M14 4v5h5"/>',
-  levels: '<path d="M4 8h16M4 12h16M4 16h16"/>',
+  "add-floor": '<path d="M3 14h12M3 19h12"/><path d="M3 9h7" stroke-dasharray="2 2"/><path d="M18 4v6M15 7h6"/>',
+  "remove-floor": '<path d="M3 14h12M3 19h12"/><path d="M15 7h6"/>',
+  levels: '<path d="M3 5h18M3 19h18"/><path d="M3 12h9"/><path d="M15 12h6M18 9v6"/>',
   "level-isolate": '<path d="M4 7h16M4 12h16M4 17h16"/><rect x="5" y="10" width="14" height="4" fill="currentColor" stroke="none"/>',
-  walls: '<path d="M4 8h16M4 16h16M9 4v16M15 4v16"/>',
-  boundary: '<rect x="4" y="4" width="16" height="16" rx="1" stroke-dasharray="3 2"/>',
-  foundations: '<path d="M4 18h16M6 18V9l6-4 6 4v9"/>',
-  floors: '<rect x="4" y="10" width="16" height="8"/><path d="M4 10l8-5 8 5"/>',
-  roofs: '<path d="M3 13l9-8 9 8"/><path d="M6 13v7h12v-7"/>',
-  ceilings: '<path d="M4 7h16M6 7v4M18 7v4M8 11h8"/>',
-  doors: '<rect x="7" y="3" width="10" height="18"/><circle cx="15" cy="13" r="0.8" fill="currentColor" stroke="none"/>',
-  windows: '<rect x="4" y="5" width="16" height="14"/><path d="M12 5v14M4 12h16"/>',
+  walls: '<path d="M3 19V5h12v4.67h3v4.66h3V19z"/><path d="M3 9.67h12M3 14.33h15"/><path stroke-width="1.3" d="M9 5v4.67M6 9.67v4.66M12 9.67v4.66M9 14.33V19M15 14.33V19"/>',
+  boundary: '<rect x="4" y="4" width="16" height="16" rx="1" stroke-dasharray="3 2.4"/>',
+  foundations: '<path d="M9 3v11M15 3v11"/><path d="M5 14h14v5H5z"/>',
+  floors: '<path d="M3 14 8 9h13l-5 5z"/><path d="M3 14v3h13v-3M16 17l5-5v-3"/>',
+  roofs: '<path d="M2 13 12 5l10 8"/><path d="M5 11v8h14v-8"/>',
+  ceilings: '<path d="M3 5h18v3H3z"/><path d="M7 11v2M12 11v4M17 11v2"/>',
+  doors: '<path d="M6.5 21V3h11v18"/><path d="M4 21h16"/><circle cx="14.8" cy="12.5" r="1" fill="currentColor" stroke="none"/>',
+  windows: '<path d="M6 3h12v15H6z"/><path d="M12 3v15M6 10.5h12"/><path d="M4.5 20.5h15"/>',
   beams: '<path d="M4 11h16v3H4z"/><path d="M7 8v8M17 8v8"/>',
-  columns: '<path d="M9 4h6M10 4v16M14 4v16M8 20h8"/>',
-  stairs: '<path d="M4 20h4v-4h4v-4h4V8h4V4"/>',
-  ramp: '<path d="M4 20h16V8z"/>',
-  railings: '<path d="M4 20V8M12 20V8M20 20V8M4 8h16"/>',
-  electrical: '<path d="M10 2l-2 10h4l-2 10"/>',
-  plumbing: '<path d="M8 4v6a4 4 0 008 0V4M12 14v6"/>',
-  waterheater: '<rect x="7" y="4" width="10" height="16" rx="3"/><path d="M12 9v4"/>',
-  drainage: '<path d="M4 6h16M6 6v6a6 6 0 0012 0V6"/>',
-  "service-route": '<path d="M4 18h8V8h8"/><circle cx="4" cy="18" r="1.6"/><circle cx="20" cy="8" r="1.6"/>',
+  columns: '<path d="M5 4h14M5 20h14"/><path d="M8 4v16M16 4v16"/>',
+  stairs: '<path d="M3 20h5v-5h5v-5h5V5h3"/>',
+  electrical: '<path d="M13 2 5 14h6l-1 8 8-12h-6z"/>',
+  plumbing: '<path d="M12 3c3.5 4.5 6 7.8 6 11a6 6 0 0 1-12 0c0-3.2 2.5-6.5 6-11z"/>',
+  drainage: '<circle cx="12" cy="12" r="8"/><path d="M8 10h8M8 14h8"/>',
+  "service-route": '<path d="M5 18h6V6h8"/><circle cx="5" cy="18" r="2"/><circle cx="19" cy="6" r="2"/>',
   "service-node": '<path d="M3 17l7-6 11 3"/><circle cx="3" cy="17" r="1.6"/><circle cx="21" cy="14" r="1.6"/><circle cx="10" cy="11" r="2.4"/>',
   "service-rise": '<path d="M12 20V6M7 11l5-5 5 5"/><path d="M5 20h14"/>',
   "service-connect": '<circle cx="7" cy="12" r="3"/><circle cx="17" cy="12" r="3"/><path d="M10 12h4"/>',
   "service-type": '<path d="M4 8h16M4 16h16"/><circle cx="12" cy="12" r="3"/>',
   "service-slope": '<path d="M4 8l16 8"/><path d="M4 8v8h16"/>',
-  furniture: '<path d="M5 11h14v8H5zM5 11V8h14v3M9 19v2M15 19v2"/>',
-  casework: '<rect x="4" y="5" width="16" height="15"/><path d="M12 5v15M4 12h16"/>',
-  rooms: '<rect x="4" y="5" width="16" height="14"/><path d="M4 10h16"/>',
-  "room-sep": '<path d="M4 12h16M12 4v16"/>',
+  furniture: '<path d="M5.5 11V7A1.5 1.5 0 0 1 7 5.5h10A1.5 1.5 0 0 1 18.5 7v4"/><path d="M12 5.5V11"/><path d="M2.5 11a1.5 1.5 0 0 1 3 0v3h13v-3a1.5 1.5 0 0 1 3 0v6h-19z"/><path d="M4.5 17v2.5M19.5 17v2.5"/>',
+  casework: '<rect x="3" y="6" width="18" height="13" rx="1"/><path d="M12 6v13M9.5 12h.01M14.5 12h.01"/>',
+  rooms: '<path d="M4 4h16v16H4z"/>',
+  "room-sep": '<path d="M4 4h16v16H4z"/><path d="M12 4v16" stroke-dasharray="2.5 2.2"/>',
   "model-lines": '<path d="M5 19L19 5"/>',
   "annot-lines": '<path d="M5 19L19 5"/><path d="M7 7h3M14 17h3"/>',
   dimensions: '<path d="M5 8v8M19 8v8M5 12h14"/>',
@@ -66,7 +65,7 @@ const GLYPHS = {
   elevation: '<rect x="5" y="8" width="14" height="12"/><path d="M5 12h14M9 8v12"/>',
   grids: '<path d="M4 8h16M4 16h16M8 4v16M16 4v16"/>',
   "project-info": '<circle cx="12" cy="12" r="8"/><path d="M12 11v5M12 8h.01"/>',
-  finishes: '<path d="M4 18h16M6 18l4-10 4 6 2-3 4 7"/>',
+  finishes: '<path d="M4 4h16v16H4z"/><path d="M4 12h16M12 4v16"/>',
   "property-line": '<path d="M4 18L12 4l8 14"/>',
   "sg-coords": '<circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/>',
   "building-line": '<rect x="6" y="7" width="12" height="12"/><path d="M3 20h18"/>',
@@ -90,7 +89,7 @@ const GLYPHS = {
   "second-screen": '<rect x="3" y="6" width="10" height="8" rx="1"/><rect x="14" y="10" width="7" height="8" rx="1"/><path d="M6 18h4"/>',
   "flip-hinge": '<path d="M5 4v16"/><path d="M5 5h10a4 4 0 014 4v6"/><path d="M16 12l3 3 3-3"/>',
   "flip-swing": '<path d="M4 12h16"/><path d="M8 12a6 6 0 016-6M8 12a6 6 0 006 6"/><path d="M14 3l2 3-3 1M14 21l2-3-3-1"/>',
-  "roof-cut": '<path d="M3 13l9-8 9 8"/><rect x="9" y="10" width="6" height="5" stroke-dasharray="2 2"/>',
+  "roof-cut": '<path d="M2 15 12 7l10 8"/><path d="M14 3 9 21" stroke-dasharray="2.5 2"/>',
   "roof-cut-here": '<path d="M3 13l9-8 9 8"/><rect x="9" y="10" width="6" height="5" stroke-dasharray="2 2"/>',
   "edit-poly": '<path d="M5 17l3-10 9 2 2 8z"/><circle cx="5" cy="17" r="1.4"/><circle cx="8" cy="7" r="1.4"/><circle cx="17" cy="9" r="1.4"/><circle cx="19" cy="17" r="1.4"/>',
   "follow-walls": '<rect x="4" y="4" width="16" height="16" rx="1"/><rect x="8" y="8" width="8" height="8" stroke-dasharray="2 2"/><path d="M10 12h4"/>',
@@ -102,7 +101,7 @@ const GLYPHS = {
   "trim-circle": '<circle cx="12" cy="12" r="6" stroke-dasharray="3 2"/><path d="M4 12h16M12 4v16"/>',
   attach: '<path d="M4 20h16"/><rect x="7" y="10" width="10" height="6"/><path d="M12 4v6M9 7l3-3 3 3"/>',
   detach: '<path d="M4 20h16"/><rect x="7" y="6" width="10" height="6"/><path d="M12 14v4M9 15l3 3 3-3"/>',
-  "wall-finishes": '<path d="M4 18h16M6 18V6h12v12"/><path d="M9 9h6M9 12h6M9 15h6"/>',
+  "wall-finishes": '<rect x="4" y="3" width="13" height="5" rx="1"/><path d="M17 5.5h3v5h-8v3"/><path d="M11 13.5h2V21h-2z"/>',
   group: '<rect x="4" y="6" width="7" height="12"/><rect x="13" y="6" width="7" height="12"/>',
   ungroup: '<rect x="3" y="7" width="7" height="10"/><rect x="14" y="7" width="7" height="10"/>',
   undo: '<path d="M9 13H5V9"/><path d="M5 13a8 8 0 111.5 4.5"/>',
@@ -117,6 +116,7 @@ const GLYPHS = {
   sheets: '<rect x="5" y="4" width="10" height="14"/><path d="M9 8h10v14H9"/>',
   "print-boq": '<rect x="6" y="10" width="12" height="8"/><path d="M8 10V6h8v4M8 18v3h8v-3"/>',
   "print-bom": '<rect x="6" y="10" width="12" height="8"/><path d="M8 10V6h8v4M8 18v3h8v-3"/>',
+  check: '<path d="M5 12l4.5 4.5L19 7"/>',
   "part-c": '<rect x="5" y="5" width="14" height="14"/><path d="M8 12h8"/>',
   "part-o": '<circle cx="12" cy="12" r="7"/><path d="M8 12h8"/>',
   "part-m": '<path d="M4 20h4v-4h4v-4h4V8h4"/>',
@@ -127,7 +127,7 @@ const GLYPHS = {
 
 function glyphSvg(id) {
   const paths = GLYPHS[id] || GLYPHS.generic;
-  return `<svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
+  return `<svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
 }
 
 function fillItemFace(btn, id, caption) {
@@ -166,9 +166,14 @@ export function decorateRibbon(functionsEl) {
       const ov = document.createElement("button");
       ov.type = "button";
       ov.className = "ribbon-overflow-btn";
-      const name = group.querySelector(".ribbon-group-label")?.textContent || "More";
-      ov.innerHTML = `${glyphSvg("generic")}<span class="caption">${name}</span>`;
+      const labelEl = group.querySelector(".ribbon-group-label");
+      const name = labelEl?.dataset.full || labelEl?.textContent || "More";
+      // The folded group keeps its lead tool's face, and stays lit while one
+      // of its tools is the active one.
+      const lead = group.querySelector(".ribbon-item.anchor") || group.querySelector(".ribbon-item");
+      ov.innerHTML = `${glyphSvg(lead?.dataset.function || "generic")}<span class="caption">${name}</span>`;
       ov.title = `${name} — more commands`;
+      ov.classList.toggle("active", Boolean(group.querySelector(".ribbon-item.active")));
       ov.addEventListener("click", (e) => {
         e.stopPropagation();
         const open = group.classList.contains("is-open");
@@ -206,47 +211,66 @@ export function decorateRibbon(functionsEl) {
 //
 //   data-big       "1" = large icon-over-caption buttons (kind "large", opted in)
 //   data-comfort   "comfy" | "narrow" | "tight"   (small buttons)
-//   data-anchors   "side" | "stack"               (kind "mixed")
-//   data-anchor-comfort  "comfy" | "tight"        (kind "mixed")
+//   data-lone      "tile" = a small button alone in its column turns into a
+//                  short icon-over-caption tile, its caption wrapping onto
+//                  two lines, so it keeps its name in half the width
+//   data-anchors   "inline" = the lead button joins the small rows (kind "mixed")
 //   data-icons     "" | "rest" | "all"            (captions hidden)
 //   data-scale     "collapsed"                    (group folds into a dropdown)
 
 export const LADDERS = {
-  // Opted-in groups (Openings): large buttons, then stacked small ones, then icons.
+  // Opted-in groups: large buttons, then stacked small ones, then icons.
   large: [
     { big: "1", comfort: "comfy" },
     { big: "1", comfort: "tight" },
     { big: "0", comfort: "tight" },
     { big: "0", comfort: "tight", icons: "all" },
   ],
-  // 3+ commands: always a three-row grid.
+  // No lead button: always a three-row grid.
   stack: [
     { comfort: "comfy" },
-    { comfort: "narrow" },
-    { comfort: "tight" },
+    { comfort: "comfy", lone: "tile" },
+    { comfort: "narrow", lone: "tile" },
+    { comfort: "tight", lone: "tile" },
     { comfort: "tight", icons: "all" },
     { collapsed: true },
   ],
-  // Anchor buttons (e.g. PDF / image, Satellite) plus smaller ones. The
-  // anchors sit side by side only when there is room, then stack.
+  // A lead button and at most two others (Room and Room separator). Names
+  // stay as long as they can: the lone one wraps into a tile, then the lead
+  // joins the others as one labelled column, and only then icons.
   mixed: [
-    { anchors: "side", anchorComfort: "comfy", comfort: "comfy" },
-    { anchors: "stack", anchorComfort: "comfy", comfort: "comfy" },
-    { anchors: "stack", anchorComfort: "comfy", comfort: "narrow" },
-    { anchors: "stack", anchorComfort: "comfy", comfort: "tight" },
-    { anchors: "stack", anchorComfort: "comfy", comfort: "tight", icons: "rest" },
-    { anchors: "stack", anchorComfort: "tight", comfort: "tight", icons: "rest" },
-    { anchors: "stack", anchorComfort: "tight", comfort: "tight", icons: "all" },
+    {},
+    { lone: "tile" },
+    { anchors: "inline" },
+    { anchors: "inline", icons: "all" },
     { collapsed: true },
+  ],
+  // A lead button and three or more others (Walls and its openings). Too
+  // many to fold into one column, so the lead stays large while the rest
+  // tighten and then drop their captions.
+  wide: [
+    {},
+    { lone: "tile" },
+    { lone: "tile", comfort: "tight" },
+    { comfort: "tight", icons: "rest" },
+    { collapsed: true },
+  ],
+  // The running command's controls. Tighten the spacing first, while every
+  // control stays on the row; folding Top and Height into a menu is last,
+  // after every other group has already given up what it can.
+  settings: [
+    {},
+    { density: "tight" },
+    { density: "fold" },
   ],
 };
 
-const ATTRS = ["big", "comfort", "anchors", "anchorComfort", "icons"];
+const ATTRS = ["big", "comfort", "lone", "anchors", "icons", "density"];
 
-/** Lowest key shrinks first. Mixed groups give up side-by-side anchors and
- * their small buttons early, and their anchors' comfort late. */
+/** Lowest key shrinks first. */
 export function shrinkKey(kind, prio, step) {
-  if (kind === "mixed") return step < 5 ? step - 3 : step - 2;
+  // Tighten before any other group moves; fold only once the rest are spent.
+  if (kind === "settings") return step === 0 ? -4 : 30 + step;
   return step - prio;
 }
 
@@ -314,6 +338,8 @@ function applyStep(group, step) {
   for (const a of ATTRS) delete group.dataset[a];
   delete group.dataset.scale;
   group.dataset.step = String(step);
+  const label = group.querySelector(":scope > .ribbon-group-label");
+  if (label?.dataset.short) label.textContent = s.icons ? label.dataset.short : label.dataset.full;
   if (s.collapsed) {
     group.dataset.scale = "collapsed";
     return;
@@ -326,7 +352,10 @@ function overflowing(el) {
   if (!groups.length) return false;
   const parentBox = el.getBoundingClientRect();
   const lastBox = groups[groups.length - 1].getBoundingClientRect();
-  return lastBox.right > parentBox.right + 2;
+  // The window, not just the row: a row that grows with its content reports
+  // itself as fitting while its tail sits past the screen.
+  const limit = Math.min(parentBox.right, window.innerWidth);
+  return lastBox.right > limit + 2;
 }
 
 /**
@@ -337,10 +366,10 @@ function overflowing(el) {
 export function fitRibbon(el) {
   if (!el || el.hidden || !el.offsetParent) return;
   closeOverflowMenus();
-  // A Settings group is a fixed strip of the running command's controls. It
-  // does not shrink; the other groups give up width around it. Overflow is
-  // still measured against the last group, which is the settings strip when
-  // one is open, so the row accounts for it.
+  // The running command's settings join the plan (kind "settings"): they
+  // tighten before anything else and fold Top and Height into a menu only
+  // at the end. The underlay mode strip stays fixed. Overflow is measured
+  // against the last group, so a fixed strip on the end still counts.
   const groups = [...el.querySelectorAll(":scope > .ribbon-group")].filter((g) => g.dataset.fit !== "fixed");
   if (!groups.length) return;
   const plan = groups.map((g) => ({ kind: g.dataset.kind || "stack", prio: Number(g.dataset.prio) || 0 }));

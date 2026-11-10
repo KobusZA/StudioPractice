@@ -10,7 +10,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,560&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="../shared/tokens.css" />
   <link rel="stylesheet" href="../shared/splash.css" />
-  <link rel="stylesheet" href="./v2.css?v=20261108-edit-sheet" />
+  <link rel="stylesheet" href="./v2.css?v=20261110-ribbon-regroup2" />
   <!-- Painted before the stylesheet arrives, so a cold load is ink rather
        than a white flash. A reload of this tab skips it. -->
   <style>
@@ -113,12 +113,14 @@
            redraw cannot destroy them. -->
       <div id="v2-ribbon-settings-park" hidden>
           <div class="plan-loc words" id="v2-roof-cut-kind" hidden>
+            <span class="draw-name">Cut</span>
             <div class="seg" role="group" aria-label="What this cut does">
               <button type="button" data-roof-cut="hole" class="active" aria-pressed="true" title="An opening. The roof around it stays.">Hole</button>
               <button type="button" data-roof-cut="remove" aria-pressed="false" title="This part of the roof comes off. The outline stays.">Remove</button>
             </div>
           </div>
           <div class="plan-loc words" id="v2-shape-link" hidden>
+            <span class="draw-name">Outline</span>
             <div class="seg" role="group" aria-label="How this outline is drawn">
               <button type="button" data-shape-link="walls" hidden aria-pressed="false" title="Click the outside corners of the walls. The roof edge sits out by the overhang. Enter closes it.">Along walls</button>
               <button type="button" data-shape-link="sketch" class="active" aria-pressed="true" title="Click each corner of the outline. Enter closes it. It does not follow the walls until you ask.">Sketch</button>
@@ -126,25 +128,86 @@
               <button type="button" data-shape-link="footprint" aria-pressed="false" title="Click inside the building. The outline follows the external walls.">External walls</button>
             </div>
           </div>
-          <label class="roof-overhang" id="v2-roof-overhang" hidden>Overhang
-            <input id="v2-roof-overhang-mm" type="text" inputmode="decimal" autocomplete="off" aria-label="Overhang in millimetres" />
-            mm
+          <label class="roof-overhang field-stack" id="v2-roof-overhang" hidden>
+            <span class="draw-name">Overhang</span>
+            <span class="unit-field">
+              <input id="v2-roof-overhang-mm" type="text" inputmode="decimal" autocomplete="off" aria-label="Overhang in millimetres" />
+              <span class="unit">mm</span>
+            </span>
           </label>
           <div class="wall-opts" id="v2-wall-opts" hidden>
           <div class="plan-loc" id="v2-wall-loc" hidden>
+            <span class="draw-name">Location</span>
             <div class="seg" role="group" aria-label="Draw on">
-              <button type="button" data-wall-loc="center" class="active" aria-pressed="true" aria-label="Centreline" title="Centreline: The line you draw is the middle of the wall."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><rect x="2" y="8" width="20" height="8" fill="#d9c7b0" stroke="#5c2410" stroke-width="1"/><line x1="2" y1="12" x2="22" y2="12" stroke="#c8501e" stroke-width="2" stroke-dasharray="3 2"/></svg></button>
-              <button type="button" data-wall-loc="exterior" aria-pressed="false" aria-label="Exterior face" title="Exterior face: The line you draw is the outside face. Draw clockwise and the wall sits inside the line. Space flips."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><rect x="2" y="8" width="20" height="8" fill="#d9c7b0" stroke="#5c2410" stroke-width="1"/><line x1="2" y1="8" x2="22" y2="8" stroke="#c8501e" stroke-width="2.5"/></svg></button>
-              <button type="button" data-wall-loc="interior" aria-pressed="false" aria-label="Interior face" title="Interior face: The line you draw is the inside face. Draw clockwise and the wall sits outside the line. Space flips."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><rect x="2" y="8" width="20" height="8" fill="#d9c7b0" stroke="#5c2410" stroke-width="1"/><line x1="2" y1="16" x2="22" y2="16" stroke="#c8501e" stroke-width="2.5"/></svg></button>
-              <button type="button" id="v2-wall-arc" aria-pressed="false" aria-label="Start-End-Radius arc" title="Start-End-Radius arc. Draw the wall from its start to its end, then pull the curve. On a wall that is already drawn, select it and click here, then pull the curve. The sweep and the radius are shown."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M3 17.5C6 8 18 8 21 17.5" fill="none" stroke="#d9c7b0" stroke-width="6" stroke-linecap="butt"/><path d="M3 17.5C6 8 18 8 21 17.5" fill="none" stroke="#5c2410" stroke-width="5.2" stroke-linecap="butt"/><path d="M3 17.5C6 8 18 8 21 17.5" fill="none" stroke="#c8501e" stroke-width="1.4" stroke-linecap="butt"/></svg></button>
+              <button type="button" data-wall-loc="center" class="active" aria-pressed="true" aria-label="Centreline" title="Centreline: The line you draw is the middle of the wall."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="8" width="18" height="8"/><line x1="3" y1="12" x2="21" y2="12" stroke-dasharray="3 2"/></svg></button>
+              <button type="button" data-wall-loc="exterior" aria-pressed="false" aria-label="Exterior face" title="Exterior face: The line you draw is the outside face. Draw clockwise and the wall sits inside the line. Space flips."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="2" y1="5" x2="22" y2="5" stroke-dasharray="3 2"/><rect x="4" y="9" width="16" height="8"/></svg></button>
+              <button type="button" data-wall-loc="interior" aria-pressed="false" aria-label="Interior face" title="Interior face: The line you draw is the inside face. Draw clockwise and the wall sits outside the line. Space flips."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="7" width="16" height="8"/><line x1="2" y1="19" x2="22" y2="19" stroke-dasharray="3 2"/></svg></button>
+            </div>
+          </div>
+          <div class="plan-loc" id="v2-wall-draw">
+            <span class="draw-name">Draw</span>
+            <div class="cluster-controls">
+            <div class="seg" role="group" aria-label="Draw">
+              <button type="button" data-wall-draw="line" class="active" aria-pressed="true" aria-label="Line" title="Line. Click the start, then the end. With Chain on, the next wall starts at that end."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="18" x2="20" y2="6"/></svg></button>
+              <button type="button" id="v2-wall-arc" data-wall-draw="arc" aria-pressed="false" aria-label="Start-End-Radius arc" title="Start-End-Radius arc. Draw the wall from its start to its end, then pull the curve. On a wall that is already drawn, select it and click here, then pull the curve. The sweep and the radius are shown."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 18C7 6 17 6 21 18"/><path d="M7 18C9.6 12 14.4 12 17 18" stroke-dasharray="2.2 2"/></svg></button>
+              <button type="button" data-wall-draw="fillet" aria-pressed="false" aria-label="Fillet arc" title="Fillet arc. Click two walls on the sides to keep, then move to size the arc. Tick Radius to use a typed size instead."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 5v8a6 6 0 0 0 6 6h8"/><path d="M11 19h2.2" stroke-dasharray="1.6 1.8"/><path d="M5 13v2.2" stroke-dasharray="1.6 1.8"/></svg></button>
+              <button type="button" data-wall-draw="pick" aria-pressed="false" aria-label="Pick lines" title="Pick lines. Move onto a wall face, a line, the property or building line, or a line on the PDF, then click. The wall runs the full length of that line, on the side the cursor is on, at the Offset. Pick the next line and the corner closes."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5h18" stroke-width="2.2"/><rect x="3" y="10" width="18" height="5"/><path d="M15 21l1.4-4.2 4.2 1.4"/></svg></button>
+            </div>
+            <label class="roof-overhang" id="v2-fillet-radius" hidden title="Tick to use this radius. Unticked, the cursor sets the size after the second wall, and the walls trim as it moves.">
+              <input id="v2-fillet-radius-lock" type="checkbox" aria-label="Lock the fillet radius" />
+              Radius
+              <span class="unit-field">
+                <input id="v2-fillet-radius-mm" type="text" inputmode="decimal" autocomplete="off" aria-label="Fillet radius in millimetres" value="600" disabled />
+                <span class="unit">mm</span>
+              </span>
+            </label>
             </div>
           </div>
           <div class="plan-loc" id="v2-wall-corner" hidden>
+            <span class="draw-name">Join</span>
             <div class="seg" role="group" aria-label="Corner">
-              <button type="button" data-wall-corner="past" aria-pressed="false" aria-label="Past old wall" title="Past old wall: Starting or ending on another wall's end: the new wall runs past it to its far face, and the other wall stops against the new one."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><rect x="3" y="2" width="6" height="20" fill="#b9b2a6" stroke="#555" stroke-width="1"/><rect x="1" y="12" width="21" height="7" fill="#d9c7b0" stroke="#5c2410"/></svg></button>
-              <button type="button" data-wall-corner="against" class="active" aria-pressed="true" aria-label="Against old wall" title="Against old wall: Starting or ending on another wall's end: the new wall stops against its side, and the other wall runs on to cover the corner."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><rect x="3" y="2" width="6" height="20" fill="#b9b2a6" stroke="#555" stroke-width="1"/><rect x="9" y="12" width="13" height="7" fill="#d9c7b0" stroke="#5c2410"/></svg></button>
-              <button type="button" data-wall-corner="center" aria-pressed="false" aria-label="On the line" title="On the line: Nothing is trimmed or extended: the walls meet on the line you drew."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><rect x="3" y="2" width="6" height="20" fill="#b9b2a6" stroke="#555" stroke-width="1"/><rect x="6" y="12" width="16" height="7" fill="#d9c7b0" fill-opacity=".7" stroke="#5c2410"/><line x1="6" y1="15.5" x2="22" y2="15.5" stroke="#c8501e" stroke-width="1.5" stroke-dasharray="3 2"/></svg></button>
+              <button type="button" data-wall-corner="past" aria-pressed="false" aria-label="Past old wall" title="Past old wall: Starting or ending on another wall's end: the new wall runs past it to its far face, and the other wall stops against the new one."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 12V3h5v9"/><path class="new-wall" d="M3 12h18v6H3z"/></svg></button>
+              <button type="button" data-wall-corner="against" class="active" aria-pressed="true" aria-label="Against old wall" title="Against old wall: Starting or ending on another wall's end: the new wall stops against its side, and the other wall runs on to cover the corner."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3" width="6" height="18"/><path class="new-wall" d="M10 13h10v6H10"/></svg></button>
+              <button type="button" data-wall-corner="center" aria-pressed="false" aria-label="On the line" title="On the line: Nothing is trimmed or extended: the walls meet on the line you drew."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="3" width="6" height="18"/><path class="new-wall" d="M9 12h11v6H9"/><line x1="9" y1="15" x2="20" y2="15" stroke-dasharray="2 1.8"/></svg></button>
             </div>
+          </div>
+          <div class="plan-loc" id="v2-wall-dims" hidden>
+            <span class="draw-name">Lengths</span>
+            <div class="seg" role="group" aria-label="Lengths shown on a selected wall">
+              <button type="button" data-wall-dims="both" class="active" aria-pressed="true" aria-label="Inside and outside" title="Inside and outside: the length along the face towards the room and the length along the face away from it. Tab steps through Both, Inside, Outside and Centre."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21V9h17"/><path d="M8 21v-8h13"/><path d="M4 5h17M4 3.5v3M21 3.5v3" stroke-width="1.4"/><path d="M8 17h13M8 15.5v3M21 15.5v3" stroke-width="1.4"/></svg></button>
+              <button type="button" data-wall-dims="inside" aria-pressed="false" aria-label="Inside" title="Inside: the length along the face towards the room. Tab steps through Both, Inside, Outside and Centre."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21V9h17"/><path d="M8 21v-8h13"/><path d="M8 17h13M8 15.5v3M21 15.5v3" stroke-width="1.4"/></svg></button>
+              <button type="button" data-wall-dims="outside" aria-pressed="false" aria-label="Outside" title="Outside: the length along the face away from the room. Tab steps through Both, Inside, Outside and Centre."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21V9h17"/><path d="M8 21v-8h13"/><path d="M4 5h17M4 3.5v3M21 3.5v3" stroke-width="1.4"/></svg></button>
+              <button type="button" data-wall-dims="centre" aria-pressed="false" aria-label="Centreline" title="Centreline: the length along the middle of the wall. Quantities are worked from it, but it cannot be measured on site. Tab steps through Both, Inside, Outside and Centre."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21V9h17"/><path d="M8 21v-8h13"/><path d="M6 21V11h15" stroke-dasharray="2 1.8"/></svg></button>
+            </div>
+          </div>
+          <div class="plan-loc wall-place-top" id="v2-wall-chain-offset" hidden>
+            <label class="wall-chain field-stack" title="Draw a series of walls connected at their ends. Off, and each wall starts where you next click.">
+              <span class="draw-name">Chain</span>
+              <span class="check-slot"><input type="checkbox" id="v2-wall-chain" checked /></span>
+            </label>
+            <label class="field-stack" title="How far the wall sits from the line you click, in millimetres. Positive is to your left as you draw. Negative is to your right. Blank keeps the wall on the line. While it is set, this box stays highlighted, and the plan shows the line you click with the distance across to the wall. With Pick lines the sign does not matter: the wall goes on the side the cursor is on.">
+              <span class="draw-name">Offset</span>
+              <span class="unit-field">
+                <input id="v2-wall-offset" type="text" inputmode="decimal" autocomplete="off" aria-label="Offset in millimetres" placeholder="0" />
+                <span class="unit">mm</span>
+              </span>
+            </label>
+          </div>
+          <div class="plan-loc wall-place-top" id="v2-wall-top" hidden>
+            <label class="field-stack" title="Where the walls you place next stop. Up to the level above follows that level if it moves. A fixed height does not.">
+              <span class="draw-name">Top</span>
+              <select id="v2-wall-top-mode">
+                <option value="level-above">Up to level above</option>
+                <option value="fixed">Fixed height</option>
+              </select>
+            </label>
+            <label class="field-stack" title="Height of the walls you place next. Typing a height places them at that fixed height.">
+              <span class="draw-name">Height</span>
+              <span class="unit-field">
+                <input id="v2-wall-top-h" type="text" inputmode="decimal" autocomplete="off" aria-label="Wall height in millimetres" />
+                <span class="unit">mm</span>
+              </span>
+            </label>
           </div>
           </div>
           <label class="move-disjoin" id="v2-move-disjoin" hidden title="Pull the wall off the walls it meets. Hold Alt while dragging to do the same.">
@@ -221,12 +284,18 @@
                aria-valuemin="0" tabindex="0"></svg>
           </div>
           <ul class="level-stations" id="v2-level-stations"></ul>
+          <label class="level-build-up" title="Screed and finish on the ground floor slab. Ground floor walls start this far below finished floor level. Blank means the DPC is taken at finished floor level.">Floor build-up
+            <span class="plan-context-field">
+              <input id="v2-floor-build-up" type="text" inputmode="decimal" autocomplete="off" placeholder="not stated" aria-label="Floor build-up, mm" />
+              <span>mm</span>
+            </span>
+          </label>
           <button type="button" class="panel-resize panel-resize-levels" id="v2-resize-levels"
                   aria-label="Resize levels panel" title="Drag to resize" tabindex="0"></button>
         </aside>
         <div class="plan-column" id="v2-plan-column">
         <div class="canvas-wrap planner-canvas-wrap" id="v2-canvas-wrap">
-        <div class="planner-tools plan-float-tools" role="toolbar" aria-label="Plan tools">
+        <div class="planner-tools plan-float-tools" id="v2-plan-tools" role="toolbar" aria-label="Plan tools">
           <button type="button" data-tool="select" class="active">Select</button>
           <button type="button" id="v2-pan" aria-pressed="false" title="Pan the plan with the left button. Esc or Pan again goes back to the tool you were using. The middle button, or Alt-drag, pans without switching.">Pan</button>
           <button type="button" id="v2-undo">Undo</button>
@@ -243,6 +312,7 @@
           </div>
         </div>
         <canvas id="v2-canvas"></canvas>
+        <input class="temp-dim-input" id="v2-temp-dim" type="text" inputmode="decimal" autocomplete="off" aria-label="Dimension in millimetres" hidden />
         <span class="elev-edge-mode" id="v2-floor-edge-mode" hidden role="group" aria-label="Drag an edge to">
           <span class="elev-edge-subject" data-edge-subject>Editing the floor</span>
           <span class="elev-edge-actions">
@@ -250,8 +320,11 @@
             <button type="button" data-floor-edge="corner" title="Add a corner on an edge. Hold Shift to move the edge instead.">Corner</button>
           </span>
         </span>
-        <div class="canvas-status">
-          <p class="ribbon-hint" id="v2-ribbon-hint" hidden></p>
+        <div class="canvas-status" id="v2-canvas-status">
+          <div class="ribbon-hint-slot" id="v2-ribbon-hint-slot" hidden>
+            <button type="button" class="ribbon-hint-info" id="v2-ribbon-hint-info" hidden aria-expanded="true" aria-controls="v2-ribbon-hint" title="Hide help">i</button>
+            <p class="ribbon-hint" id="v2-ribbon-hint" hidden></p>
+          </div>
           <div class="plan-options plan-fields" id="v2-plan-options" role="group" aria-label="Sizes" hidden>
             <label id="v2-ctx-len-wrap">Length
               <span class="plan-context-field">
@@ -392,7 +465,7 @@
               <input id="v2-elev-guideline" type="text" inputmode="decimal" placeholder="mm" aria-label="Guideline, millimetres down from the top of the wall" />
             </label>
             <button type="button" class="elev-info" id="v2-elev-info" hidden aria-expanded="false" aria-controls="v2-elev-info-note" title="How this elevation works">i</button>
-            <p class="elev-info-note" id="v2-elev-info-note" hidden>Drag the top of the wall to set its height. The line above is the next floor, or the roof on the top storey. Scroll to zoom in or out; middle-drag or Alt-drag to move around. Not aligned shows when this view has been zoomed or moved. Whole wall shows the whole face. Align centres the wall and the elevation at this zoom. Escape blurs a field, finishes or cancels a drawing, cancels a finish that is waiting, drops a typed gap, releases a corner, selects the wall, then closes it. Exit closes this wall in one press.</p>
+            <p class="elev-info-note" id="v2-elev-info-note" hidden>Drag the top of the wall to set its height. The line above is the next floor, or the roof on the top storey. The elevation opens lined up with the plan, and follows the plan when you zoom or pan it. Scroll or middle-drag in the elevation to look closer; the plan stays put and Not aligned shows. Fit whole wall fits the whole face in the strip. Align to drawing lines the elevation up with the wall on the plan again. A wall that runs up the plan sits in the centre of the strip, and the guide bends across to it. Escape blurs a field, finishes or cancels a drawing, cancels a finish that is waiting, drops a typed gap, releases a corner, selects the wall, then closes it. Exit closes this wall in one press.</p>
             </span>
           </div>
           <button type="button" class="svc-profile-all" id="v2-profile-select-all"
@@ -408,9 +481,9 @@
                   title="View the other face of this wall.">Flip face</button>
           <span class="elev-align-state" id="v2-elev-align-state" hidden>Not aligned</span>
           <button type="button" class="svc-profile-all" id="v2-elev-align" hidden
-                  title="Centre the wall and the elevation, keeping this zoom">Align</button>
+                  title="Line this elevation up with the wall on the plan. The plan stays where it is.">Align to drawing</button>
           <button type="button" class="svc-profile-all" id="v2-elev-fit" hidden
-                  title="Show the whole wall again">Whole wall</button>
+                  title="Fit the whole wall in the elevation. The plan stays where it is.">Fit whole wall</button>
           <button type="button" class="svc-profile-all" id="v2-elev-flash" hidden
                   title="Show this side of the wall on the plan">Show on plan</button>
           <button type="button" class="svc-profile-all" id="v2-elev-second-screen" hidden
@@ -609,6 +682,12 @@
               <span>mm</span>
             </span>
           </label>
+          <label id="v2-ctx-floor-offset-wrap" hidden title="Raise or sink this floor from its level, e.g. -170 for a step down. Blank or 0 keeps it on the level.">Offset from level
+            <span class="plan-context-field">
+              <input id="v2-ctx-floor-offset" type="text" inputmode="decimal" autocomplete="off" placeholder="0" aria-label="Offset from level, mm" />
+              <span>mm</span>
+            </span>
+          </label>
           <div id="v2-ctx-roof-cut" hidden>
             <fieldset class="planner-status" id="v2-ctx-roof-cut-kind" hidden>
               <legend>This cut</legend>
@@ -701,6 +780,11 @@
                 <span>Base</span>
                 <strong id="v2-ctx-attach">Not attached</strong>
               </div>
+              <label class="level-isolate" id="v2-ctx-foundation-wrap" hidden title="A 220 mm foundation wall runs under this wall, from the foundation level up to its base. Untick for a wall that needs none.">
+                <input type="checkbox" id="v2-ctx-foundation" />
+                Foundation wall under it
+              </label>
+              <button type="button" id="v2-ctx-foundation-own" hidden title="Turn the foundation wall under this wall into a drawn wall you can edit">Draw foundation as its own wall</button>
             </div>
           </details>
           <button type="button" id="v2-ctx-convert" hidden title="Replace this room's walls with drawn walls you can select and edit one by one">Convert walls to drawn</button>
@@ -829,6 +913,11 @@
           Services
         </label>
         <div class="mass-actions">
+          <div class="seg section-host" id="v2-mass-host" hidden role="group" aria-label="Where the section is shown">
+            <button type="button" data-section-host="overlay" title="Cover the plan">Overlay</button>
+            <button type="button" data-section-host="float" title="A window on this screen. The plan stays editable and the section updates.">Float</button>
+            <button type="button" data-section-host="screen" title="Its own window, for a second monitor. The section updates as you edit.">Window</button>
+          </div>
           <button type="button" id="v2-mass-picture" aria-expanded="false" aria-controls="v2-mass-prompt">Generate model</button>
           <button type="button" id="v2-mass-show-3d" hidden>Back to the model</button>
           <button type="button" id="v2-mass-close">Back to plan</button>
@@ -958,7 +1047,7 @@
         <section class="sheet-main">
           <div class="sheet-fields" id="v2-sheet-fields" hidden>
             <label>View
-              <select id="v2-sheet-view"></select>
+              <select id="v2-sheet-viewport"></select>
             </label>
             <label>Level
               <select id="v2-sheet-level"></select>
@@ -1289,6 +1378,6 @@
     </form>
   </div>
 
-  <script type="module" src="./ui.js?v=20261108-edit-sheet"></script>
+  <script type="module" src="./ui.js?v=20261110-pick-side"></script>
 </body>
 </html>

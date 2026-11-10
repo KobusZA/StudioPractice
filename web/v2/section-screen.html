@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Section</title>
+  <link rel="icon" href="../logo.png" type="image/png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,560&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="./v2.css?v=20261110-ribbon-settings" />
+</head>
+<body class="section-screen">
+  <!-- The section on a second monitor. This page holds no document and no
+       model: the plan tab compiles the building and draws it on
+       #screen-canvas. The script below only says so when that tab is gone. -->
+  <header class="section-screen-bar" id="screen-bar">
+    <h1 id="screen-title">Section</h1>
+    <div class="seg" id="screen-filters" role="group" aria-label="Show in section" hidden>
+      <button type="button" data-section-status="both" class="active">Both</button>
+      <button type="button" data-section-status="existing">Existing</button>
+      <button type="button" data-section-status="planned">Proposed</button>
+    </div>
+    <label class="mass-services" id="screen-services-label" hidden title="Hot water, cold water, drainage, electrical and gas.">
+      <input type="checkbox" id="screen-services" />
+      Services
+    </label>
+    <div class="seg section-host" id="screen-host" role="group" aria-label="Where the section is shown">
+      <button type="button" data-section-host="overlay" title="Cover the plan">Overlay</button>
+      <button type="button" data-section-host="float" title="A window on this screen. The plan stays editable and the section updates.">Float</button>
+      <button type="button" data-section-host="screen" title="Its own window, for a second monitor. The section updates as you edit.">Window</button>
+    </div>
+    <div class="mass-actions">
+      <button type="button" id="screen-fit" hidden title="Fit the cut in the window">Fit</button>
+      <button type="button" id="screen-done" hidden title="Clear this section. The window stays open for the next one.">Done</button>
+    </div>
+  </header>
+  <main class="section-screen-main">
+    <p class="section-screen-wait" id="screen-waiting">Waiting for a section. Draw a cut on the plan.</p>
+    <div class="canvas-wrap mass-wrap section-screen-view" id="screen-view" hidden>
+      <p class="mass-gesture" id="screen-hint" hidden>Drag to pan · scroll to zoom</p>
+      <canvas id="screen-canvas"></canvas>
+      <div class="empty" id="screen-empty" hidden>
+        <h3>Nothing in this cut</h3>
+        <p>Draw the line through the plan.</p>
+      </div>
+    </div>
+    <div class="section-screen-note" id="screen-note" hidden>
+      <p id="screen-note-text"></p>
+      <button type="button" id="screen-close" hidden>Close window</button>
+    </div>
+  </main>
+  <script>
+    (function () {
+      var note = document.getElementById("screen-note");
+      var text = document.getElementById("screen-note-text");
+      var close = document.getElementById("screen-close");
+      close.addEventListener("click", function () { window.close(); });
+      var last = "";
+      function link() {
+        try {
+          var plan = window.opener;
+          if (!plan || plan.closed) return "closed";
+          if (plan.__tspSectionScreen !== window) return "reloaded";
+          return "live";
+        } catch (e) {
+          return "closed";
+        }
+      }
+      function tick() {
+        var state = link();
+        if (state === last) return;
+        last = state;
+        if (state === "live") {
+          delete document.body.dataset.link;
+          note.hidden = true;
+          return;
+        }
+        document.body.dataset.link = state;
+        note.hidden = false;
+        close.hidden = state !== "closed";
+        text.textContent = state === "closed"
+          ? "The plan is closed."
+          : "The plan was reloaded. Draw a section on the plan to continue.";
+        document.title = "Section";
+      }
+      tick();
+      window.setInterval(tick, 500);
+    })();
+  </script>
+</body>
+</html>

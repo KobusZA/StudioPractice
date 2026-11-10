@@ -36,6 +36,7 @@ import {
 } from "../model.js";
 import { deriveWalls, deriveRoomWalls, isExternalWall, statusVisible } from "../walls.js";
 import { compile } from "../compile.js";
+import { roofEavesElevation } from "../level-view.js";
 import { roomEdgeSegment, roomOpeningAreas } from "../openings.js";
 import { validatePack, complianceGaps, normalizePackUnits } from "../schema.js";
 
@@ -554,6 +555,24 @@ test("compile reports rooms with the data the compliance engine needs", () => {
   assert.equal(bed.minDimension, 4);
   assert.equal(bed.minDimensionExact, true);
   assert.equal(bed.ceilingHeight, 2.8);
+});
+
+test("a floor placed on the roof eaves sits at that cut, and a storey floor stays on the storey", () => {
+  const level = (pack.levels || []).find((l) => l.id === "01 GFL");
+  const doc = normalizeDoc({
+    slabs: [
+      { id: "f1", sku: pack.system.defaultFloorSku, level: "01 GFL", atEaves: true, rect: { x: 0, y: 0, w: 4, h: 3 } },
+      { id: "f2", sku: pack.system.defaultFloorSku, level: "01 GFL", atEaves: false, rect: { x: 5, y: 0, w: 2, h: 2 } },
+    ],
+  });
+  assert.equal(doc.slabs.find((s) => s.id === "f1").atEaves, true);
+  assert.equal(doc.slabs.find((s) => s.id === "f2").atEaves, undefined, "only an explicit true is kept");
+  const out = compile(doc, pack);
+  const up = out.sketchForms.find((f) => f.elementId === "f1");
+  const down = out.sketchForms.find((f) => f.elementId === "f2");
+  assert.equal(up.elevation, roofEavesElevation(level));
+  assert.ok(up.elevation > down.elevation, "the eaves floor is above the storey floor");
+  assert.equal(down.elevation, level.elevation);
 });
 
 test("a ceiling slab renders at floor-to-ceiling height, not flush with the floor", () => {

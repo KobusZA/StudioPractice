@@ -107,6 +107,24 @@ test("a ceiling tool on a ceiling cut is not flagged", () => {
   }), null);
 });
 
+test("a floor on the roof eaves cut is allowed", () => {
+  assert.equal(placementHintOverride({
+    tool: "slab",
+    stationKind: "roof",
+    level: gfl,
+    categories: ["floor"],
+  }), null);
+});
+
+test("a pool on the roof eaves cut is still flagged", () => {
+  assert.match(placementHintOverride({
+    tool: "slab",
+    stationKind: "roof",
+    level: gfl,
+    categories: ["pool"],
+  }), /roof plan/);
+});
+
 test("Floors on a ceiling cut is flagged", () => {
   assert.match(placementHintOverride({
     tool: "slab",

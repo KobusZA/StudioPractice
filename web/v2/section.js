@@ -2,7 +2,7 @@
 //
 // Same extrusion Camera and 3D already use - not a second model. Every cut
 // is also saved as a named view (below), so `sheets.js` can draft it onto a
-// sheet's viewport later (Output > view-section) without re-deriving it. The
+// sheet's viewport later (Output > Print > Sheets) without re-deriving it. The
 // cut itself is a viewing plane the user placed; look is to the left of the
 // stroke, so drawing the line the other way flips the view the way Revit does.
 
@@ -139,7 +139,7 @@ export function projectSectionPoint(x, y, z, cut, originU, originV, scale, cx, c
 //
 // The Section tool always makes a new one, the same as Revit: a cut is its
 // own view from the moment it is drawn, not a scratch value the quick look
-// discards on close. That permanence is what `view-section` (Output > Views,
+// discards on close. That permanence is what Sheets (Output > Print,
 // "placing a section view on a sheet, once sheets exist") needed - sheets.js
 // can now point a sheet's one viewport at a named section instead of only
 // ever the plan.
@@ -174,6 +174,47 @@ export function removeSection(doc, sectionId) {
 
 export function sectionById(doc, sectionId) {
   return ensureSections(doc).find((s) => s.id === sectionId) || null;
+}
+
+/**
+ * Spot levels a section prints: every room or floor compile() gave a
+ * `spotLevel` ("FFL −0.170") that the cut line passes through. Each is
+ * `{ id, text, u, v }`, placed over the widest stretch the cut crosses, at
+ * the floor's elevation. A floor on its level has no `spotLevel`, so a plain
+ * section prints nothing.
+ */
+export function sectionSpotLevels(payload, cut) {
+  if (!cut || cut.mode !== "section") return [];
+  const out = [];
+  const [ox, oy] = cut.origin;
+  const [ax, ay] = cut.along;
+  for (const form of payload?.sketchForms || []) {
+    if (!form.spotLevel || !Number.isFinite(form.elevation)) continue;
+    const ring = (form.profileLoops?.[0]?.curves || []).map((c) => c.start).filter(Boolean);
+    if (ring.length < 3) continue;
+    const hits = [];
+    for (let i = 0; i < ring.length; i += 1) {
+      const p = ring[i];
+      const q = ring[(i + 1) % ring.length];
+      // Signed distance of each end from the cut line; a sign change is a crossing.
+      const dp = (p[0] - ox) * -ay + (p[1] - oy) * ax;
+      const dq = (q[0] - ox) * -ay + (q[1] - oy) * ax;
+      if ((dp > 0) === (dq > 0)) continue;
+      const t = dp / (dp - dq);
+      const x = p[0] + (q[0] - p[0]) * t;
+      const y = p[1] + (q[1] - p[1]) * t;
+      hits.push((x - ox) * ax + (y - oy) * ay);
+    }
+    hits.sort((a, b) => a - b);
+    let best = null;
+    for (let i = 0; i + 1 < hits.length; i += 2) {
+      const lo = Math.max(hits[i], 0);
+      const hi = Math.min(hits[i + 1], cut.length);
+      if (hi - lo > 1e-3 && (!best || hi - lo > best.hi - best.lo)) best = { lo, hi };
+    }
+    if (best) out.push({ id: form.elementId, text: form.spotLevel, u: (best.lo + best.hi) / 2, v: form.elevation });
+  }
+  return out;
 }
 
 export function sectionFrame(faces, cut) {

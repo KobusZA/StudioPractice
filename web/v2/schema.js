@@ -11,7 +11,8 @@
 //  4. Unknown compliance facts are null, never guessed. Null means "ask the firm"
 //     and shows up in the gap report.
 //  5. Units (see UNITS-MIGRATION-PLAN.md and SCHEMA.md's changelog): every SKU's
-//     `geometry.*` field and `system.wallHeight` are millimetres in the pack/JSON
+//     `geometry.*` field, `system.wallHeight` and `system.foundationWallThickness`
+//     are millimetres in the pack/JSON
 //     representation (sp.pack/3+), matching the QS workbook and the firm's own
 //     wall-type naming ("220mm Foundation Perimeter"). Everything that consumes a
 //     pack at runtime (walls.js, compile.js, openings.js, dimensions.js, modify.js,
@@ -42,6 +43,9 @@ export function normalizePackUnits(pack) {
   if (next.system) {
     next.system = { ...next.system };
     if (isNum(next.system.wallHeight)) next.system.wallHeight = next.system.wallHeight / 1000;
+    if (isNum(next.system.foundationWallThickness)) {
+      next.system.foundationWallThickness = next.system.foundationWallThickness / 1000;
+    }
   }
   if (Array.isArray(next.skus)) {
     next.skus = next.skus.map((sku) => {
@@ -430,8 +434,8 @@ export function validatePack(pack) {
 
   // --- referential integrity ---------------------------------------------
   const known = (id) => ids.has(id);
-  for (const key of ["defaultWallSku", "defaultFloorSku", "defaultFoundationSku", "defaultRoofSku",
-    "defaultCeilingSku"]) {
+  for (const key of ["defaultWallSku", "defaultFloorSku", "defaultFoundationSku", "defaultFoundationWallSku",
+    "defaultRoofSku", "defaultCeilingSku"]) {
     const v = sys?.[key];
     if (v && !known(v)) at(`system.${key}`, `unknown SKU ${v}`);
   }

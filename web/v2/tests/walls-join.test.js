@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { joinWallCorners, selectionAngleJoint, selectionSideGaps } from "../walls.js";
+import { gapMoveDelta, joinWallCorners, selectionAngleJoint, selectionSideGaps } from "../walls.js";
 
 function wall(id, x1, y1, x2, y2, level = "l1") {
   return { id, x1, y1, x2, y2, level, length: Math.hypot(x2 - x1, y2 - y1) };
@@ -153,4 +153,17 @@ test("selectionSideGaps ignores a wall beyond the limit and a bare wall", () => 
   const away = wall("away", 0, 20, 4, 20);
   assert.equal(selectionSideGaps(run, []).length, 0);
   assert.equal(selectionSideGaps(run, [away]).length, 0);
+});
+
+test("typing a gap moves the wall square off its line, towards or away from the other wall", () => {
+  const run = wall("run", 0, 0, 4, 0);
+  const beside = wall("beside", 0, 2, 4, 2);
+  const [gap] = selectionSideGaps(run, [beside]);
+  const closer = gapMoveDelta(gap, 1.5);
+  assert.ok(Math.abs(closer.dx) < 1e-9 && Math.abs(closer.dy - 0.5) < 1e-9);
+  const further = gapMoveDelta(gap, 2.6);
+  assert.ok(Math.abs(further.dx) < 1e-9 && Math.abs(further.dy + 0.6) < 1e-9);
+  assert.equal(gapMoveDelta(gap, 0), null);
+  assert.equal(gapMoveDelta(gap, Number.NaN), null);
+  assert.equal(gapMoveDelta({ x1: 1, y1: 1, x2: 1, y2: 1 }, 2), null);
 });

@@ -268,3 +268,17 @@ test("dragging a window moves it along its wall even when the pointer leaves the
   assert.equal(opening.roomId, "a");
   assert.equal(opening.edgeIndex, draft.edgeIndex);
 });
+
+test("garage, sliding and pocket doors have no swing; side-hung doors do", async () => {
+  const { doorAction, doorSwings, openingSymbolSegments } = await import("../openings.js");
+  const door = (family) => ({ category: "door", family, name: family });
+  assert.equal(doorAction(door("Door-Garage-Embossed_Panel")), "garage");
+  assert.equal(doorAction(door("Door-Double-Sliding")), "sliding");
+  assert.equal(doorAction(door("Door-Interior-Single-Pocket-2_Panel-Wood")), "pocket");
+  assert.equal(doorAction(door("Door-Interior-Single-4_Panel-Wood")), "swing");
+  assert.equal(doorAction({ category: "window", family: "Garage" }), null);
+  assert.equal(doorSwings({ ...door("Door-Garage"), drawing: { action: "swing" } }), true);
+  const wall = { x1: 0, y1: 0, x2: 6, y2: 0, thickness: 0.22 };
+  const placed = { a: { x: 1, y: 0 }, b: { x: 5.8, y: 0 }, width: 4.8, sku: door("Door-Garage") };
+  assert.equal(openingSymbolSegments(wall, placed, {}).length, 1);
+});

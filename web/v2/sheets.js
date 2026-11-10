@@ -5,7 +5,7 @@
 //  - A sheet's one viewport can now show the plan (default), a named section
 //    (`sheetView()`/`setSheetView()`, fed by section.js's `doc.sections`), a
 //    named elevation (fed by elevation.js's `doc.elevations`) or a named
-//    callout (fed by callout.js's `doc.callouts`) - `view-section`'s job,
+//    callout (fed by callout.js's `doc.callouts`) - the Sheets button's job,
 //    "placing a section view on a sheet, once sheets exist," extended to
 //    the elevation and callout view kinds that landed alongside it.
 //  - `project-info` (ui.js's Project information panel, `doc.projectInfo`)
@@ -91,7 +91,7 @@ export function createSheet(doc, { size = "A1", name, number, level = null } = {
     checkedBy: "",
     scaleOverride: null,
     // The one viewport this sheet gets. Plan is the default every existing
-    // sheet already drew; `view-section` (Output > Views) is what lets it
+    // sheet already drew; Sheets (Output > Print) is what lets it
     // point at a named section (section.js's `doc.sections`), a named
     // elevation (elevation.js's `doc.elevations`) or a named callout
     // (callout.js's `doc.callouts`) instead.

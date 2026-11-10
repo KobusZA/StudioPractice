@@ -11,7 +11,7 @@
 //
 // Walls and foundations only. No DOM.
 
-import { MIN_TRACE } from "./click-draw.js";
+import { MIN_TRACE, arcFromRadius } from "./click-draw.js";
 import { objectByRef } from "./model.js";
 import { moveWallEnd } from "./modify.js";
 
@@ -120,6 +120,194 @@ export function planTrimCorner(wallA, wallB, pickA, pickB) {
       { id: wallB.id, ...b },
     ],
   };
+}
+
+// Shorter than this, the fillet arc is a nick, not a wall.
+const FILLET_MIN_CHORD = 0.05;
+
+function keepDirection(seg, keep, cross) {
+  const dx = seg.x2 - seg.x1;
+  const dy = seg.y2 - seg.y1;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-9) return null;
+  const sc = signed(seg, cross.x, cross.y);
+  const sk = signed(seg, keep.x, keep.y);
+  const sign = Math.sign(sk - sc);
+  if (!sign) return null;
+  return {
+    x: (dx / len) * sign,
+    y: (dy / len) * sign,
+    reach: Math.abs(sk - sc),
+  };
+}
+
+/**
+ * The corner the two clicks keep: the crossing, the kept direction of each
+ * wall, and the angle between them. Shared by the sized fillet and the
+ * cursor radius. Does not read a radius.
+ */
+function filletFrame(wallA, wallB, pickA, pickB) {
+  if (!wallA || !wallB || !pickA || !pickB) return fail("Click each wall on the part you want to keep.");
+  if (wallA.id != null && wallA.id === wallB.id) return fail("Click a different wall for the second side.");
+  if (wallA.arc || wallB.arc) return fail("Fillet works on straight walls.");
+  if ((wallA.level ?? null) !== (wallB.level ?? null)) return fail("These walls are on different floors.");
+  const cross = lineCross(wallA, wallB);
+  if (!cross) return fail("These two walls run parallel, so there is no corner to fillet.");
+  if (!crossReachable(wallA, cross) || !crossReachable(wallB, cross)) {
+    return fail("These walls meet too far away to fillet.");
+  }
+  const a = travellingEnd(wallA, pickA, cross);
+  const b = travellingEnd(wallB, pickB, cross);
+  if (a.reason === "ambiguous" || b.reason === "ambiguous") {
+    return fail("Click further along the wall, on the part you want to keep.");
+  }
+  if (a.reason || b.reason) return fail("That would leave the wall too short.");
+  const dirA = keepDirection(wallA, a.keep, cross);
+  const dirB = keepDirection(wallB, b.keep, cross);
+  if (!dirA || !dirB) return fail("Click further along the wall, on the part you want to keep.");
+  const dot = Math.min(1, Math.max(-1, dirA.x * dirB.x + dirA.y * dirB.y));
+  const alpha = Math.acos(dot);
+  if (alpha < 1e-3) return fail("These two walls run parallel, so there is no corner to fillet.");
+  if (Math.PI - alpha < 1e-3) return fail("These walls are already straight, so there is no corner to round.");
+  return { ok: true, cross, a, b, dirA, dirB, alpha };
+}
+
+/**
+ * Centreline radius of the fillet whose arc passes through `point`. The arc
+ * stays tangent to both kept walls, so its centre lies on the angle bisector
+ * and the radius is the circle through the point. The larger circle is the
+ * one whose arc faces the corner. Metres. Does not change the document.
+ */
+export function filletRadiusForPoint(wallA, wallB, pickA, pickB, point) {
+  if (!(Number.isFinite(point?.x) && Number.isFinite(point?.y))) {
+    return fail("Move into the corner to set the radius.");
+  }
+  const frame = filletFrame(wallA, wallB, pickA, pickB);
+  if (!frame.ok) return frame;
+  const radius = radiusThroughPoint(frame, point);
+  if (!(radius > 0)) return fail("Move into the corner to set the radius.");
+  return { ok: true, radius };
+}
+
+function radiusThroughPoint(frame, point) {
+  const { cross, dirA, dirB, alpha } = frame;
+  const half = alpha / 2;
+  const sinH = Math.sin(half);
+  if (sinH < 1e-6) return null;
+  const bisLen = Math.hypot(dirA.x + dirB.x, dirA.y + dirB.y);
+  if (bisLen < 1e-9) return null;
+  const bisX = (dirA.x + dirB.x) / bisLen;
+  const bisY = (dirA.y + dirB.y) / bisLen;
+  const vx = point.x - cross.x;
+  const vy = point.y - cross.y;
+  const along = vx * bisX + vy * bisY;
+  const s = 1 / sinH;
+  const A = s * s - 1;
+  const B = -2 * s * along;
+  const C = vx * vx + vy * vy;
+  const roots = [];
+  if (A < 1e-8) {
+    if (Math.abs(B) > 1e-12) roots.push(-C / B);
+  } else {
+    let disc = B * B - 4 * A * C;
+    if (disc < 0 && disc > -1e-8) disc = 0;
+    if (disc < 0) return null;
+    const root = Math.sqrt(disc);
+    roots.push((-B + root) / (2 * A), (-B - root) / (2 * A));
+  }
+  let best = null;
+  for (const radius of roots) {
+    if (!(radius > 1e-6)) continue;
+    if (best == null || radius > best) best = radius;
+  }
+  // The far side of the circle sits past the centre, away from the corner.
+  if (best != null && best + 1e-6 < along * sinH) return null;
+  return best;
+}
+
+/**
+ * Round the corner the two clicks keep. Each wall is trimmed or extended
+ * back from the crossing by the tangent length, and the arc between those
+ * points has the given centreline radius. Does not change the document.
+ * The radius is metres, on the centreline.
+ */
+export function planFillet(wallA, wallB, pickA, pickB, radius) {
+  if (!(radius > 0) || !Number.isFinite(radius)) {
+    if (!wallA || !wallB || !pickA || !pickB) return fail("Click each wall on the part you want to keep.");
+    if (wallA.id != null && wallA.id === wallB.id) return fail("Click a different wall for the second side.");
+    return fail("Type a radius greater than zero.");
+  }
+  const frame = filletFrame(wallA, wallB, pickA, pickB);
+  if (!frame.ok) return frame;
+  const { cross, a, b, dirA, dirB, alpha } = frame;
+  const setback = radius / Math.tan(alpha / 2);
+  if (setback + MIN_TRACE > dirA.reach || setback + MIN_TRACE > dirB.reach) {
+    return fail("That radius is too large for this corner.");
+  }
+  const tA = { x: cross.x + dirA.x * setback, y: cross.y + dirA.y * setback };
+  const tB = { x: cross.x + dirB.x * setback, y: cross.y + dirB.y * setback };
+  const chord = Math.hypot(tB.x - tA.x, tB.y - tA.y);
+  if (chord < FILLET_MIN_CHORD) return fail("That radius is too small to draw.");
+  const bisLen = Math.hypot(dirA.x + dirB.x, dirA.y + dirB.y);
+  const bisX = (dirA.x + dirB.x) / bisLen;
+  const bisY = (dirA.y + dirB.y) / bisLen;
+  const centerDist = radius / Math.sin(alpha / 2);
+  const cx = cross.x + bisX * centerDist;
+  const cy = cross.y + bisY * centerDist;
+  const nx = (tB.y - tA.y) / chord;
+  const ny = -(tB.x - tA.x) / chord;
+  const off = (cx - (tA.x + tB.x) / 2) * nx + (cy - (tA.y + tB.y) / 2) * ny;
+  const side = off >= 0 ? 1 : -1;
+  const arc = arcFromRadius(tA.x, tA.y, tB.x, tB.y, radius, side, false);
+  if (!arc || Math.hypot(arc.cx - cx, arc.cy - cy) > 1e-4) {
+    return fail("That radius does not fit this corner.");
+  }
+  return {
+    ok: true,
+    cross,
+    radius: arc.radius,
+    moves: [
+      { id: wallA.id, end: a.end, point: tA, from: a.from, keep: a.keep },
+      { id: wallB.id, end: b.end, point: tB, from: b.from, keep: b.keep },
+    ],
+    chord: { x1: tA.x, y1: tA.y, x2: tB.x, y2: tB.y },
+    arc,
+    record: { radius: arc.radius, side: arc.side },
+  };
+}
+
+/**
+ * Trim both walls to the fillet and add the arc wall. One failure puts the
+ * walls back and does not add the arc. `segment` is the new wall, already
+ * carrying the chord and the arc record.
+ */
+export function applyFillet(doc, plan, segment, { skuById = () => null } = {}) {
+  if (!plan?.ok) return plan?.message ? plan : fail("Click each wall on the part you want to keep.");
+  if (!segment) return fail("Click each wall on the part you want to keep.");
+  const snap = snapshot(doc, new Set(plan.moves.map((move) => move.id)));
+  for (const move of plan.moves) {
+    const seg = (doc.segments || []).find((item) => item.id === move.id);
+    if (!seg) {
+      restore(doc, snap);
+      return fail("That wall is no longer on the plan.");
+    }
+    const at = endPoint(seg, move.end);
+    if (Math.hypot(at.x - move.point.x, at.y - move.point.y) < 1e-9) continue;
+    const result = moveWallEnd(doc, { kind: "segment", id: move.id }, move.end, move.point, {
+      skuById,
+      space: "centre",
+    });
+    if (!result.ok) {
+      restore(doc, snap);
+      return result;
+    }
+  }
+  if (!Array.isArray(doc.segments)) doc.segments = [];
+  doc.segments.push(segment);
+  return done("Corner filleted.", [
+    ...plan.moves.map((move) => ({ kind: "segment", id: move.id })),
+    { kind: "segment", id: segment.id },
+  ]);
 }
 
 /**

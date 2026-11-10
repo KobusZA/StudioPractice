@@ -46,7 +46,9 @@ test("the export is a DXF with millimetre insertion units", () => {
 
 test("a 6 m room writes wall outlines in millimetres, not metres", () => {
   const { text, report } = exportDxf(roomDoc(), pack);
-  assert.equal(report.counts.walls, 4);
+  // Four walls, and the four foundation walls drawn under them.
+  assert.equal(report.counts.walls, 8);
+  assert.match(text, /A-WALL-00_FOUNDATION/);
   assert.equal(codes(text, "LWPOLYLINE").length >= 4, true);
   // 6 m along X, y flipped: the far corner is 6000 mm, -4000 mm.
   assert.match(text, /\n10\n6000\.000\n20\n-4000\.000/);

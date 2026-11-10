@@ -6,6 +6,8 @@ import {
   nextTraceView,
   noteRecentDoor,
   openingStaysArmed,
+  placedWallTop,
+  placementTopShown,
   recentDoorSkus,
   rememberFunctionSku,
   skuForArmedFunction,
@@ -44,6 +46,29 @@ test("leaving the wall tool and changing thickness keeps the location line", () 
   assert.equal(doors.wallLocation, "exterior");
   const wallsAgain = armPlacement({ ...doors, memory: { walls: "w110" } }, { id: "walls", categories: ["wall"] }, skus);
   assert.equal(wallsAgain.wallLocation, "exterior");
+});
+
+test("with no Top setting a wall takes its type's default top", () => {
+  assert.deepEqual(placedWallTop(null, { defaultTop: "level-above", rise: 3 }), { top: "level-above", height: null });
+  assert.deepEqual(placedWallTop(null, { defaultTop: null, rise: 3 }), { top: null, height: null });
+  // A type default of "level above" with no level above stands at its own height.
+  assert.deepEqual(placedWallTop(null, { defaultTop: "level-above", rise: null }), { top: null, height: null });
+});
+
+test("the Top setting places a wall up to the level above or at a fixed height", () => {
+  assert.deepEqual(placedWallTop({ mode: "level-above" }, { defaultTop: null, rise: 3 }), { top: "level-above", height: null });
+  assert.deepEqual(placedWallTop({ mode: "fixed", height: 2.4 }, { defaultTop: "level-above", rise: 3 }), { top: null, height: 2.4 });
+  // A fixed height left blank is the type's height.
+  assert.deepEqual(placedWallTop({ mode: "fixed", height: null }, { defaultTop: "level-above", rise: 3 }), { top: null, height: null });
+  // Up to the level above on the top storey keeps the typed height, if any.
+  assert.deepEqual(placedWallTop({ mode: "level-above", height: 2.4 }, { rise: null }), { top: null, height: 2.4 });
+});
+
+test("the Top setting shows the height the next wall gets", () => {
+  assert.deepEqual(placementTopShown(null, { defaultTop: "level-above", rise: 3, typeHeight: 2.7 }), { mode: "level-above", height: 3 });
+  assert.deepEqual(placementTopShown(null, { defaultTop: null, rise: 3, typeHeight: 2.7 }), { mode: "fixed", height: 2.7 });
+  assert.deepEqual(placementTopShown({ mode: "fixed", height: 2.4 }, { defaultTop: "level-above", rise: 3, typeHeight: 2.7 }), { mode: "fixed", height: 2.4 });
+  assert.deepEqual(placementTopShown({ mode: "level-above" }, { rise: null, typeHeight: 2.7 }), { mode: "fixed", height: 2.7 });
 });
 
 test("a door stays armed and recent doors sit beside the library, newest first", () => {

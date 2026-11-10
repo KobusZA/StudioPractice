@@ -9,9 +9,14 @@ import {
   canCommitRect,
   centerlineFromLocation,
   chainStart,
+  nextWallDraft,
+  offsetChainCorner,
+  offsetPlacementLine,
   cycleWallLocation,
   flipWallLocation,
   hasClickDraft,
+  nextPolygonEscape,
+  polyCanClose,
   isFaceLocation,
   lineLength,
   locationLineOf,
@@ -47,6 +52,58 @@ test("a line shorter than MIN_TRACE does not commit", () => {
 test("a committed wall chains from its endpoint", () => {
   const end = { x: 4, y: 1 };
   assert.deepEqual(chainStart(end), { x1: 4, y1: 1, x2: 4, y2: 1 });
+});
+
+test("chain on starts the next wall at the end that was clicked", () => {
+  const end = { x: 4, y: 1 };
+  const next = nextWallDraft(end, { chain: true, prev: { x: 4, y: 0 }, prevId: "s1" });
+  assert.equal(next.chained, true);
+  assert.equal(next.prevId, "s1");
+  assert.deepEqual(next.prev, { x: 4, y: 0 });
+  near(next.x1, 4);
+  near(next.y1, 1);
+  near(next.x2, 4);
+});
+
+test("chain off waits for a new start", () => {
+  assert.equal(nextWallDraft({ x: 4, y: 1 }, { chain: false, prevId: "s1" }), null);
+  assert.equal(nextWallDraft(null, { chain: true }), null);
+});
+
+test("a positive offset sits to the left of the line that was clicked", () => {
+  const line = offsetPlacementLine({ x: 0, y: 0 }, { x: 4, y: 0 }, 1);
+  near(line.x1, 0);
+  near(line.x2, 4);
+  near(line.y1, -1);
+  near(line.y2, -1);
+});
+
+test("a negative offset sits to the right, and zero stays on the line", () => {
+  const right = offsetPlacementLine({ x: 0, y: 0 }, { x: 4, y: 0 }, -0.5);
+  near(right.y1, 0.5);
+  near(right.y2, 0.5);
+  const same = offsetPlacementLine({ x: 1, y: 2 }, { x: 3, y: 5 }, 0);
+  near(same.x1, 1);
+  near(same.y1, 2);
+  near(same.x2, 3);
+  near(same.y2, 5);
+});
+
+test("a chained offset closes the corner, lengthening a turn away and shortening a turn toward it", () => {
+  const prev = { x1: 0, y1: -1, x2: 4, y2: -1 };
+  const outside = offsetChainCorner(prev, { x1: 5, y1: 0, x2: 5, y2: 3 });
+  near(outside.x, 5);
+  near(outside.y, -1);
+  const inside = offsetChainCorner(prev, { x1: 3, y1: 0, x2: 3, y2: -3 });
+  near(inside.x, 3);
+  near(inside.y, -1);
+});
+
+test("parallel offset walls have no corner to close", () => {
+  assert.equal(
+    offsetChainCorner({ x1: 0, y1: -1, x2: 4, y2: -1 }, { x1: 4, y1: -1, x2: 8, y2: -1 }),
+    null,
+  );
 });
 
 test("centre location stores the line that was drawn", () => {
@@ -249,6 +306,7 @@ test("a vertical wall reads as a right angle", () => {
 test("a chained wall reads 180 straight on and 90 at a corner", () => {
   const straight = wallJointAngle({ x: 4, y: 0 }, { x: 0, y: 0 }, { x: 5, y: 0 });
   assert.ok(Math.abs(straight.interior - 180) < 1e-6);
+  assert.ok(Math.abs(straight.deflection) < 1e-6);
   const corner = wallJointAngle({ x: 4, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 3 });
   assert.ok(Math.abs(corner.interior - 90) < 1e-6);
   const two = (2 * Math.PI) / 180;
@@ -319,6 +377,19 @@ test("a wall along the horizontal draws no angle", () => {
   assert.equal(wallDraftAngle({ x: 0, y: 0 }, { x: 5, y: 0 }), null);
   assert.equal(wallDraftAngle({ x: 0, y: 0 }, { x: -4, y: 0 }), null);
   assert.equal(wallDraftAngle({ x: 1, y: 1 }, { x: 1, y: 1 }), null);
+});
+
+test("a polygon closes only on the first corner, once it has three", () => {
+  const points = [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }];
+  assert.equal(polyCanClose(points.slice(0, 2), { x: 0, y: 0 }), false);
+  assert.equal(polyCanClose(points, { x: 1, y: 1 }), false);
+  assert.equal(polyCanClose(points, { x: 0.29, y: 0 }), true);
+  assert.equal(polyCanClose(points, { x: 0.3, y: 0 }), false);
+});
+
+test("Escape on a polygon outline asks to finish before it discards", () => {
+  assert.equal(nextPolygonEscape(false), "nudge");
+  assert.equal(nextPolygonEscape(true), "discard");
 });
 
 test("Escape aborts a live click-click draft before leaving the tool", () => {

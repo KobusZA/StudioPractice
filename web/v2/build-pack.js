@@ -526,6 +526,12 @@ export function buildPack(catalog, { includeUnplaced = false, id, name, version 
 
   const levels = buildLevels(catalog, notes);
   const system = buildSystem(skus, levels);
+  notes.push({
+    id: "system",
+    name: "system",
+    field: "foundationWallThickness",
+    reason: "the firm's brief: every foundation wall is 220 mm (the template's foundation wall types state 240)",
+  });
 
   return {
     pack: {
@@ -626,6 +632,25 @@ function mostPlaced(skus, category) {
     .sort((a, b) => (b.revit?.placedCount || 0) - (a.revit?.placedCount || 0))[0]?.id ?? null;
 }
 
+/** Customer-stated, millimetres: foundation walls are 220, whatever the type says. */
+const FOUNDATION_WALL_THICKNESS_MM = 220;
+
+/** The foundation type drawn under every ground-storey wall: not a strip footing, unplastered first. */
+function defaultFoundationWallSku(skus) {
+  const walls = skus.filter((s) => s.category === "foundation" && !isStripFootingMm(s));
+  const bare = walls.filter((s) => /no[-\s]?plaster/i.test(s.name || ""));
+  const pick = (list) => list
+    .sort((a, b) => (b.revit?.placedCount || 0) - (a.revit?.placedCount || 0))[0]?.id ?? null;
+  return pick(bare) ?? pick(walls);
+}
+
+/** walls.js's `isStripFooting`, on the pack's millimetre geometry. */
+function isStripFootingMm(sku) {
+  const g = sku.geometry || {};
+  if (Number.isFinite(g.height) && g.height > 0) return false;
+  return g.width > 0 && g.thickness > 0 && g.depth > 0 && g.width > g.thickness + 1e-3 && Math.abs(g.thickness - g.depth) < 0.1;
+}
+
 /**
  * The level the app opens on and stamps new objects with when none is chosen.
  * `levels[0]` (physically lowest) is wrong once a foundation level exists: its
@@ -653,6 +678,8 @@ function buildSystem(skus, levels) {
     defaultWallSku: defaultWall,
     defaultFloorSku: mostPlaced(skus, "floor"),
     defaultFoundationSku: mostPlaced(skus, "foundation"),
+    defaultFoundationWallSku: defaultFoundationWallSku(skus),
+    foundationWallThickness: FOUNDATION_WALL_THICKNESS_MM,
     defaultRoofSku: mostPlaced(skus, "roof"),
     defaultCeilingSku: mostPlaced(skus, "ceiling"),
     defaultLevel: defaultLevelId(levels),

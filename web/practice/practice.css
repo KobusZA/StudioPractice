@@ -26,7 +26,9 @@ button { cursor: pointer; }
 /* --- chrome ------------------------------------------------------------- */
 
 .topbar {
-  height: 44px; display: flex; align-items: center; gap: 12px; padding: 0 14px;
+  /* Taller than the nav buttons so the current section's underline sits in
+     the bar, with a band of paper under it, before the job header's rule. */
+  height: 56px; display: flex; align-items: center; gap: 12px; padding: 0 14px;
   background: var(--bg-secondary); border-bottom: 1px solid var(--hairline-strong);
 }
 .brand { display: flex; align-items: center; gap: 8px; }
@@ -46,7 +48,7 @@ button { cursor: pointer; }
 
 .nav { display: flex; gap: 2px; margin-left: 10px; }
 .nav button {
-  border: 0; background: transparent; height: 44px; padding: 0 12px;
+  border: 0; background: transparent; height: 36px; padding: 0 12px;
   font-size: 13px; font-weight: 600; color: var(--ink-soft);
   border-bottom: 2px solid transparent;
 }
@@ -62,8 +64,10 @@ kbd {
 .btn {
   height: 32px; padding: 0 14px; border: 1px solid var(--hairline-strong);
   background: var(--bg-elevated); border-radius: var(--radius-sm);
-  font-size: 12.5px; font-weight: 600;
+  font-size: 12.5px; font-weight: 600; color: var(--ink); text-decoration: none;
+  white-space: nowrap;
 }
+a.btn { display: inline-flex; align-items: center; }
 .btn:hover { background: var(--bg-hover); }
 /* Primary actions carry more visual weight than their box: a subtle lift and
    a slightly heavier weight, so "the thing to click" reads before the label
@@ -76,23 +80,19 @@ kbd {
 .btn-primary:hover { background: var(--copper-dark); }
 .btn:disabled { opacity: 0.45; cursor: default; }
 .btn-sm { height: 27px; padding: 0 10px; font-size: 12px; }
-/* The one primary call-to-action living in the topbar ("New job") stays a
-   notch larger than the other small buttons around it, so the busiest
-   screen in the app still has one obvious next action for someone new to it. */
+/* "New job" is the topbar's primary action on the list screens, where it is
+   the thing to do next. Inside a job, Log time takes that role and this
+   button steps back to the same plain chrome as Switch job. renderChrome()
+   adds and removes .btn-primary. */
 .btn-sm.btn-primary { height: 30px; padding: 0 13px; font-size: 12.5px; }
-/* The sticky-selection pill: distinguished with a copper left edge so it
-   reads as "your place, held" rather than another action button like
-   "Switch job" beside it. */
+/* The sticky-selection pill: a copper left edge, never a filled button.
+   Filled copper is for the one action on the page. Jobs in the nav is what
+   says which section you are in. */
 #current-job {
   border-left: 3px solid var(--copper); font-weight: 700; color: var(--ink);
 }
 #current-job .muted { font-weight: 500; color: var(--ink-muted); }
-/* In a job: the pill goes solid copper-tinted so it reads as the current
-   location, and Register is only the lit parent section. */
-#current-job.is-here {
-  background: var(--copper); border-color: var(--copper-dark); color: #fff; cursor: default;
-}
-#current-job.is-here .muted { color: rgba(255, 255, 255, 0.85); }
+#current-job.is-here { cursor: default; }
 /* Inside a job: Jobs is the lit parent, everything else steps back. */
 .nav.in-job button { opacity: 0.55; }
 .nav.in-job button:hover { opacity: 1; }
@@ -132,11 +132,12 @@ kbd {
 
 .main { overflow-y: auto; min-height: 0; }
 .wrap { width: min(1180px, calc(100% - 44px)); margin: 0 auto; }
-/* A tinted band with a copper top edge: the job page looks like a place you
-   have entered, where the overview and list screens stay neutral. */
+/* The lighter paper, with a copper top edge. The edge is what marks that
+   you have entered this job. A wash of copper on white reads pink, so the
+   band stays in the paper scale, lighter than the page behind it. */
 .proj-head {
   padding: 14px 22px 0; border-top: 3px solid var(--copper);
-  background: color-mix(in srgb, var(--copper) 11%, var(--bg-elevated));
+  background: var(--bg-secondary);
 }
 /* Just created: the band is copper, then the copper thins away and the job is there. */
 .proj-head.arriving { position: relative; }
@@ -184,7 +185,7 @@ kbd {
 .proj-head-drawing .dwg-md figcaption { display: none; }
 /* Log time beside the drawing, bottom-aligned with its button. */
 .proj-head-side { display: flex; align-items: flex-end; gap: 10px; flex-shrink: 0; }
-/* Tabs sit inside the tinted header band, edge to edge, so they read as the
+/* Tabs sit inside the header band, edge to edge, so they read as the
    way around this job rather than as one more section below it. */
 .proj-head .tabs { margin: 0 -22px; }
 
@@ -921,7 +922,7 @@ h4.form-group:first-child { margin-top: 0; }
 /* Covers the workspace. A new job is a sequence of decisions, and the list
    of every other job is the thing that makes people rush the form. */
 .composer {
-  position: fixed; inset: 44px 0 0; z-index: 15;
+  position: fixed; inset: 56px 0 0; z-index: 15;
   background: var(--bg-primary); overflow-y: auto;
 }
 .composer-frame { width: min(720px, calc(100% - 36px)); margin: 28px auto 72px; }

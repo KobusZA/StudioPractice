@@ -293,21 +293,25 @@ function foreignLineAim(from, wx, wy, lines, prev, tolWorld) {
  * straight continuation jumps onto that ray. Moving on past the jump, to
  * 1° or more, leaves it, and that aim is not pulled back onto an axis.
  * A run within `tolWorld` of the horizontal or vertical through `from` is
- * stored on that axis. A run within `tolWorld` of an existing line, with
+ * stored on that axis, and one close to a 45° or 15° plan angle
+ * (`ANGLE_SNAP_STEPS`) on that angle. A run within `tolWorld` of an existing line, with
  * the start on that line too, is stored on that line's direction. Anything
  * else keeps the ray from `from` through the pointer: only the length is
  * pulled to a round millimetre. Rounding X and Y separately turns that ray,
  * which is how a wall aimed along a line was stored off it.
  *
  * `latch` is the jump state from the previous move. The returned point
- * carries the next `latch`, and `jump` (`"corner"`, `"straight"`, or null).
+ * carries the next `latch`, `jump` (`"corner"`, `"straight"`, or null), and
+ * `angle`, the plan angle in degrees it was caught on, or null. `ortho`
+ * (Shift) overrides all of this; see `orthoEnd`.
  */
 export function snapLinearEnd(wx, wy, opts = {}) {
   const join = opts.join || { snapped: false, x: wx, y: wy, guideX: null, guideY: null };
   const from = opts.from || null;
+  if (from && opts.ortho) return orthoEnd(wx, wy, { ...opts, join });
   if (!from || isExactPointSnap(join) || (join.snapped && (join.guideX != null || join.guideY != null))) {
     const point = applyNicePoint(wx, wy, opts);
-    return { ...point, latch: null, jump: null };
+    return { ...point, latch: null, jump: null, angle: null };
   }
   const tolWorld = opts.tolWorld ?? 0;
   const minStep = opts.minStep ?? NICE_MIN_STEP_M;
@@ -316,12 +320,13 @@ export function snapLinearEnd(wx, wy, opts = {}) {
   const other = prev ? foreignLineAim(from, wx, wy, lines, prev, tolWorld) : null;
   if (other) {
     const point = snapLengthFrom(from, other, tolWorld, minStep);
-    return { ...point, latch: null, jump: null };
+    return { ...point, latch: null, jump: null, angle: null };
   }
   const chain = prev ? chainAngleJump(from, wx, wy, prev, opts.latch || null) : null;
   let aim;
   let latch = null;
   let jump = null;
+  let angle = null;
   if (chain?.jumped && chain.point) {
     aim = chain.point;
     latch = chain.latch;
@@ -332,24 +337,73 @@ export function snapLinearEnd(wx, wy, opts = {}) {
   } else {
     const locked = runDirection(from, wx, wy, lines, tolWorld);
     aim = locked || { x: wx, y: wy };
+    angle = locked?.angle ?? null;
   }
   const point = snapLengthFrom(from, aim, tolWorld, minStep);
-  return { ...point, latch, jump };
+  return { ...point, latch, jump, angle };
+}
+
+/**
+ * Absolute plan angles a run is caught on, as Revit's angular snap does.
+ * The 45° family catches at the full tolerance, the other 15° steps at a
+ * finer one, and each also stops past `maxDeg` so a run that is short on
+ * screen is not caught on every step. The axes are handled separately.
+ */
+export const ANGLE_SNAP_STEPS = [
+  { stepDeg: 45, tolScale: 1, maxDeg: 3 },
+  { stepDeg: 15, tolScale: 0.5, maxDeg: 1.5 },
+];
+
+/**
+ * Shift: the run stays horizontal or vertical, whichever is nearer the
+ * pointer. A corner or alignment on the running axis still sets where it
+ * ends; otherwise the length is pulled to a round millimetre.
+ */
+function orthoEnd(wx, wy, opts) {
+  const from = opts.from;
+  const join = opts.join || {};
+  const tolWorld = opts.tolWorld ?? 0;
+  const minStep = opts.minStep ?? NICE_MIN_STEP_M;
+  const dx = wx - from.x;
+  const dy = wy - from.y;
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    const x = join.snapped && join.guideX != null ? join.x : from.x + snapNiceDelta(dx, tolWorld, minStep);
+    return { x, y: from.y, latch: null, jump: null, angle: null, ortho: "x" };
+  }
+  const y = join.snapped && join.guideY != null ? join.y : from.y + snapNiceDelta(dy, tolWorld, minStep);
+  return { x: from.x, y, latch: null, jump: null, angle: null, ortho: "y" };
 }
 
 function runDirection(from, wx, wy, lines, tolWorld) {
   let best = null;
-  const offer = (dist, dirx, diry, kind) => {
+  const rank = { line: 2, axis: 1, angle: 0 };
+  const offer = (dist, dirx, diry, kind, angle = null) => {
     if (!(dist <= tolWorld)) return;
     const closer = !best || dist < best.dist - 1e-9;
-    const lineWinsTie = best && Math.abs(dist - best.dist) <= 1e-9 && kind === "line" && best.kind !== "line";
-    if (closer || lineWinsTie) best = { dist, dirx, diry, kind };
+    const winsTie = best && Math.abs(dist - best.dist) <= 1e-9 && rank[kind] > rank[best.kind];
+    if (closer || winsTie) best = { dist, dirx, diry, kind, angle };
   };
 
   const dx = wx - from.x;
   const dy = wy - from.y;
   offer(Math.abs(dy), dx >= 0 ? 1 : -1, 0, "axis");
   offer(Math.abs(dx), 0, dy >= 0 ? 1 : -1, "axis");
+
+  const len = Math.hypot(dx, dy);
+  if (len > 1e-9) {
+    const heading = Math.atan2(dy, dx) / DEG;
+    for (const { stepDeg, tolScale, maxDeg } of ANGLE_SNAP_STEPS) {
+      const k = Math.round(heading / stepDeg);
+      const target = k * stepDeg;
+      if (Math.abs(((target % 90) + 90) % 90) < 1e-9) continue;
+      const err = Math.abs(heading - target);
+      if (err > maxDeg) continue;
+      const dist = len * Math.sin(err * DEG);
+      if (dist > tolWorld * tolScale) continue;
+      const rad = target * DEG;
+      offer(dist, Math.cos(rad), Math.sin(rad), "angle", ((target % 360) + 360) % 360);
+    }
+  }
 
   for (const edge of lines) {
     const ex = edge.x2 - edge.x1;
@@ -368,8 +422,8 @@ function runDirection(from, wx, wy, lines, tolWorld) {
 
   if (!best) return null;
   const span = dx * best.dirx + dy * best.diry;
-  if (Math.abs(span) < 1e-9) return { x: from.x, y: from.y };
-  return { x: from.x + best.dirx * span, y: from.y + best.diry * span };
+  if (Math.abs(span) < 1e-9) return { x: from.x, y: from.y, angle: best.angle };
+  return { x: from.x + best.dirx * span, y: from.y + best.diry * span, angle: best.angle };
 }
 
 /** Past this, a gap label would be measuring across empty site, not an eave. */

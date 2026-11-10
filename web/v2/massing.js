@@ -34,6 +34,7 @@ import {
   projectSectionPoint,
   sectionDot,
   sectionFrame,
+  sectionSpotLevels,
 } from "./section.js";
 
 /** Tilt down from horizontal, in radians. The opening view stays a 3/4
@@ -1841,6 +1842,40 @@ function paintPlateCallouts(ctx, projected, width, height) {
 }
 
 /**
+ * "FFL −0.170" on a section, where the cut crosses a stepped floor: a level
+ * triangle on the floor line with the figure beside it. `toScreen(u, v)`
+ * maps section coordinates to canvas pixels. A sheet's section viewport
+ * draws with the same function.
+ */
+export function paintSpotLevels(ctx, labels, toScreen, { fontPx = 11, ink = "#243044" } = {}) {
+  if (!labels?.length) return;
+  ctx.save();
+  ctx.font = `600 ${fontPx}px 'Source Sans 3', sans-serif`;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "bottom";
+  ctx.fillStyle = ink;
+  ctx.strokeStyle = ink;
+  ctx.lineWidth = 1;
+  const tri = fontPx * 0.55;
+  for (const label of labels) {
+    const [x, y] = toScreen(label.u, label.v);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x - tri, y - tri * 1.4);
+    ctx.lineTo(x + tri, y - tri * 1.4);
+    ctx.closePath();
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x - tri * 1.6, y - tri * 1.4);
+    ctx.lineTo(x + tri * 1.6 + ctx.measureText(label.text).width + 4, y - tri * 1.4);
+    ctx.stroke();
+    ctx.fillText(label.text, x + tri * 1.6, y - tri * 1.4 - 2);
+  }
+  ctx.restore();
+}
+
+/**
  * Wire an orbiting canvas view. Call `setPayload` whenever the document
  * changes, `resize` when the wrap is shown or resized, and `draw` to
  * re-render without changing anything (e.g. after a status filter click).
@@ -1888,9 +1923,45 @@ export function createMassingView({ canvas, emptyEl, hintEl, titleEl, onDraw }) 
     return highlightHits;
   }
 
-  function setPayload(nextPayload) {
+  /**
+   * Replace the compiled building. A section keeps its pan and zoom when
+   * `reframe` is false, so a later edit does not snap the view back to Fit.
+   * A frame that has not been drawn yet (the canvas had no size) still runs.
+   */
+  function setPayload(nextPayload, options) {
     payload = nextPayload;
-    if (cam.mode !== "look") reframe = true;
+    if (options?.reframe !== false && cam.mode !== "look") reframe = true;
+    draw();
+  }
+
+  /** The section cut this view is showing, or null. */
+  function sectionCamera() {
+    if (cam.mode !== "section" || !cam.origin || !cam.along || !cam.look) return null;
+    return {
+      mode: "section",
+      origin: [cam.origin[0], cam.origin[1]],
+      along: [cam.along[0], cam.along[1]],
+      look: [cam.look[0], cam.look[1]],
+      length: cam.length,
+      far: cam.far,
+    };
+  }
+
+  function cutFrame() {
+    return {
+      sectionOu: cam.sectionOu,
+      sectionOv: cam.sectionOv,
+      sectionScale: cam.sectionScale,
+    };
+  }
+
+  /** Put back a pan and zoom. Used when a section moves to the second screen. */
+  function useCutFrame(frame) {
+    if (!frame) return;
+    if (Number.isFinite(frame.sectionOu)) cam.sectionOu = frame.sectionOu;
+    if (Number.isFinite(frame.sectionOv)) cam.sectionOv = frame.sectionOv;
+    if (Number.isFinite(frame.sectionScale) && frame.sectionScale > 0) cam.sectionScale = frame.sectionScale;
+    reframe = false;
     draw();
   }
 
@@ -2189,6 +2260,12 @@ export function createMassingView({ canvas, emptyEl, hintEl, titleEl, onDraw }) 
     }
     paintPickedNodes();
     if (!isLook && !flat) paintPlateCallouts(viewCtx, projected, width, height);
+    if (isSection) {
+      paintSpotLevels(viewCtx, sectionSpotLevels(payload, viewCam), (u, v) => [
+        cx + (u - viewCam.sectionOu) * sectionScale,
+        cy - (v - viewCam.sectionOv) * sectionScale,
+      ]);
+    }
     if (live && typeof onDraw === "function") onDraw(viewCam, payload);
     return true;
   }
@@ -2276,6 +2353,9 @@ export function createMassingView({ canvas, emptyEl, hintEl, titleEl, onDraw }) 
     draw,
     resize: draw,
     mode: () => cam.mode,
+    sectionCamera,
+    cutFrame,
+    useCutFrame,
     referenceCanvases,
   };
 }

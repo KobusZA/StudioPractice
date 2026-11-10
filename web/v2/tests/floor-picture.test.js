@@ -243,6 +243,23 @@ test("the open picture redraws when the floor outline changes and the finishes d
   assert.doesNotMatch(body, /setHidden\(el\.elevAlign, true\)/);
 });
 
+test("Show in the plan closes the second window and leaves the elevation or floor open", () => {
+  const src = readFileSync(new URL("../ui.js", import.meta.url), "utf8");
+  const start = src.indexOf("function returnFaceToPlan()");
+  const end = src.indexOf("/** The second window was closed.");
+  assert.ok(start >= 0 && end > start);
+  const body = src.slice(start, end);
+  assert.match(body, /stopScreenWatch\(\)/);
+  assert.match(body, /elevationHost = "strip"/);
+  assert.match(body, /mountFaceInStrip\(\)/);
+  assert.match(body, /win\.close\(\)/);
+  assert.doesNotMatch(body, /endFace\(\)/);
+  assert.doesNotMatch(body, /closeOpenFace\(\)/);
+  assert.doesNotMatch(body, /closeFloorPicture\(\)/);
+  assert.match(src, /Show in the plan/);
+  assert.match(src, /returnFaceToPlan/);
+});
+
 test("the floor picture uses the second screen when that window is the host", () => {
   const src = readFileSync(new URL("../ui.js", import.meta.url), "utf8");
   const start = src.indexOf("if (floorPicture) {");

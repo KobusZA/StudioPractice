@@ -19,6 +19,8 @@
     "defaultWallSku": "TSP_WAL_MASONARY_WALL_220MM_PLASTER",
     "defaultFloorSku": "TSP_FLR_GENERIC_85MM",
     "defaultFoundationSku": "TSP_FND_BEARING_FOOTING_600X200_MM",
+    "defaultFoundationWallSku": "TSP_FND_MASONARY_WALL_220MM_FOUNDATI",
+    "foundationWallThickness": 220,
     "defaultRoofSku": "TSP_ROF_GENERIC_125MM",
     "defaultCeilingSku": "TSP_CLG_9MM_PLASTERED_CEILINGS",
     "defaultLevel": "01 GFL"

@@ -42,6 +42,36 @@ export function armPlacement(state, item, skus) {
   };
 }
 
+/**
+ * The top a wall is placed with, from the Top setting on the options bar.
+ * `choice` is `{ mode: "level-above" | "fixed", height }` with the height in
+ * metres, or null to keep the type's own default (`defaultTop`). A fixed
+ * height left blank is the type's height. "Up to level above" needs a level
+ * above (`rise` not null); without one the wall stands at a fixed height.
+ * Returns the `top` and `height` to write on the segment.
+ */
+export function placedWallTop(choice, { defaultTop = null, rise = null } = {}) {
+  const mode = choice?.mode;
+  if (mode === "level-above" && rise != null) return { top: "level-above", height: null };
+  if (mode === "fixed" || mode === "level-above") {
+    const height = Number(choice.height);
+    return { top: null, height: height > 0 ? height : null };
+  }
+  return { top: defaultTop === "level-above" && rise != null ? "level-above" : null, height: null };
+}
+
+/**
+ * What the Top setting shows for the armed type: the mode, and the height in
+ * metres the next wall would get. `typeHeight` is the type's own height, which
+ * a fixed choice with no height of its own falls back to.
+ */
+export function placementTopShown(choice, { defaultTop = null, rise = null, typeHeight = null } = {}) {
+  const placed = placedWallTop(choice, { defaultTop, rise });
+  const mode = placed.top === "level-above" ? "level-above" : "fixed";
+  const height = mode === "level-above" ? rise : (placed.height ?? typeHeight);
+  return { mode, height: Number.isFinite(height) ? height : null };
+}
+
 /** A placed door stays armed. A window still returns to Select. */
 export function openingStaysArmed(category) {
   return category === "door";
@@ -232,7 +262,9 @@ export function joinedWallPolygon(wall, walls, tol = CORNER_JOIN_TOL) {
   const thickness = Number(wall?.thickness) || 0;
   if (!(thickness > 0)) return null;
   if (Math.hypot((wall.x2 || 0) - (wall.x1 || 0), (wall.y2 || 0) - (wall.y1 || 0)) < 1e-6) return null;
-  const others = (walls || []).filter((other) => other && other !== wall && other.id !== wall.id && (Number(other.thickness) || 0) > 0);
+  // A curved wall meets a straight one tangentially (a fillet), so both ends
+  // stay square. Mitring to the arc's chord would cut a notch into the join.
+  const others = (walls || []).filter((other) => other && other !== wall && other.id !== wall.id && !other.arc && (Number(other.thickness) || 0) > 0);
   const start = wallEndCorners(wall, 1, wallCornerNeighbors(wall, 1, others, { tol }));
   const end = wallEndCorners(wall, 2, wallCornerNeighbors(wall, 2, others, { tol }));
   return [start[0], end[0], end[1], start[1]];

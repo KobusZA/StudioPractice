@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { emptyDoc } from "../model.js";
-import { planTrimCorner, planTrimSingle, trimToBoundary, trimToCorner } from "../trim-extend.js";
+import { applyFillet, filletRadiusForPoint, planFillet, planTrimCorner, planTrimSingle, trimToBoundary, trimToCorner } from "../trim-extend.js";
 
 function near(actual, expected, msg = "") {
   assert.ok(Math.abs(actual - expected) < 1e-6, `${msg} ${actual} vs ${expected}`);
@@ -320,4 +320,113 @@ test("single: the preview names the same end the commit will move", () => {
   assert.equal(plan.moves[0].end, 1);
   near(plan.cross.x, 3);
   near(plan.cross.y, 0);
+});
+
+test("the cursor sets the fillet radius, and the arc passes through that point", () => {
+  const a = wall("a", 0, 0, 4, 0);
+  const b = wall("b", 0, 0, 0, 4);
+  const mid = 0.6 * (Math.SQRT2 - 1);
+  const onArc = filletRadiusForPoint(a, b, { x: 2, y: 0 }, { x: 0, y: 2 }, {
+    x: mid / Math.SQRT2,
+    y: mid / Math.SQRT2,
+  });
+  assert.equal(onArc.ok, true);
+  near(onArc.radius, 0.6);
+  const onWall = filletRadiusForPoint(a, b, { x: 2, y: 0 }, { x: 0, y: 2 }, { x: 1, y: 0 });
+  assert.equal(onWall.ok, true);
+  near(onWall.radius, 1);
+  const acute = 0.5 * (Math.sqrt(3) / 2);
+  const sixty = filletRadiusForPoint(
+    wall("c", 0, 0, 4, 0),
+    wall("d", 0, 0, 2, 2 * Math.sqrt(3)),
+    { x: 2, y: 0 },
+    { x: 1, y: Math.sqrt(3) },
+    { x: acute, y: 0.25 },
+  );
+  assert.equal(sixty.ok, true);
+  near(sixty.radius, 0.5);
+  const plan = planFillet(a, b, { x: 2, y: 0 }, { x: 0, y: 2 }, onArc.radius);
+  assert.equal(plan.ok, true);
+  near(Math.hypot(plan.arc.cx - mid / Math.SQRT2, plan.arc.cy - mid / Math.SQRT2), plan.arc.radius);
+  const outside = filletRadiusForPoint(a, b, { x: 2, y: 0 }, { x: 0, y: 2 }, { x: -1, y: -1 });
+  assert.equal(outside.ok, false);
+});
+
+test("fillet of a right angle sets both walls back by the radius and bows a quarter circle", () => {
+  const a = wall("a", 0, 0, 4, 0);
+  const b = wall("b", 0, 0, 0, 4);
+  const plan = planFillet(a, b, { x: 2, y: 0 }, { x: 0, y: 2 }, 1);
+  assert.equal(plan.ok, true);
+  near(plan.moves[0].point.x, 1);
+  near(plan.moves[0].point.y, 0);
+  near(plan.moves[1].point.x, 0);
+  near(plan.moves[1].point.y, 1);
+  near(plan.arc.cx, 1);
+  near(plan.arc.cy, 1);
+  near(plan.arc.radius, 1);
+  near(plan.arc.sweepDeg, 90);
+  // The radius meets each wall at a right angle.
+  near((plan.arc.cx - 1) * 1 + (plan.arc.cy - 0) * 0, 0);
+  near((plan.arc.cx - 0) * 0 + (plan.arc.cy - 1) * 1, 0);
+});
+
+test("fillet extends walls that stop short of the corner", () => {
+  const a = wall("a", 1.5, 0, 4, 0);
+  const b = wall("b", 0, 2, 0, 4);
+  const plan = planFillet(a, b, { x: 3, y: 0 }, { x: 0, y: 3 }, 1);
+  assert.equal(plan.ok, true);
+  near(plan.moves[0].point.x, 1);
+  near(plan.moves[0].point.y, 0);
+  near(plan.moves[1].point.x, 0);
+  near(plan.moves[1].point.y, 1);
+});
+
+test("fillet refuses a radius that would eat the wall", () => {
+  const a = wall("a", 0, 0, 1, 0);
+  const b = wall("b", 0, 0, 0, 4);
+  const plan = planFillet(a, b, { x: 0.6, y: 0 }, { x: 0, y: 2 }, 1);
+  assert.equal(plan.ok, false);
+  assert.match(plan.message, /too large/);
+});
+
+test("fillet refuses a curved wall and a parallel pair", () => {
+  const curved = planFillet(
+    wall("a", 0, 0, 4, 0, { arc: { radius: 3, side: 1 } }),
+    wall("b", 0, 0, 0, 4),
+    { x: 2, y: 0 },
+    { x: 0, y: 2 },
+    1,
+  );
+  assert.equal(curved.ok, false);
+  assert.match(curved.message, /straight/);
+  const parallel = planFillet(wall("a", 0, 0, 4, 0), wall("b", 0, 1, 4, 1), { x: 1, y: 0 }, { x: 1, y: 1 }, 1);
+  assert.equal(parallel.ok, false);
+  assert.match(parallel.message, /parallel/);
+});
+
+test("fillet trims the kept sides of a crossing and adds the arc wall", () => {
+  const doc = docWith([wall("a", 0, 0, 4, 0), wall("b", 2, -2, 2, 2)]);
+  const plan = planFillet(doc.segments[0], doc.segments[1], { x: 1, y: 0 }, { x: 2, y: 1 }, 1);
+  assert.equal(plan.ok, true);
+  const segment = {
+    id: "arc",
+    sku: "T220",
+    x1: plan.chord.x1,
+    y1: plan.chord.y1,
+    x2: plan.chord.x2,
+    y2: plan.chord.y2,
+    arc: plan.record,
+  };
+  const result = applyFillet(doc, plan, segment, { skuById });
+  assert.equal(result.ok, true);
+  const a = doc.segments[0];
+  const b = doc.segments[1];
+  near(a.x1, 0);
+  near(a.x2, 1);
+  near(a.y1, 0);
+  near(b.x1, 2);
+  near(b.y1, 1);
+  near(b.y2, 2);
+  assert.equal(doc.segments[2].id, "arc");
+  assert.equal(doc.segments[2].arc.radius, 1);
 });

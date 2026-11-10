@@ -73,7 +73,7 @@ test("moving a wall rewrites a bound room and does not price a second wall", () 
   assert.ok(roomArea(doc.rooms[0]) > before);
   assert.equal(doc.rooms[0].shape.kind, "poly");
   const drawn = deriveWalls(doc, pack).filter((w) => w.drawn);
-  const generated = deriveWalls(doc, pack).filter((w) => !w.drawn);
+  const generated = deriveWalls(doc, pack).filter((w) => !w.drawn && !w.derived);
   assert.equal(drawn.length, 4);
   assert.equal(generated.length, 0);
   assert.ok(compile(doc, pack).rooms[0].area > before);

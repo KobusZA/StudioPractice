@@ -11,7 +11,8 @@
 import { defaultWallTop, isReferenceLevel, levelAboveRise } from "./level-view.js";
 import { levelElevation, resolvedBase } from "./compile.js";
 import { nid } from "./model.js";
-import { foundationStorey, isFoundationLevel } from "./placement-warn.js";
+import { foundationStorey } from "./placement-warn.js";
+import { footingBelongsUnder } from "./floor-levels.js";
 import { archRise, fitArchSize } from "./arch-head.js";
 import {
   isArchHead,
@@ -24,7 +25,7 @@ import {
   wallT,
 } from "./openings.js";
 import { joinedWallPolygon } from "./drawing-defaults.js";
-import { deriveWalls, drawnSegmentFromWall, skuDrawnHeight } from "./walls.js";
+import { deriveWalls, drawnSegmentFromWall, isStripFooting, skuDrawnHeight } from "./walls.js";
 import { faceArcScale, faceFinishBands, reanchorRun } from "./finish-model.js";
 import { applyJoineryEdit as writeJoineryEdit, elevationJoinery } from "./joinery.js";
 
@@ -104,9 +105,8 @@ function heightGuide(pack, wall) {
   if (!level || !Number.isFinite(level.elevation)) return null;
   const rise = levelAboveRise(levels, wall.level);
   if (rise !== null) {
-    const above = levels
-      .filter((l) => Number.isFinite(l.elevation) && l.elevation > level.elevation + 1e-6 && !isReferenceLevel(l) && !l.parentId)
-      .sort((a, b) => a.elevation - b.elevation)[0];
+    const above = levels.find((l) => Number.isFinite(l.elevation)
+      && Math.abs(l.elevation - (level.elevation + rise)) < 1e-6 && !isReferenceLevel(l) && !l.parentId);
     if (!above) return null;
     return { elevation: above.elevation, kind: "floor", id: above.id, name: above.name || above.id };
   }
@@ -143,6 +143,18 @@ export function faceExtent(wall, all, side) {
   const sb = station(b);
   if (!Number.isFinite(sa) || !Number.isFinite(sb) || sb - sa < 1e-3) return whole;
   return side === -1 ? { from: length - sb, to: length - sa } : { from: sa, to: sb };
+}
+
+/**
+ * The long edge the viewer is looking at, in viewing order: left end, then
+ * right end. Polygon order is start-left, end-left, end-right, start-right.
+ * Side 1 walks the left edge from the wall's first end. Side -1 stands on the
+ * other face, so its left end is the wall's second end.
+ */
+export function viewedFaceCorners(poly, side) {
+  if (!Array.isArray(poly) || poly.length < 4) return null;
+  if (!poly[0] || !poly[1] || !poly[2] || !poly[3]) return null;
+  return side === -1 ? [poly[2], poly[3]] : [poly[0], poly[1]];
 }
 
 /** Height a wall keeps when its own override is cleared: up to the level above, else the type. */
@@ -207,12 +219,13 @@ export function elevationModel(doc, pack, faceRef, walls = null, foundationSku =
   const joinery = elevationJoinery(doc, pack, wall, side, flip);
 
   const foundations = foundationsUnder(doc, pack, wall, all, base, flip);
-  // Nothing under this wall yet, and it starts on the ground storey: the
+  // Nothing drawn under this wall yet, and it starts on the ground storey: the
   // elevation can place the job's default footing. A wall that starts at the
-  // next floor already sits on that floor.
-  const foundationOffer = wall.category === "foundation" || foundations.length
+  // next floor already sits on that floor. A derived foundation wall is not a
+  // footing, so the offer stays and the footing hangs under it.
+  const foundationOffer = wall.category === "foundation" || foundations.some((f) => !f.derived)
     ? null
-    : foundationOfferFor(pack, base, foundationSku);
+    : foundationOfferFor(pack, base, foundationSku, foundations.some((f) => f.derived));
 
   const levels = (pack.levels || [])
     .filter((l) => Number.isFinite(l.elevation))
@@ -428,21 +441,11 @@ function foundationsUnder(doc, pack, wall, all, wallBase, flip) {
       base: footBase,
       top: footTop,
       depth: footTop - footBase,
+      ...(found.derived ? { derived: true, hostWallId: found.hostWallId } : {}),
     });
   }
   out.sort((a, b) => a.from - b.from || a.base - b.base);
   return out;
-}
-
-/** True when `wallBase` is still on the ground storey, below the next floor. */
-function footingBelongsUnder(pack, wallBase) {
-  if (!Number.isFinite(wallBase)) return false;
-  const storeys = (pack?.levels || [])
-    .filter((l) => Number.isFinite(l.elevation) && !l.parentId && !isReferenceLevel(l) && !isFoundationLevel(l))
-    .sort((a, b) => a.elevation - b.elevation);
-  const above = storeys[1];
-  if (!storeys[0] || !above) return Boolean(storeys[0]);
-  return wallBase < above.elevation - 0.05;
 }
 
 /** Foundation types the elevation can place, in catalogue order. */
@@ -461,21 +464,25 @@ export function foundationTypes(pack) {
  * The footing the elevation would add under a bare ground-storey wall.
  * `skuId` picks one of `foundationTypes`; anything else falls back to the
  * job's default, then the first type that has a depth. The top meets the
- * wall's base. Null when this wall does not take a footing.
+ * wall's base. A strip footing under a derived foundation wall hangs under
+ * that instead, at the foundation level; a foundation wall type drawn there
+ * replaces the derived one. Null when this wall does not take a footing.
  */
-function foundationOfferFor(pack, wallBase, skuId) {
+function foundationOfferFor(pack, wallBase, skuId, onFoundationWall = false) {
   if (!footingBelongsUnder(pack, wallBase)) return null;
   const types = foundationTypes(pack);
   if (!types.length) return null;
   const chosen = types.find((t) => t.id === skuId)
     || types.find((t) => t.id === pack?.system?.defaultFoundationSku)
     || types[0];
+  const home = onFoundationWall && isStripFooting(skuById(pack, chosen.id)) ? foundationStorey(pack?.levels || []) : null;
+  const top = home ? home.elevation : wallBase;
   return {
     skuId: chosen.id,
     name: chosen.name,
     depth: chosen.depth,
-    base: wallBase - chosen.depth,
-    top: wallBase,
+    base: top - chosen.depth,
+    top,
   };
 }
 

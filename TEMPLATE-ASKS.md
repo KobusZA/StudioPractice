@@ -83,6 +83,14 @@ supplying a default.
 common real attach - a wall onto a foundation - cannot resolve. One height per
 foundation type clears it.
 
+**The two "Masonary wall 220mm Foundation" types state 240 mm.** The firm's
+brief says every foundation wall is 220, and foundation brickwork carries no
+plaster, so the 20 mm looks like plaster carried over from the plastered wall
+types. The planner draws and prices the foundation walls it derives under
+ground floor walls at 220 (`system.foundationWallThickness`). A foundation
+wall the user draws as its own wall takes the type's 240. Ask the firm to
+correct the type to 220, or to say why it is 240.
+
 **236 assumed dimensions.** Most do not matter: 192 of them are the 64
 electrical SKUs' placeholder 86 mm width/depth/height, and those are count-only
 items priced as PC sums, so their geometry is never measured. The ones worth

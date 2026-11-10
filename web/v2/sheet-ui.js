@@ -35,6 +35,7 @@ import {
   recordCalibration,
   reorderPage,
   setPageShown,
+  setSheetSetHidden,
   unplaceLoss,
   unplacePage,
   referenceDistanceMetres,
@@ -95,10 +96,27 @@ export function createSheetUi(ctx) {
   const otherList = h("div", { class: "sheet-set-list is-off", role: "tabpanel" });
   const sheetsStack = h("div", { class: "sheet-set-stack" }, drawnList, otherList);
   const sheetsList = sheetsStack;
-  const sheetsToggle = h("button", { type: "button", class: "sheet-set-list-head", "aria-expanded": "true", onclick: () => {
-    const collapsed = sheetsCard.classList.toggle("is-collapsed");
-    sheetsToggle.setAttribute("aria-expanded", String(!collapsed));
-  } }, "Sheets");
+  const sheetsChevron = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  sheetsChevron.setAttribute("class", "sheet-set-list-chevron");
+  sheetsChevron.setAttribute("viewBox", "0 0 16 16");
+  sheetsChevron.setAttribute("width", "13");
+  sheetsChevron.setAttribute("height", "13");
+  sheetsChevron.setAttribute("aria-hidden", "true");
+  const sheetsChevronPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  sheetsChevronPath.setAttribute("d", "M3.2 5.2h9.6L8 12z");
+  sheetsChevronPath.setAttribute("fill", "currentColor");
+  sheetsChevron.append(sheetsChevronPath);
+  const sheetsToggle = h("button", {
+    type: "button",
+    class: "sheet-set-list-head",
+    "aria-expanded": "true",
+    title: "Collapse the sheet list",
+    onclick: () => {
+      const collapsed = sheetsCard.classList.toggle("is-collapsed");
+      sheetsToggle.setAttribute("aria-expanded", String(!collapsed));
+      sheetsToggle.title = collapsed ? "Expand the sheet list" : "Collapse the sheet list";
+    },
+  }, "Sheets", sheetsChevron);
   const sheetsClose = h("button", {
     type: "button",
     class: "sheet-set-list-close",
@@ -912,13 +930,18 @@ export function createSheetUi(ctx) {
     return Boolean(api.hasOpenPdf?.());
   }
 
+  /** Drawn on the plan right now. The whole-set hide covers every eye. */
+  function pageDrawn(set, page, showing) {
+    if (!set || !page || set.hidden || !isPlanPage(page)) return false;
+    return page.index === showing ? !page.suppressed : Boolean(page.shown);
+  }
+
   /** The eye is on, this floor is drawing the sheet, and its pixels are not ready yet. */
   function eyeWaiting(set, page, showing) {
-    if (!page || set.hidden || !isPlanPage(page)) return false;
+    if (!pageDrawn(set, page, showing)) return false;
     const current = Number.isInteger(showing) ? set.pages.find((q) => q.index === showing) : null;
     if (!current?.levelId || page.levelId !== current.levelId) return false;
-    const visible = page.index === showing ? !page.suppressed : Boolean(page.shown);
-    if (!visible || api.isPageBitmapReady?.(page.index)) return false;
+    if (api.isPageBitmapReady?.(page.index)) return false;
     return pageFileOpen(page);
   }
 
@@ -967,6 +990,7 @@ export function createSheetUi(ctx) {
     applyTab();
     const sig = JSON.stringify([
       showing,
+      Boolean(set.hidden),
       levels.map((l) => [l.id, l.name]),
       set.pages.map((p) => [p.index, p.label, p.levelId, p.role, p.verified, p.printedScale, p.shown, p.suppressed, p.sourceId]),
       (set.sources || []).map((s) => [s.id, s.name]),
@@ -1036,7 +1060,7 @@ export function createSheetUi(ctx) {
         if (role) assignRole(p, role);
       });
       for (const type of ["click", "dblclick", "keydown"]) beside.addEventListener(type, (e) => e.stopPropagation());
-      const visible = isShowing ? !p.suppressed : Boolean(p.shown);
+      const visible = pageDrawn(set, p, showing);
       const waiting = eyeWaiting(set, p, showing);
       const eye = h("button", {
         type: "button",
@@ -1053,6 +1077,7 @@ export function createSheetUi(ctx) {
       eye.addEventListener("click", (e) => {
         e.stopPropagation();
         ctx.pushUndo?.("Changed sheet");
+        if (!visible && set.hidden) setSheetSetHidden(set, false);
         setPageShown(set, p.index, !visible, showing);
         listSignature = "";
         ctx.changed();

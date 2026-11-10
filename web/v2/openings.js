@@ -152,6 +152,28 @@ export function doorHand(opening) {
 }
 
 /**
+ * How a door leaf moves: "swing" (side-hung), "sliding", "pocket", or
+ * "garage" (sectional, roller, or up-and-over). `drawing.action` on the type
+ * wins; otherwise the family name decides. Only a swing door gets a leaf and
+ * an arc on the plan.
+ */
+export function doorAction(sku) {
+  if (sku?.category !== "door") return null;
+  const set = sku.drawing?.action;
+  if (set === "swing" || set === "sliding" || set === "pocket" || set === "garage") return set;
+  const name = `${sku.family || ""} ${sku.name || ""}`;
+  if (/garage|sectional|roller|up.?and.?over|overhead/i.test(name)) return "garage";
+  if (/pocket/i.test(name)) return "pocket";
+  if (/sliding|slider|stacker/i.test(name)) return "sliding";
+  return "swing";
+}
+
+/** True for a side-hung door: the only kind with a leaf, a swing and a hinge. */
+export function doorSwings(sku) {
+  return doorAction(sku) === "swing";
+}
+
+/**
  * Plan swing of a door: the hinge jamb, the free jamb, and where the leaf
  * tip lands on the swing side of the wall.
  */
@@ -177,7 +199,7 @@ export function doorSwing(wall, placed, opening) {
 export function openingSymbolSegments(wall, placed, opening) {
   if (!placed?.a || !placed?.b) return [];
   const segs = [[placed.a, placed.b]];
-  if (placed.sku?.category === "door") {
+  if (doorSwings(placed.sku)) {
     const swing = doorSwing(wall, placed, opening);
     segs.push([swing.hinge, swing.leaf]);
   }
@@ -199,7 +221,7 @@ function directedSweep(from, to) {
 /** The door's quarter-circle: distance from the hinge, the leaf radius, and
  * whether the bearing from the hinge falls inside the sweep. */
 function swingSector(wall, placed, opening, x, y) {
-  if (placed?.sku?.category !== "door") return null;
+  if (!doorSwings(placed?.sku)) return null;
   const swing = doorSwing(wall, placed, opening);
   const radius = Math.hypot(swing.free.x - swing.hinge.x, swing.free.y - swing.hinge.y);
   if (!(radius > EPS)) return null;
