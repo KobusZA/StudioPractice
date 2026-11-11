@@ -178,6 +178,26 @@ test("the centreline is offered too, at the length the wall is stored with", () 
   near(wallFaceLengths(wall("free", 0, 0, 4, 0), [], thick).centre.length, 4);
 });
 
+test("the centreline runs corner to corner when the wall is stored short of the corners", () => {
+  const t = 0.13;
+  const run = wall("run", t / 2, 0, 3.5 - t / 2, 0, { thickness: t });
+  const left = wall("left", 0, 0, 0, 3, { thickness: t });
+  const right = wall("right", 3.5, 0, 3.5, 3, { thickness: t });
+  const faces = wallFaceLengths(run, [left, right], thick);
+  near(faces.inside.length, 3.37, "inside");
+  near(faces.outside.length, 3.63, "outside");
+  near(faces.centre.length, 3.5, "centre");
+  near(faces.centre.x1, 0);
+  near(faces.centre.x2, 3.5);
+  near(faces.centre.y1, 0);
+});
+
+test("a centreline ending against the side of a wall runs to that wall's centreline", () => {
+  const run = wall("run", 0, 0, 4 - T / 2, 0);
+  const through = wall("through", 4, -3, 4, 3);
+  near(wallFaceLengths(run, [through], thick).centre.length, 4);
+});
+
 test("a wall with no length has no faces", () => {
   assert.equal(wallFaceLengths(wall("dot", 1, 1, 1, 1), [], thick), null);
   assert.equal(wallFaceLengths(null, [], thick), null);

@@ -1,8 +1,21 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { emptyDoc } from "../model.js";
-import { applyFillet, filletRadiusForPoint, planFillet, planTrimCorner, planTrimSingle, trimToBoundary, trimToCorner } from "../trim-extend.js";
+import { arcFromRadius } from "../click-draw.js";
+import { emptyDoc, normalizeDoc } from "../model.js";
+import { moveWallEnd } from "../modify.js";
+import {
+  applyFillet,
+  captureFillets,
+  filletRadiusForPoint,
+  planFillet,
+  planTrimCorner,
+  planTrimSingle,
+  refitFillets,
+  sharpenFillets,
+  trimToBoundary,
+  trimToCorner,
+} from "../trim-extend.js";
 
 function near(actual, expected, msg = "") {
   assert.ok(Math.abs(actual - expected) < 1e-6, `${msg} ${actual} vs ${expected}`);
@@ -429,4 +442,131 @@ test("fillet trims the kept sides of a crossing and adds the arc wall", () => {
   near(b.y2, 2);
   assert.equal(doc.segments[2].id, "arc");
   assert.equal(doc.segments[2].arc.radius, 1);
+});
+
+// An L: `a` comes down the y axis to the corner, `b` runs out along x.
+function filletedL(radius = 1) {
+  const doc = docWith([wall("a", 0, 5, 0, 0), wall("b", 0, 0, 5, 0)]);
+  const plan = planFillet(doc.segments[0], doc.segments[1], { x: 0, y: 4 }, { x: 4, y: 0 }, radius);
+  assert.equal(plan.ok, true);
+  const segment = {
+    id: "arc",
+    sku: "T220",
+    x1: plan.chord.x1,
+    y1: plan.chord.y1,
+    x2: plan.chord.x2,
+    y2: plan.chord.y2,
+    arc: plan.record,
+    fillet: plan.link,
+  };
+  assert.equal(applyFillet(doc, plan, segment, { skuById }).ok, true);
+  return doc;
+}
+
+const seg = (doc, id) => doc.segments.find((row) => row.id === id);
+
+function distToLine(line, x, y) {
+  const dx = line.x2 - line.x1;
+  const dy = line.y2 - line.y1;
+  return Math.abs((x - line.x1) * dy - (y - line.y1) * dx) / Math.hypot(dx, dy);
+}
+
+function assertTangent(doc, radius) {
+  const arcSeg = seg(doc, "arc");
+  const arc = arcFromRadius(arcSeg.x1, arcSeg.y1, arcSeg.x2, arcSeg.y2, arcSeg.arc.radius, arcSeg.arc.side);
+  near(arc.radius, radius, "radius");
+  near(distToLine(seg(doc, "a"), arc.cx, arc.cy), radius, "tangent to a");
+  near(distToLine(seg(doc, "b"), arc.cx, arc.cy), radius, "tangent to b");
+  near(Math.hypot(seg(doc, "a").x2 - arcSeg.x1, seg(doc, "a").y2 - arcSeg.y1), 0, "a meets the arc");
+  near(Math.hypot(seg(doc, "b").x1 - arcSeg.x2, seg(doc, "b").y1 - arcSeg.y2), 0, "b meets the arc");
+}
+
+test("a fillet records the two walls it was made between", () => {
+  const doc = filletedL();
+  assert.deepEqual(seg(doc, "arc").fillet, { a: { id: "a", end: 2 }, b: { id: "b", end: 1 } });
+  const loaded = normalizeDoc(structuredClone(doc));
+  assert.deepEqual(loaded.segments.find((row) => row.id === "arc").fillet, seg(doc, "arc").fillet);
+});
+
+test("sliding a filleted wall sideways keeps the arc tangent at the same radius", () => {
+  const doc = filletedL();
+  const links = captureFillets(doc, ["a"]);
+  assert.equal(links.length, 1);
+  const a = seg(doc, "a");
+  a.x1 -= 1;
+  a.x2 -= 1;
+  assert.deepEqual(refitFillets(doc, links, { skuById }), []);
+  assertTangent(doc, 1);
+  near(seg(doc, "b").x1, 0);
+  near(seg(doc, "a").y2, 1);
+});
+
+test("turning a filleted wall keeps the radius and follows the new corner angle", () => {
+  const doc = filletedL();
+  const links = captureFillets(doc, ["a"]);
+  seg(doc, "a").x1 = -2;
+  assert.deepEqual(refitFillets(doc, links, { skuById }), []);
+  assertTangent(doc, 1);
+});
+
+test("a fillet that no longer fits is reported and left alone", () => {
+  const doc = filletedL();
+  const links = captureFillets(doc, ["a"]);
+  const before = structuredClone(seg(doc, "arc"));
+  const a = seg(doc, "a");
+  a.x1 = 4.5;
+  a.x2 = 4.5;
+  assert.deepEqual(refitFillets(doc, links, { skuById }), ["arc"]);
+  assert.deepEqual(seg(doc, "arc"), before);
+});
+
+test("sharpening takes the arc out and brings the walls back to a corner", () => {
+  const doc = filletedL();
+  const links = captureFillets(doc, ["a"]);
+  assert.deepEqual(sharpenFillets(doc, links, ["arc"], { skuById }), ["arc"]);
+  assert.equal(seg(doc, "arc"), undefined);
+  near(seg(doc, "a").x2, 0);
+  near(seg(doc, "a").y2, 0);
+  near(seg(doc, "b").x1, 0);
+  near(seg(doc, "b").y1, 0);
+});
+
+test("an arc with no stored link still follows walls it is tangent to", () => {
+  const doc = filletedL();
+  delete seg(doc, "arc").fillet;
+  const links = captureFillets(doc, ["a"]);
+  assert.equal(links.length, 1);
+  assert.deepEqual([links[0].a, links[0].b], [{ id: "a", end: 2 }, { id: "b", end: 1 }]);
+  seg(doc, "a").x1 -= 1;
+  seg(doc, "a").x2 -= 1;
+  assert.deepEqual(refitFillets(doc, links, { skuById }), []);
+  assertTangent(doc, 1);
+});
+
+test("a free arc that is not tangent to its walls is not treated as a fillet", () => {
+  const doc = docWith([
+    wall("a", 0, 5, 0, 1),
+    wall("b", 1, 0, 5, 0),
+    wall("arc", 0, 1, 1, 0, { arc: { radius: 3, side: 1 } }),
+  ]);
+  assert.deepEqual(captureFillets(doc, ["a"]), []);
+});
+
+test("a stale fillet link is not followed", () => {
+  const doc = filletedL();
+  seg(doc, "a").y2 = 2;
+  assert.deepEqual(captureFillets(doc, ["a"]), []);
+  const moved = filletedL();
+  assert.equal(captureFillets(moved, ["a", "b", "arc"]).length, 0, "the arc moving with its walls goes rigidly");
+  assert.equal(captureFillets(moved, ["arc"]).length, 0, "an arc moved on its own is not held");
+});
+
+test("moving an end of a free arc keeps its angle instead of its radius", () => {
+  const doc = docWith([wall("c", 0, 0, 2, 0, { arc: { radius: 1, side: 1 } })]);
+  const result = moveWallEnd(doc, { kind: "segment", id: "c" }, 2, { x: 4, y: 0 }, { skuById, space: "centre" });
+  assert.equal(result.ok, true);
+  const c = seg(doc, "c");
+  near(c.arc.radius, 2);
+  const arc = arcFromRadius(c.x1, c.y1, c.x2, c.y2, c.arc.radius, c.arc.side);
+  near(arc.sweepDeg, 180);
 });

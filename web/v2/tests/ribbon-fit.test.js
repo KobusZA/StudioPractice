@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import { LADDERS, maxStep, planSteps, shrinkKey } from "../ribbon-fit.js";
 import { readFileSync } from "node:fs";
-import { CONTEXT_TABS, GROUP_PRIORITY, RIBBON, placingTab, ribbonItems, selectionTab, sheetTab, tabWithStatus } from "../ribbon.js";
+import { CONTEXT_TABS, GROUP_PRIORITY, RIBBON, floorFinishTab, placingTab, ribbonItems, selectionTab, sheetTab, tabWithStatus, wallFinishTab } from "../ribbon.js";
 
 // A toy width model: each group's width depends on its kind and step, so the
 // planner can be exercised without a browser. Wider = nicer.
@@ -40,7 +40,7 @@ test("Build is regrouped in drawing order, each modelling group led by one tool"
   assert.deepEqual(lead("Services"), []);
   assert.deepEqual(onRow("Walls & openings").map((i) => i.id), ["walls", "doors", "windows", "boundary", "foundations"]);
   assert.deepEqual(onRow("Floors & roofs").map((i) => i.id), ["floors", "ceilings", "roofs", "roof-cut"]);
-  assert.deepEqual(onRow("Interiors").map((i) => i.id), ["furniture", "casework", "wall-finishes", "finishes"]);
+  assert.deepEqual(onRow("Interiors").map((i) => i.id), ["furniture", "casework", "scale-person", "scale-car", "wall-finishes", "finishes"]);
   assert.deepEqual(onRow("Levels").map((i) => i.label), ["Add level", "Remove level", "Insert level"]);
   assert.equal(ribbonItems().get("room-sep").label, "Room separator");
   assert.equal(build.groups.find((g) => g.label === "Walls & openings").short, "Walls");
@@ -172,7 +172,7 @@ test("Multi-Select is the intersection of the kinds' Edit groups", () => {
   assert.deepEqual(withRoom.groups[0].items.map((i) => i.id), ["delete"]);
 });
 
-test("a placing tab is derived from the item's tool, not written out", () => {
+test("a placing tab lists only the tools that place, from the item's group", () => {
   const walls = placingTab("walls");
   assert.equal(walls.label, "Place Wall");
   assert.deepEqual(walls.groups[0].items.map((i) => i.id), ["walls", "doors", "windows", "boundary", "foundations"]);
@@ -182,13 +182,39 @@ test("a placing tab is derived from the item's tool, not written out", () => {
   assert.equal(placingTab("floors").label, "Place Floor");
   assert.equal(placingTab("stairs").label, "Place Stair");
   assert.equal(placingTab("plumbing").label, "Place Plumbing");
+  const placingCommands = new Set(["room-sep", "service-route"]);
   for (const [id, item] of ribbonItems()) {
-    if (item.tool && item.tabId === "build" && id !== "roof-cut") assert.ok(placingTab(id), id);
+    const expect = (item.tool && item.tabId === "build" && id !== "roof-cut") || placingCommands.has(id);
+    if (expect) assert.ok(placingTab(id), id);
     else assert.equal(placingTab(id), null, id);
   }
   // Trims arm a tool but do not place anything. Cut roof edits a roof.
+  // Finishes open a picture of something already drawn.
   assert.equal(placingTab("trim-corner"), null);
   assert.equal(placingTab("roof-cut"), null);
+  assert.equal(placingTab("finishes"), null);
+  assert.equal(placingTab("wall-finishes"), null);
+  assert.deepEqual(placingTab("casework").groups[0].items.map((i) => i.id), ["furniture", "casework", "scale-person", "scale-car"]);
+  assert.deepEqual(placingTab("floors").groups[0].items.map((i) => i.id), ["floors", "ceilings", "roofs"]);
+  assert.deepEqual(placingTab("rooms").groups[0].items.map((i) => i.id), ["rooms", "room-sep"]);
+  assert.equal(placingTab("room-sep").label, "Place Room separator");
+  assert.deepEqual(placingTab("electrical").groups[0].items.map((i) => i.id), ["electrical", "plumbing", "drainage", "service-route"]);
+  assert.equal(placingTab("service-route").label, "Place Route");
+});
+
+test("an open finish picture has its own short tab, and can name what it shows", () => {
+  const wall = wallFinishTab();
+  assert.equal(wall.key, "wall-finish");
+  assert.equal(wall.label, "Wall finish");
+  assert.deepEqual(wall.groups[0].items.map((i) => i.id), ["add-finish", "flip-face", "second-screen", "finish-done"]);
+  assert.equal(wallFinishTab("230 Brick, Kitchen side").label, "Wall finish · 230 Brick, Kitchen side");
+  const floor = floorFinishTab();
+  assert.equal(floor.key, "floor-finish");
+  assert.equal(floor.label, "Floor finish");
+  assert.deepEqual(floor.groups[0].items.map((i) => i.id), ["add-finish", "second-screen", "finish-done"]);
+  assert.equal(floorFinishTab("Kitchen").label, "Floor finish · Kitchen");
+  assert.equal(ribbonItems().get("add-finish").label, "Add a finish");
+  assert.equal(ribbonItems().get("finish-done").label, "Done");
 });
 
 test("the permanent Modify tab keeps only the commands with no other home", () => {
@@ -240,9 +266,11 @@ test("only the agreed commands wait for a selection", () => {
 
 test("every id on a contextual tab has its own icon", () => {
   const source = readFileSync(new URL("../ribbon-fit.js", import.meta.url), "utf8");
-  for (const tab of Object.values(CONTEXT_TABS)) {
+  const tabs = [...Object.values(CONTEXT_TABS), wallFinishTab(), floorFinishTab()];
+  for (const tab of tabs) {
     for (const group of tab.groups) {
-      for (const id of group.items) {
+      for (const item of group.items) {
+        const id = item.id || item;
         assert.ok(source.includes(`${/^[a-z]+$/i.test(id) ? id : `"${id}"`}: '`), `no glyph for ${id}`);
       }
     }

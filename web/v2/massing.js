@@ -26,6 +26,7 @@
 
 import { archRise, archVoidPolygon } from "./arch-head.js";
 import { clipPolygon, pointInPoly } from "./geom.js";
+import { figureFaces } from "./scale-figures.js";
 import { gableForForm, roofRidgeAlongX } from "./roof.js";
 import {
   SECTION_FAR_M,
@@ -1444,7 +1445,100 @@ export function facesFromPayload(payload, statusFilter = "both") {
   const faces = [];
   for (const form of forms) pushFormFaces(faces, form, openings);
   conformWallsToRoofs(faces, forms);
+  // selectKind is the document object a click should select. A room-derived
+  // wall has none: it exists only for this extrusion.
+  const kindOf = new Map();
+  for (const form of forms) {
+    if (form.elementId && form.selectKind) kindOf.set(form.elementId, form.selectKind);
+  }
+  for (const face of faces) {
+    const kind = kindOf.get(face.id);
+    if (kind) face.selectKind = kind;
+  }
   return faces;
+}
+
+/**
+ * The view ray behind a canvas pixel in an orbit view. Orthographic: every
+ * pixel looks along the same direction. `frame` is the projection the last
+ * paint used (origin, cx, cy, scale, yaw, pitch). Returns null when the
+ * frame is not an orbit frame.
+ */
+export function orbitRay(sx, sy, frame) {
+  if (!frame || !(frame.scale > 0) || !frame.origin) return null;
+  const { origin, cx, cy, scale, yaw, pitch } = frame;
+  const x1 = (sx - cx) / scale;
+  const z2 = (cy - sy) / scale;
+  const cyaw = Math.cos(yaw);
+  const syaw = Math.sin(yaw);
+  const cp = Math.cos(pitch);
+  const sp = Math.sin(pitch);
+  const y1 = z2 * sp;
+  const pz = z2 * cp;
+  const px = x1 * cyaw + y1 * syaw;
+  const py = -x1 * syaw + y1 * cyaw;
+  const dir = [syaw * cp, -cyaw * cp, -sp];
+  const len = Math.hypot(dir[0], dir[1], dir[2]) || 1;
+  return {
+    origin: [origin[0] + px, origin[1] - py, origin[2] + pz],
+    dir: [dir[0] / len, dir[1] / len, dir[2] / len],
+  };
+}
+
+/** Where a ray crosses a plane, or null when it runs along the plane. */
+export function rayPlanePoint(ray, point, normal) {
+  if (!ray || !point || !normal) return null;
+  const denom = ray.dir[0] * normal[0] + ray.dir[1] * normal[1] + ray.dir[2] * normal[2];
+  if (Math.abs(denom) < 1e-8) return null;
+  const t = (
+    (point[0] - ray.origin[0]) * normal[0]
+    + (point[1] - ray.origin[1]) * normal[1]
+    + (point[2] - ray.origin[2]) * normal[2]
+  ) / denom;
+  return [
+    ray.origin[0] + ray.dir[0] * t,
+    ray.origin[1] + ray.dir[1] * t,
+    ray.origin[2] + ray.dir[2] * t,
+  ];
+}
+
+/** A screen point is inside a projected face, or within `tol` pixels of an edge. */
+export function pointHitsProjected(x, y, pts, tol = 3) {
+  if (!pts || pts.length < 3) return false;
+  const poly = pts.map((p) => [p[0], p[1]]);
+  if (pointInPoly(x, y, poly)) return true;
+  const tol2 = tol * tol;
+  for (let i = 0; i < poly.length; i += 1) {
+    const a = poly[i];
+    const b = poly[(i + 1) % poly.length];
+    const dx = b[0] - a[0];
+    const dy = b[1] - a[1];
+    const len2 = dx * dx + dy * dy;
+    let t = len2 < 1e-6 ? 0 : ((x - a[0]) * dx + (y - a[1]) * dy) / len2;
+    t = Math.max(0, Math.min(1, t));
+    const px = a[0] + dx * t - x;
+    const py = a[1] + dy * t - y;
+    if (px * px + py * py <= tol2) return true;
+  }
+  return false;
+}
+
+/**
+ * Elements under a canvas pixel, front first. `items` is the painted list,
+ * far faces first, each `{ id, kind, selectKind, pts }`. One entry per
+ * element: the front face that contains the point.
+ */
+export function pickProjected(x, y, items) {
+  const seen = new Set();
+  const hits = [];
+  for (let i = (items?.length || 0) - 1; i >= 0; i -= 1) {
+    const item = items[i];
+    if (!item?.selectKind || !item.id || seen.has(item.id)) continue;
+    if (!pointHitsProjected(x, y, item.pts)) continue;
+    seen.add(item.id);
+    hits.push({ id: item.id, kind: item.kind, selectKind: item.selectKind });
+  }
+  return hits;
 }
 
 /** Orbit projection. The third component is depth, and it grows away from
@@ -1532,6 +1626,24 @@ function boundsOfPoints(points) {
     minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z);
   }
   return { minX, minY, minZ, maxX, maxY, maxZ };
+}
+
+/**
+ * Frame the building, and the site when it is not many times larger.
+ * A township erf must not shrink the house to a speck; the lines still draw.
+ */
+function frameWithSite(bounds, rings) {
+  const pts = [];
+  for (const ring of rings || []) {
+    for (const p of ring.points || []) pts.push([p[0], p[1], 0]);
+  }
+  const site = boundsOfPoints(pts);
+  if (!finiteBounds(site)) return bounds;
+  if (!finiteBounds(bounds)) return site;
+  const building = Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY, 1);
+  const erf = Math.max(site.maxX - site.minX, site.maxY - site.minY);
+  if (erf > Math.max(12, building * 3)) return bounds;
+  return unionBounds(bounds, site);
 }
 
 function unionBounds(a, b) {
@@ -1704,6 +1816,32 @@ export function faceStyle(face) {
     return { fill: face.kind === "wall" ? "rgba(90,84,76,0.42)" : "rgba(92,83,72,0.28)", stroke: "#5c5348" };
   }
   return { fill: face.fill, stroke: face.stroke };
+}
+
+/**
+ * How one face is painted in this view. Colour is the shaded model.
+ * Lines is a hidden-line drawing: white faces, dark edges. Existing / new
+ * recolours every element and leaves the Both / Existing / Proposed filter
+ * to hide things. A person or car stays an outline in every style. A cut
+ * face keeps its poché colour.
+ */
+export function viewFaceStyle(face, viewStyle = "colour") {
+  if (face?.kind === "figure") {
+    return { ...faceStyle(face), flat: true, heavy: true };
+  }
+  if (viewStyle === "lines" && face?.kind === "ground") {
+    return { fill: "rgb(248, 244, 236)", stroke: "rgba(90,84,76,0.28)", flat: true };
+  }
+  if (face?.kind === "ground" || face?.cut) return { ...faceStyle(face) };
+  if (viewStyle === "lines") {
+    return { fill: "rgb(252, 249, 244)", stroke: "#2a2622", flat: true, heavy: true };
+  }
+  if (viewStyle === "status") {
+    const status = resolvedStatus(face.status);
+    if (status === "existing") return { fill: "rgba(138,132,124,0.96)", stroke: "#5c5348" };
+    return { fill: "rgba(196,112,58,0.96)", stroke: "#8a3a1e" };
+  }
+  return { ...faceStyle(face) };
 }
 
 const PAPER_RGB = [248, 241, 229];
@@ -1880,13 +2018,18 @@ export function paintSpotLevels(ctx, labels, toScreen, { fontPx = 11, ink = "#24
  * changes, `resize` when the wrap is shown or resized, and `draw` to
  * re-render without changing anything (e.g. after a status filter click).
  */
-export function createMassingView({ canvas, emptyEl, hintEl, titleEl, onDraw }) {
+export function createMassingView({ canvas, emptyEl, hintEl, titleEl, onDraw, onPick, onOpeningDrag }) {
   const ctx = canvas.getContext("2d");
   const cam = createCamera();
   let statusFilter = "both";
+  // colour | lines | status. A view setting, not a change to the model.
+  let viewStyle = "colour";
   let payload = null;
   let serviceRoutes = [];
   let showServices = false;
+  let showFigures = true;
+  let scaleFigures = [];
+  let siteRings = [];
   let hintDismissed = false;
   let drag = null;
   let reframe = true;
@@ -1894,6 +2037,13 @@ export function createMassingView({ canvas, emptyEl, hintEl, titleEl, onDraw }) 
   // everything else is faded and these are painted in the accent colour.
   let highlight = new Set();
   let highlightHits = 0;
+  // Click selection. Independent of the schedule's "show in 3D" highlight:
+  // the building stays solid and the chosen element is tinted.
+  let selected = new Set();
+  let figures = [];
+  // The last live frame, so a click can be tested against what was drawn
+  // and turned back into a point on a wall.
+  let pickFrame = null;
   const NODE_FLASH_MS = 1400;
   let serviceNodes = [];
   let flashStart = 0;
@@ -1968,6 +2118,26 @@ export function createMassingView({ canvas, emptyEl, hintEl, titleEl, onDraw }) 
   function setStatusFilter(filter) {
     statusFilter = filter;
     draw();
+  }
+
+  function setStyle(next) {
+    viewStyle = next === "lines" || next === "status" ? next : "colour";
+    draw();
+  }
+
+  function setFigures(next, drawNow = true) {
+    scaleFigures = Array.isArray(next) ? next : [];
+    if (drawNow) draw();
+  }
+
+  function setShowFigures(on, drawNow = true) {
+    showFigures = Boolean(on);
+    if (drawNow) draw();
+  }
+
+  function setSite(rings, drawNow = true) {
+    siteRings = Array.isArray(rings) ? rings : [];
+    if (drawNow) draw();
   }
 
   function setServices(routes) {
@@ -2049,11 +2219,17 @@ export function createMassingView({ canvas, emptyEl, hintEl, titleEl, onDraw }) 
     }
 
     const allFaces = facesFromPayload(payload, statusFilter);
-    const faces = flat && viewCam.mode === "orbit"
+    const modelFaces = flat && viewCam.mode === "orbit"
       ? allFaces.filter((face) => face.kind !== "roof" || highlight.has(face.id))
       : allFaces;
+    const drawnFigures = showFigures ? scaleFigures : [];
+    const faces = [
+      ...modelFaces,
+      ...drawnFigures.flatMap((fig) => figureFaces(fig, viewCam)),
+    ];
     const routes = showServices ? serviceRoutesInView(serviceRoutes, statusFilter, viewCam) : [];
-    if (!faces.length && !routes.length) {
+    const rings = siteRings.filter((ring) => ring?.points?.length >= 2);
+    if (!faces.length && !routes.length && !rings.length) {
       if (live) {
         if (emptyEl) emptyEl.hidden = false;
         if (hintEl) hintEl.hidden = true;
@@ -2067,17 +2243,23 @@ export function createMassingView({ canvas, emptyEl, hintEl, titleEl, onDraw }) 
       else {
         hintEl.hidden = false;
         hintEl.textContent = isLook
-          ? "Drag to look around · scroll to zoom"
+          ? "Drag to look around · scroll to zoom · click to select"
           : isCutView
-            ? "Drag to pan · scroll to zoom"
-            : "Drag to turn · scroll to zoom";
+            ? "Drag to pan · scroll to zoom · click to select"
+            : "Drag empty space to turn · scroll to zoom · click to select · drag a window or door to move it";
       }
     }
 
-    const bounds = unionBounds(
-      boundsOfFaces(faces),
+    // People and cars stand outside the building. They must not move the
+    // camera: the frame stays on the model, and the ground just extends
+    // far enough to sit under them.
+    const modelBounds = frameWithSite(unionBounds(
+      boundsOfFaces(modelFaces),
       boundsOfPoints(routes.flatMap((route) => [route.a, route.b])),
-    );
+    ), rings);
+    const figureBounds = boundsOfFaces(faces.filter((face) => face.kind === "figure"));
+    const bounds = modelBounds || figureBounds;
+    const groundBounds = unionBounds(bounds, figureBounds) || bounds;
     if (live && reframe && !isLook && !isCutView && bounds) {
       frameCamera(viewCam, bounds);
       reframe = false;
@@ -2086,7 +2268,7 @@ export function createMassingView({ canvas, emptyEl, hintEl, titleEl, onDraw }) 
       viewCam.pitch = Math.PI / 2 - 0.0001;
       viewCam.yaw = 0;
     }
-    const withGround = [...faces, ...groundFacesFromBounds(bounds)];
+    const withGround = [...faces, ...groundFacesFromBounds(groundBounds)];
     // Only a section clips: an elevation is viewed from outside the whole
     // model, so nothing needs to be cut away for it to make sense.
     const cutFaces = isSection ? clipFacesForSection(withGround, viewCam) : withGround;
@@ -2131,13 +2313,15 @@ export function createMassingView({ canvas, emptyEl, hintEl, titleEl, onDraw }) 
     const cy = height / 2 - (isLook || isCutView ? 0 : 16);
     const sectionScale = Number(viewCam.sectionScale) > 0 ? viewCam.sectionScale : scale;
 
+    const projectWorld = (p) => (isLook
+      ? projectLookPoint(p[0], p[1], p[2], viewCam, cx, cy, height)
+      : isCutView
+        ? projectSectionPoint(p[0], p[1], p[2], viewCam, viewCam.sectionOu, viewCam.sectionOv, sectionScale, cx, cy)
+        : projectPoint(p[0], p[1], p[2], origin, cx, cy, scale, viewCam));
+
     const projected = [];
     for (const face of cutFaces) {
-      const pts = face.pts.map((p) => (isLook
-        ? projectLookPoint(p[0], p[1], p[2], viewCam, cx, cy, height)
-        : isCutView
-          ? projectSectionPoint(p[0], p[1], p[2], viewCam, viewCam.sectionOu, viewCam.sectionOv, sectionScale, cx, cy)
-          : projectPoint(p[0], p[1], p[2], origin, cx, cy, scale, viewCam)));
+      const pts = face.pts.map((p) => projectWorld(p));
       const depth = pts.reduce((s, p) => s + p[2], 0) / pts.length;
       if (isLook && depth < LOOK_NEAR) continue;
       projected.push({ face, pts, depth });
@@ -2159,11 +2343,30 @@ export function createMassingView({ canvas, emptyEl, hintEl, titleEl, onDraw }) 
       }
       return b.depth - a.depth;
     });
+    if (live) {
+      pickFrame = {
+        mode: viewCam.mode,
+        origin: origin.slice(),
+        cx,
+        cy,
+        scale,
+        yaw: viewCam.yaw,
+        pitch: viewCam.pitch,
+        items: projected
+          .filter((item) => item.face.kind !== "ground")
+          .map((item) => ({
+            id: item.face.id,
+            kind: item.face.kind,
+            selectKind: item.face.selectKind || null,
+            pts: item.pts,
+          })),
+      };
+    }
 
     const picking = highlight.size > 0;
     highlightHits = 0;
     const drawFace = (item, picked) => {
-      const style = faceStyle(item.face);
+      const style = viewFaceStyle(item.face, viewStyle);
       viewCtx.beginPath();
       item.pts.forEach((p, i) => (i === 0 ? viewCtx.moveTo(p[0], p[1]) : viewCtx.lineTo(p[0], p[1])));
       viewCtx.closePath();
@@ -2177,16 +2380,25 @@ export function createMassingView({ canvas, emptyEl, hintEl, titleEl, onDraw }) 
       }
       viewCtx.fillStyle = item.face.cut
         ? (item.face.kind === "wall" ? "rgba(90,84,76,0.72)" : style.fill)
-        : (isCutView ? style.fill : opaqueFill(item.face, style.fill));
+        : (style.flat || isCutView ? style.fill : opaqueFill(item.face, style.fill));
       viewCtx.strokeStyle = style.stroke;
-      viewCtx.lineWidth = projected.length > 8000 ? 0.2 : (item.face.cut ? 0.9 : (isCutView ? 0.45 : 0.8));
+      viewCtx.lineWidth = projected.length > 8000
+        ? 0.2
+        : (style.heavy ? 1.15 : (item.face.cut ? 0.9 : (isCutView ? 0.45 : 0.8)));
       viewCtx.fill();
       if (item.face.cut) hatchPolygon(viewCtx, item.pts, style.stroke);
       if (projected.length < 25000) strokeFaceEdges(viewCtx, item.pts, item.face);
     };
+    let siteDrawn = false;
+    const paintSite = () => {
+      if (siteDrawn) return;
+      siteDrawn = true;
+      paintSiteRings(viewCtx, rings, projectWorld, isLook);
+    };
     const pickedItems = [];
     for (const item of projected) {
-      const picked = picking && item.face.kind !== "ground" && highlight.has(item.face.id);
+      if (massingLayer(item.face) >= 2) paintSite();
+      const picked = picking && item.face.kind !== "ground" && item.face.kind !== "figure" && highlight.has(item.face.id);
       if (picked) {
         pickedItems.push(item);
         highlightHits += 1;
@@ -2196,9 +2408,25 @@ export function createMassingView({ canvas, emptyEl, hintEl, titleEl, onDraw }) 
       drawFace(item, false);
       viewCtx.globalAlpha = 1;
     }
+    paintSite();
     // Picked faces go on top of the faded building, so a hit is never hidden
     // behind a wall that merely happens to be nearer the camera.
     for (const item of pickedItems) drawFace(item, true);
+    if (live && selected.size && !picking) {
+      viewCtx.save();
+      for (const item of projected) {
+        if (item.face.kind === "ground" || !selected.has(item.face.id)) continue;
+        viewCtx.beginPath();
+        item.pts.forEach((p, i) => (i === 0 ? viewCtx.moveTo(p[0], p[1]) : viewCtx.lineTo(p[0], p[1])));
+        viewCtx.closePath();
+        viewCtx.fillStyle = "rgba(255,170,0,0.28)";
+        viewCtx.strokeStyle = "#c2410c";
+        viewCtx.lineWidth = 1.6;
+        viewCtx.fill();
+        viewCtx.stroke();
+      }
+      viewCtx.restore();
+    }
     const projectRoute = (point) => (isLook
       ? projectLookPoint(point[0], point[1], point[2], viewCam, cx, cy, height)
       : isCutView
@@ -2266,6 +2494,7 @@ export function createMassingView({ canvas, emptyEl, hintEl, titleEl, onDraw }) 
         cy - (v - viewCam.sectionOv) * sectionScale,
       ]);
     }
+    if (live && figures.length) paintMassFigures(viewCtx, figures, projectRoute, isLook);
     if (live && typeof onDraw === "function") onDraw(viewCam, payload);
     return true;
   }
@@ -2293,23 +2522,81 @@ export function createMassingView({ canvas, emptyEl, hintEl, titleEl, onDraw }) 
     return shots;
   }
 
+  function canvasPoint(event) {
+    const rect = canvas.getBoundingClientRect();
+    return { sx: event.clientX - rect.left, sy: event.clientY - rect.top };
+  }
+
+  function pickAt(sx, sy) {
+    if (!pickFrame) return [];
+    return pickProjected(sx, sy, pickFrame.items);
+  }
+
+  // A drag starts a move only when the front element is a window or door.
+  // Anything else still orbits, pans, or looks.
+  function openingUnder(hits, event) {
+    if (!onOpeningDrag || event.button !== 0 || event.shiftKey || cam.mode !== "orbit") return null;
+    const front = hits[0];
+    return front?.selectKind === "opening" ? front : null;
+  }
+
+  function showSelection(ids, nextFigures, { draw: redraw = true } = {}) {
+    selected = new Set((ids || []).filter(Boolean));
+    figures = Array.isArray(nextFigures) ? nextFigures : [];
+    if (redraw) draw();
+  }
+
+  function ray(sx, sy) {
+    if (!pickFrame || pickFrame.mode !== "orbit") return null;
+    return orbitRay(sx, sy, pickFrame);
+  }
+
   canvas.addEventListener("pointerdown", (event) => {
     if (flat && cam.mode === "orbit") return;
+    const at = canvasPoint(event);
+    const hits = onPick ? pickAt(at.sx, at.sy) : [];
+    const opening = openingUnder(hits, event);
     drag = {
       x: event.clientX,
       y: event.clientY,
+      sx: at.sx,
+      sy: at.sy,
       yaw: cam.yaw,
       pitch: cam.pitch,
       ou: cam.sectionOu,
       ov: cam.sectionOv,
+      hits,
+      shift: event.shiftKey,
+      openingId: opening?.id || null,
+      openingStarted: false,
+      moved: false,
     };
+    if (opening) canvas.style.cursor = "grab";
     canvas.setPointerCapture(event.pointerId);
   });
   canvas.addEventListener("pointermove", (event) => {
-    if (!drag) return;
-    if (!hintDismissed && (Math.abs(event.clientX - drag.x) > 4 || Math.abs(event.clientY - drag.y) > 4)) {
-      hintDismissed = true;
+    if (!drag) {
+      if (!onOpeningDrag || cam.mode !== "orbit" || flat) return;
+      const at = canvasPoint(event);
+      const front = pickAt(at.sx, at.sy)[0];
+      canvas.style.cursor = front?.selectKind === "opening" ? "grab" : "";
+      return;
     }
+    const dist = Math.hypot(event.clientX - drag.x, event.clientY - drag.y);
+    if (!hintDismissed && dist > 4) hintDismissed = true;
+    if (drag.openingId && cam.mode === "orbit") {
+      if (dist <= 4) return;
+      const at = canvasPoint(event);
+      if (!drag.openingStarted) {
+        drag.openingStarted = true;
+        canvas.style.cursor = "grabbing";
+        onOpeningDrag({ phase: "start", id: drag.openingId, sx: at.sx, sy: at.sy });
+      }
+      drag.moved = true;
+      onOpeningDrag({ phase: "move", id: drag.openingId, sx: at.sx, sy: at.sy });
+      return;
+    }
+    if (dist > 4) drag.moved = true;
     if (cam.mode === "look") {
       cam.yaw = drag.yaw + (event.clientX - drag.x) * 0.008;
       cam.pitch = Math.min(LOOK_PITCH_MAX, Math.max(LOOK_PITCH_MIN, drag.pitch - (event.clientY - drag.y) * 0.008));
@@ -2323,7 +2610,17 @@ export function createMassingView({ canvas, emptyEl, hintEl, titleEl, onDraw }) 
     }
     draw();
   });
-  canvas.addEventListener("pointerup", () => { drag = null; });
+  canvas.addEventListener("pointerup", () => {
+    const ended = drag;
+    drag = null;
+    canvas.style.cursor = "";
+    if (!ended || !onPick) return;
+    if (ended.openingStarted) {
+      onOpeningDrag?.({ phase: "end", id: ended.openingId });
+      return;
+    }
+    if (!ended.moved) onPick(ended.hits || [], { shift: Boolean(ended.shift) });
+  });
   canvas.addEventListener("wheel", (event) => {
     event.preventDefault();
     if (cam.mode === "look") {
@@ -2343,6 +2640,10 @@ export function createMassingView({ canvas, emptyEl, hintEl, titleEl, onDraw }) 
     setHighlight,
     setFlat,
     setStatusFilter,
+    setStyle,
+    setFigures,
+    setShowFigures,
+    setSite,
     setServices,
     setServiceNodes,
     setShowServices,
@@ -2350,6 +2651,8 @@ export function createMassingView({ canvas, emptyEl, hintEl, titleEl, onDraw }) 
     setSection,
     setElevation,
     setOrbit,
+    showSelection,
+    ray,
     draw,
     resize: draw,
     mode: () => cam.mode,
@@ -2358,6 +2661,90 @@ export function createMassingView({ canvas, emptyEl, hintEl, titleEl, onDraw }) 
     useCutFrame,
     referenceCanvases,
   };
+}
+
+/** The selected element's own measurements, in blue, over the model. */
+function paintMassFigures(ctx, list, project, isLook) {
+  ctx.save();
+  ctx.font = "600 12px 'Source Sans 3', sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.lineWidth = 1;
+  const tag = (text, x, y) => {
+    const w = ctx.measureText(text).width + 8;
+    const h = 16;
+    ctx.fillStyle = "rgba(248,241,229,0.94)";
+    ctx.strokeStyle = "#1d4ed8";
+    ctx.beginPath();
+    ctx.rect(x - w / 2, y - h / 2, w, h);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#1d4ed8";
+    ctx.fillText(text, x, y);
+  };
+  for (const fig of list) {
+    if (fig.at && fig.text) {
+      const p = project(fig.at);
+      if (isLook && p[2] < LOOK_NEAR) continue;
+      tag(fig.text, p[0], p[1]);
+      continue;
+    }
+    if (!fig.a || !fig.b || !fig.text) continue;
+    const a = project(fig.a);
+    const b = project(fig.b);
+    if (isLook && (a[2] < LOOK_NEAR || b[2] < LOOK_NEAR)) continue;
+    let ox = b[1] - a[1];
+    let oy = a[0] - b[0];
+    const span = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    const olen = Math.hypot(ox, oy) || 1;
+    if (oy > 0) { ox = -ox; oy = -oy; }
+    const lift = span < 8 ? 0 : 12;
+    ox = (ox / olen) * lift;
+    oy = (oy / olen) * lift;
+    const ax = a[0] + ox;
+    const ay = a[1] + oy;
+    const bx = b[0] + ox;
+    const by = b[1] + oy;
+    ctx.strokeStyle = "#1d4ed8";
+    ctx.beginPath();
+    ctx.moveTo(ax, ay);
+    ctx.lineTo(bx, by);
+    ctx.stroke();
+    const tick = 4;
+    const tx = ((b[0] - a[0]) / (span || 1)) * tick;
+    const ty = ((b[1] - a[1]) / (span || 1)) * tick;
+    ctx.beginPath();
+    ctx.moveTo(ax - ty, ay + tx);
+    ctx.lineTo(ax + ty, ay - tx);
+    ctx.moveTo(bx - ty, by + tx);
+    ctx.lineTo(bx + ty, by - tx);
+    ctx.stroke();
+    tag(fig.text, (ax + bx) / 2, (ay + by) / 2 - 10);
+  }
+  ctx.restore();
+}
+
+/** Property line and building line, on the ground, under the walls. */
+function paintSiteRings(ctx, rings, project, isLook) {
+  if (!rings?.length) return;
+  ctx.save();
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([7, 5]);
+  for (const ring of rings) {
+    const pts = [];
+    for (const p of ring.points) {
+      const s = project([p[0], p[1], Number.isFinite(ring.z) ? ring.z : 0]);
+      if (isLook && s[2] < LOOK_NEAR) continue;
+      pts.push(s);
+    }
+    if (pts.length < 2) continue;
+    ctx.beginPath();
+    pts.forEach((p, i) => (i === 0 ? ctx.moveTo(p[0], p[1]) : ctx.lineTo(p[0], p[1])));
+    if (pts.length >= 3) ctx.closePath();
+    ctx.strokeStyle = ring.role === "building" ? "#8d6f3a" : "#5b7553";
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 /**

@@ -32,8 +32,8 @@
 import { complianceGaps, normalizePackUnits, GEOMETRY_LENGTH_KEYS } from "./schema.js";
 import { RULE_PACK, evaluateCompliance, groupFindingsByPart, summarizeFindings } from "./rules.js";
 import { deriveBuildingLine, hitPropertyLine, setBuildingLine, setPropertyLine, setSgReference } from "./site.js?v=20261015-property";
-import { CONTEXT_TAB_ID, HINTS, firstTabId, placingTab, renderRibbon, selectionTab, sheetTab, tabWithStatus } from "./ribbon.js?v=20261111-section-side";
-import { closeOverflowMenus, decorateRibbon, fitRibbon } from "./ribbon-fit.js?v=20261110-ribbon-soft";
+import { CONTEXT_TAB_ID, HINTS, firstTabId, floorFinishTab, placingTab, renderRibbon, selectionTab, sheetTab, tabWithStatus, wallFinishTab } from "./ribbon.js?v=20261111-alt-detach";
+import { closeOverflowMenus, decorateRibbon, fitRibbon } from "./ribbon-fit.js?v=20261111-exit-button";
 import {
   ghostContext,
   MAX_FLOORS_TO_ADD,
@@ -59,7 +59,13 @@ import {
   inspectorStations,
   selectedInspectorStationId,
   isolateShows,
-} from "./level-view.js?v=20261110-remove-floor";
+  planLevelOf,
+  levelDisplayName,
+  stationDisplay,
+  sectionMm,
+  railLabelYs,
+  sectionPartShown,
+} from "./level-view.js?v=20261111-active-cut";
 import { foundationStorey, foundationsOffStorey, isFoundationLevel as levelIsFoundation, placementHintOverride } from "./placement-warn.js?v=20261109-eaves-floor";
 import {
   alignSelection,
@@ -76,14 +82,15 @@ import {
   moveWallEnd,
   realignWallFaces,
   shiftJoinedEnds,
+  wallMoveHasJoins,
   retypeSelection,
   rotateSelection,
   collinearWallJoints,
   splitSelection,
   splitWallAt,
   MIN_WALL_SPLIT_M,
-} from "./modify.js?v=20261108-ridge";
-import { applyFillet, filletRadiusForPoint, planFillet, planTrimCorner, planTrimSingle, trimToBoundary, trimToCorner, wallCanTrim } from "./trim-extend.js?v=20261110-fillet-size";
+} from "./modify.js?v=20261111-alt-detach";
+import { applyFillet, captureFillets, filletRadiusForPoint, planFillet, planTrimCorner, planTrimSingle, refitFillets, sharpenFillets, trimToBoundary, trimToCorner, wallCanTrim } from "./trim-extend.js?v=20261111-fillet-tangent";
 import { applyCircleTrim, planCircleTrim } from "./circle-trim.js?v=20261108-joinery";
 import {
   calibrate,
@@ -194,7 +201,7 @@ import {
 } from "./drawing-defaults.js?v=20261110-fillet-join";
 import { area as polyArea, bbox, clampDeltaInside, clampToPoly, clipPolygon, clipSegToRect, distToSeg, fitPolygonToHost, formatLengthMm, headingDeg, parseLengthMm, pointInPoly, roundGrid, translatePolyEdge } from "./geom.js?v=20261108-ridge";
 import { SNAP_PIXEL_TOL, GAP_MAX_M, ALIGN_ORIGIN_MAX_M, CHAIN_GUIDE_DEG, NICE_MIN_STEP_M, PROBE_VECTORS, applyNicePoint, bestLinearMoveSnap, chainAngleTarget, collectSnapEdges, collectSnapTargets, isExactPointSnap, nearestAlignments, resolveProbes, snapEdgeToLine, snapLengthFrom, snapLinearEnd, snapNiceDelta, snapPoint, snapToFace } from "./snap.js?v=20261110-angle-snap";
-import { DEFAULT_ROOF_OVERHANG_MM, DEFAULT_ROOF_PITCH, ROOF_CUT_MIN_AREA, applyRoofOverhang, commitRoofAnchors, gableProfile, normalizeRoofCutKind, roofEdgeFromBase, roofGuideLines, roofHasBase, floorOffsetMm, roofOffsetMm, roofOverhangMm, roofPitch2Deg, roofPlanAreas, roofRidgeAlongX, roofRidgeOffsetMm } from "./roof.js?v=20261109-floor-offsets";
+import { DEFAULT_ROOF_OVERHANG_MM, DEFAULT_ROOF_PITCH, ROOF_CUT_MIN_AREA, applyRoofOverhang, commitRoofAnchors, gableProfile, normalizeRoofCutKind, roofEdgeFromBase, roofGuideLines, roofHasBase, floorOffsetMm, roofOffsetMm, roofOverhangMm, roofEaveDropM, roofPitch2Deg, roofPlanAreas, roofRidgeAlongX, roofRidgeOffsetMm } from "./roof.js?v=20261109-floor-offsets";
 import {
   ATTACHABLE_KINDS,
   PlanStore,
@@ -245,6 +252,7 @@ import {
   openingOnWall,
   openingSideGaps,
   openingSize,
+  placeOpeningOnHost,
   openingSymbolSegments,
   slideOpening,
   pointInDoorSwing,
@@ -253,8 +261,8 @@ import {
   wallForOpening,
   wallNormal,
   wallT,
-} from "./openings.js?v=20261108-joinery";
-import { paintFixture } from "./plan-symbols.js?v=20261105-sans";
+} from "./openings.js?v=20261111-mass-pick";
+import { paintFixture } from "./plan-symbols.js?v=20261111-rugs";
 import {
   applyJoineryEdit,
   commitJoineryRun,
@@ -266,6 +274,9 @@ import {
   joineryDraftAt,
   joineryHandlePoints,
   joineryHeights,
+  furnitureCrossesWall,
+  furnitureIsRug,
+  furnitureOverlapsRect,
   joineryIsRun,
   joineryLabel,
   joineryPolygon,
@@ -275,8 +286,8 @@ import {
   stretchJoineryDepth,
   stretchJoineryRun,
   syncHostedJoinery,
-} from "./joinery.js?v=20261108-cupboard-snap";
-import { paintSanitaryPreview, sanitaryPreview } from "./type-preview.js?v=20261106-san-preview";
+} from "./joinery.js?v=20261111-rugs";
+import { paintSanitaryPreview, sanitaryPreview } from "./type-preview.js?v=20261111-rugs";
 import {
   floorSocketDraft,
   slideWallSocket,
@@ -293,11 +304,12 @@ import {
   levelElevation,
   objectLabel,
   resolvedBase,
-} from "./compile.js?v=20261109-floor-offsets";
+} from "./compile.js?v=20261111-mass-pick";
 import { exportDxf } from "./dxf.js";
 import { exportIfc } from "./ifc.js";
 import { boqRows, bomRows, scheduleTotal } from "./schedule.js";
-import { createMassingView, lookFromClicks, EYE_HEIGHT_M, facesFromPayload, faceStyle, massingLayer, hatchPolygon, paintSpotLevels, strokeFaceEdges } from "./massing.js?v=20261109-floor-offsets";
+import { createMassingView, lookFromClicks, EYE_HEIGHT_M, facesFromPayload, faceStyle, massingLayer, hatchPolygon, paintSpotLevels, rayPlanePoint, strokeFaceEdges } from "./massing.js?v=20261111-mass-style";
+import { figureFootprint, figureLabel, figureNose, scaleFigurePair } from "./scale-figures.js?v=20261111-mass-figures";
 import {
   MAX_VISUALIZE_PROMPT,
   VISUALIZE_BUILTIN,
@@ -513,14 +525,16 @@ const el = {
   inspectBack: document.getElementById("v2-inspect-back"),
   levelWidget: document.getElementById("v2-level-widget"),
   levelHouse: document.getElementById("v2-level-house"),
-  levelStations: document.getElementById("v2-level-stations"),
+  levelFrame: document.getElementById("v2-level-frame"),
+  levelLabels: document.getElementById("v2-level-labels"),
   cutName: document.getElementById("v2-cut-name"),
-  cutElev: document.getElementById("v2-cut-elev"),
-  cutKind: document.getElementById("v2-cut-kind"),
+  cutMeta: document.getElementById("v2-cut-meta"),
   levelIsolate: document.getElementById("v2-level-isolate"),
+  levelIsolateNote: document.getElementById("v2-level-isolate-note"),
+  sectionDatum: document.getElementById("v2-section-datum"),
+  slabName: document.getElementById("v2-slab-name"),
+  floorBuildUpNote: document.getElementById("v2-floor-build-up-note"),
   planOptions: document.getElementById("v2-plan-options"),
-  moveDisjoin: document.getElementById("v2-move-disjoin"),
-  moveDisjoinBox: document.getElementById("v2-move-disjoin-box"),
   wallLoc: document.getElementById("v2-wall-loc"),
   wallDraw: document.getElementById("v2-wall-draw"),
   wallArc: document.getElementById("v2-wall-arc"),
@@ -721,6 +735,7 @@ const el = {
   massFlip: document.getElementById("v2-mass-flip"),
   massPrompt: document.getElementById("v2-mass-prompt"),
   massGenerate: document.getElementById("v2-mass-generate"),
+  massPromptClose: document.getElementById("v2-mass-prompt-close"),
   massPromptExamples: document.getElementById("v2-mass-prompt-examples"),
   massPromptNote: document.getElementById("v2-mass-prompt-note"),
   massPromptText: document.getElementById("v2-mass-prompt-text"),
@@ -748,6 +763,7 @@ const el = {
   massPlanCanvas: document.getElementById("v2-mass-plan-canvas"),
   massViewLabel: document.getElementById("v2-mass-view-label"),
   massServices: document.getElementById("v2-mass-services"),
+  massFigures: document.getElementById("v2-mass-figures"),
   typeDetailOverlay: document.getElementById("v2-type-detail-overlay"),
   typeDetailPanel: document.querySelector("#v2-type-detail-overlay .type-detail-panel"),
   typeDetailName: document.getElementById("v2-type-detail-name"),
@@ -836,6 +852,8 @@ let openProject = null;
 let openDrawingId = null;
 
 let tool = "select";
+// Person or car while the scale-figure tool is armed.
+let scaleFigureKind = null;
 
 /** A door, a window, or a plain opening: click a wall to place it. */
 function hostedOpeningTool(name = tool) {
@@ -1210,7 +1228,6 @@ let moveSession = null;
 // Copy is the same two clicks, but nothing is written until the second one.
 // The shapes are a snapshot of what will be drawn, offset by dx/dy.
 let copySession = null;
-let moveDisjoin = false;
 /** Held ends to mark while a move is in hand. Null when nothing is held. */
 let joinHold = null;
 // Screen boxes of labels already painted this frame, so a snap string can
@@ -1339,6 +1356,8 @@ const massView = createMassingView({
   hintEl: el.massHint,
   titleEl: el.massTitle,
   onDraw: syncLookPlan,
+  onPick: (hits, mods) => handleMassPick(hits, mods),
+  onOpeningDrag: (info) => handleMassOpeningDrag(info),
 });
 
 function syncLookPlan(cam, payload, info) {
@@ -1357,10 +1376,7 @@ function syncLookPlan(cam, payload, info) {
   if (el.massHost) el.massHost.hidden = !isSection;
   if (el.massFlip) el.massFlip.hidden = !isSection;
   if (isSection) syncSectionHostButtons();
-  if (isSection && el.massPrompt && !el.massPrompt.hidden) {
-    el.massPrompt.hidden = true;
-    el.massPicture?.setAttribute("aria-expanded", "false");
-  }
+  if (isSection && el.massPrompt && !el.massPrompt.hidden) setPictureOpen(false);
   const emptyTitle = el.massEmpty?.querySelector("h3");
   const emptyCopy = el.massEmpty?.querySelector("p");
   if (emptyTitle && emptyCopy) {
@@ -2963,6 +2979,51 @@ function itemRect(item, sku) {
   return rot ? { x: item.x, y: item.y, w: d, h: w } : { x: item.x, y: item.y, w, h: d };
 }
 
+function looseFurniture(item, sku) {
+  return Boolean(item && sku?.category === "furniture" && item.host !== "joinery");
+}
+
+function placingFurniture() {
+  if (tool !== "place") return false;
+  const sku = skuById(placeSkuId);
+  return sku?.category === "furniture" && !joineryIsRun(sku);
+}
+
+function selectedFurniture() {
+  if (!store.selected.length || !store.selected.every((r) => r.kind === "item")) return false;
+  return store.selected.every((ref) => looseFurniture(objByRef(ref), skuById(objByRef(ref)?.sku)));
+}
+
+/** "wall" when the piece cuts a wall, "furniture" when it cuts another piece.
+ * A rug may cover other furniture. Sharing an edge does not count. */
+function furnitureClashKind(item, sku) {
+  if (!looseFurniture(item, sku)) return null;
+  const rect = itemRect(item, sku);
+  const walls = (wallsCache.length ? wallsCache : currentWalls()).filter((w) =>
+    w.drawn && w.thickness > 0 && w.category !== "foundation" && onLevel(item, w.level));
+  if (furnitureCrossesWall(rect, walls.map((w) => wallFootprint(w).map((p) => [p.x, p.y])))) return "wall";
+  if (furnitureIsRug(sku)) return null;
+  for (const other of store.doc.items || []) {
+    if (!other || other.id === item.id || !onLevel(other, item.level || activeLevel)) continue;
+    const otherSku = skuById(other.sku);
+    if (!looseFurniture(other, otherSku) || furnitureIsRug(otherSku)) continue;
+    if (furnitureOverlapsRect(rect, itemRect(other, otherSku))) return "furniture";
+  }
+  return null;
+}
+
+function noteFurnitureClash(items) {
+  const list = items || store.selected.map((ref) => objByRef(ref)).filter(Boolean);
+  for (const item of list) {
+    const sku = skuById(item?.sku);
+    const kind = furnitureClashKind(item, sku);
+    if (!kind) continue;
+    const name = sku?.name || "Furniture";
+    setStatusMessage(kind === "wall" ? `${name} crosses a wall.` : `${name} overlaps other furniture.`, "warn");
+    return;
+  }
+}
+
 function objectStatus(obj) {
   return obj?.status === "existing" ? "existing" : "planned";
 }
@@ -3511,23 +3572,25 @@ function openingsPhrase(cats) {
   return "Doors and windows";
 }
 
-// --- level widget: house cutaway + elevation-accurate rail ---------------
-// Ported in full from level-slider-mock.html. The house is a schematic
+// --- Active cut panel: section + labelled elevation rail -----------------
+// Ported from active-cut-panel-mock.html. The section is a schematic
 // single-bay cutaway - not the real plan geometry, and the roof rise is a
-// fixed constant since nothing here has real roof geometry to draw - used
-// only to give the rail a physical floor/ceiling/roof reference instead of
-// the flat evenly-spaced-tick rail this replaces. Real geometry stays on the
-// plan canvas.
+// fixed constant since nothing here has real roof geometry to draw. Every
+// station is labelled on the rail, so the drawing, the rail and the list
+// are one control. Real geometry stays on the plan canvas.
 const SVG_NS = "http://www.w3.org/2000/svg";
-const HOUSE_VB = { w: 248, h: 318, padTop: 16, padBot: 22 };
-const HOUSE_ROOF_RISE = 1.65;
+const HOUSE_PAD = 14;
+const HOUSE_LABEL_GAP = 21;
+const HOUSE_LABEL_W = 176;
+// The mock's scale: a storey never grows past this, however tall the panel
+// is. A taller building shrinks to the room it is given instead.
+const HOUSE_PX_PER_M = 54;
+const HOUSE_ROOF_RISE = 1.05;
 const HOUSE_SLAB = 0.2;
 const HOUSE_CEIL = 0.09;
-const HOUSE_WALL_T = 6.5;
-const HOUSE_X0 = 28;
+const HOUSE_WALL_T = 7;
+const HOUSE_X0 = 16;
 const HOUSE_X1 = HOUSE_X0 + HOUSE_WALL_T;
-const HOUSE_BREAK_X = 132;
-const HOUSE_RAIL_X = 214;
 const HOUSE_RAIL_GRAB = 12;
 
 let houseStations = [];
@@ -3541,9 +3604,15 @@ let houseZToY = () => 0;
 let houseYToZ = () => 0;
 let houseCutGroup = null;
 let houseGhostGroup = null;
-let houseGhostBg = null;
-let houseGhostLabel = null;
+let houseRailX = 0;
 let houseDragging = false;
+/** Build-up typed but not yet committed, mm (null: cleared). Undefined
+ * while there is none, so the section draws the stated value. */
+let buildUpPreviewMm;
+let buildUpFocused = false;
+/** The build-up the section was last drawn with, so render() redraws it
+ * only when that changes. */
+let houseDrawnBuildUp = null;
 /** Which station (may be a level's ceiling or the roof, not just its floor)
  * the widget currently shows as cut. Kept separate from `activeLevel`
  * because a ceiling/roof cut still edits the level that owns it. */
@@ -3556,10 +3625,10 @@ function svgEl(name, attrs) {
 }
 
 function houseKindPhrase(kind) {
-  if (kind === "ceiling") return "ceiling plan";
-  if (kind === "roof") return "roof plan";
-  if (kind === "foundation") return "foundation plan";
-  return "floor plan";
+  if (kind === "ceiling") return "Ceiling plan";
+  if (kind === "roof") return "Roof plan";
+  if (kind === "foundation") return "Foundation plan";
+  return "Floor plan";
 }
 
 function nearestStationIndex(z) {
@@ -3607,161 +3676,188 @@ function drawLevelSwitcher() {
   // interactions go through selectStationIndex()/renderLevelCut() instead -
   // so the cut always snaps back to the active level's floor here.
   activeStationId = `${activeLevel}::floor`;
+  drawHouse();
+}
 
-  const topLevel = levels[levels.length - 1];
-  const eavesZ = topLevel.elevation + topLevel.floorToFloor;
-  const ridgeZ = eavesZ + HOUSE_ROOF_RISE;
-  const zMin = levels[0].elevation - 0.55;
-  const zMax = ridgeZ + 0.45;
+/** The build-up the section draws, mm: the one being typed, else the stated one, else 0. */
+function houseBuildUpMm() {
+  if (buildUpPreviewMm !== undefined) return buildUpPreviewMm ?? 0;
+  return floorBuildUpStated(store.doc) ? Math.round(store.doc.floorBuildUp) : 0;
+}
 
-  houseZToY = (z) => {
-    const t = (z - zMin) / (zMax - zMin);
-    return HOUSE_VB.padTop + (1 - t) * (HOUSE_VB.h - HOUSE_VB.padTop - HOUSE_VB.padBot);
-  };
-  houseYToZ = (y) => {
-    const t = 1 - (y - HOUSE_VB.padTop) / (HOUSE_VB.h - HOUSE_VB.padTop - HOUSE_VB.padBot);
-    return zMin + t * (zMax - zMin);
-  };
-
-  const groundY = houseZToY(0);
-  const foundY = houseZToY(levels[0].elevation);
-  const eavesY = houseZToY(eavesZ);
-  const ridgeY = houseZToY(ridgeZ);
-  const footY = houseZToY(levels[0].elevation - 0.2);
-
-  function breakLine(x, y0, y1) {
-    const mid = (y0 + y1) / 2;
-    return `<path class="house-break" d="
-      M ${x} ${y0}
-      L ${x} ${mid - 10}
-      L ${x + 5} ${mid - 6}
-      L ${x - 5} ${mid + 6}
-      L ${x} ${mid + 10}
-      L ${x} ${y1}" />`;
+/** Pixels the section may use: the panel, less the cut name, the toggle and the slab block. */
+function houseFrameRoom() {
+  const widget = el.levelWidget;
+  const frame = el.levelFrame;
+  if (!widget || !frame || !widget.clientHeight) return 0;
+  const ws = getComputedStyle(widget);
+  let used = parseFloat(ws.paddingTop) + parseFloat(ws.paddingBottom);
+  for (const child of widget.children) {
+    if (child === frame || child.hidden) continue;
+    const s = getComputedStyle(child);
+    if (s.position === "absolute") continue;
+    used += child.offsetHeight + parseFloat(s.marginTop) + parseFloat(s.marginBottom);
   }
+  return Math.max(0, widget.clientHeight - used);
+}
 
-  const occupied = levels.filter((l) => l.elevation >= 0);
-  const openings = occupied.map((l) => {
+/**
+ * Draws the section, the rail and its labels for `houseStations`. The
+ * drawing keeps one scale (HOUSE_PX_PER_M) and only shrinks when the panel
+ * is too short for it, so a tall window never stretches the storeys. Keeps
+ * the cut where it is; drawLevelSwitcher() is what resets it.
+ */
+function drawHouse() {
+  if (!el.levelHouse || !houseStations.length) return;
+  const levels = widgetLevels.filter((l) => !isReferenceLevel(l) && Number.isFinite(l.elevation));
+  if (!levels.length) return;
+  const frame = el.levelFrame;
+  const W = Math.max(180, Math.round(frame?.clientWidth || 276));
+  const needed = houseStations.length * HOUSE_LABEL_GAP + 2 * HOUSE_PAD;
+  // The drawing gives way before the labels do: "Ground floor · ceiling"
+  // and its height need about HOUSE_LABEL_W.
+  const breakX = Math.round(Math.min(100, Math.max(48, W - 24 - HOUSE_LABEL_W)));
+  const railX = breakX + 12;
+  const labelX = railX + 12;
+  houseRailX = railX;
+
+  const storeys = levels.filter((l) => !l.parentId && !levelIsFoundation(l));
+  const foundationId = levels.find((l) => levelIsFoundation(l))?.id ?? "";
+  const ground = groundStorey(levels) || storeys[0] || levels[0];
+  const top = storeys[storeys.length - 1] || levels[levels.length - 1];
+  const eavesZ = houseStations.find((s) => s.kind === "roof")?.elevation ?? top.elevation + 3;
+  const roofEndZ = eavesZ + HOUSE_ROOF_RISE;
+  const baseZ = levels[0].elevation;
+  const zMin = baseZ - 0.55;
+  const zMax = roofEndZ + 0.3;
+  const room = houseFrameRoom();
+  const natural = Math.max(needed, Math.round((zMax - zMin) * HOUSE_PX_PER_M + 2 * HOUSE_PAD));
+  const H = room ? Math.max(needed, Math.min(natural, room)) : natural;
+  if (frame) frame.style.height = `${room ? Math.min(H, room) : H}px`;
+  houseZToY = (z) => HOUSE_PAD + (1 - (z - zMin) / (zMax - zMin)) * (H - 2 * HOUSE_PAD);
+  houseYToZ = (y) => zMin + (1 - (y - HOUSE_PAD) / (H - 2 * HOUSE_PAD)) * (zMax - zMin);
+
+  const buildUpMm = houseBuildUpMm();
+  houseDrawnBuildUp = buildUpMm;
+  const bu = buildUpMm / 1000;
+  const gradeY = houseZToY(0);
+  const foundY = houseZToY(baseZ);
+  const footY = houseZToY(baseZ - 0.2);
+  const eavesY = houseZToY(eavesZ);
+  const roofEndY = houseZToY(roofEndZ);
+  const slabW = breakX - HOUSE_X1;
+  const part = (levelId, role, inner, extra = "") =>
+    `<g class="part${extra}" data-level="${escapeHtml(levelId)}" data-role="${role}">${inner}</g>`;
+
+  const walls = storeys.map((l, i) => {
+    const topY = houseZToY(i + 1 < storeys.length ? storeys[i + 1].elevation : eavesZ);
     const sill = houseZToY(l.elevation + 0.95);
     const head = houseZToY(l.elevation + 2.2);
-    const oh = head - sill;
-    if (oh <= 1) return "";
-    return `<rect class="house-void" x="${HOUSE_X0 - 0.3}" y="${sill}" width="${HOUSE_WALL_T + 0.6}" height="${oh}" />`;
+    const opening = sill - head > 1
+      ? `<rect class="house-void" x="${HOUSE_X0 - 0.3}" y="${head}" width="${HOUSE_WALL_T + 0.6}" height="${sill - head}" />`
+      : "";
+    return part(l.id, "wall", `<rect class="house-poche" x="${HOUSE_X0}" y="${topY}" width="${HOUSE_WALL_T}" height="${houseZToY(l.elevation) - topY}" />${opening}`);
   }).join("");
 
-  const floors = occupied.map((l) => {
+  const upperSlabs = storeys.filter((l) => l !== ground).map((l) => {
     const y = houseZToY(l.elevation);
-    const h = Math.max(1.8, houseZToY(l.elevation - HOUSE_SLAB) - y);
-    return `<rect class="house-poche" x="${HOUSE_X1}" y="${y}" width="${HOUSE_BREAK_X - HOUSE_X1}" height="${h}" />`;
+    return part(l.id, "floor", `<rect class="house-poche" x="${HOUSE_X1}" y="${y}" width="${slabW}" height="${Math.max(1.8, houseZToY(l.elevation - HOUSE_SLAB) - y)}" />`);
   }).join("");
 
-  const ceilings = occupied.filter((l) => Number.isFinite(l.floorToCeiling)).map((l) => {
+  const ceilings = storeys.filter((l) => Number.isFinite(l.floorToCeiling)).map((l) => {
     const y = houseZToY(l.elevation + l.floorToCeiling);
-    const h = Math.max(1, houseZToY(l.elevation + l.floorToCeiling - HOUSE_CEIL) - y);
-    return `<rect class="house-ceiling" x="${HOUSE_X1}" y="${y}" width="${HOUSE_BREAK_X - HOUSE_X1}" height="${h}" />`;
+    return part(l.id, "ceiling", `<rect class="house-ceiling" x="${HOUSE_X1}" y="${y}" width="${slabW}" height="${Math.max(1, houseZToY(l.elevation + l.floorToCeiling - HOUSE_CEIL) - y)}" />`);
   }).join("");
 
-  const eaveX = HOUSE_X0 - 11;
-  const eaveY = eavesY + 2;
-  const roofEndX = HOUSE_BREAK_X + 2;
-  const roofT = (roofEndX - eaveX) / 130;
-  const roofEndY = eaveY - (eaveY - ridgeY) * roofT;
+  const fflY = houseZToY(ground.elevation);
+  const slabTopY = houseZToY(ground.elevation - bu);
+  const screed = bu > 0
+    ? `<rect class="house-screed" x="${HOUSE_X1}" y="${fflY}" width="${slabW}" height="${Math.max(1.5, slabTopY - fflY)}" />`
+    : "";
+  const gfSlab = part(ground.id, "floor",
+    `${screed}<rect class="house-poche" x="${HOUSE_X1}" y="${slabTopY}" width="${slabW}" height="${Math.max(1.8, houseZToY(ground.elevation - bu - HOUSE_SLAB) - slabTopY)}" />`,
+    ` house-gf-slab${buildUpFocused ? " focus" : ""}`);
 
-  const ticks = houseStations.map((s) => {
+  const labelYs = railLabelYs(houseStations.map((s) => houseZToY(s.elevation)), HOUSE_LABEL_GAP, 10, H - 10);
+  const ticks = houseStations.map((s, i) => {
     const y = houseZToY(s.elevation);
-    return `<line class="house-tick" x1="${HOUSE_RAIL_X - 3.5}" y1="${y}" x2="${HOUSE_RAIL_X + 3.5}" y2="${y}" />`;
+    return `<line class="house-tick" data-i="${i}" x1="${railX - 3.5}" y1="${y}" x2="${railX + 3.5}" y2="${y}" />
+      <path class="house-leader" data-i="${i}" d="M ${railX + 3.5} ${y} L ${railX + 6} ${y} L ${labelX - 2} ${labelYs[i]}" />`;
   }).join("");
 
+  const eaveX = HOUSE_X0 - 9;
+  const eaveY = eavesY + 2;
+  const breakMid = (roofEndY + 6 + footY) / 2;
+
+  el.levelHouse.setAttribute("width", String(W));
+  el.levelHouse.setAttribute("height", String(H));
+  el.levelHouse.setAttribute("viewBox", `0 0 ${W} ${H}`);
   el.levelHouse.innerHTML = `
     <defs>
       <pattern id="v2-house-earth" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(32)">
-        <line x1="0" y1="0" x2="0" y2="5" stroke="#d2c6b4" stroke-width="0.55" />
+        <line x1="0" y1="0" x2="0" y2="5" stroke="#cdbfab" stroke-width="0.6" />
       </pattern>
     </defs>
-    <style>
-      .house-earth { fill: url(#v2-house-earth); }
-      .house-grade { stroke: #1a1612; stroke-width: 0.9; fill: none; }
-      .house-poche { fill: #2c2824; stroke: #1a1612; stroke-width: 0.55; }
-      .house-void { fill: #f6f1e8; stroke: #1a1612; stroke-width: 0.55; }
-      .house-ceiling { fill: #cfc6b8; stroke: #1a1612; stroke-width: 0.4; }
-      .house-stroke { fill: none; stroke: #1a1612; stroke-width: 0.9; }
-      .house-break { fill: none; stroke: #1a1612; stroke-width: 0.7; }
-      .house-rail { stroke: #c0b4a2; stroke-width: 1; }
-      .house-tick { stroke: #8a7d6c; stroke-width: 1; }
-      .house-cut { stroke: #b2451e; stroke-width: 1.1; stroke-dasharray: 3.2 2.4; fill: none; }
-      .house-cut-cap { fill: #b2451e; }
-      .house-thumb { fill: #f6f1e8; stroke: #b2451e; stroke-width: 1.2; }
-      .house-rail-band, .house-thumb-hit { fill: transparent; cursor: ns-resize; }
-      .house-ghost { opacity: 0; pointer-events: none; }
-      .house-ghost.on { opacity: 1; }
-      .house-ghost line { stroke: #b2451e; stroke-width: 1.1; stroke-dasharray: 3.2 2.4; opacity: 0.55; }
-      .house-ghost-chip { fill: #f6f1e8; stroke: #c0b4a2; stroke-width: 0.8; }
-      .house-ghost text { fill: #1a1612; font-size: 14px; font-weight: 600; font-family: "Source Sans 3", sans-serif; }
-      @media (prefers-reduced-motion: no-preference) {
-        .house-cut-group { transition: transform 120ms ease-out; }
-        .house-ghost { transition: transform 120ms ease-out, opacity 120ms ease-out; }
-      }
-    </style>
-    <rect class="house-earth" x="${HOUSE_X0 - 16}" y="${groundY}" width="${HOUSE_BREAK_X - HOUSE_X0 + 22}" height="${HOUSE_VB.h - groundY - 10}" />
-    <line class="house-grade" x1="${HOUSE_X0 - 16}" y1="${groundY}" x2="${HOUSE_BREAK_X + 6}" y2="${groundY}" />
-    <rect class="house-poche" x="${HOUSE_X0 - 6}" y="${groundY}" width="${HOUSE_WALL_T + 12}" height="${footY - groundY}" />
-    <rect class="house-poche" x="${HOUSE_X1}" y="${foundY}" width="${HOUSE_BREAK_X - HOUSE_X1}" height="${Math.max(1.6, houseZToY(levels[0].elevation - 0.16) - foundY)}" />
-    <rect class="house-poche" x="${HOUSE_X0}" y="${eavesY}" width="${HOUSE_WALL_T}" height="${groundY - eavesY}" />
-    ${openings}
-    ${floors}
+    ${part(foundationId, "earth", `
+      <rect class="house-earth" x="2" y="${gradeY}" width="${breakX + 2}" height="${Math.max(0, H - gradeY - 6)}" />
+      <line class="house-grade" x1="2" y1="${gradeY}" x2="${breakX + 4}" y2="${gradeY}" />`)}
+    ${part(foundationId, "foundation", `
+      <rect class="house-poche" x="${HOUSE_X0 - 5}" y="${gradeY}" width="${HOUSE_WALL_T + 10}" height="${Math.max(0, footY - gradeY)}" />
+      <rect class="house-poche" x="${HOUSE_X1}" y="${foundY}" width="${slabW}" height="${Math.max(1.6, houseZToY(baseZ - 0.16) - foundY)}" />`)}
+    ${walls}
+    ${gfSlab}
+    ${upperSlabs}
     ${ceilings}
-    <path class="house-poche" d="
-      M ${eaveX} ${eaveY}
-      L ${roofEndX} ${roofEndY}
-      L ${roofEndX} ${roofEndY + 5.5}
-      L ${eaveX + 2.5} ${eaveY + 5.5}
-      Z" />
-    <path class="house-stroke" d="M ${eaveX} ${eaveY} L ${roofEndX} ${roofEndY}" />
-    ${breakLine(HOUSE_BREAK_X, ridgeY + 4, footY)}
-    <line class="house-rail" x1="${HOUSE_RAIL_X}" y1="${houseZToY(ridgeZ)}" x2="${HOUSE_RAIL_X}" y2="${houseZToY(levels[0].elevation)}" />
+    ${part(top.id, "roof", `
+      <path class="house-poche" d="M ${eaveX} ${eaveY} L ${breakX + 2} ${roofEndY} L ${breakX + 2} ${roofEndY + 5} L ${eaveX + 2.5} ${eaveY + 5} Z" />
+      <path class="house-stroke" d="M ${eaveX} ${eaveY} L ${breakX + 2} ${roofEndY}" />`)}
+    <path class="house-break" d="M ${breakX} ${roofEndY + 6} L ${breakX} ${breakMid - 9} L ${breakX + 4} ${breakMid - 5}
+      L ${breakX - 4} ${breakMid + 5} L ${breakX} ${breakMid + 9} L ${breakX} ${footY}" />
+    <line class="house-rail" x1="${railX}" y1="${roofEndY}" x2="${railX}" y2="${foundY + 6}" />
     ${ticks}
-    <rect class="house-rail-band" x="${HOUSE_RAIL_X - HOUSE_RAIL_GRAB}" y="${houseZToY(ridgeZ) - 12}"
-          width="${HOUSE_RAIL_GRAB * 2}" height="${houseZToY(levels[0].elevation) - houseZToY(ridgeZ) + 24}" />
+    <rect class="house-rail-band" x="${railX - HOUSE_RAIL_GRAB}" y="${roofEndY - 12}" width="${HOUSE_RAIL_GRAB * 2}" height="${foundY - roofEndY + 24}" />
     <g id="v2-house-cut-layer"></g>
   `;
 
-  const cutLayer = el.levelHouse.querySelector("#v2-house-cut-layer");
-  const xLeft = HOUSE_X0 - 8;
-
-  houseGhostLabel = svgEl("text", { x: String(xLeft + 8), y: "-5" });
-  houseGhostBg = svgEl("rect", { class: "house-ghost-chip", rx: "2.5", ry: "2.5" });
+  const xLeft = 6;
   houseGhostGroup = svgEl("g", { class: "house-ghost" });
-  houseGhostGroup.append(
-    svgEl("line", { x1: xLeft, y1: 0, x2: HOUSE_RAIL_X - 7, y2: 0 }),
-    houseGhostBg,
-    houseGhostLabel,
-  );
-
+  houseGhostGroup.append(svgEl("line", { x1: xLeft, y1: 0, x2: railX - 7, y2: 0 }));
   houseCutGroup = svgEl("g", { class: "house-cut-group" });
   houseCutGroup.append(
-    svgEl("line", { class: "house-cut", x1: xLeft, y1: 0, x2: HOUSE_BREAK_X, y2: 0 }),
+    svgEl("line", { class: "house-cut", x1: xLeft, y1: 0, x2: railX - 7, y2: 0 }),
     svgEl("polygon", { class: "house-cut-cap", points: `${xLeft},0 ${xLeft - 4.5},-2.8 ${xLeft - 4.5},2.8` }),
-    svgEl("line", { class: "house-cut", x1: HOUSE_BREAK_X, y1: 0, x2: HOUSE_RAIL_X - 7, y2: 0 }),
-    svgEl("rect", { class: "house-thumb", x: HOUSE_RAIL_X - 5, y: -5, width: 10, height: 10 }),
-    svgEl("rect", { class: "house-thumb-hit", x: HOUSE_RAIL_X - HOUSE_RAIL_GRAB, y: -12, width: HOUSE_RAIL_GRAB * 2, height: 24 }),
+    svgEl("rect", { class: "house-thumb", x: railX - 6, y: -5, width: 12, height: 10, rx: 1.5 }),
+    svgEl("line", { class: "house-grip", x1: railX - 3, y1: -1.5, x2: railX + 3, y2: -1.5 }),
+    svgEl("line", { class: "house-grip", x1: railX - 3, y1: 1.5, x2: railX + 3, y2: 1.5 }),
+    svgEl("rect", { class: "house-thumb-hit", x: railX - HOUSE_RAIL_GRAB, y: -12, width: HOUSE_RAIL_GRAB * 2, height: 24 }),
   );
-  const startIdx = activeStationIndex();
-  houseCutGroup.setAttribute("transform", `translate(0 ${houseZToY(houseStations[startIdx].elevation)})`);
-  cutLayer.append(houseGhostGroup, houseCutGroup);
+  houseCutGroup.setAttribute("transform", `translate(0 ${houseZToY(houseStations[activeStationIndex()].elevation)})`);
+  el.levelHouse.querySelector("#v2-house-cut-layer").append(houseGhostGroup, houseCutGroup);
 
   el.levelHouse.setAttribute("aria-valuemin", "0");
   el.levelHouse.setAttribute("aria-valuemax", String(houseStations.length - 1));
 
-  if (el.levelStations) {
-    el.levelStations.innerHTML = [...houseStations].reverse().map((s) => `
-      <li>
-        <button type="button" data-id="${escapeHtml(s.id)}">
-          <span>${escapeHtml(s.label)}</span>
-          <span class="level-station-elev">${formatLengthMm(s.elevation)}</span>
+  if (el.levelLabels) {
+    el.levelLabels.style.left = `${labelX}px`;
+    el.levelLabels.style.height = `${H}px`;
+    el.levelLabels.innerHTML = houseStations.map((s, i) => {
+      const d = stationDisplay(s, widgetLevels);
+      const mm = sectionMm(s.elevation);
+      const title = s.kind === "roof" ? `${d.name}, ${mm} mm` : `${d.name}, ${mm} mm. Double-click the height to change it.`;
+      return `<li style="top:${labelYs[i] - 10}px">
+        <button type="button" data-i="${i}" title="${escapeHtml(title)}">
+          <span class="level-rail-code">${escapeHtml(d.code)}</span>
+          <span class="level-rail-name">${escapeHtml(d.name)}</span>
+          <span class="level-station-elev">${mm}</span>
         </button>
-      </li>
-    `).join("");
+      </li>`;
+    }).join("");
   }
+
+  if (el.sectionDatum) {
+    el.sectionDatum.textContent = Math.abs(ground.elevation) < 0.0005 ? "mm from ground floor FFL" : "mm from datum";
+  }
+  if (el.slabName) el.slabName.textContent = `${levelDisplayName(ground).name} slab`;
 
   renderLevelCut();
 }
@@ -3775,15 +3871,26 @@ function renderLevelCut() {
   if (!houseStations.length || !houseCutGroup) return;
   const idx = activeStationIndex();
   const s = houseStations[idx];
+  const d = stationDisplay(s, widgetLevels);
   houseCutGroup.setAttribute("transform", `translate(0 ${houseZToY(s.elevation)})`);
   el.levelHouse.setAttribute("aria-valuenow", String(idx));
-  el.levelHouse.setAttribute("aria-valuetext", s.label);
-  if (el.cutName) el.cutName.textContent = s.label;
-  if (el.cutElev) el.cutElev.textContent = `${formatLengthMm(s.elevation)} mm`;
-  if (el.cutKind) el.cutKind.textContent = houseKindPhrase(s.kind);
-  for (const btn of el.levelStations?.querySelectorAll("button") || []) {
-    if (btn.dataset.id === s.id) btn.setAttribute("aria-current", "true");
+  el.levelHouse.setAttribute("aria-valuetext", `${d.name}, ${sectionMm(s.elevation, true)} millimetres`);
+  if (el.cutName) {
+    el.cutName.innerHTML = `${d.code ? `<span class="level-cut-code">${escapeHtml(d.code)}</span> ` : ""}${escapeHtml(d.name)}`;
+  }
+  if (el.cutMeta) el.cutMeta.innerHTML = `${houseKindPhrase(s.kind)} · <strong>${sectionMm(s.elevation, true)} mm</strong>`;
+  for (const btn of el.levelLabels?.querySelectorAll("button") || []) {
+    if (Number(btn.dataset.i) === idx) btn.setAttribute("aria-current", "true");
     else btn.removeAttribute("aria-current");
+  }
+  for (const line of el.levelHouse.querySelectorAll(".house-tick, .house-leader")) {
+    line.classList.toggle("active", Number(line.dataset.i) === idx);
+  }
+  const planLevel = planLevelOf(widgetLevels, s.levelId);
+  for (const part of el.levelHouse.querySelectorAll(".part")) {
+    const kept = (buildUpFocused && part.classList.contains("house-gf-slab"))
+      || sectionPartShown(s.kind, planLevel, part.dataset);
+    part.classList.toggle("dim", isolateCurrentLevel && !kept);
   }
 }
 
@@ -3831,48 +3938,21 @@ function houseLocalPoint(clientX, clientY) {
   return ctm ? pt.matrixTransform(ctm.inverse()) : null;
 }
 
+/** Previews station `idx`: a faint cut in the section and its rail label lit. */
 function showHouseGhost(idx) {
   if (!houseGhostGroup || !houseStations[idx]) return;
-  if (idx === activeStationIndex()) { hideHouseGhost(); return; }
-  const s = houseStations[idx];
-  const cutY = houseZToY(s.elevation);
-  houseGhostGroup.setAttribute("transform", `translate(0 ${cutY})`);
-  layoutHouseGhostLabel(s.label, cutY);
-  houseGhostGroup.classList.add("on");
-}
-
-/** Paper chip beside the dashed preview cut. The old 8.5px copper text sat
- * at 40% opacity and was clipped by the viewBox, so long names such as
- * "First Floor (inferred) · Floor" were unreadable on hover. */
-function layoutHouseGhostLabel(label, cutY) {
-  if (!houseGhostLabel || !houseGhostBg) return;
-  const xLeft = HOUSE_X0 - 8;
-  const x = xLeft + 8;
-  const padX = 4.5;
-  const chipH = 16;
-  const maxW = HOUSE_RAIL_X - 12 - x;
-  houseGhostLabel.setAttribute("x", String(x));
-  houseGhostLabel.setAttribute("font-size", "14");
-  houseGhostLabel.textContent = label;
-  let tw = houseGhostLabel.getComputedTextLength();
-  if (tw > maxW - padX * 2) {
-    houseGhostLabel.setAttribute("font-size", "12");
-    tw = houseGhostLabel.getComputedTextLength();
+  const current = activeStationIndex();
+  for (const btn of el.levelLabels?.querySelectorAll("button") || []) {
+    btn.classList.toggle("is-hover", Number(btn.dataset.i) === idx && idx !== current);
   }
-  const w = Math.min(maxW, tw + padX * 2);
-  // Roof/eaves sits near the top of the viewBox; flip the chip under the
-  // dashed line so it is not clipped off the drawing.
-  const above = cutY - chipH - 2 >= 1;
-  const chipY = above ? -chipH - 2 : 3;
-  houseGhostLabel.setAttribute("y", String(chipY + 12.2));
-  houseGhostBg.setAttribute("x", String(x - padX));
-  houseGhostBg.setAttribute("y", String(chipY));
-  houseGhostBg.setAttribute("width", String(w));
-  houseGhostBg.setAttribute("height", String(chipH));
+  if (idx === current) { houseGhostGroup.classList.remove("on"); return; }
+  houseGhostGroup.setAttribute("transform", `translate(0 ${houseZToY(houseStations[idx].elevation)})`);
+  houseGhostGroup.classList.add("on");
 }
 
 function hideHouseGhost() {
   if (houseGhostGroup) houseGhostGroup.classList.remove("on");
+  for (const btn of el.levelLabels?.querySelectorAll("button.is-hover") || []) btn.classList.remove("is-hover");
 }
 
 /** Next station in `dir` that starts a storey, so PgUp/PgDn skip ceilings. */
@@ -3886,20 +3966,20 @@ function houseStoreyStep(dir) {
 
 /**
  * Drag-to-scrub, click-to-jump and keyboard paging for the house rail, plus
- * the stations list clicks. Wired once at startup: `el.levelHouse` persists
+ * the rail label clicks. Wired once at startup: `el.levelHouse` persists
  * across rebuilds, only its children (and the cached cutGroup/ghostGroup
- * refs, refreshed by drawLevelSwitcher()) are replaced.
+ * refs, refreshed by drawHouse()) are replaced.
  */
 function wireLevelWidget() {
   if (!el.levelHouse) return;
 
   el.levelHouse.addEventListener("pointerdown", (e) => {
     const loc = houseLocalPoint(e.clientX, e.clientY);
-    if (!loc || !houseStations.length) return;
+    if (!loc || !houseStations.length || loc.x > houseRailX + HOUSE_RAIL_GRAB) return;
     // Only the rail is a drag handle. The house is a drawing first, so
     // clicking it picks a station without turning the widget into a scrub
     // surface end to end.
-    if (loc.x >= HOUSE_RAIL_X - HOUSE_RAIL_GRAB) {
+    if (loc.x >= houseRailX - HOUSE_RAIL_GRAB) {
       houseDragging = true;
       el.levelHouse.setPointerCapture(e.pointerId);
     }
@@ -3910,7 +3990,8 @@ function wireLevelWidget() {
     const loc = houseLocalPoint(e.clientX, e.clientY);
     if (!loc || !houseStations.length) return;
     if (houseDragging) selectStationIndex(nearestStationIndex(houseYToZ(loc.y)));
-    else showHouseGhost(nearestStationIndex(houseYToZ(loc.y)));
+    else if (loc.x <= houseRailX + HOUSE_RAIL_GRAB) showHouseGhost(nearestStationIndex(houseYToZ(loc.y)));
+    else hideHouseGhost();
   });
   el.levelHouse.addEventListener("pointerup", () => { houseDragging = false; });
   el.levelHouse.addEventListener("pointercancel", () => { houseDragging = false; });
@@ -3937,20 +4018,39 @@ function wireLevelWidget() {
     }
   });
 
-  el.levelStations?.addEventListener("dblclick", (e) => {
-    const span = e.target.closest(".level-station-elev");
+  el.levelLabels?.addEventListener("dblclick", (e) => {
+    const span = e.target.closest("span.level-station-elev");
     const btn = e.target.closest("button");
     if (!span || !btn) return;
-    const station = houseStations.find((s) => s.id === btn.dataset.id);
+    const station = houseStations[Number(btn.dataset.i)];
     if (station) editStationElevation(span, station);
   });
 
-  el.levelStations?.addEventListener("click", (e) => {
+  el.levelLabels?.addEventListener("click", (e) => {
     const btn = e.target.closest("button");
-    if (!btn) return;
-    const idx = houseStations.findIndex((s) => s.id === btn.dataset.id);
-    if (idx !== -1) selectStationIndex(idx);
+    if (!btn || e.target.closest("input")) return;
+    const idx = Number(btn.dataset.i);
+    if (houseStations[idx]) selectStationIndex(idx);
   });
+  el.levelLabels?.addEventListener("pointerover", (e) => {
+    const btn = e.target.closest("button");
+    if (btn) showHouseGhost(Number(btn.dataset.i));
+  });
+  el.levelLabels?.addEventListener("pointerleave", hideHouseGhost);
+
+  // The panel, not the drawing: the drawing's own height is set inside
+  // drawHouse(), so watching the frame would redraw on every draw.
+  if (el.levelWidget && typeof ResizeObserver !== "undefined") {
+    let size = "";
+    new ResizeObserver(() => {
+      const next = `${el.levelWidget.clientWidth}x${el.levelWidget.clientHeight}`;
+      if (next === size || !el.levelWidget.clientWidth) return;
+      size = next;
+      // An elevation being typed on the rail would be lost to the redraw.
+      if (el.levelLabels?.querySelector("input")) return;
+      drawHouse();
+    }).observe(el.levelWidget);
+  }
 
   el.levelIsolate?.addEventListener("change", () => {
     setIsolateCurrentLevel(el.levelIsolate.checked);
@@ -3962,12 +4062,18 @@ function wireLevelWidget() {
  * state the plan is actually drawing. */
 function syncLevelIsolateControl() {
   if (el.levelIsolate) el.levelIsolate.checked = isolateCurrentLevel;
+  if (el.levelIsolateNote) {
+    el.levelIsolateNote.textContent = isolateCurrentLevel
+      ? "On: the plan hides the rest. The section fades it."
+      : "Off: the neighbouring level is ghosted.";
+  }
 }
 
 function setIsolateCurrentLevel(on) {
   isolateCurrentLevel = Boolean(on);
   window.localStorage.setItem("v2-level-isolate", isolateCurrentLevel ? "1" : "0");
   syncLevelIsolateControl();
+  renderLevelCut();
   drawRibbon();
   render();
 }
@@ -4467,16 +4573,20 @@ function selectionKindKeys() {
   return keys;
 }
 
-/** The green tab right now: the armed draw tool's, else the selection's, else none.
+/** The green tab right now.
+ *  An open editor wins: the sheet, then a wall face or floor picture.
+ *  Otherwise the armed draw tool, otherwise the selection.
  *  Existing and Proposed sit on that tab. A room has no other tab, so those
  *  two buttons are the one it opens. */
 function currentContextTab() {
   // The sheet is not in store.selected. Its tab is open for as long as an
   // underlay mode is: Adjust (the sheet is selected), Set scale, Align sheets.
   if (currentUnderlayMode()) return sheetTab();
+  const finish = openFinishTab();
+  if (finish) return finish;
   if (!panMode && tool !== "select") {
     const placing = placingTab(activeFunction);
-    if (placing) return tabWithStatus(placing);
+    if (placing) return tabWithStatus(withSubject(placing, placingSubject()));
   }
   const keys = selectionKindKeys();
   let tab = selectionTab(keys);
@@ -4487,6 +4597,48 @@ function currentContextTab() {
     tab = { id: CONTEXT_TAB_ID, key: "multi", label: "Multi-Select", groups: [] };
   }
   return tab ? tabWithStatus(tab) : null;
+}
+
+/** Append the thing this tab is about, so the tab names the mode and the object. */
+function withSubject(tab, subject) {
+  const name = String(subject || "").trim();
+  if (!tab || !name) return tab;
+  return { ...tab, label: `${tab.label} · ${name}` };
+}
+
+/** The type being placed. A separator or a route has no type, so its tab stays unnamed. */
+function placingSubject() {
+  if (activeFunction === "room-sep" || activeFunction === "service-route") return "";
+  return skuById(placeSkuId)?.name || "";
+}
+
+/** Wall face or floor picture: a short tab for that picture, not the selection's. */
+function openFinishTab() {
+  if (elevationOpen && selectedElevationFace()) {
+    return tabWithStatus(wallFinishTab(wallFinishSubject()));
+  }
+  if (floorHostNow()) return tabWithStatus(floorFinishTab(floorFinishSubject()));
+  return null;
+}
+
+/** The wall type and which side the open face is showing. */
+function wallFinishSubject() {
+  const face = selectedElevationFace();
+  if (!face) return "";
+  const wall = wallsCache.find((w) => w.id === face.wallId);
+  const product = wallProductName(wall);
+  const side = faceSideTitle(face);
+  if (product && side) return `${product}, ${side}`;
+  return product || side || "";
+}
+
+/** The room name, or the slab's type, for the open floor picture. */
+function floorFinishSubject() {
+  const host = floorHostNow();
+  if (!host) return "";
+  if (host.name) return host.name;
+  if (store.primary?.kind === "room") return "";
+  return skuById(host.sku)?.name || "";
 }
 
 /** Something a selection command could act on. Select, Delete and the site boundary count. */
@@ -4504,6 +4656,8 @@ function ribbonHasSelection() {
  *    set when it first opened (not on every render).
  *  - Arming a draw tool swaps in Place; the Esc that disarms it closes that
  *    tab and goes back to the permanent tab, whatever is still selected.
+ *    Opening a wall face or floor picture instead keeps the green tab, now
+ *    on that picture.
  */
 function syncContextTab() {
   const ctx = currentContextTab();
@@ -4520,7 +4674,7 @@ function syncContextTab() {
     if (key && !lastContextKey) {
       if (activeTab !== CONTEXT_TAB_ID) previousTab = activeTab;
       activeTab = CONTEXT_TAB_ID;
-    } else if (key && wasPlacing && !key.startsWith("place:")) {
+    } else if (key && wasPlacing && !key.startsWith("place:") && key !== "wall-finish" && key !== "floor-finish") {
       back();
     } else if (key) {
       activeTab = CONTEXT_TAB_ID;
@@ -4551,6 +4705,10 @@ function ribbonStateKey() {
     sharedSelectionStatus(),
     wallEdit ? `${wallEdit.mode}${wallEdit.end ? 1 : 0}` : "",
     elevationOpen ? 1 : 0,
+    floorPicture ? `${floorPicture.kind}:${floorPicture.id}` : "",
+    elevationFace ? `${elevationFace.wallId}:${elevationFace.side}` : "",
+    placeSkuId || "",
+    store.primary ? `${store.primary.kind}:${store.primary.id}` : "",
     one?.shape?.kind || "",
     followLinked(one) ? 1 : 0,
   ].join("|");
@@ -4597,7 +4755,7 @@ function render() {
   const spaceKey = spaceNow.kind === "enclosed"
     ? `e${spaceNow.occupied ? 1 : 0}:${Number(spaceNow.area).toFixed(1)}`
     : spaceNow.kind;
-  const hintKey = `${tool}|${activeFunction || ""}|${store.selected.length}|${store.primary?.kind || ""}|${store.primary?.id || ""}|${panMode ? 1 : 0}|${wallDraft ? 1 : 0}|${wallDraw}|${filletPick ? 1 : 0}|${filletPair ? 1 : 0}|${filletRadiusLock ? 1 : 0}|${filletHover?.ok ? "ok" : filletHover?.message || ""}|${moveSession?.base ? 1 : 0}|${moveSession?.stopped ? 1 : 0}|${copySession?.base ? 1 : 0}|${spaceKey}|${roofCutNoteText}|${followNoteText}|${polyHintText}`;
+  const hintKey = `${tool}|${activeFunction || ""}|${store.selected.length}|${store.primary?.kind || ""}|${store.primary?.id || ""}|${panMode ? 1 : 0}|${wallDraft ? 1 : 0}|${wallDraw}|${filletPick ? 1 : 0}|${filletPair ? 1 : 0}|${filletRadiusLock ? 1 : 0}|${filletHover?.ok ? "ok" : filletHover?.message || ""}|${moveSession?.base ? 1 : 0}|${moveSession?.stopped ? 1 : 0}|${moveSession?.joined ? 1 : 0}|${moveSession?.altHeld ? 1 : 0}|${copySession?.base ? 1 : 0}|${spaceKey}|${roofCutNoteText}|${followNoteText}|${polyHintText}`;
   if (hintKey !== lastPlanHintKey) {
     lastPlanHintKey = hintKey;
     updateRibbonHint();
@@ -4605,6 +4763,7 @@ function render() {
   placeFloorEdgeMode();
   syncHistoryPanel();
   syncSectionScreen();
+  syncMassIfNeeded();
 }
 
 let lastPlanHintKey = "";
@@ -4752,6 +4911,24 @@ function polygonSketch() {
   return null;
 }
 
+/**
+ * The outline bar, including before the first corner. `polygonSketch` is only
+ * the one already started: Escape and Backspace must not treat a bare tool as
+ * an outline. The bar itself has to be there from the moment the tool is
+ * armed, or Finish and Cancel sit nowhere until a corner exists.
+ */
+function sketchOffer() {
+  const live = polygonSketch();
+  if (live) return live;
+  if (tool === "room") return { points: [], noun: "room", finish: finishRoomDraft };
+  if (tool === "slab") return { points: [], noun: "floor", finish: finishBoundaryDraft };
+  if (tool === "roof") return { points: [], noun: "roof", finish: finishBoundaryDraft };
+  if (tool === "roof-cut") return { points: [], noun: roofCutKind === "remove" ? "cut" : "hole", finish: finishRoofCut };
+  if (tool === "region") return { points: [], noun: regionFinish ? "shape" : "region", finish: finishRegionDraft };
+  if (tool === "property") return { points: siteDraft || [], noun: "boundary", finish: finishPropertyLine };
+  return null;
+}
+
 function discardPolygonSketch() {
   const sketch = polygonSketch();
   polyFinishNudge = false;
@@ -4795,16 +4972,20 @@ function syncSketchBar(sketch) {
       : "Esc again discards the outline.")
     : n >= 3
       ? `Click the next corner, or the first to close the ${sketch.noun}.`
-      : `Click the next corner. ${3 - n} more to close the ${sketch.noun}.`;
+      : n === 0
+        ? `Click the first corner of the ${sketch.noun}. Finish closes it once it has three.`
+        : `Click the next corner. ${3 - n} more to close the ${sketch.noun}.`;
   el.modePrompt.textContent = prompt;
   el.modePrompt.title = prompt;
-  el.modeDone.textContent = "Finish";
+  // Revit's Finish Edit Mode / Cancel Edit Mode: a green tick and a red cross.
+  el.modeDone.textContent = "✓ Finish";
   el.modeDone.disabled = n < 3;
   el.modeDone.title = n < 3 ? "An outline needs at least three corners." : "Close the outline (Enter)";
   el.modeDone.classList.toggle("is-nudge", polyFinishNudge && n >= 3);
   el.modeCancel.hidden = false;
-  el.modeCancel.textContent = "Cancel";
-  el.modeCancel.title = "Discard this outline";
+  el.modeCancel.textContent = "✗ Cancel";
+  el.modeCancel.title = n ? "Discard this outline and stop drawing" : "Stop drawing";
+  el.modeBar.classList.add("is-sketch");
   el.modeEsc.textContent = polyFinishNudge ? "Esc discards" : "Enter";
   el.modeEsc.title = polyFinishNudge ? "Discard the outline" : "Finish the outline";
   el.modeClose.title = "Discard this outline";
@@ -4818,7 +4999,7 @@ function syncModeBar() {
     barMode = mode;
     barSnapshot = mode ? captureUnderlayState() : null;
   }
-  const sketch = !mode && polygonSketch();
+  const sketch = !mode && sketchOffer();
   if (!sketch) polyFinishNudge = false;
   el.modeBar.hidden = !mode && !sketch;
   el.canvasWrap.classList.toggle("in-underlay-mode", Boolean(mode));
@@ -4834,9 +5015,11 @@ function syncModeBar() {
     return;
   }
   el.modeDone?.classList.remove("is-nudge");
+  el.modeBar.classList.remove("is-sketch");
   el.modeBar.setAttribute("aria-label", "Underlay tool");
   el.modeClose.title = "Close";
   el.modeCancel.title = "";
+  el.modeCancel.textContent = "Cancel";
 
   const u = store.doc.underlay;
   const set = store.doc.sheetSet;
@@ -5175,7 +5358,38 @@ function drawPlanLevel(levelId, walls, { ghost = false, look = "down", allow = (
     }
   }
   if (!ghost && allow("item")) {
-    for (const item of store.doc.items.filter((i) => onLevel(i, levelId) && planObjectVisible(i))) drawItem(item);
+    const levelItems = store.doc.items.filter((i) => onLevel(i, levelId) && planObjectVisible(i));
+    levelItems.sort((a, b) => Number(!furnitureIsRug(skuById(a.sku))) - Number(!furnitureIsRug(skuById(b.sku))));
+    for (const item of levelItems) drawItem(item);
+    for (const fig of (store.doc.figures || []).filter((f) => onLevel(f, levelId) && planObjectVisible(f))) {
+      drawScaleFigure(fig);
+    }
+    if (levelId === activeLevel && tool === "scale-figure" && scaleFigureKind && hoverPoint) {
+      ctx.save();
+      ctx.globalAlpha = 0.72;
+      drawScaleFigure({
+        id: "draft",
+        kind: scaleFigureKind,
+        x: hoverPoint.x,
+        y: hoverPoint.y,
+        rotation: placeRotation,
+      });
+      ctx.restore();
+    }
+    if (levelId === activeLevel && placingFurniture() && hoverPoint) {
+      ctx.save();
+      ctx.globalAlpha = 0.72;
+      drawItem({
+        id: "draft",
+        sku: placeSkuId,
+        level: activeLevel,
+        x: hoverPoint.x,
+        y: hoverPoint.y,
+        rotation: placeRotation,
+        status: placementStatus(),
+      });
+      ctx.restore();
+    }
   }
   if (!ghost && joineryDraft && hoverPoint && joineryIsRun(skuById(placeSkuId))) {
     const sku = skuById(placeSkuId);
@@ -6444,6 +6658,33 @@ function drawCloudMark(rect, label) {
   ctx.restore();
 }
 
+function drawScaleFigure(fig) {
+  const poly = figureFootprint(fig);
+  if (poly.length < 3) return;
+  ctx.save();
+  ctx.strokeStyle = "#4a453f";
+  ctx.lineWidth = 1.25;
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  poly.forEach((p, i) => {
+    const [sx, sy] = worldToScreen(p[0], p[1]);
+    if (i === 0) ctx.moveTo(sx, sy);
+    else ctx.lineTo(sx, sy);
+  });
+  ctx.closePath();
+  ctx.stroke();
+  const nose = figureNose(fig);
+  if (nose) {
+    const [ax, ay] = worldToScreen(nose[0][0], nose[0][1]);
+    const [bx, by] = worldToScreen(nose[1][0], nose[1][1]);
+    ctx.beginPath();
+    ctx.moveTo(ax, ay);
+    ctx.lineTo(bx, by);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function drawItem(item) {
   const sku = skuById(item.sku);
   if (!sku) return;
@@ -6451,19 +6692,23 @@ function drawItem(item) {
   ctx.lineJoin = "round";
   ctx.lineCap = "round";
   ctx.setLineDash([]);
-  ctx.strokeStyle = statusStroke(objectStatus(item));
-  ctx.lineWidth = 1.25;
-  // SANS 10143 sanitary symbol at the measured size. Anything without a
-  // conventional mark stays the footprint rectangle and its type name.
+  const furniture = sku.category === "furniture";
+  ctx.strokeStyle = furniture ? "#6e655c" : statusStroke(objectStatus(item));
+  ctx.lineWidth = furniture ? 1 : 1.25;
+  // SANS 10143 sanitary symbol, or a furniture plan symbol, at the measured
+  // size. Anything without a conventional mark stays the footprint rectangle
+  // and its type name. Furniture is thin linework, with no fill.
   if (!paintFixture(ctx, item, sku, (x, y) => worldToScreen(x, y), cam.scale)) {
     const wall = item.host === "joinery"
       ? wallsCache.find((w) => w.id === item.wallId)
       : null;
     const poly = item.host === "joinery" ? joineryPolygon(item, sku, wall) : null;
-    const timber = sku.drawing?.colourClass === "timber";
-    ctx.fillStyle = timber
-      ? (objectStatus(item) === "existing" ? "rgba(255,255,255,0.85)" : "rgba(232, 196, 64, 0.35)")
-      : "rgba(58, 95, 122, 0.12)";
+    const timber = !furniture && sku.drawing?.colourClass === "timber";
+    if (!furniture) {
+      ctx.fillStyle = timber
+        ? (objectStatus(item) === "existing" ? "rgba(255,255,255,0.85)" : "rgba(232, 196, 64, 0.35)")
+        : "rgba(58, 95, 122, 0.12)";
+    }
     if (joineryDashed(sku)) ctx.setLineDash([6, 4]);
     if (poly?.length >= 4) {
       ctx.beginPath();
@@ -6487,13 +6732,22 @@ function drawItem(item) {
       const box = itemRect(item, sku);
       const [sx, sy] = worldToScreen(box.x, box.y);
       const [ex, ey] = worldToScreen(box.x + box.w, box.y + box.h);
-      ctx.fillRect(sx, sy, ex - sx, ey - sy);
+      if (!furniture) ctx.fillRect(sx, sy, ex - sx, ey - sy);
       ctx.strokeRect(sx, sy, ex - sx, ey - sy);
       ctx.setLineDash([]);
       ctx.font = "10px Source Sans 3, sans-serif";
       ctx.fillStyle = "#5c5348";
       ctx.fillText(joineryLabel(sku) === sku.name ? sku.name : joineryLabel(sku), sx, sy - 3);
     }
+  }
+  if (furniture && furnitureClashKind(item, sku)) {
+    const box = itemRect(item, sku);
+    const [sx, sy] = worldToScreen(box.x, box.y);
+    const [ex, ey] = worldToScreen(box.x + box.w, box.y + box.h);
+    ctx.setLineDash([4, 3]);
+    ctx.strokeStyle = "#b2451e";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(sx, sy, ex - sx, ey - sy);
   }
   ctx.restore();
 }
@@ -6577,8 +6831,11 @@ function drawSelectionHighlights(walls) {
       }
       // Split preview replaces the one length with the two pieces it would make.
       const splitting = ref.kind === "segment" && wallEdit?.mode === "split" && wallEdit.id === obj.id && snapGuide;
+      // The trim preview paints its own lengths and angle, and the selection's
+      // would sit on top of them.
+      const trimming = isTrimTool(tool) || tool === "trim-circle";
       const showReadout = ref.kind === "segment" && store.selected.length === 1 && store.selected[0].id === obj.id
-        && !splitting && !wallDraft && arcEdit?.id !== obj.id;
+        && !splitting && !trimming && !wallDraft && arcEdit?.id !== obj.id;
       // A single straight wall draws its own location line, the same way it
       // did while it was placed. Several walls, and an arch, keep the light
       // dashed face line.
@@ -6591,7 +6848,7 @@ function drawSelectionHighlights(walls) {
       }
       // A single straight wall draws its length as a dimension string. The chip
       // stays for an arch, and for a wall that is one of several selected.
-      if (!splitting && !(showReadout && !arc)) {
+      if (!splitting && !trimming && !(showReadout && !arc)) {
         const paintedLength = drawLengthLabel(
           obj.x1, obj.y1, obj.x2, obj.y2,
           ref.kind === "segment" ? wallLengthPlace(obj) : null,
@@ -6609,6 +6866,12 @@ function drawSelectionHighlights(walls) {
         const [sx, sy] = worldToScreen(box.x, box.y);
         const [ex, ey] = worldToScreen(box.x + box.w, box.y + box.h);
         ctx.strokeRect(sx - 2, sy - 2, ex - sx + 4, ey - sy + 4);
+      }
+    } else if (ref.kind === "figure") {
+      const poly = figureFootprint(obj);
+      if (poly.length >= 3) {
+        pathForPoly(poly);
+        ctx.stroke();
       }
     } else if (ref.kind === "opening") {
       const wall = wallForOpening(store.doc, pack, walls, obj);
@@ -6668,6 +6931,12 @@ function drawHover(ref) {
       const [sx, sy] = worldToScreen(box.x, box.y);
       const [ex, ey] = worldToScreen(box.x + box.w, box.y + box.h);
       ctx.strokeRect(sx - 2, sy - 2, ex - sx + 4, ey - sy + 4);
+    }
+  } else if (ref.kind === "figure") {
+    const poly = figureFootprint(obj);
+    if (poly.length >= 3) {
+      pathForPoly(poly);
+      ctx.stroke();
     }
   } else if (ref.kind === "opening") {
     const wall = wallForOpening(store.doc, pack, wallsCache, obj);
@@ -7477,7 +7746,9 @@ function syncTempDim() {
 function translateWallKeepingJoins(ref, dx, dy) {
   const seg = objByRef(ref);
   const origin = { x1: seg.x1, y1: seg.y1, x2: seg.x2, y2: seg.y2 };
-  const joins = captureWallJoins(store.doc, [ref], { skuById });
+  const fillets = captureFillets(store.doc, [ref.id]);
+  const arcIds = new Set(fillets.map((link) => link.arcId));
+  const joins = captureWallJoins(store.doc, [ref], { skuById }).filter((join) => !arcIds.has(join.hostId));
   store.applyMoveSnapshot([{ ref, ...origin }], dx, dy, null);
   const result = holdWallJoins(store.doc, joins, { skuById });
   const moved = objByRef(ref);
@@ -7487,6 +7758,15 @@ function translateWallKeepingJoins(ref, dx, dy) {
     old: origin,
     next: { x1: moved.x1, y1: moved.y1, x2: moved.x2, y2: moved.y2 },
   }], { skuById });
+  if (refitFilletsOnce(fillets)) result.sharpened = FILLET_SHARPENED;
+  return result;
+}
+
+/** Move one end of a wall and keep the fillet arcs on it tangent. */
+function moveWallEndFollowingFillets(ref, end, point) {
+  const fillets = captureFillets(store.doc, [ref.id]);
+  const result = moveWallEnd(store.doc, ref, end, point, { skuById });
+  if (result.ok && refitFilletsOnce(fillets)) return { ...result, message: FILLET_SHARPENED };
   return result;
 }
 
@@ -7524,14 +7804,15 @@ function commitTempDim() {
     }
     store.pushUndo(`${historyDid("Set the length of")} to ${formatLengthMm(value)} mm`);
     const end = setLineLength({ x: line.x1, y: line.y1 }, { x: line.x2, y: line.y2 }, target);
-    const result = moveWallEnd(store.doc, ref, 2, end, { skuById });
+    const result = moveWallEndFollowingFillets(ref, 2, end);
     if (!result.ok) {
       store.dropUndo();
       setStatusMessage(result.message, "warn");
       render();
       return;
     }
-    setStatusMessage("Length set.", "ok");
+    if (result.message === FILLET_SHARPENED) setStatusMessage(result.message, "warn");
+    else setStatusMessage("Length set.", "ok");
   } else {
     const delta = edit.gap ? gapMoveDelta(edit.gap, value) : null;
     if (!delta) {
@@ -7540,7 +7821,7 @@ function commitTempDim() {
     }
     store.pushUndo(`${historyDid("Moved")} to ${formatLengthMm(value)} mm from the wall beside it`);
     const result = translateWallKeepingJoins(ref, delta.dx, delta.dy);
-    const note = result.broken.find((row) => row.message)?.message;
+    const note = result.sharpened || result.broken.find((row) => row.message)?.message;
     setStatusMessage(note || "Wall moved.", note ? "warn" : "ok");
   }
   if (pack) syncHosts();
@@ -8530,6 +8811,12 @@ function drawTrimCornerPreview() {
       strokeWorldLine(move.from.x, move.from.y, move.point.x, move.point.y);
     }
     ctx.setLineDash([]);
+    // Each wall's length as it would end up, measured on the centreline the trim moves.
+    for (const move of plan.moves) {
+      const seg = (store.doc.segments || []).find((item) => item.id === move.id);
+      const after = { id: move.id, x1: move.keep.x, y1: move.keep.y, x2: move.point.x, y2: move.point.y, thickness: seg?.thickness };
+      drawLengthLabel(after.x1, after.y1, after.x2, after.y2, wallLengthPlace(after));
+    }
     const [cx, cy] = worldToScreen(plan.cross.x, plan.cross.y);
     ctx.fillStyle = "#1f4fa8";
     ctx.fillRect(cx - 3, cy - 3, 6, 6);
@@ -9415,7 +9702,7 @@ function setSegmentLength(sel, length) {
     Number(length) || cur,
     (n) => roundGrid(n, activeGrid()),
   );
-  return moveWallEnd(store.doc, sel.ref, 2, end, { skuById });
+  return moveWallEndFollowingFillets(sel.ref, 2, end);
 }
 
 function setSegmentHeading(sel, deg) {
@@ -9430,7 +9717,7 @@ function setSegmentHeading(sel, deg) {
   const line = locationLineOf(seg, segmentThickness(seg));
   const len = segmentLength(line.x1, line.y1, line.x2, line.y2) || MIN_TRACE;
   const end = setLineHeading({ x: line.x1, y: line.y1 }, len, deg);
-  return moveWallEnd(store.doc, sel.ref, 2, end, { skuById });
+  return moveWallEndFollowingFillets(sel.ref, 2, end);
 }
 
 /** Where a dragged end should land, before the wall is written. */
@@ -10194,6 +10481,11 @@ function refsInMarquee(box) {
     const sku = skuById(item.sku);
     if (sku && test(itemRect(item, sku))) hits.push({ kind: "item", id: item.id });
   }
+  for (const fig of (store.doc.figures || []).filter(onActiveLevel)) {
+    if (!planObjectVisible(fig) || !keptByCut(fig, "item")) continue;
+    const poly = figureFootprint(fig);
+    if (poly.length >= 3 && test(bbox(poly))) hits.push({ kind: "figure", id: fig.id });
+  }
   if ((store.doc.serviceNodes || []).length && keptByCut(null, "service")) {
     const nodes = new Map(store.doc.serviceNodes.map((n) => [n.id, n]));
     for (const node of store.doc.serviceNodes) {
@@ -10350,6 +10642,14 @@ function hitTest(wx, wy, { skipServices = false, skipAreas = false } = {}) {
   if (!skipServices) {
     const serviceRef = serviceHit(wx, wy);
     if (serviceRef) return serviceRef;
+  }
+
+  const figures = (store.doc.figures || []).filter(onActiveLevel);
+  for (let i = figures.length - 1; i >= 0; i -= 1) {
+    const fig = figures[i];
+    if (!planObjectVisible(fig) || !keptByCut(fig, "item")) continue;
+    const poly = figureFootprint(fig);
+    if (poly.length >= 3 && pointInPoly(wx, wy, poly)) return { kind: "figure", id: fig.id };
   }
 
   const items = store.doc.items.filter(onActiveLevel);
@@ -10551,6 +10851,7 @@ function inspectKindLabel(kind, sku) {
   if (kind === "slab") return "Floor";
   if (kind === "roof") return "Roof";
   if (kind === "beam") return "Beam";
+  if (kind === "figure") return "Figure";
   if (kind === "item") return "Item";
   if (kind === "line") return "Line";
   if (kind === "separation") return "Separation";
@@ -11138,7 +11439,9 @@ function bindPanelResize(handle, { get, set, invert }) {
   const writeVar = (name, px) => {
     const other = name === "--levels" ? readVar("--dock", 320) : readVar("--levels", 300);
     const room = (root?.clientWidth || 0) - other - 280;
-    const clamped = Math.min(560, Math.max(220, Math.min(px, Math.max(220, room))));
+    // The levels panel names every cut on its rail; narrower truncates them.
+    const min = name === "--levels" ? 270 : 220;
+    const clamped = Math.min(560, Math.max(min, Math.min(px, Math.max(min, room))));
     root?.style.setProperty(name, `${Math.round(clamped)}px`);
   };
   bindPanelResize(document.getElementById("v2-resize-levels"), {
@@ -11209,7 +11512,7 @@ function skuCount(categories) {
 }
 
 /** The running command's controls. They live outside the ribbon so a redraw, which replaces the row's HTML, cannot destroy them. */
-const RIBBON_SETTING_NODES = ["roofCutKindBar", "shapeLink", "roofOverhang", "wallOpts", "moveDisjoin"];
+const RIBBON_SETTING_NODES = ["roofCutKindBar", "shapeLink", "roofOverhang", "wallOpts"];
 
 /** The Adjust / Set scale / Align strip. It lives in the ribbon row, not under it. */
 function modeBarPark() {
@@ -11233,7 +11536,7 @@ function modeBarOnSheetTab() {
 function mountModeBar() {
   const row = el.ribbonFunctions;
   const bar = el.modeBar;
-  const sketching = Boolean(polygonSketch());
+  const sketching = Boolean(sketchOffer());
   if (!row || !bar || bar.hidden || !(modeBarOnSheetTab() || sketching)) {
     parkModeBar();
     return;
@@ -11254,7 +11557,15 @@ function mountModeBar() {
   label.textContent = sketching ? "Outline" : (MODE_NAMES[mode] || "Adjust");
   if (mode === "adjust" || sketching) label.title = el.modePrompt?.textContent || "";
   wrap.append(items, label);
-  row.appendChild(wrap);
+  // At the end of a full tab (Room, Roof) the bar sat past the window, so
+  // Finish and Cancel were only visible on a short tab such as a finish.
+  // An outline puts them second, straight after Modify.
+  if (sketching) {
+    const lead = row.querySelector(":scope > .ribbon-group");
+    row.insertBefore(wrap, lead ? lead.nextSibling : null);
+  } else {
+    row.appendChild(wrap);
+  }
   requestAnimationFrame(() => fitRibbon(row));
 }
 
@@ -11272,8 +11583,7 @@ let lastSettingsSig = "";
 /**
  * Put the running command's settings on the ribbon.
  * Location line, arc, corner, the roof-cut Hole / Remove and the floor outline
- * link become a Settings group on the open tab. Disjoin sits beside Move, and
- * only while Move is armed. Typed lengths stay on the canvas.
+ * link become a Settings group on the open tab. Typed lengths stay on the canvas.
  * `force` rebuilds after the row's HTML was replaced.
  */
 function mountRibbonSettings(force = false) {
@@ -11288,11 +11598,6 @@ function mountRibbonSettings(force = false) {
   host?.remove();
 
   const pieces = [el.roofCutKindBar, el.shapeLink, el.roofOverhang, el.wallOpts].filter((node) => node && !node.hidden);
-  const moveBtn = row.querySelector('[data-function="move"]');
-  if (el.moveDisjoin && !el.moveDisjoin.hidden) {
-    if (moveBtn) moveBtn.insertAdjacentElement("afterend", el.moveDisjoin);
-    else pieces.unshift(el.moveDisjoin);
-  }
   if (!pieces.length) return true;
   const wrap = document.createElement("div");
   wrap.className = "ribbon-group ribbon-settings";
@@ -11328,17 +11633,11 @@ function mountRibbonSettings(force = false) {
 
 /** True when the visible controls are already where this row should show them. */
 function ribbonSettingsMounted(row, host) {
-  const moveBtn = row.querySelector('[data-function="move"]');
-  if (el.moveDisjoin && !el.moveDisjoin.hidden) {
-    const besideMove = Boolean(moveBtn) && el.moveDisjoin.previousElementSibling === moveBtn;
-    const inSettings = Boolean(host?.contains(el.moveDisjoin));
-    if (moveBtn ? !besideMove : !inSettings) return false;
-  }
   for (const node of [el.roofCutKindBar, el.shapeLink, el.roofOverhang, el.wallOpts]) {
     if (node && !node.hidden && !host?.contains(node)) return false;
   }
   if (host) {
-    const held = [el.roofCutKindBar, el.shapeLink, el.roofOverhang, el.wallOpts, el.moveDisjoin].some((node) => node && host.contains(node));
+    const held = [el.roofCutKindBar, el.shapeLink, el.roofOverhang, el.wallOpts].some((node) => node && host.contains(node));
     if (!held) return false;
   }
   return true;
@@ -11514,7 +11813,11 @@ function updateRibbonHint() {
       ? "Click the point to move from."
       : moveSession.stopped
         ? "The floor stops the finish here. Click to place it, or type a shorter distance. Esc cancels."
-        : "Click where that point should land, or type the distance and press Enter. Joined walls stay joined. Disjoin, or hold Alt, pulls them apart. Esc cancels.");
+        : moveSession.kind === "segment" && moveSession.joined
+          ? (moveSession.altHeld
+            ? "Click where that point should land, or type the distance and press Enter. Detached: joined walls stay put. Let go of Alt to keep them joined. Esc cancels."
+            : "Click where that point should land, or type the distance and press Enter. Joined walls stay joined. Hold Alt to pull them apart. Esc cancels.")
+          : "Click where that point should land, or type the distance and press Enter. Esc cancels.");
     return;
   }
   if (tool === "copy") {
@@ -11817,12 +12120,23 @@ function ribbonCommandState(item) {
     };
   }
   if (item.id === "flip-face") {
-    if (!selectedWall()) return { disabled: true, title: "Select one wall first." };
+    if (!selectedWall() && !selectedElevationFace()) return { disabled: true, title: "Select one wall first." };
     return { title: "View the other face of this wall (mirrored left to right)" };
   }
   if (item.id === "second-screen") {
-    if (!selectedWall()) return { disabled: true, title: "Select one wall first." };
+    if (floorHostNow()) return { title: "Open this floor on the second screen" };
+    if (!selectedWall() && !selectedElevationFace()) return { disabled: true, title: "Select one wall first." };
     return { title: "Open this face on the second screen" };
+  }
+  if (item.id === "add-finish") {
+    const adding = Boolean(faceAddPending || floorAddPending || floorDraft);
+    return {
+      active: adding,
+      title: adding ? "Choose where this finish goes. Nothing is added until then." : HINTS["add-finish"],
+    };
+  }
+  if (item.id === "finish-done") {
+    return { title: HINTS["finish-done"] };
   }
   if (item.id === "roof-cut-here") {
     return { active: tool === "roof-cut", title: "Click around the part to cut. Enter closes it. Esc steps back." };
@@ -12010,6 +12324,7 @@ function onRibbonFunction(item) {
   paletteFilter = item.categories || null;
   lastPaletteLabel = item.categories ? item.label : lastPaletteLabel;
   tool = item.tool || "select";
+  scaleFigureKind = item.figure === "car" || item.figure === "person" ? item.figure : scaleFigureKind;
   if (tool !== "select") arcEdit = null;
   if (tool !== "door") doorHandSign = 1;
   const armed = armPlacement(
@@ -12149,7 +12464,12 @@ function runCommand(name) {
     case "snap": armWallEdit("snap"); return;
     case "edit-face": editThisFace(); return;
     case "flip-face": flipElevationFace(); return;
-    case "second-screen": openPreviewOnSecondScreen(); return;
+    case "second-screen":
+      if (floorHostNow()) openFloorPreviewOnSecondScreen();
+      else openPreviewOnSecondScreen();
+      return;
+    case "add-finish": beginOpenFinish(); return;
+    case "finish-done": exitRouteProfile(); return;
     case "flip-hinge": flipDoors("hinge"); break;
     case "flip-swing": flipDoors("swing"); break;
     case "roof-cut-here": cutIntoThisRoof(); return;
@@ -12211,6 +12531,7 @@ function runCommand(name) {
     case "attach": startAttachPick(); return;
     case "detach": runDetach(); return;
     case "select-similar": runSelectSimilar(); return;
+    case "exit-modify": exitModify(); return;
     case "move": startMove(); return;
     case "copy": startCopy(); return;
     case "rotate":
@@ -12270,6 +12591,286 @@ function modifySelection(op) {
 
 // --- 3D massing ----------------------------------------------------------
 
+// Click selection in the 3D view. The same store.selected the plan uses, so
+// going back to the plan finds the element already chosen. Figures are that
+// one element's own measurements. A window or door drag stays on its wall.
+let massPick = { hits: [], index: 0 };
+let massDocSeen = "";
+let massSelSeen = "";
+let massOpeningDrag = null;
+
+function massCoversPlan() {
+  return Boolean(el.massOverlay && !el.massOverlay.hidden && !el.massOverlay.classList.contains("mass-overlay--float"));
+}
+
+function massSelectionKey() {
+  return store.selected.map((r) => `${r.kind}:${r.id}`).join(",");
+}
+
+function massDocStamp() {
+  const parts = [];
+  for (const key of ["openings", "segments", "rooms", "roofs", "slabs", "beams", "items", "figures"]) {
+    const list = store.doc[key] || [];
+    parts.push(key, String(list.length));
+    for (const row of list) {
+      parts.push(row.id, row.t, row.sill, row.wallId, row.x1, row.y1, row.x2, row.y2, row.x, row.y, row.rotation, row.sku, row.kind);
+    }
+  }
+  const site = store.doc.site;
+  parts.push("site", JSON.stringify(site?.propertyLine || null), JSON.stringify(site?.buildingLine || null));
+  return parts.join("|");
+}
+
+function massFigureRecords() {
+  if (!pack || el.massFigures?.checked === false) return [];
+  return (store.doc.figures || []).map((fig) => ({
+    id: fig.id,
+    kind: fig.kind,
+    x: fig.x,
+    y: fig.y,
+    rotation: fig.rotation || 0,
+    z: levelElevation(pack, fig.level) || 0,
+  }));
+}
+
+function massSiteRings() {
+  const site = store.doc.site;
+  const rings = [];
+  const property = shapePolygon(site?.propertyLine);
+  if (property.length >= 3) rings.push({ role: "property", points: property });
+  const building = shapePolygon(site?.buildingLine);
+  if (building.length >= 3) rings.push({ role: "building", points: building });
+  return rings;
+}
+
+/** Plan extent of the building, so a scale figure can stand just outside it. */
+function buildingPlanBounds() {
+  const pts = [];
+  for (const room of store.doc.rooms || []) pts.push(...shapePolygon(room.shape));
+  for (const slab of store.doc.slabs || []) pts.push(...shapePolygon(slab.shape));
+  for (const roof of store.doc.roofs || []) pts.push(...shapePolygon(roof.shape));
+  for (const seg of store.doc.segments || []) {
+    if (Number.isFinite(seg.x1)) pts.push([seg.x1, seg.y1], [seg.x2, seg.y2]);
+  }
+  return pts.length ? bbox(pts) : null;
+}
+
+/** Ground storey, so a person stands on the floor rather than the foundation. */
+function scaleFigureLevel() {
+  const levels = (pack?.levels || [])
+    .filter((level) => Number(level.elevation) >= -0.01)
+    .slice()
+    .sort((a, b) => (Number(a.elevation) || 0) - (Number(b.elevation) || 0));
+  return levels[0]?.id || activeLevel;
+}
+
+/** The checkbox has nothing to show until a person and a car exist. */
+function ensureScaleFigures() {
+  if ((store.doc.figures || []).length) return false;
+  const made = scaleFigurePair(buildingPlanBounds(), scaleFigureLevel());
+  store.pushUndo(historyAction("Showed", ["a person and a car"]));
+  store.doc.figures = made.map((fig) => ({ ...fig, id: nid("f") }));
+  store.persist();
+  return true;
+}
+
+function syncMassScene() {
+  massView.setShowFigures(el.massFigures?.checked !== false, false);
+  massView.setFigures(massFigureRecords(), false);
+  massView.setSite(massSiteRings(), false);
+}
+
+function publishMassSelection({ draw = true } = {}) {
+  massSelSeen = massSelectionKey();
+  massView.showSelection(
+    store.selected.map((r) => r.id),
+    massMeasureFigures(),
+    { draw },
+  );
+}
+
+function refreshMassModel() {
+  if (!el.massOverlay || el.massOverlay.hidden || !pack) return;
+  massDocSeen = massDocStamp();
+  massView.setServices(serviceMassingRoutes(store.doc, pack));
+  publishMassSelection({ draw: false });
+  syncMassScene();
+  massView.setPayload(compile(store.doc, pack), { reframe: false });
+}
+
+function syncMassIfNeeded() {
+  if (!massCoversPlan() || massOpeningDrag) return;
+  if (massDocStamp() !== massDocSeen) {
+    refreshMassModel();
+    return;
+  }
+  if (massSelectionKey() !== massSelSeen) publishMassSelection();
+}
+
+function massPickStatus(ref, count) {
+  const tab = count > 1 ? " Tab picks the next thing under the cursor." : "";
+  if (!ref) return "Nothing there.";
+  if (ref.kind === "opening") return `Drag to slide it along the wall. A window also moves up and down.${tab}`;
+  return `Selected.${tab}`;
+}
+
+function handleMassPick(hits, mods) {
+  massPick = { hits: hits || [], index: 0 };
+  const hit = massPick.hits[0];
+  if (!hit) {
+    if (!mods?.shift) store.clearSelection();
+  } else {
+    const ref = { kind: hit.selectKind, id: hit.id };
+    if (mods?.shift) store.toggleRefs([ref], ref);
+    else store.selectOne(ref);
+  }
+  publishMassSelection();
+  setStatusMessage(massPickStatus(store.primary, massPick.hits.length), store.primary ? "ok" : "warn");
+  render();
+}
+
+function cycleMassPick(step) {
+  const hits = massPick.hits;
+  if (hits.length < 2) return false;
+  massPick.index = (massPick.index + step + hits.length) % hits.length;
+  const hit = hits[massPick.index];
+  store.selectOne({ kind: hit.selectKind, id: hit.id });
+  publishMassSelection();
+  setStatusMessage(massPickStatus(store.primary, hits.length), "ok");
+  render();
+  return true;
+}
+
+function massMeasureFigures() {
+  if (store.selected.length !== 1 || !pack) return [];
+  const ref = store.selected[0];
+  if (ref.kind === "opening") return massOpeningFigures(ref.id);
+  if (ref.kind === "segment") return massWallFigures(ref.id);
+  if (ref.kind === "roof") return massRoofFigures(ref.id);
+  return [];
+}
+
+function massOpeningFigures(id) {
+  const opening = (store.doc.openings || []).find((o) => o.id === id);
+  if (!opening) return [];
+  const walls = currentWalls();
+  const wall = wallForOpening(store.doc, pack, walls, opening);
+  if (!wall) return [];
+  const placed = openingOnWall(store.doc, pack, opening, wall);
+  const size = openingSize(pack, opening);
+  const sku = placed.sku;
+  const base = resolvedBase(store.doc, pack, wall, wall.height || size.height || 2.4);
+  const z0 = base.elevation;
+  const sill = sku?.category === "door" ? 0 : (Number(size.sill) || 0);
+  const height = size.height || (sku?.category === "window" ? 1.2 : 2.1);
+  const head = z0 + sill + height;
+  const figs = [
+    { a: [placed.a.x, placed.a.y, head], b: [placed.b.x, placed.b.y, head], text: formatLengthMm(placed.width) },
+    { a: [placed.b.x, placed.b.y, z0 + sill], b: [placed.b.x, placed.b.y, head], text: formatLengthMm(height) },
+  ];
+  if (sku?.category === "window" && sill > 0.02) {
+    figs.push({ a: [placed.a.x, placed.a.y, z0], b: [placed.a.x, placed.a.y, z0 + sill], text: formatLengthMm(sill) });
+  }
+  const neighbors = [];
+  for (const other of store.doc.openings || []) {
+    if (other.id === opening.id) continue;
+    const host = wallForOpening(store.doc, pack, walls, other);
+    if (!host || host.id !== wall.id) continue;
+    neighbors.push(openingOnWall(store.doc, pack, other, wall));
+  }
+  for (const gap of openingSideGaps(wall, placed, neighbors)) {
+    figs.push({
+      a: [gap.x1, gap.y1, z0 + sill],
+      b: [gap.x2, gap.y2, z0 + sill],
+      text: formatLengthMm(gap.dist),
+    });
+  }
+  return figs;
+}
+
+function massWallFigures(id) {
+  const wall = currentWalls().find((w) => w.id === id && w.drawn);
+  if (!wall) return [];
+  const base = resolvedBase(store.doc, pack, wall, wall.height || 2.4);
+  const z0 = base.elevation;
+  const z1 = z0 + base.height;
+  return [
+    { a: [wall.x1, wall.y1, (z0 + z1) / 2], b: [wall.x2, wall.y2, (z0 + z1) / 2], text: formatLengthMm(wall.length) },
+    { a: [wall.x1, wall.y1, z0], b: [wall.x1, wall.y1, z1], text: formatLengthMm(base.height) },
+  ];
+}
+
+function massRoofFigures(id) {
+  const roof = (store.doc.roofs || []).find((r) => r.id === id);
+  if (!roof) return [];
+  const poly = shapePolygon(roof.shape);
+  if (poly.length < 3) return [];
+  let x = 0;
+  let y = 0;
+  for (const p of poly) { x += p[0]; y += p[1]; }
+  x /= poly.length;
+  y /= poly.length;
+  const levelZ = levelElevation(pack, roof.level);
+  const plate = (levelZ < 0.05 ? (pack.system.wallHeight || 2.8) : levelZ) + roofOffsetMm(roof) / 1000;
+  const eave = plate - roofEaveDropM(roof);
+  const pitch = !roof.form || roof.form === "flat" ? "Flat" : `${Math.round(Number(roof.pitch) || DEFAULT_ROOF_PITCH)}°`;
+  return [{ at: [x, y, eave + 0.25], text: `${pitch} · eaves ${formatLengthMm(eave)}` }];
+}
+
+function moveMassOpening(sx, sy) {
+  const opening = (store.doc.openings || []).find((o) => o.id === massOpeningDrag?.id);
+  if (!opening) return false;
+  const walls = currentWalls();
+  const wall = wallForOpening(store.doc, pack, walls, opening);
+  if (!wall) return false;
+  const ray = massView.ray(sx, sy);
+  if (!ray) return false;
+  const dx = wall.x2 - wall.x1;
+  const dy = wall.y2 - wall.y1;
+  const len = Math.hypot(dx, dy) || 1;
+  const base = resolvedBase(store.doc, pack, wall, wall.height || 2.4);
+  let hit = rayPlanePoint(ray, [wall.x1, wall.y1, base.elevation], [-dy / len, dx / len, 0]);
+  let sill = null;
+  if (hit) sill = hit[2] - base.elevation;
+  else {
+    const size = openingSize(pack, opening);
+    const z = base.elevation + (Number(opening.sill) || 0) + (size.height || 1.2) / 2;
+    hit = rayPlanePoint(ray, [0, 0, z], [0, 0, 1]);
+    if (!hit) return false;
+  }
+  const beforeT = Number(opening.t) || 0;
+  const beforeSill = Number(opening.sill) || 0;
+  if (!placeOpeningOnHost(store.doc, pack, walls, opening, hit[0], hit[1], { sill, wallHeight: base.height })) return false;
+  return Math.abs((Number(opening.t) || 0) - beforeT) > 1e-4
+    || Math.abs((Number(opening.sill) || 0) - beforeSill) > 1e-4;
+}
+
+function handleMassOpeningDrag(info) {
+  if (info.phase === "start") {
+    const opening = (store.doc.openings || []).find((o) => o.id === info.id);
+    if (!opening) return;
+    store.selectOne({ kind: "opening", id: opening.id });
+    holdUndo(historyDid("Moved"));
+    massOpeningDrag = { id: opening.id, moved: false };
+    return;
+  }
+  if (info.phase === "move") {
+    if (!massOpeningDrag || massOpeningDrag.id !== info.id) return;
+    if (moveMassOpening(info.sx, info.sy)) {
+      massOpeningDrag.moved = true;
+      refreshMassModel();
+    }
+    return;
+  }
+  if (!massOpeningDrag) return;
+  const moved = massOpeningDrag.moved;
+  massOpeningDrag = null;
+  if (!moved) store.dropUndo({ pendingOnly: true });
+  else store.commitPending();
+  store.persist();
+  render();
+}
+
 function openMassing(view) {
   if (!view && (tool === "camera" || tool === "section")) {
     cameraDraft = null;
@@ -12280,12 +12881,15 @@ function openMassing(view) {
     drawRibbon();
   }
   massView.setServices(serviceMassingRoutes(store.doc, pack));
+  syncMassScene();
   if (view?.mode === "look") massView.setLook(view);
   else if (view?.mode === "section") massView.setSection(view);
   else if (view?.mode === "elevation") massView.setElevation(view);
   else massView.setOrbit();
   syncReferenceOffer();
   massView.setPayload(compile(store.doc, pack));
+  massDocSeen = massDocStamp();
+  publishMassSelection();
   hideMassRender();
   loadKeptPictures();
   setPictureOpen(false);
@@ -12706,6 +13310,7 @@ function refreshSectionPanel() {
   if (!el.massOverlay.classList.contains("mass-overlay--float")) return false;
   massView.setShowServices(Boolean(el.massServices?.checked));
   massView.setServices(serviceMassingRoutes(store.doc, pack));
+  syncMassScene();
   massView.setPayload(compile(store.doc, pack), { reframe: false });
   sectionSeenEpoch = sectionEpoch;
   return true;
@@ -13203,6 +13808,7 @@ function wireVisualizePrompt() {
 function setPictureOpen(open) {
   if (el.massPrompt) el.massPrompt.hidden = !open;
   if (el.massPicture) el.massPicture.setAttribute("aria-expanded", open ? "true" : "false");
+  el.massPanel?.classList.toggle("mass-panel--prompt", Boolean(open));
   syncReferenceOffer();
   requestAnimationFrame(() => massView.resize());
 }
@@ -13408,6 +14014,7 @@ function flipOpenSection() {
   if (onScreen) paintSectionScreen({ reframe: true });
   if (onPanel) {
     massView.setSection(flipped);
+    syncMassScene();
     massView.setPayload(compile(store.doc, pack), { reframe: false });
   }
   setStatusMessage("Looking the other way.", "ok");
@@ -13764,6 +14371,7 @@ function wireMassing() {
   el.massPicture?.addEventListener("click", () => {
     setPictureOpen(el.massPrompt?.hidden !== false);
   });
+  el.massPromptClose?.addEventListener("click", () => setPictureOpen(false));
   el.massGenerate?.addEventListener("click", () => { generateModel(); });
   el.massShow3d?.addEventListener("click", hideMassRender);
   el.massRenderCopy?.addEventListener("click", () => { withRenderAction(el.massRenderCopy, copyRenderImage); });
@@ -13788,6 +14396,33 @@ function wireMassing() {
       massView.setStatusFilter(btn.dataset.massStatus || "both");
     });
   });
+  const MASS_STYLE_KEY = "v2-mass-style";
+  const MASS_FIGURES_KEY = "v2-mass-figures";
+  let savedStyle = "colour";
+  try {
+    const stored = window.localStorage.getItem(MASS_STYLE_KEY);
+    if (stored === "lines" || stored === "status") savedStyle = stored;
+    if (el.massFigures) el.massFigures.checked = window.localStorage.getItem(MASS_FIGURES_KEY) === "1";
+  } catch { /* private mode */ }
+  document.querySelectorAll("[data-mass-style]").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.massStyle === savedStyle);
+    btn.addEventListener("click", () => {
+      const next = btn.dataset.massStyle === "lines" || btn.dataset.massStyle === "status" ? btn.dataset.massStyle : "colour";
+      document.querySelectorAll("[data-mass-style]").forEach((b) => b.classList.toggle("active", b === btn));
+      try { window.localStorage.setItem(MASS_STYLE_KEY, next); } catch { /* private mode */ }
+      massView.setStyle(next);
+    });
+  });
+  massView.setStyle(savedStyle);
+  if (el.massFigures) {
+    el.massFigures.addEventListener("change", () => {
+      try { window.localStorage.setItem(MASS_FIGURES_KEY, el.massFigures.checked ? "1" : "0"); } catch { /* private mode */ }
+      if (el.massFigures.checked) ensureScaleFigures();
+      syncMassScene();
+      massView.draw();
+      render();
+    });
+  }
   if (el.massServices) {
     massView.setShowServices(el.massServices.checked);
     el.massServices.addEventListener("change", () => {
@@ -15793,21 +16428,24 @@ function moveDestination(wx, wy) {
 function ensureMoveJoins(bag, refs) {
   if (bag.joins) return;
   bag.joins = captureWallJoins(store.doc, refs, { skuById });
+  bag.joined = bag.joins.length > 0 || wallMoveHasJoins(store.doc, refs, { skuById });
+  bag.altHeld = false;
   bag.released = [];
 }
 
 /**
- * Put joined ends back after the translation. Alt or Disjoin skips it, so the
- * wall moves the way it used to. A join that cannot be kept stays broken for
- * the rest of the gesture.
+ * Put joined ends back after the translation. Alt skips it, so the wall
+ * moves on its own. A join that cannot be kept stays broken for the rest
+ * of the gesture.
  */
-function holdMoveJoins(bag, disjoin) {
+function holdMoveJoins(bag, disjoin, { probe = false } = {}) {
   if (disjoin || !bag?.joins?.length) {
     joinHold = null;
     return;
   }
   const live = dropBrokenJoins(bag.joins, bag.released);
   const result = holdWallJoins(store.doc, live, { skuById });
+  if (probe) return;
   if (result.broken.length) {
     const note = result.broken.find((row) => row.message && row.message !== bag.breakNote);
     bag.released = [...(bag.released || []), ...result.broken];
@@ -15822,9 +16460,92 @@ function holdMoveJoins(bag, disjoin) {
 function clearMoveJoins(bag) {
   if (!bag) return;
   bag.joins = null;
+  bag.joined = false;
+  bag.altHeld = false;
   bag.released = null;
   bag.breakNote = null;
+  bag.fillets = null;
+  bag.filletState = null;
   joinHold = null;
+}
+
+// Past the last place a fillet still fits, a move holds there for this many
+// pixels before the arc gives way to a sharp corner.
+const FILLET_SNAP_PX = 24;
+
+/**
+ * Run a wall gesture with its fillet arcs kept tangent. `apply(t, probe)`
+ * writes the gesture `t` of the way from where it started, from its own
+ * snapshot; `probe` is a trial that should not report anything. Where a
+ * fillet stops fitting, the move holds at that limit until the pointer is
+ * FILLET_SNAP_PX past it. Further on, the arc comes out and the walls make a
+ * sharp corner, and coming back inside the limit puts the arc back. `apply`
+ * returns false when the gesture itself cannot go that far. `reach` is the
+ * length of the whole gesture in metres. Returns the fraction applied.
+ */
+function applyFollowingFillets(bag, before, movedIds, reach, apply) {
+  if (!bag.fillets) {
+    restoreWallEndSnapshot(before);
+    bag.fillets = captureFillets(store.doc, movedIds);
+    const arcIds = new Set(bag.fillets.map((link) => link.arcId));
+    if (bag.joins && arcIds.size) bag.joins = bag.joins.filter((join) => !arcIds.has(join.hostId));
+  }
+  if (!bag.fillets.length) {
+    apply(1, false);
+    return 1;
+  }
+  let refused = false;
+  const fit = (t, probe) => {
+    refused = apply(t, probe) === false;
+    if (refused) return ["refused"];
+    return refitFillets(store.doc, bag.fillets, { skuById });
+  };
+  let failed = fit(1, false);
+  if (refused) return 1;
+  if (!failed.length) {
+    noteFilletState(bag, null);
+    return 1;
+  }
+  let lo = 0;
+  let hi = 1;
+  for (let i = 0; i < 18; i += 1) {
+    const mid = (lo + hi) / 2;
+    if (fit(mid, true).length) hi = mid;
+    else lo = mid;
+  }
+  if ((1 - lo) * reach * cam.scale <= FILLET_SNAP_PX) {
+    fit(lo, false);
+    noteFilletState(bag, "held");
+    return lo;
+  }
+  failed = fit(1, false);
+  sharpenFillets(store.doc, bag.fillets, failed, { skuById });
+  noteFilletState(bag, "sharp");
+  return 1;
+}
+
+function noteFilletState(bag, state) {
+  if (bag.filletState === state) return;
+  const was = bag.filletState;
+  bag.filletState = state;
+  if (state === "held") {
+    setStatusMessage("The fillet arc is as far as it goes. Keep moving to take it out and make a sharp corner.", "warn");
+  } else if (state === "sharp") {
+    setStatusMessage("The arc is out and the corner is sharp. Move back to bring the arc back.", "warn");
+  } else if (was) {
+    setStatusMessage("The fillet arc is back.", "ok");
+  }
+}
+
+const FILLET_SHARPENED = "The fillet arc no longer fits, so that corner is now sharp. Undo brings it back.";
+
+/** One-off wall edits: a fillet that no longer fits becomes a sharp corner. True when one did. */
+function refitFilletsOnce(links) {
+  if (!links.length) return false;
+  const failed = refitFillets(store.doc, links, { skuById });
+  if (!failed.length) return false;
+  sharpenFillets(store.doc, links, failed, { skuById });
+  return true;
 }
 
 function restoreMoveOrigin() {
@@ -15875,18 +16596,26 @@ function applyMovePreview(wx, wy, altKey = false) {
       moveSession.wallBefore = wallEndSnapshot();
       ensureMoveJoins(moveSession, [moveSession.ref]);
     }
-    restoreWallEndSnapshot(moveSession.wallBefore);
-    store.applyMoveSnapshot([{ ref: moveSession.ref, ...moveSession.origin }], dx, dy, null);
-    holdMoveJoins(moveSession, altKey || moveDisjoin);
-    const moved = objByRef(moveSession.ref);
-    if (moved) {
-      shiftJoinedEnds(store.doc, [{
-        id: moveSession.ref.id,
-        level: moved.level ?? null,
-        old: moveSession.origin,
-        next: { x1: moved.x1, y1: moved.y1, x2: moved.x2, y2: moved.y2 },
-      }], { skuById });
-    }
+    const fullX = dx;
+    const fullY = dy;
+    const filletBefore = moveSession.filletState;
+    const t = applyFollowingFillets(moveSession, moveSession.wallBefore, [moveSession.ref.id], Math.hypot(dx, dy), (f, probe) => {
+      restoreWallEndSnapshot(moveSession.wallBefore);
+      store.applyMoveSnapshot([{ ref: moveSession.ref, ...moveSession.origin }], fullX * f, fullY * f, null);
+      holdMoveJoins(moveSession, altKey, { probe });
+      const moved = objByRef(moveSession.ref);
+      if (!altKey && moved) {
+        shiftJoinedEnds(store.doc, [{
+          id: moveSession.ref.id,
+          level: moved.level ?? null,
+          old: moveSession.origin,
+          next: { x1: moved.x1, y1: moved.y1, x2: moved.x2, y2: moved.y2 },
+        }], { skuById });
+      }
+    });
+    dx = fullX * t;
+    dy = fullY * t;
+    showDetachHint(altKey, { quiet: filletNoted(filletBefore, moveSession) });
   }
   moveSession.dx = dx;
   moveSession.dy = dy;
@@ -15895,8 +16624,7 @@ function applyMovePreview(wx, wy, altKey = false) {
 function endMoveTool() {
   moveSession = null;
   joinHold = null;
-  moveDisjoin = false;
-  if (el.moveDisjoinBox) el.moveDisjoinBox.checked = false;
+  clearDetachHint();
   sizeDraft = null;
   snapGuide = null;
   if (tool === "move") tool = "select";
@@ -15924,6 +16652,7 @@ function cancelMoveStep() {
   moveSession.wallBefore = null;
   sizeDraft = null;
   snapGuide = null;
+  clearDetachHint();
   setStatusMessage("Click the point to move from.", "ok");
   render();
 }
@@ -16040,6 +16769,7 @@ function finishMove() {
     moveSession.wallBefore = null;
     sizeDraft = null;
     snapGuide = null;
+    clearDetachHint();
     setStatusMessage(stopped
       ? "The floor stops that move. Click the point to move from."
       : "Click the point to move from.", stopped ? "warn" : "ok");
@@ -16644,6 +17374,8 @@ el.attachConfirm?.addEventListener("click", () => {
 });
 
 let statusTimer = null;
+/** Status text kept up while a wall is being moved. Null when that hint is off. */
+let detachHint = null;
 
 function setStatusMessage(text, tone, action = null) {
   clearTimeout(statusTimer);
@@ -16668,11 +17400,89 @@ function setStatusMessage(text, tone, action = null) {
   el.healthDot.title = text;
   el.healthDot.hidden = false;
   statusTimer = setTimeout(() => {
+    if (detachHint && wallMoveDisjoinLive()) {
+      el.healthLabel.textContent = detachHint;
+      el.healthDot.classList.toggle("ok", !detachHint.startsWith("Detached"));
+      el.healthDot.title = detachHint;
+      el.healthDot.hidden = false;
+      statusTimer = null;
+      return;
+    }
     el.healthLabel.textContent = "";
     el.healthDot.classList.add("ok");
     el.healthDot.hidden = true;
+    statusTimer = null;
     drawPackHealth();
   }, action ? 8000 : 4000);
+}
+
+/** The wall move in hand: the Move command after its base point, or a drag that includes a wall. Null otherwise. */
+function wallMoveBag() {
+  if (tool === "move" && moveSession?.base && moveSession.kind === "segment") return moveSession;
+  if (drag?.kind === "move" && drag.snaps?.some((snap) => snap.ref?.kind === "segment")) return drag;
+  return null;
+}
+
+/** A wall move is in hand and the wall meets another wall, so Alt has something to pull apart. */
+function wallMoveDisjoinLive() {
+  return Boolean(wallMoveBag()?.joined);
+}
+
+function detachHintText(altKey) {
+  return altKey
+    ? "Detached. Joined walls stay put."
+    : "Hold Alt to detach from joined walls.";
+}
+
+/** True when this gesture just changed the fillet, so that note keeps the status line. */
+function filletNoted(before, bag) {
+  return bag?.filletState !== before && Boolean(bag?.filletState || before);
+}
+
+/**
+ * Keep the Alt sentence on the status line for the whole wall move.
+ * `quiet` records it without covering a fillet note that was just written.
+ */
+function showDetachHint(altKey, { quiet = false } = {}) {
+  const bag = wallMoveBag();
+  if (bag) bag.altHeld = Boolean(altKey);
+  if (!bag?.joined) {
+    clearDetachHint();
+    return;
+  }
+  const text = detachHintText(altKey);
+  detachHint = text;
+  if (quiet || el.healthLabel?.textContent === text) return;
+  clearTimeout(statusTimer);
+  statusTimer = null;
+  el.healthLabel.textContent = text;
+  el.healthDot.classList.toggle("ok", !altKey);
+  el.healthDot.hidden = false;
+  el.healthDot.title = text;
+}
+
+function clearDetachHint() {
+  if (!detachHint) return;
+  const showing = el.healthLabel?.textContent === detachHint;
+  detachHint = null;
+  if (!showing) return;
+  clearTimeout(statusTimer);
+  statusTimer = null;
+  el.healthLabel.textContent = "";
+  el.healthDot.classList.add("ok");
+  el.healthDot.hidden = true;
+  drawPackHealth();
+}
+
+/** Re-run the wall move at the pointer. Pressing Alt does not move the mouse, so the preview has to be asked again. */
+function replayWallMove(altKey) {
+  if (!wallMoveDisjoinLive() || !hoverPoint) {
+    showDetachHint(altKey);
+    return;
+  }
+  if (tool === "move" && moveSession?.base) applyMovePreview(hoverPoint.x, hoverPoint.y, altKey);
+  else applySelectionMove(hoverPoint.x, hoverPoint.y, altKey);
+  render();
 }
 
 /** How many products the loaded template offers. Phrased for the person
@@ -16837,6 +17647,7 @@ function cancelDrawing() {
     store.undo();
     store.setSelection(selection, primary);
     drag = null;
+    clearDetachHint();
     drawRibbon();
     render();
     return;
@@ -16948,6 +17759,94 @@ function cancelDrawing() {
   }
   drawRibbon();
   render();
+}
+
+/**
+ * The same way out as Escape, taken all the way: the Modify button on a green
+ * tab and Cancel on the plan's right-click menu both land here. Escape steps
+ * back one press at a time, so this runs those steps until nothing is armed,
+ * then clears the selection. A wall chain loses only the segment that was not
+ * placed; what is already drawn stays.
+ */
+function exitModify() {
+  const armed = () => tool !== "select" || Boolean(activeFunction)
+    || currentUnderlayMode() === "scale" || currentUnderlayMode() === "align";
+  // A route selection stays on a click of empty plan; this is the Exit for it.
+  if (serviceRoute || selectionIsRoute()
+    || tool === "service-route" || tool === "service-connect" || tool === "service-node") {
+    exitRouteProfile();
+  }
+  // The steps are finite, but a cap keeps a tool that never lets go from
+  // spinning the page.
+  for (let n = 0; armed() && n < 12; n += 1) cancelDrawing();
+  // Nothing armed now: one more step is the one that deselects.
+  if (store.selected.length || underlaySelected || propertySelected || drag) cancelDrawing();
+}
+
+// --- right-click menu on the plan ---------------------------------------------
+
+let planMenuEl = null;
+
+function closePlanMenu() {
+  if (planMenuEl) planMenuEl.hidden = true;
+}
+
+/** What Enter would finish right now, as [label, run], or null. Only tools where finishing differs from cancelling. */
+function planFinishAction() {
+  if (serviceRoute) return () => { finishServiceRoute(); updateRibbonHint(); render(); };
+  if (tool === "roof-cut" && roofCutDraft?.points?.length >= 3) return () => finishRoofCut();
+  if ((tool === "slab" || tool === "roof") && boundaryDraft?.length >= 3) return () => finishBoundaryDraft();
+  if (tool === "room" && roomDraft?.length >= 3) return () => finishRoomDraft();
+  if (tool === "region" && regionDraft?.length >= 3) return () => finishRegionDraft();
+  if (tool === "property" && siteDraft?.length >= 3) return () => finishPropertyLine();
+  return null;
+}
+
+function showPlanMenu(ev) {
+  const finish = planFinishAction();
+  const hasSomething = finish || tool !== "select" || activeFunction || store.selected.length
+    || underlaySelected || propertySelected || currentUnderlayMode();
+  if (!hasSomething) {
+    closePlanMenu();
+    return;
+  }
+  if (!planMenuEl) {
+    planMenuEl = document.createElement("div");
+    planMenuEl.className = "plan-menu";
+    planMenuEl.setAttribute("role", "menu");
+    document.body.appendChild(planMenuEl);
+    // Any press outside, a key, or the window losing focus puts it away.
+    window.addEventListener("pointerdown", (e) => {
+      if (planMenuEl && !planMenuEl.hidden && !planMenuEl.contains(e.target)) closePlanMenu();
+    }, true);
+    window.addEventListener("keydown", closePlanMenu, true);
+    window.addEventListener("blur", closePlanMenu);
+  }
+  planMenuEl.innerHTML = "";
+  const add = (label, hint, run) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.setAttribute("role", "menuitem");
+    btn.textContent = label;
+    if (hint) {
+      const key = document.createElement("span");
+      key.className = "plan-menu-key";
+      key.textContent = hint;
+      btn.appendChild(key);
+    }
+    btn.addEventListener("click", () => {
+      closePlanMenu();
+      run();
+    });
+    planMenuEl.appendChild(btn);
+  };
+  if (finish) add("Finish", "Enter", finish);
+  add("Cancel", "Esc", () => exitModify());
+  planMenuEl.hidden = false;
+  // Keep it on screen: open to the left or upward near the window's edge.
+  const { offsetWidth: w, offsetHeight: h } = planMenuEl;
+  planMenuEl.style.left = `${Math.max(4, Math.min(ev.clientX, window.innerWidth - w - 4))}px`;
+  planMenuEl.style.top = `${Math.max(4, Math.min(ev.clientY, window.innerHeight - h - 4))}px`;
 }
 
 function wireToolbar() {
@@ -17142,6 +18041,13 @@ function onPointerDown(ev) {
     return;
   }
   if (panMode) return;
+  // Right button never places a point or starts a window. It opens the menu
+  // (Finish / Cancel); the browser's own menu is already suppressed.
+  if (ev.button === 2) {
+    showPlanMenu(ev);
+    return;
+  }
+  if (ev.button > 2) return;
   // The first point of a stroke used to miss: the click asked for a snap
   // before the page's lines had been read, and only the following move hit.
   // Hold this click until that read finishes, then place the snapped point.
@@ -17671,6 +18577,11 @@ function onPointerDown(ev) {
   if (tool === "place") {
     underlaySelected = false;
     placeItem(wx, wy);
+    return;
+  }
+  if (tool === "scale-figure") {
+    underlaySelected = false;
+    commitScaleFigure(wx, wy);
     return;
   }
 
@@ -18325,6 +19236,7 @@ function commitFillet(plan) {
     y2: plan.chord.y2,
     status: placementStatus(),
     arc: plan.record,
+    fillet: plan.link,
   };
   const newSku = skuById(placeSkuId);
   if (isStripFooting(newSku)) {
@@ -18981,8 +19893,18 @@ function restoreWallEndSnapshot(snap) {
 function applyDraggedWallEnd(drag, wx, wy, shiftKey) {
   restoreWallEndSnapshot(drag.before);
   const point = segmentEndAim(wx, wy, shiftKey, drag, { kind: "segment", id: drag.id });
-  const result = moveWallEnd(store.doc, { kind: "segment", id: drag.id }, drag.end, point, { skuById });
-  if (!result.ok) {
+  const start = segmentById(drag.id);
+  if (!start) return;
+  const line = locationLineOf(start, segmentThickness(start));
+  const from = drag.end === 1 ? { x: line.x1, y: line.y1 } : { x: line.x2, y: line.y2 };
+  let result = null;
+  applyFollowingFillets(drag, drag.before, [drag.id], Math.hypot(point.x - from.x, point.y - from.y), (f) => {
+    restoreWallEndSnapshot(drag.before);
+    const at = { x: from.x + (point.x - from.x) * f, y: from.y + (point.y - from.y) * f };
+    result = moveWallEnd(store.doc, { kind: "segment", id: drag.id }, drag.end, at, { skuById });
+    return result.ok;
+  });
+  if (!result?.ok) {
     restoreWallEndSnapshot(drag.lastGood || drag.before);
     drag.refused = result.message;
     return;
@@ -19005,7 +19927,7 @@ function previewWallEdit(wx, wy) {
 
 function commitWallEnd(seg, end, point) {
   store.pushUndo(historyDid("Moved an end of"));
-  const result = moveWallEnd(store.doc, { kind: "segment", id: seg.id }, end, point, { skuById });
+  const result = moveWallEndFollowingFillets({ kind: "segment", id: seg.id }, end, point);
   if (!result.ok) {
     store.dropUndo();
     setStatusMessage(result.message, "warn");
@@ -19338,6 +20260,102 @@ function planSelectCursor(wx, wy, uHandle) {
   return "crosshair";
 }
 
+function applySelectionMove(wx, wy, altKey) {
+  if (drag?.kind !== "move") return;
+  let dx = wx - drag.x0;
+  let dy = wy - drag.y0;
+  if (Math.hypot(dx, dy) * cam.scale > 2) drag.moved = true;
+  let grid = activeGrid();
+  snapGuide = null;
+  // Snapping only makes sense for a single wall or beam: with a mixed
+  // selection there is no one centreline, or one pair of faces, to test,
+  // so those still fall back to plain grid rounding. Faces are included
+  // so a side can meet another wall's end and an end can meet its side,
+  // not only so the centrelines meet.
+  if (drag.snaps.length === 1 && drag.snaps[0].x1 !== undefined) {
+    const single = drag.snaps[0];
+    const exclude = single.ref.kind === "segment" ? { excludeSegmentIds: new Set([single.ref.id]) }
+      : { excludeBeamIds: new Set([single.ref.id]) };
+    const opts = snapOpts(exclude);
+    const targets = collectSnapTargets(store.doc, opts);
+    const edges = collectSnapEdges(store.doc, opts);
+    const tol = SNAP_PIXEL_TOL / cam.scale;
+    const moving = objByRef(single.ref);
+    const thickness = single.ref.kind === "segment" && moving ? segmentThickness(moving) : 0;
+    const best = bestLinearMoveSnap({
+      x1: single.x1 + dx,
+      y1: single.y1 + dy,
+      x2: single.x2 + dx,
+      y2: single.y2 + dy,
+    }, thickness, targets, edges, tol);
+    if (best) {
+      dx += best.dx;
+      dy += best.dy;
+      grid = null; // best.dx/dy already lands exactly on the target
+      // Same shape applySnap() builds, so drawSnapGuide's tracking lines
+      // and "how far along this guide" label render identically whether
+      // the guide came from drawing a new object or moving an existing
+      // one.
+      snapGuide = {
+        ...best.guide,
+        snapX: best.guide.guideX != null,
+        snapY: best.guide.guideY != null,
+        exactJoin: isExactPointSnap(best.guide),
+      };
+    }
+  }
+  if (drag.snaps.length >= 1 && drag.snaps.every((s) => s.ref.kind === "serviceNode")) {
+    // Route points get the same live snap and gap dimensions to nearby walls,
+    // corners and other route points that a wall gets while it is drawn. The
+    // lead point is snapped; the rest (a riser column, a picked run) follow
+    // by the same delta.
+    const lead = drag.snaps[0];
+    serviceMoveIds = new Set(drag.snaps.map((s) => s.ref.id));
+    try {
+      const p = applySnap(lead.x + dx, lead.y + dy);
+      dx = p.x - lead.x;
+      dy = p.y - lead.y;
+      grid = null;
+    } finally {
+      serviceMoveIds = null;
+    }
+  }
+  if (drag.snaps.length > 1 && grid) {
+    // Several objects move as one rigid body: round the shared delta once
+    // and apply it exactly. Rounding each coordinate separately shifts
+    // off-grid objects (e.g. walls) by different amounts than the floor.
+    dx = roundGrid(dx, grid);
+    dy = roundGrid(dy, grid);
+    grid = null;
+  }
+  if (!drag.wallBefore) {
+    drag.wallBefore = wallEndSnapshot();
+    ensureMoveJoins(drag, drag.snaps.map((snap) => snap.ref));
+  }
+  const movedIds = drag.snaps.filter((snap) => snap.ref?.kind === "segment").map((snap) => snap.ref.id);
+  const filletBefore = drag.filletState;
+  applyFollowingFillets(drag, drag.wallBefore, movedIds, Math.hypot(dx, dy), (f, probe) => {
+    restoreWallEndSnapshot(drag.wallBefore);
+    store.applyMoveSnapshot(drag.snaps, dx * f, dy * f, grid);
+    holdMoveJoins(drag, altKey, { probe });
+    if (altKey) return;
+    const joined = [];
+    for (const snap of drag.snaps) {
+      if (snap.ref?.kind !== "segment" || snap.x1 === undefined) continue;
+      const obj = objByRef(snap.ref);
+      if (!obj) continue;
+      joined.push({
+        id: snap.ref.id,
+        level: obj.level ?? null,
+        old: { x1: snap.x1, y1: snap.y1, x2: snap.x2, y2: snap.y2 },
+        next: { x1: obj.x1, y1: obj.y1, x2: obj.x2, y2: obj.y2 },
+      });
+    }
+    if (joined.length) shiftJoinedEnds(store.doc, joined, { skuById });
+  });
+  if (movedIds.length) showDetachHint(altKey, { quiet: filletNoted(filletBefore, drag) });
+}
+
 function onPointerMove(ev) {
   if (drag?.kind === "pan") {
     cam.ox = drag.ox0 + (ev.clientX - drag.startX);
@@ -19502,8 +20520,14 @@ function onPointerMove(ev) {
     return;
   }
   if (tool === "place") {
-    hoverPoint = { x: wx, y: wy };
     el.canvas.style.cursor = "crosshair";
+    if (placingFurniture()) {
+      const p = applySnap(wx, wy);
+      hoverPoint = { x: p.x, y: p.y };
+      render();
+      return;
+    }
+    hoverPoint = { x: wx, y: wy };
     if (joineryDraft || joineryIsRun(skuById(placeSkuId))) {
       updateRibbonHint();
       render();
@@ -19559,92 +20583,7 @@ function onPointerMove(ev) {
     return;
   }
   if (drag?.kind === "move") {
-    let dx = wx - drag.x0;
-    let dy = wy - drag.y0;
-    if (Math.hypot(dx, dy) * cam.scale > 2) drag.moved = true;
-    let grid = activeGrid();
-    snapGuide = null;
-    // Snapping only makes sense for a single wall or beam: with a mixed
-    // selection there is no one centreline, or one pair of faces, to test,
-    // so those still fall back to plain grid rounding. Faces are included
-    // so a side can meet another wall's end and an end can meet its side,
-    // not only so the centrelines meet.
-    if (drag.snaps.length === 1 && drag.snaps[0].x1 !== undefined) {
-      const single = drag.snaps[0];
-      const exclude = single.ref.kind === "segment" ? { excludeSegmentIds: new Set([single.ref.id]) }
-        : { excludeBeamIds: new Set([single.ref.id]) };
-      const opts = snapOpts(exclude);
-      const targets = collectSnapTargets(store.doc, opts);
-      const edges = collectSnapEdges(store.doc, opts);
-      const tol = SNAP_PIXEL_TOL / cam.scale;
-      const moving = objByRef(single.ref);
-      const thickness = single.ref.kind === "segment" && moving ? segmentThickness(moving) : 0;
-      const best = bestLinearMoveSnap({
-        x1: single.x1 + dx,
-        y1: single.y1 + dy,
-        x2: single.x2 + dx,
-        y2: single.y2 + dy,
-      }, thickness, targets, edges, tol);
-      if (best) {
-        dx += best.dx;
-        dy += best.dy;
-        grid = null; // best.dx/dy already lands exactly on the target
-        // Same shape applySnap() builds, so drawSnapGuide's tracking lines
-        // and "how far along this guide" label render identically whether
-        // the guide came from drawing a new object or moving an existing
-        // one.
-        snapGuide = {
-          ...best.guide,
-          snapX: best.guide.guideX != null,
-          snapY: best.guide.guideY != null,
-          exactJoin: isExactPointSnap(best.guide),
-        };
-      }
-    }
-    if (drag.snaps.length >= 1 && drag.snaps.every((s) => s.ref.kind === "serviceNode")) {
-      // Route points get the same live snap and gap dimensions to nearby walls,
-      // corners and other route points that a wall gets while it is drawn. The
-      // lead point is snapped; the rest (a riser column, a picked run) follow
-      // by the same delta.
-      const lead = drag.snaps[0];
-      serviceMoveIds = new Set(drag.snaps.map((s) => s.ref.id));
-      try {
-        const p = applySnap(lead.x + dx, lead.y + dy);
-        dx = p.x - lead.x;
-        dy = p.y - lead.y;
-        grid = null;
-      } finally {
-        serviceMoveIds = null;
-      }
-    }
-    if (drag.snaps.length > 1 && grid) {
-      // Several objects move as one rigid body: round the shared delta once
-      // and apply it exactly. Rounding each coordinate separately shifts
-      // off-grid objects (e.g. walls) by different amounts than the floor.
-      dx = roundGrid(dx, grid);
-      dy = roundGrid(dy, grid);
-      grid = null;
-    }
-    if (!drag.wallBefore) {
-      drag.wallBefore = wallEndSnapshot();
-      ensureMoveJoins(drag, drag.snaps.map((snap) => snap.ref));
-    }
-    restoreWallEndSnapshot(drag.wallBefore);
-    store.applyMoveSnapshot(drag.snaps, dx, dy, grid);
-    holdMoveJoins(drag, ev.altKey);
-    const joined = [];
-    for (const snap of drag.snaps) {
-      if (snap.ref?.kind !== "segment" || snap.x1 === undefined) continue;
-      const obj = objByRef(snap.ref);
-      if (!obj) continue;
-      joined.push({
-        id: snap.ref.id,
-        level: obj.level ?? null,
-        old: { x1: snap.x1, y1: snap.y1, x2: snap.x2, y2: snap.y2 },
-        next: { x1: obj.x1, y1: obj.y1, x2: obj.x2, y2: obj.y2 },
-      });
-    }
-    if (joined.length) shiftJoinedEnds(store.doc, joined, { skuById });
+    applySelectionMove(wx, wy, ev.altKey);
     render();
     return;
   }
@@ -19930,6 +20869,7 @@ function onPointerUp(ev) {
       setStatusMessage("Wall selected. Delete asks before the wall is removed.", "ok");
     }
   } else if (drag.kind === "move") {
+    clearDetachHint();
     if (!drag.moved) {
       // No-op click: drop the speculative undo entry. Put the document back
       // first, so a sub-threshold nudge cannot stay behind when the click is
@@ -19945,6 +20885,7 @@ function onPointerUp(ev) {
     } else {
       if (pack) syncHosts();
       settleServicesAfterMove(drag.snaps);
+      noteFurnitureClash();
     }
   } else if (drag.kind === "opening" || drag.kind === "socket") {
     if (!drag.moved) store.dropUndo({ pendingOnly: true });
@@ -20388,10 +21329,17 @@ function wireKeyboard() {
       syncElevEdgeCursors(false);
       setOrthoHeld(false);
     }
+    if (ev.key === "Alt" || ev.code === "AltLeft" || ev.code === "AltRight") {
+      if (wallMoveDisjoinLive()) {
+        ev.preventDefault();
+        replayWallMove(false);
+      }
+    }
   };
   const onBlur = () => {
     if (elevShiftHeld) syncElevEdgeCursors(false);
     setOrthoHeld(false);
+    if (wallMoveDisjoinLive()) replayWallMove(false);
   };
   window.addEventListener("keyup", onKeyUp);
   window.addEventListener("blur", onBlur);
@@ -20408,6 +21356,18 @@ function wireKeyboard() {
     }
     const tag = activeEl()?.tagName;
     const typing = tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA";
+
+    if ((ev.key === "Alt" || ev.code === "AltLeft" || ev.code === "AltRight") && wallMoveDisjoinLive()) {
+      ev.preventDefault();
+      if (!ev.repeat) replayWallMove(true);
+      return;
+    }
+
+    if (!typing && ev.key === "Tab" && massCoversPlan() && !ev.ctrlKey && !ev.altKey && !ev.metaKey
+      && cycleMassPick(ev.shiftKey ? -1 : 1)) {
+      ev.preventDefault();
+      return;
+    }
 
     if (ev.key === "Shift") return;
     if (handleSizeTyping(ev)) return;
@@ -20550,6 +21510,30 @@ function wireKeyboard() {
       setStatusMessage(doorHandSign === -1
         ? "The door hinges at the other end of the opening."
         : "The door hinges at the first end of the opening.");
+      render();
+    } else if (ev.key === " " && !typing && tool === "scale-figure") {
+      ev.preventDefault();
+      placeRotation = (placeRotation + 90) % 360;
+      setStatusMessage(placeRotation
+        ? `Turned ${placeRotation}°. Space turns it again.`
+        : "Turned back to the start. Space turns it again.");
+      render();
+    } else if (ev.key === " " && !typing && placingFurniture()) {
+      ev.preventDefault();
+      placeRotation = (placeRotation + 90) % 360;
+      setStatusMessage(placeRotation
+        ? `Turned ${placeRotation}°. Space turns it again.`
+        : "Turned back to the start. Space turns it again.");
+      render();
+    } else if (ev.key === " " && !typing && tool === "select" && !drag
+      && store.selected.length && store.selected.every((r) => r.kind === "figure")) {
+      ev.preventDefault();
+      modifySelection("rotate");
+      render();
+    } else if (ev.key === " " && !typing && tool === "select" && !drag && selectedFurniture()) {
+      ev.preventDefault();
+      modifySelection("rotate");
+      noteFurnitureClash();
       render();
     } else if (ev.key === " " && tool === "wall") {
       ev.preventDefault();
@@ -20808,6 +21792,8 @@ function commitArcEdit(cursor) {
   store.pushUndo(historyDid(arc ? "Curved" : "Straightened"));
   if (arc) seg.arc = arcRecord(arc);
   else delete seg.arc;
+  // A reshaped arc is no longer tangent to the walls, so it stops following them.
+  delete seg.fillet;
   arcEdit = null;
   sizeDraft = null;
   store.persist();
@@ -20851,6 +21837,29 @@ function placeOpening(wx, wy) {
       ? "Opening placed. Drag a corner on the elevation to change its size."
       : "Window placed. Drag it along the wall to move it. Press Delete to remove it.", "ok");
   renderPalette();
+  render();
+}
+
+function commitScaleFigure(wx, wy) {
+  const kind = scaleFigureKind === "car" ? "car" : "person";
+  const p = applySnap(wx, wy);
+  const fig = {
+    id: nid("f"),
+    kind,
+    level: activeLevel,
+    x: p.x,
+    y: p.y,
+    rotation: placeRotation || 0,
+    status: "mixed",
+  };
+  if (!Array.isArray(store.doc.figures)) store.doc.figures = [];
+  store.pushUndo(historyAction("Placed", [figureLabel(kind).toLowerCase()]));
+  store.doc.figures.push(fig);
+  store.selectOne({ kind: "figure", id: fig.id });
+  store.persist();
+  setStatusMessage(kind === "car"
+    ? "Car placed. Drag it, or press Space to turn it. It is not counted."
+    : "Person placed. Drag it to move it. It is not counted.", "ok");
   render();
 }
 
@@ -20967,7 +21976,7 @@ function placeItem(wx, wy) {
   }
   store.pushUndo(historyPlaced("Placed", "item"));
   const p = applySnap(wx, wy);
-  store.doc.items.push({
+  const item = {
     id: nid("i"),
     sku: placeSkuId,
     level: activeLevel,
@@ -20975,8 +21984,10 @@ function placeItem(wx, wy) {
     y: p.y,
     rotation: placeRotation,
     status: placementStatus(),
-  });
+  };
+  store.doc.items.push(item);
   store.persist();
+  noteFurnitureClash([item]);
   render();
 }
 
@@ -26365,7 +27376,8 @@ function addFoundationFromFace() {
   render();
 }
 
-el.faceAdd?.addEventListener("click", () => {
+/** Add a finish on the open picture: the floor, or the wall face. */
+function beginOpenFinish() {
   if (floorHostNow()) {
     beginFloorAdd();
     return;
@@ -26385,7 +27397,9 @@ el.faceAdd?.addEventListener("click", () => {
   if (el.faceSwatch) el.faceSwatch.style.background = finishSwatch("paint");
   render();
   el.faceProduct?.focus();
-});
+}
+
+el.faceAdd?.addEventListener("click", beginOpenFinish);
 
 el.faceRemove?.addEventListener("click", () => {
   if (floorHostNow()) {
@@ -28382,7 +29396,6 @@ function syncPlanContext() {
     setHidden(el.roofOverhang, true);
     setHidden(el.wallOpts, true);
     setHidden(el.roofCutKindBar, true);
-    setHidden(el.moveDisjoin, true);
     setHidden(el.ctxLenWrap, true);
     setHidden(el.ctxAngWrap, true);
     setHidden(el.ctxWWrap, true);
@@ -28478,7 +29491,7 @@ function syncPlanContext() {
     if (dockState === "create") el.paletteTitle.textContent = lastPaletteLabel || "Types";
     else if (draft) el.paletteTitle.textContent = inspectKindLabel("wall", skuById(placeSkuId)) || "Wall";
     else if (editingProperty) el.paletteTitle.textContent = "Property line";
-    else if (obj) el.paletteTitle.textContent = inspectKindLabel(ref.kind, skuById(obj.sku)) || "Inspector";
+    else if (obj) el.paletteTitle.textContent = (ref.kind === "figure" ? figureLabel(obj.kind) : inspectKindLabel(ref.kind, skuById(obj.sku))) || "Inspector";
     else if (multiTypeable) el.paletteTitle.textContent = "Types";
     else el.paletteTitle.textContent = "Inspector";
   }
@@ -28506,7 +29519,6 @@ function syncPlanContext() {
   const moving = tool === "move" && Boolean(moveSession?.base);
   const copying = tool === "copy" && Boolean(copySession?.base);
   const placing = moving || copying;
-  setHidden(el.moveDisjoin, !moving);
   const faceWalls = draft ? [] : refs.filter((r) => r.kind === "segment" && segmentHasFaceControl(objByRef(r)));
   const editingFace = !placingWall && faceWalls.length > 0;
   // Location line and the arc are the wall command's settings. They show
@@ -28841,14 +29853,6 @@ el.ctxLen?.addEventListener("change", (ev) => {
   }
   store.persist();
   render();
-});
-
-el.moveDisjoinBox?.addEventListener("change", () => {
-  moveDisjoin = Boolean(el.moveDisjoinBox.checked);
-  if (tool === "move" && moveSession?.base && hoverPoint) {
-    applyMovePreview(hoverPoint.x, hoverPoint.y, false);
-    render();
-  }
 });
 
 function readFilletRadius(raw) {
@@ -29286,9 +30290,51 @@ el.ctxFoundationOwn?.addEventListener("click", () => {
 });
 
 function syncFloorBuildUp() {
+  if (houseBuildUpMm() !== houseDrawnBuildUp) drawHouse();
   if (!el.floorBuildUp || activeEl() === el.floorBuildUp) return;
   el.floorBuildUp.value = floorBuildUpStated(store.doc) ? String(Math.round(store.doc.floorBuildUp)) : "";
+  renderBuildUpNote();
 }
+
+/** Says what the build-up does, or what leaving it blank means. */
+function renderBuildUpNote(invalid = false) {
+  const note = el.floorBuildUpNote;
+  if (!note) return;
+  const mm = buildUpPreviewMm !== undefined
+    ? buildUpPreviewMm
+    : floorBuildUpStated(store.doc) ? Math.round(store.doc.floorBuildUp) : null;
+  note.classList.toggle("warn", invalid || mm == null);
+  if (invalid) el.floorBuildUp?.setAttribute("aria-invalid", "true");
+  else el.floorBuildUp?.removeAttribute("aria-invalid");
+  if (invalid) note.textContent = "Enter a thickness in mm, 0 or more.";
+  else if (mm == null) note.textContent = "Not stated yet. Until it is, the DPC is taken at finished floor level.";
+  else note.textContent = `Screed and finish on the slab. Ground floor walls start ${mm} mm below finished floor level.`;
+}
+
+function setBuildUpFocus(on) {
+  buildUpFocused = on;
+  el.levelHouse?.querySelector(".house-gf-slab")?.classList.toggle("focus", on);
+  renderLevelCut();
+}
+
+el.floorBuildUp?.addEventListener("focus", () => setBuildUpFocus(true));
+el.floorBuildUp?.addEventListener("blur", () => {
+  buildUpPreviewMm = undefined;
+  setBuildUpFocus(false);
+  syncFloorBuildUp();
+});
+
+el.floorBuildUp?.addEventListener("input", (e) => {
+  const raw = String(e.target.value ?? "").trim();
+  const mm = raw ? parseMm(raw) : null;
+  if (raw && (mm == null || mm < 0)) {
+    renderBuildUpNote(true);
+    return;
+  }
+  buildUpPreviewMm = mm == null ? null : Math.round(mm);
+  renderBuildUpNote();
+  drawHouse();
+});
 
 el.floorBuildUp?.addEventListener("change", (e) => {
   const raw = String(e.target.value ?? "").trim();
@@ -29440,15 +30486,17 @@ el.modeDone?.addEventListener("click", () => {
   }
   doneUnderlayMode();
 });
+// On an outline, ✗ Cancel is Revit's Cancel Edit Mode: the corners go and so
+// does the tool. Backspace is the way to take back one corner.
 el.modeCancel?.addEventListener("click", () => {
-  if (!polygonSketch()) {
+  if (!sketchOffer()) {
     cancelUnderlayMode();
     return;
   }
+  const hadCorners = sketchOffer().points.length > 0;
   discardPolygonSketch();
-  setStatusMessage("Outline discarded.", "warn");
-  drawRibbon();
-  render();
+  exitModify();
+  if (hadCorners) setStatusMessage("Outline discarded.", "warn");
 });
 // The close button is Cancel in Set scale and Align sheets, and Done in Adjust,
 // where leaving the mode is not a reason to throw the move away. On an outline

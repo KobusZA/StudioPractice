@@ -44,6 +44,7 @@ export const ENTITY_KINDS = [
   "roof",
   "opening",
   "item",
+  "figure",
   "beam",
   "stair",
   "line",
@@ -144,6 +145,8 @@ export function emptyDoc() {
     roofs: [],
     openings: [],
     items: [],
+    // People and cars for scale. Not compiled, not counted.
+    figures: [],
     beams: [],
     stairs: [],
     // Document > Lines (`model-lines`/`annot-lines`) - see LINE_KINDS above
@@ -400,6 +403,7 @@ const KIND_TO_ARRAY = {
   roof: "roofs",
   opening: "openings",
   item: "items",
+  figure: "figures",
   beam: "beams",
   stair: "stairs",
   line: "lines",
@@ -971,6 +975,7 @@ export class PlanStore {
 const PLAN_MARK_ARRAYS = [
   "openings",
   "items",
+  "figures",
   "beams",
   "stairs",
   "lines",
@@ -1006,6 +1011,7 @@ const JOB_CONTENT_ARRAYS = [
   "roofs",
   "openings",
   "items",
+  "figures",
   "beams",
   "stairs",
   "lines",
@@ -1174,6 +1180,7 @@ export function normalizeDoc(raw) {
   doc.segments = (raw.segments || raw.traces || []).map((seg) => {
     const location = normalizeWallLocation(seg.location);
     const arc = normalizeWallArc(seg.arc, seg.x1, seg.y1, seg.x2, seg.y2);
+    const fillet = arc ? normalizeFilletLink(seg.fillet) : null;
     return {
       id: seg.id || nid("s"),
       sku: seg.sku,
@@ -1187,6 +1194,7 @@ export function normalizeDoc(raw) {
       ...(seg.foundation === false ? { foundation: false } : {}),
       ...(location === "exterior" || location === "interior" ? { location } : {}),
       ...(arc ? { arc } : {}),
+      ...(fillet ? { fillet } : {}),
       ...baseAttachFields(seg),
     };
   });
@@ -1220,6 +1228,23 @@ export function normalizeDoc(raw) {
 
   doc.openings = (raw.openings || []).map((o) => migrateOpening(o));
   doc.items = (raw.items || []).map((i) => ({ ...i, id: i.id || nid("i") }));
+  doc.figures = (Array.isArray(raw.figures) ? raw.figures : [])
+    .map((fig) => {
+      if (fig?.kind !== "person" && fig?.kind !== "car") return null;
+      if (!Number.isFinite(fig.x) || !Number.isFinite(fig.y)) return null;
+      const rotation = Number(fig.rotation);
+      return {
+        id: fig.id || nid("f"),
+        kind: fig.kind,
+        level: fig.level || null,
+        x: fig.x,
+        y: fig.y,
+        rotation: Number.isFinite(rotation) ? ((rotation % 360) + 360) % 360 : 0,
+        // A scale mark, not existing or proposed work, so both plan filters keep it.
+        status: "mixed",
+      };
+    })
+    .filter(Boolean);
   doc.beams = (raw.beams || []).map((b) => ({ ...b, id: b.id || nid("b"), ...baseAttachFields(b) }));
   doc.stairs = (raw.stairs || []).map((s) => ({ ...s, id: s.id || nid("st") }));
   // A line with a missing endpoint or an unrecognised `kind` is dropped
@@ -1423,6 +1448,21 @@ export function normalizeDoc(raw) {
 
   if (isV1) doc.migratedFrom = raw.schema || "sp.doc/1";
   return doc;
+}
+
+/**
+ * The two straight walls a fillet arc was made between. `a` meets the arc's
+ * first end and `b` its second. Anything malformed is dropped, and the arc
+ * stays a free arc.
+ */
+function normalizeFilletLink(raw) {
+  const side = (row) => (row && typeof row.id === "string" && row.id && (row.end === 1 || row.end === 2)
+    ? { id: row.id, end: row.end }
+    : null);
+  const a = side(raw?.a);
+  const b = side(raw?.b);
+  if (!a || !b || a.id === b.id) return null;
+  return { a, b };
 }
 
 /**

@@ -424,6 +424,7 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
 
     sketchForms.push({
       kind: "Room",
+      selectKind: "room",
       elementId: room.id,
       name: room.name,
       isSolid: false,
@@ -515,6 +516,7 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
 
     sketchForms.push({
       kind: "Floor",
+      selectKind: "slab",
       elementId: slab.id,
       name: sku.name,
       isSolid: true,
@@ -558,6 +560,7 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
 
     sketchForms.push({
       kind: "Roof",
+      selectKind: "roof",
       elementId: roof.id,
       name: sku.name,
       isSolid: true,
@@ -650,6 +653,8 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
 
     sketchForms.push({
       kind: "Wall",
+      // A room-derived wall is not a document object, so a click cannot select it.
+      selectKind: wall.drawn ? "segment" : null,
       elementId: wall.id,
       name: sku.name,
       thickness: wall.thickness,
@@ -695,6 +700,7 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
 
     const tick = {
       kind: sku.category === "window" ? "Window" : "Opening",
+      selectKind: "opening",
       elementId: opening.id,
       name: sku.name,
       hostWallId: wall.id,
@@ -771,6 +777,7 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
     const elevation = levelElevation(pack, effectiveLevel(item, pack)) + (joineryIsRun(sku) ? heights.bottom : 0);
     sketchForms.push({
       kind: "Extrusion",
+      selectKind: "item",
       elementId: item.id,
       name: sku.name,
       isSolid: true,
@@ -809,6 +816,7 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
 
     sketchForms.push({
       kind: "Extrusion",
+      selectKind: "beam",
       elementId: beam.id,
       name: sku.name,
       depth: base.height,

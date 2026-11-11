@@ -273,7 +273,170 @@ export function planFillet(wallA, wallB, pickA, pickB, radius) {
     chord: { x1: tA.x, y1: tA.y, x2: tB.x, y2: tB.y },
     arc,
     record: { radius: arc.radius, side: arc.side },
+    link: { a: { id: wallA.id, end: a.end }, b: { id: wallB.id, end: b.end } },
   };
+}
+
+// --- fillets that follow their walls ----------------------------------------
+//
+// A fillet arc remembers the two walls it was made between (`seg.fillet`).
+// When either wall moves, the arc is fitted again at the same radius, so it
+// stays tangent to both. The link is read at the start of a gesture, the way
+// joins are, and only kept while the arc's ends still sit on those walls.
+
+const FILLET_LINK_TOL = 1e-3;
+
+function farEnd(seg, end) {
+  return endPoint(seg, end === 1 ? 2 : 1);
+}
+
+function segById(doc, id) {
+  return (doc.segments || []).find((seg) => seg && seg.id === id) || null;
+}
+
+function planLinkedFillet(doc, link) {
+  const wallA = segById(doc, link.a.id);
+  const wallB = segById(doc, link.b.id);
+  if (!wallA || !wallB) return fail("That wall is no longer on the plan.");
+  const plan = planFillet(wallA, wallB, farEnd(wallA, link.a.end), farEnd(wallB, link.b.end), link.radius);
+  if (!plan.ok) return plan;
+  if (plan.moves[0].end !== link.a.end || plan.moves[1].end !== link.b.end) {
+    return fail("The walls have turned past the corner.");
+  }
+  return plan;
+}
+
+/**
+ * The fillets to keep fitted while `movedIds` move. An arc moving with both
+ * of its walls goes rigidly and is left out, and so is an arc moving on its
+ * own, which is no longer held to the corner. Each link is checked against
+ * the plan as it is now, so a stale link (a wall split, deleted, or dragged
+ * off the arc) is not followed.
+ */
+export function captureFillets(doc, movedIds) {
+  const moved = movedIds instanceof Set ? movedIds : new Set(movedIds || []);
+  const links = [];
+  for (const arcSeg of doc.segments || []) {
+    if (!arcSeg?.arc || moved.has(arcSeg.id)) continue;
+    const found = storedFilletLink(doc, arcSeg) || tangentFilletLink(doc, arcSeg);
+    if (!found) continue;
+    if (!moved.has(found.a.id) && !moved.has(found.b.id)) continue;
+    const link = { arcId: arcSeg.id, ...found, radius: arcSeg.arc.radius };
+    if (!planLinkedFillet(doc, link).ok) continue;
+    links.push(link);
+  }
+  return links;
+}
+
+function straightWallEndAt(seg, end, x, y) {
+  if (!seg || seg.arc) return false;
+  const at = endPoint(seg, end);
+  return Math.hypot(at.x - x, at.y - y) <= FILLET_LINK_TOL;
+}
+
+function storedFilletLink(doc, arcSeg) {
+  const raw = arcSeg.fillet;
+  if (!raw?.a || !raw?.b) return null;
+  if (!straightWallEndAt(segById(doc, raw.a.id), raw.a.end, arcSeg.x1, arcSeg.y1)) return null;
+  if (!straightWallEndAt(segById(doc, raw.b.id), raw.b.end, arcSeg.x2, arcSeg.y2)) return null;
+  return { a: { ...raw.a }, b: { ...raw.b } };
+}
+
+/**
+ * An arc with no stored link, drawn before fillets kept one or drawn by
+ * hand, still counts when each end meets the end of a straight wall that
+ * runs off along the arc's tangent.
+ */
+function tangentFilletLink(doc, arcSeg) {
+  const arc = arcFromRadius(arcSeg.x1, arcSeg.y1, arcSeg.x2, arcSeg.y2, arcSeg.arc.radius, arcSeg.arc.side, arcSeg.arc.major === true);
+  if (!arc || arc.major) return null;
+  const tol = Math.max(FILLET_LINK_TOL, arc.radius * 1e-3);
+  const touching = (x, y) => {
+    for (const seg of doc.segments || []) {
+      if (!seg || seg.id === arcSeg.id || seg.arc || (seg.level ?? null) !== (arcSeg.level ?? null)) continue;
+      const len = Math.hypot(seg.x2 - seg.x1, seg.y2 - seg.y1);
+      if (len < 1e-9) continue;
+      for (const end of [1, 2]) {
+        if (!straightWallEndAt(seg, end, x, y)) continue;
+        const off = Math.abs((arc.cx - seg.x1) * (seg.y2 - seg.y1) - (arc.cy - seg.y1) * (seg.x2 - seg.x1)) / len;
+        if (Math.abs(off - arc.radius) <= tol) return { id: seg.id, end };
+      }
+    }
+    return null;
+  };
+  const a = touching(arcSeg.x1, arcSeg.y1);
+  const b = touching(arcSeg.x2, arcSeg.y2);
+  if (!a || !b || a.id === b.id) return null;
+  return { a, b };
+}
+
+/**
+ * Fit each captured fillet to where its walls are now: both walls are cut
+ * back or stretched to the tangent points and the arc spans them at its
+ * radius. A fillet that no longer fits is left as it was and its arc id is
+ * returned in `failed`.
+ */
+export function refitFillets(doc, links, { skuById = () => null } = {}) {
+  const failed = [];
+  for (const link of links || []) {
+    const arcSeg = segById(doc, link.arcId);
+    if (!arcSeg) continue;
+    const plan = planLinkedFillet(doc, link);
+    if (!plan.ok) {
+      failed.push(link.arcId);
+      continue;
+    }
+    const ids = new Set(plan.moves.map((move) => move.id));
+    const snap = snapshot(doc, ids);
+    let ok = true;
+    for (const move of plan.moves) {
+      const seg = segById(doc, move.id);
+      const at = endPoint(seg, move.end);
+      if (Math.hypot(at.x - move.point.x, at.y - move.point.y) < 1e-9) continue;
+      if (!moveWallEnd(doc, { kind: "segment", id: move.id }, move.end, move.point, { skuById, space: "centre" }).ok) {
+        ok = false;
+        break;
+      }
+    }
+    if (!ok) {
+      restore(doc, snap);
+      failed.push(link.arcId);
+      continue;
+    }
+    arcSeg.x1 = plan.chord.x1;
+    arcSeg.y1 = plan.chord.y1;
+    arcSeg.x2 = plan.chord.x2;
+    arcSeg.y2 = plan.chord.y2;
+    if (Number.isFinite(arcSeg.length)) arcSeg.length = plan.arc.length;
+    arcSeg.arc = { ...plan.record };
+  }
+  return failed;
+}
+
+/**
+ * Take the arc out of each listed fillet and bring its two walls back to a
+ * sharp corner. Doors, windows and finishes on the arc go with it. Walls that
+ * can no longer meet are left where they are.
+ */
+export function sharpenFillets(doc, links, arcIds, { skuById = () => null } = {}) {
+  const drop = new Set(arcIds || []);
+  const sharpened = [];
+  for (const link of links || []) {
+    if (!drop.has(link.arcId) || !segById(doc, link.arcId)) continue;
+    doc.segments = doc.segments.filter((seg) => seg.id !== link.arcId);
+    doc.openings = (doc.openings || []).filter((opening) => opening.wallId !== link.arcId);
+    if (doc.finishRuns) doc.finishRuns = doc.finishRuns.filter((run) => run.wallId !== link.arcId);
+    const wallA = segById(doc, link.a.id);
+    const wallB = segById(doc, link.b.id);
+    if (wallA && wallB) {
+      trimToCorner(doc, [
+        { ref: { kind: "segment", id: wallA.id }, pick: farEnd(wallA, link.a.end) },
+        { ref: { kind: "segment", id: wallB.id }, pick: farEnd(wallB, link.b.end) },
+      ], { skuById });
+    }
+    sharpened.push(link.arcId);
+  }
+  return sharpened;
 }
 
 /**

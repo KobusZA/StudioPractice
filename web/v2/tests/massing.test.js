@@ -22,6 +22,9 @@ import {
   lookAxes,
   projectLookPoint,
   projectPoint,
+  orbitRay,
+  rayPlanePoint,
+  pickProjected,
   EYE_HEIGHT_M,
   LOOK_NEAR,
   MASSING_PITCH_MIN,
@@ -144,6 +147,45 @@ test("default 3D camera looks down over a typical pitched roof", () => {
   assert.ok(cam.pitch > (40 * Math.PI) / 180);
   assert.ok(MASSING_PITCH_MIN < (20 * Math.PI) / 180, "orbit can drop toward an elevation");
   assert.ok(MASSING_PITCH_MAX > (80 * Math.PI) / 180, "orbit can rise toward plan");
+});
+
+test("an orbit ray through a pixel hits that model point", () => {
+  const cam = { yaw: 0.8, pitch: 0.7 };
+  const frame = { origin: [1, 2, 0.5], cx: 400, cy: 300, scale: 36, yaw: cam.yaw, pitch: cam.pitch };
+  const world = [4, -1, 2.2];
+  const [sx, sy] = projectPoint(world[0], world[1], world[2], frame.origin, frame.cx, frame.cy, frame.scale, cam);
+  const ray = orbitRay(sx, sy, frame);
+  const flat = rayPlanePoint(ray, world, [0, 0, 1]);
+  const wall = rayPlanePoint(ray, world, [1, 0, 0]);
+  for (const hit of [flat, wall]) {
+    assert.ok(Math.abs(hit[0] - world[0]) < 1e-6);
+    assert.ok(Math.abs(hit[1] - world[1]) < 1e-6);
+    assert.ok(Math.abs(hit[2] - world[2]) < 1e-6);
+  }
+});
+
+test("a click hits the front element, then the one behind it", () => {
+  const back = { id: "wall", kind: "wall", selectKind: "segment", pts: [[0, 0], [100, 0], [100, 100], [0, 100]] };
+  const front = { id: "win", kind: "window", selectKind: "opening", pts: [[20, 20], [60, 20], [60, 70], [20, 70]] };
+  const over = pickProjected(40, 40, [back, front]);
+  assert.deepEqual(over.map((h) => h.id), ["win", "wall"]);
+  assert.equal(over[0].selectKind, "opening");
+  assert.equal(pickProjected(80, 80, [back, front])[0].id, "wall");
+  assert.equal(pickProjected(200, 200, [back, front]).length, 0);
+});
+
+test("3D faces remember which document object a click selects", () => {
+  const windowSku = pack.skus.find((s) => s.category === "window")?.id;
+  const doc = normalizeDoc({
+    segments: [{ id: "s1", sku: "TSP_MAS009", x1: 0, y1: 0, x2: 4, y2: 0 }],
+    openings: [{ id: "o1", sku: windowSku, wallId: "s1", t: 0.5, status: "planned" }],
+    roofs: [{ id: "rf1", sku: pack.system.defaultRoofSku, form: "gable", pitch: 30, shape: rectShape(0, 0, 4, 4) }],
+  });
+  const faces = facesFromPayload(compile(doc, pack));
+  assert.ok(faces.some((f) => f.id === "o1" && f.selectKind === "opening"));
+  assert.ok(faces.some((f) => f.id === "s1" && f.selectKind === "segment"));
+  assert.ok(faces.some((f) => f.id === "rf1" && f.selectKind === "roof"));
+  assert.ok(faces.filter((f) => f.kind === "ground").every((f) => !f.selectKind));
 });
 
 test("the top-down 3D view is the plan, not a mirror of it", () => {

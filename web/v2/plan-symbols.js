@@ -1,13 +1,22 @@
-// Plan symbols for sanitary fittings, drawn to the fitting's true size.
-// SANS 10143 shows these as thin line conventions, not as the manufacturer's
-// outline and not as a filled box: a close-coupled WC is a cistern against
-// the wall with the pan in front, a basin is a bowl with taps and a waste,
-// a bath is a double line (rim) with taps at one end and the waste at the
-// other, a shower is a crossed tray, a front-loading washer is a rectangle
-// with its door. The wall side of every symbol is local v = 0. Rotation
-// keeps the footprint in the same axis-aligned box the plan already uses.
+// Plan symbols for sanitary fittings and loose furniture, drawn to the
+// type's true size. SANS 10143 shows sanitary as thin line conventions, not
+// as the manufacturer's outline and not as a filled box: a close-coupled WC
+// is a cistern against the wall with the pan in front, a basin is a bowl
+// with taps and a waste, a bath is a double line (rim) with taps at one end
+// and the waste at the other, a shower is a crossed tray, a front-loading
+// washer is a rectangle with its door. Furniture is the same kind of
+// linework: a bed with a headboard and pillows, a sofa with a back and arms,
+// a dining table with its chairs. The wall side, or the back of a piece, is
+// local v = 0. Rotation keeps the footprint in the same axis-aligned box
+// the plan already uses.
 
 const TAP = 0.012;
+
+const FURNITURE_PLANS = new Set([
+  "bed", "bedside", "sofa-2", "sofa-3", "armchair", "coffee", "tv",
+  "dining-4", "dining-6", "dining-8", "desk", "chair", "fridge", "stove",
+  "carpet-square", "carpet-round",
+]);
 
 export function fixtureSize(sku) {
   const g = sku?.geometry || {};
@@ -19,6 +28,7 @@ export function fixtureSize(sku) {
 /** Which SANS 10143 plan symbol this type is, or null to keep the plain box. */
 export function fixtureSymbolKind(sku) {
   if (!sku) return null;
+  if (sku.category === "furniture" && FURNITURE_PLANS.has(sku.drawing?.plan)) return sku.drawing.plan;
   const name = `${sku.family || ""} ${sku.name || ""}`;
   if (sku.category === "waterheater" || /geyser|water heater|hot[- ]water cylinder/i.test(name)) return "geyser";
   if (/dishwasher/i.test(name)) return "dishwasher";
@@ -71,6 +81,22 @@ export function fixturePrimitives(kind, width, depth) {
     case "sink": return sinkPrimitives(w, d, 1);
     case "sink-double": return sinkPrimitives(w, d, 2);
     case "geyser": return geyserPrimitives(w, d);
+    case "bed": return bedPrimitives(w, d);
+    case "bedside": return bedsidePrimitives(w, d);
+    case "sofa-2": return sofaPrimitives(w, d, 2);
+    case "sofa-3": return sofaPrimitives(w, d, 3);
+    case "armchair": return sofaPrimitives(w, d, 1);
+    case "coffee": return coffeePrimitives(w, d);
+    case "tv": return tvPrimitives(w, d);
+    case "dining-4": return diningPrimitives(w, d, 1);
+    case "dining-6": return diningPrimitives(w, d, 2);
+    case "dining-8": return diningPrimitives(w, d, 3);
+    case "desk": return deskPrimitives(w, d);
+    case "chair": return chairParts(0, 0, w, d, "plusV");
+    case "fridge": return fridgePrimitives(w, d);
+    case "stove": return stovePrimitives(w, d);
+    case "carpet-square": return carpetSquarePrimitives(w, d);
+    case "carpet-round": return carpetRoundPrimitives(w, d);
     default: return [];
   }
 }
@@ -294,6 +320,190 @@ function geyserPrimitives(w, d) {
     { op: "circle", cx: w / 2, cy: d / 2, r },
     { op: "line", x1: w / 2 - r, y1: d / 2, x2: w / 2 + r, y2: d / 2 },
   ];
+}
+
+// Chair depth sits in the 500 mm band around a dining table. The back is the
+// closed side; the seat opens toward the table.
+const CHAIR_D = 0.45;
+const CHAIR_GAP = 0.05;
+const CHAIR_W = 0.46;
+
+function chairParts(x, y, w, h, facing) {
+  const t = Math.min(0.08, Math.min(w, h) * 0.22);
+  if (facing === "minusV") {
+    return [
+      { op: "line", x1: x, y1: y + h, x2: x + w, y2: y + h },
+      { op: "line", x1: x, y1: y + h, x2: x, y2: y + h - t },
+      { op: "line", x1: x + w, y1: y + h, x2: x + w, y2: y + h - t },
+      { op: "rect", x, y, w, h: h - t },
+    ];
+  }
+  if (facing === "plusU") {
+    return [
+      { op: "line", x1: x, y1: y, x2: x, y2: y + h },
+      { op: "line", x1: x, y1: y, x2: x + t, y2: y },
+      { op: "line", x1: x, y1: y + h, x2: x + t, y2: y + h },
+      { op: "rect", x: x + t, y, w: w - t, h },
+    ];
+  }
+  if (facing === "minusU") {
+    return [
+      { op: "line", x1: x + w, y1: y, x2: x + w, y2: y + h },
+      { op: "line", x1: x + w, y1: y, x2: x + w - t, y2: y },
+      { op: "line", x1: x + w, y1: y + h, x2: x + w - t, y2: y + h },
+      { op: "rect", x, y, w: w - t, h },
+    ];
+  }
+  return [
+    { op: "line", x1: x, y1: y, x2: x + w, y2: y },
+    { op: "line", x1: x, y1: y, x2: x, y2: y + t },
+    { op: "line", x1: x + w, y1: y, x2: x + w, y2: y + t },
+    { op: "rect", x, y: y + t, w, h: h - t },
+  ];
+}
+
+function addChairs(parts, origin, span, count, along, facing) {
+  if (!(count > 0) || !(span > 0)) return;
+  const gap = (span - CHAIR_W * count) / (count + 1);
+  if (gap < -0.01) return;
+  for (let i = 0; i < count; i += 1) {
+    const t = gap + i * (CHAIR_W + gap);
+    if (along === "u") {
+      parts.push(...chairParts(origin.x + t, origin.y, CHAIR_W, CHAIR_D, facing));
+    } else {
+      parts.push(...chairParts(origin.x, origin.y + t, CHAIR_D, CHAIR_W, facing));
+    }
+  }
+}
+
+function bedPrimitives(w, d) {
+  const head = Math.min(0.08, Math.max(0.05, d * 0.04));
+  const pillowD = Math.min(0.4, d * 0.2);
+  const gap = Math.min(0.04, w * 0.025);
+  const inset = Math.min(0.08, w * 0.05);
+  const count = w >= 1.15 ? 2 : 1;
+  const pw = (w - inset * 2 - gap * (count - 1)) / count;
+  const py = head + gap;
+  const parts = [
+    { op: "rect", x: 0, y: 0, w, h: d },
+    { op: "rect", x: 0, y: 0, w, h: head },
+  ];
+  for (let i = 0; i < count; i += 1) {
+    parts.push({
+      op: "roundRect",
+      x: inset + i * (pw + gap),
+      y: py,
+      w: pw,
+      h: pillowD,
+      r: Math.min(0.04, pillowD * 0.15),
+    });
+  }
+  const fold = py + pillowD + Math.min(0.22, d * 0.1);
+  parts.push({ op: "line", x1: inset, y1: fold, x2: w - inset, y2: fold });
+  return parts;
+}
+
+function bedsidePrimitives(w, d) {
+  return [
+    { op: "rect", x: 0, y: 0, w, h: d },
+    { op: "line", x1: w * 0.12, y1: d * 0.5, x2: w * 0.88, y2: d * 0.5 },
+  ];
+}
+
+function sofaPrimitives(w, d, seats) {
+  const arm = Math.min(0.16, Math.max(0.1, w * 0.08));
+  const back = Math.min(0.28, Math.max(0.18, d * 0.28));
+  const front = Math.min(0.04, d * 0.05);
+  const parts = [
+    { op: "roundRect", x: 0, y: 0, w, h: d, r: Math.min(0.04, d * 0.05) },
+    { op: "line", x1: arm, y1: back, x2: w - arm, y2: back },
+    { op: "line", x1: arm, y1: back, x2: arm, y2: d - front },
+    { op: "line", x1: w - arm, y1: back, x2: w - arm, y2: d - front },
+  ];
+  if (seats > 1) {
+    const inner = w - arm * 2;
+    for (let i = 1; i < seats; i += 1) {
+      const x = arm + inner * (i / seats);
+      parts.push({ op: "line", x1: x, y1: back, x2: x, y2: d - front });
+    }
+  }
+  return parts;
+}
+
+function coffeePrimitives(w, d) {
+  const m = Math.min(0.05, Math.min(w, d) * 0.08);
+  return [
+    { op: "rect", x: 0, y: 0, w, h: d },
+    { op: "rect", x: m, y: m, w: w - m * 2, h: d - m * 2 },
+  ];
+}
+
+function tvPrimitives(w, d) {
+  const inset = Math.min(0.08, w * 0.05);
+  return [
+    { op: "rect", x: 0, y: 0, w, h: d },
+    { op: "rect", x: inset, y: d * 0.1, w: w - inset * 2, h: d * 0.5 },
+  ];
+}
+
+function diningPrimitives(w, d, perLongSide) {
+  const inset = CHAIR_D + CHAIR_GAP;
+  const tableX = inset;
+  const tableY = inset;
+  const tableW = w - inset * 2;
+  const tableH = d - inset * 2;
+  const parts = [{ op: "rect", x: tableX, y: tableY, w: tableW, h: tableH }];
+  addChairs(parts, { x: tableX, y: 0 }, tableW, perLongSide, "u", "plusV");
+  addChairs(parts, { x: tableX, y: tableY + tableH + CHAIR_GAP }, tableW, perLongSide, "u", "minusV");
+  addChairs(parts, { x: 0, y: tableY }, tableH, 1, "v", "plusU");
+  addChairs(parts, { x: tableX + tableW + CHAIR_GAP, y: tableY }, tableH, 1, "v", "minusU");
+  return parts;
+}
+
+function deskPrimitives(w, d) {
+  const chairD = Math.min(CHAIR_D, d * 0.4);
+  const gap = Math.min(0.06, d * 0.05);
+  const deskD = Math.max(0.2, d - chairD - gap);
+  const chairW = Math.min(0.5, w * 0.42);
+  return [
+    { op: "rect", x: 0, y: 0, w, h: deskD },
+    ...chairParts((w - chairW) / 2, deskD + gap, chairW, chairD, "minusV"),
+  ];
+}
+
+function fridgePrimitives(w, d) {
+  return [
+    { op: "rect", x: 0, y: 0, w, h: d },
+    { op: "line", x1: w * 0.08, y1: d * 0.9, x2: w * 0.92, y2: d * 0.9 },
+    { op: "line", x1: w * 0.78, y1: d * 0.55, x2: w * 0.78, y2: d * 0.82 },
+  ];
+}
+
+function carpetSquarePrimitives(w, d) {
+  const m = Math.min(0.08, Math.min(w, d) * 0.045);
+  return [
+    { op: "rect", x: 0, y: 0, w, h: d },
+    { op: "rect", x: m, y: m, w: w - m * 2, h: d - m * 2 },
+  ];
+}
+
+function carpetRoundPrimitives(w, d) {
+  const rx = w / 2;
+  const ry = d / 2;
+  const inset = Math.min(0.08, Math.min(rx, ry) * 0.1);
+  return [
+    { op: "ellipse", cx: rx, cy: ry, rx, ry },
+    { op: "ellipse", cx: rx, cy: ry, rx: Math.max(0.02, rx - inset), ry: Math.max(0.02, ry - inset) },
+  ];
+}
+
+function stovePrimitives(w, d) {
+  const parts = [{ op: "rect", x: 0, y: 0, w, h: d }];
+  const r = Math.min(w, d) * 0.12;
+  for (const [u, v] of [[0.32, 0.32], [0.68, 0.32], [0.32, 0.68], [0.68, 0.68]]) {
+    parts.push({ op: "circle", cx: w * u, cy: d * v, r });
+  }
+  return parts;
 }
 
 function strokeRoundRect(ctx, x, y, w, h, r) {

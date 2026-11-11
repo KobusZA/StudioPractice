@@ -17,7 +17,7 @@ import {
   objectLabel,
   resolvedBase,
 } from "./compile.js";
-import { MIN_TRACE, centerlineFromLocation, fitWallArc, locationLineOf, mirroredWallLocation, normalizeWallLocation, realignAboutLocation, rethickenAboutLocation } from "./click-draw.js?v=20261107-arc2";
+import { MIN_TRACE, centerlineFromLocation, keepArcSweep, locationLineOf, mirroredWallLocation, normalizeWallLocation, realignAboutLocation, rethickenAboutLocation } from "./click-draw.js?v=20261111-fillet-follow";
 import { bbox, roundGrid } from "./geom.js";
 import {
   ATTACHABLE_KINDS,
@@ -320,6 +320,7 @@ export function copySelection(doc, refs, { dx = null, dy = 0 } = {}) {
   for (const { ref, obj } of rows) {
     const copy = structuredClone(obj);
     copy.id = nid(ref.kind[0]);
+    delete copy.fillet;
     if (SHAPED.has(ref.kind)) {
       copy.shape = translateAny(copy.shape, offsetX, dy);
       if (copy.base) copy.base = translateAny(copy.base, offsetX, dy);
@@ -1094,7 +1095,7 @@ export function moveWallEnd(doc, ref, end, point, { skuById = () => null, space 
     if (Number.isFinite(plan.seg.length)) {
       plan.seg.length = Math.hypot(plan.next.x2 - plan.next.x1, plan.next.y2 - plan.next.y1);
     }
-    fitWallArc(plan.seg);
+    keepArcSweep(plan.seg, plan.old);
   }
 
   const drop = new Set();
@@ -1187,7 +1188,9 @@ export function captureWallJoins(doc, refs, { skuById = () => null, tol = CORNER
   for (const seg of moving) {
     const dir = wallDir(seg);
     if (!dir) continue;
-    const others = (doc.segments || []).filter((other) => other && !movingIds.has(other.id) && sameLevel(other, seg));
+    // A fillet arc on this wall is refitted after the move, so its end is not a join to hold.
+    const others = (doc.segments || []).filter((other) => other && !movingIds.has(other.id) && sameLevel(other, seg)
+      && other.fillet?.a?.id !== seg.id && other.fillet?.b?.id !== seg.id);
     for (const end of [1, 2]) {
       const px = end === 1 ? seg.x1 : seg.x2;
       const py = end === 1 ? seg.y1 : seg.y2;
@@ -1294,7 +1297,7 @@ export function holdWallJoins(doc, joins, { skuById = () => null } = {}) {
     seg.x2 = cur.x2;
     seg.y2 = cur.y2;
     if (Number.isFinite(seg.length)) seg.length = Math.hypot(cur.x2 - cur.x1, cur.y2 - cur.y1);
-    fitWallArc(seg);
+    keepArcSweep(seg, pre);
     const rigid = Math.abs((cur.x1 - pre.x1) - (cur.x2 - pre.x2)) < 1e-9
       && Math.abs((cur.y1 - pre.y1) - (cur.y2 - pre.y2)) < 1e-9;
     if (!rigid) {
@@ -1322,6 +1325,39 @@ export function dropBrokenJoins(joins, broken) {
   const gone = new Set((broken || []).map((row) => `${row.wallId}:${row.end}:${row.hostId}`));
   if (!gone.size) return joins ? [...joins] : [];
   return (joins || []).filter((join) => !gone.has(`${join.wallId}:${join.end}:${join.hostId}`));
+}
+
+/**
+ * True when moving these walls would hold or stretch another wall: a join
+ * `captureWallJoins` would hold, or a neighbour `shiftJoinedEnds` would
+ * move. A fillet arc does not count; it is refitted whether or not the
+ * walls are pulled apart.
+ */
+export function wallMoveHasJoins(doc, refs, { skuById = () => null, tol = CORNER_JOIN_TOL } = {}) {
+  if (captureWallJoins(doc, refs, { skuById, tol }).length) return true;
+  const moving = [];
+  const movingIds = new Set();
+  for (const ref of refs || []) {
+    if (!ref || ref.kind !== "segment" || movingIds.has(ref.id)) continue;
+    const seg = objectByRef(doc, ref);
+    if (!seg) continue;
+    movingIds.add(seg.id);
+    moving.push(seg);
+  }
+  const thick = (seg) => drawnWallThickness(skuById(seg?.sku));
+  for (const other of doc.segments || []) {
+    if (!other || movingIds.has(other.id)) continue;
+    if (movingIds.has(other.fillet?.a?.id) || movingIds.has(other.fillet?.b?.id)) continue;
+    const here = { id: other.id, thickness: thick(other), ...endsOf(other) };
+    for (const seg of moving) {
+      if (!sameLevel(other, seg)) continue;
+      const was = { id: seg.id, thickness: thick(seg), ...endsOf(seg) };
+      for (const end of [1, 2]) {
+        if (wallCornerNeighbors(here, end, [was], { thicknessOf: (w) => w.thickness || 0, tol }).length) return true;
+      }
+    }
+  }
+  return false;
 }
 
 /**
@@ -1391,6 +1427,7 @@ export function shiftJoinedEnds(doc, moves, { skuById = () => null, tol = CORNER
     other.x2 = next.x2;
     other.y2 = next.y2;
     if (Number.isFinite(other.length)) other.length = Math.hypot(next.x2 - next.x1, next.y2 - next.y1);
+    keepArcSweep(other, old);
     if (!rigid) {
       for (const opening of doc.openings || []) {
         if (opening.wallId !== other.id || !Number.isFinite(Number(opening.t))) continue;

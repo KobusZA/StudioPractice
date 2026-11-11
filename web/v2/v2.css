@@ -2250,9 +2250,9 @@ body.library-home {
   }
 }
 
-/* Active-level widget: a permanent sidebar beside the plan canvas, ported in
-   full from level-slider-mock.html (house cutaway, stations list, elevation-
-   accurate rail) rather than the flat evenly-spaced-tick rail this replaces.
+/* Active-level widget: a permanent sidebar beside the plan canvas, ported
+   from active-cut-panel-mock.html (section cutaway with every station
+   labelled on an elevation-accurate rail) rather than a flat tick rail.
    Storeys have a physical top-to-bottom order and a real spacing in metres;
    a dropdown or an index-only rail both throw that away. */
 /* Flush two-column workspace: plan + one context dock. Types and Inspector
@@ -3395,8 +3395,8 @@ button.fin-kind {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  /* House drawing shrinks in .level-house-frame so the station list stays
-     fully visible after the 300px widen. */
+  /* The section keeps its own height (see .level-house-frame), so spare
+     room falls below the slab block instead of stretching the drawing. */
   min-height: 0;
   overflow: hidden;
   padding: 12px 12px 14px;
@@ -3428,39 +3428,64 @@ button.fin-kind {
   min-height: 2.4em;
 }
 
-.level-cut-meta {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 0.76rem;
+/* The level code is a muted prefix, so the name reads first. */
+.level-cut-code {
+  font-family: "Source Sans 3", sans-serif;
+  font-size: 0.78rem;
   color: var(--ink-soft);
-  margin: 0 0 8px;
+  margin-right: 2px;
   font-variant-numeric: tabular-nums;
 }
 
-.level-kind-chip {
-  font-size: 0.68rem;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  border: 1px solid var(--line);
-  background: var(--paper-2);
-  padding: 1px 6px;
+/* Plain text, not a chip: the view type is a fact, not a button. */
+.level-cut-meta {
+  flex-shrink: 0;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+  margin: 0 0 10px;
+  font-variant-numeric: tabular-nums;
 }
+.level-cut-meta strong { color: var(--ink); font-weight: 600; }
 
 /* Isolate lives on the widget, next to the named cut, rather than as a
    second dashed rule on the house: one more line on that drawing is easy
-   to confuse with the cut itself. Same flag as the ribbon command. */
+   to confuse with the cut itself. Same flag as the ribbon command. The note
+   under it says what Off does, so the scope is not a guess. */
 .level-isolate {
   flex-shrink: 0;
-  display: flex;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 8px;
   align-items: center;
-  gap: 6px;
-  margin: 0 0 8px;
-  font-size: 0.76rem;
+  padding: 8px 0 10px;
+  border-top: 1px solid var(--line);
+  font-size: 0.8rem;
   color: var(--ink);
   cursor: pointer;
   line-height: 1.3;
+}
+.level-isolate small {
+  grid-column: 2;
+  font-size: 0.72rem;
+  color: var(--ink-soft);
+}
+
+.level-section-head {
+  flex-shrink: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  padding-top: 8px;
+  margin-bottom: 2px;
+  border-top: 1px solid var(--line);
+  font-size: 0.7rem;
+  color: var(--ink-soft);
+}
+.level-section-head span:first-child {
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-weight: 600;
 }
 
 /* Same box as Chain, Radius and the other ribbon checkboxes. */
@@ -3475,24 +3500,108 @@ button.fin-kind {
   flex-shrink: 0;
 }
 
+/* As tall as the section ui.js draws into it, never taller, so spare panel
+   height collects below the slab block instead of stretching the storeys.
+   Scrolls only when the building is taller than the room it is given. */
 .level-house-frame {
-  flex: 1 1 auto;
+  position: relative;
+  flex: 0 0 auto;
   min-height: 0;
-  display: flex;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .level-house {
   display: block;
-  width: 100%;
-  height: 100%;
-  min-height: 0;
-  cursor: pointer;
   touch-action: none;
   user-select: none;
-  overflow: visible;
 }
 .level-house:focus { outline: none; }
-.level-house:focus-visible { outline: 1px solid var(--ink); outline-offset: 3px; }
+.level-house:focus-visible { outline: 1px solid var(--ink); outline-offset: -1px; }
+
+.level-house .house-earth { fill: url(#v2-house-earth); }
+.level-house .house-grade { stroke: var(--ink); stroke-width: 0.9; fill: none; }
+.level-house .house-poche { fill: #2c2824; stroke: var(--ink); stroke-width: 0.55; }
+.level-house .house-void { fill: #f6f1e8; stroke: var(--ink); stroke-width: 0.55; }
+.level-house .house-ceiling { fill: #cfc6b8; stroke: var(--ink); stroke-width: 0.4; }
+.level-house .house-screed { fill: #e6dccb; stroke: var(--ink); stroke-width: 0.45; }
+.level-house .house-gf-slab.focus .house-poche,
+.level-house .house-gf-slab.focus .house-screed { stroke: var(--copper); stroke-width: 1.4; }
+.level-house .house-stroke { fill: none; stroke: var(--ink); stroke-width: 0.9; }
+/* Grey on purpose: the break says "the drawing continues", it is not a wall. */
+.level-house .house-break { fill: none; stroke: #a99c89; stroke-width: 0.7; }
+/* What the plan has dropped. Labels and the cut line sit outside these groups. */
+.level-house .part.dim { opacity: 0.22; }
+.level-house .house-rail { stroke: #a99c89; stroke-width: 1; }
+.level-house .house-tick { stroke: #6f6355; stroke-width: 1; }
+.level-house .house-leader { stroke: #a99c89; stroke-width: 0.8; fill: none; }
+.level-house .house-leader.active,
+.level-house .house-tick.active { stroke: var(--copper); }
+.level-house .house-cut { stroke: var(--copper); stroke-width: 1.2; stroke-dasharray: 3.2 2.4; fill: none; }
+.level-house .house-cut-cap,
+.level-house .house-thumb { fill: var(--copper); }
+.level-house .house-grip { stroke: #f6f1e8; stroke-width: 1; }
+.level-house .house-rail-band,
+.level-house .house-thumb-hit { fill: transparent; cursor: ns-resize; }
+.level-house .house-ghost { opacity: 0; pointer-events: none; }
+.level-house .house-ghost.on { opacity: 1; }
+.level-house .house-ghost line { stroke: var(--copper); stroke-width: 1.1; stroke-dasharray: 3.2 2.4; opacity: 0.45; }
+@media (prefers-reduced-motion: no-preference) {
+  .level-house .house-cut-group { transition: transform 120ms ease-out; }
+}
+
+/* Each station named beside its tick; ui.js sets `left` to the label column
+   and each row's `top`. */
+.level-rail-labels {
+  position: absolute;
+  top: 0;
+  right: 0;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  pointer-events: none;
+}
+.level-rail-labels li {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 20px;
+}
+.level-rail-labels button {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  gap: 3px;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  padding: 0 3px;
+  font: inherit;
+  font-size: 0.78rem;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  pointer-events: auto;
+}
+.level-rail-code {
+  color: var(--ink-soft);
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+}
+.level-rail-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.level-rail-labels button:hover,
+.level-rail-labels button.is-hover { background: rgba(26, 22, 18, 0.05); }
+.level-rail-labels button:focus-visible { outline: 1px solid var(--copper); outline-offset: -1px; }
+/* Copper alone would carry the active row; the wash and weight keep it
+   legible in greyscale and for colour-blind readers. */
+.level-rail-labels button[aria-current="true"] {
+  background: rgba(178, 69, 30, 0.08);
+  font-weight: 600;
+}
+.level-rail-labels button[aria-current="true"] .level-rail-name,
+.level-rail-labels button[aria-current="true"] .level-rail-code,
+.level-rail-labels button[aria-current="true"] .level-station-elev { color: var(--copper); }
 
 .level-widget .hint {
   flex-shrink: 0;
@@ -3503,59 +3612,52 @@ button.fin-kind {
   padding: 0;
 }
 
-.level-build-up {
+/* The build-up belongs to the ground floor slab, so it sits under that
+   heading; focusing it outlines the slab in the section. */
+.level-slab-block {
   flex-shrink: 0;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+.level-eyebrow {
+  margin: 0 0 6px;
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+
+.level-build-up {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 6px;
-  margin: 8px 0 0;
-  font-size: 0.76rem;
+  font-size: 0.8rem;
   color: var(--ink);
 }
 
 .level-build-up .plan-context-field input {
   width: 5.5em;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.level-build-up .plan-context-field input[aria-invalid="true"] {
+  border-color: var(--copper);
+  background: rgba(178, 69, 30, 0.08);
 }
 
-.level-stations {
-  flex: 0 0 auto;
-  overflow: visible;
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  border-top: 1px solid var(--line);
+.level-build-up-note {
+  margin: 6px 0 0;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: var(--ink-soft);
 }
-
-.level-stations button {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  width: 100%;
-  gap: 10px;
-  border: 0;
-  border-bottom: 1px solid var(--line);
-  border-left: 2px solid transparent;
-  background: transparent;
-  padding: 6px 2px 6px 8px;
-  font: inherit;
-  font-size: 0.82rem;
-  color: inherit;
-  cursor: pointer;
-  text-align: left;
-}
-.level-stations button:hover { background: rgba(26, 22, 18, 0.035); }
-.level-stations button:focus-visible { outline: 1px solid var(--copper); outline-offset: -2px; }
-/* Copper alone would carry the active row; the gutter bar and weight keep it
-   legible in greyscale and for colour-blind readers. */
-.level-stations button[aria-current="true"] {
-  color: var(--copper);
-  border-left-color: var(--copper);
-  font-weight: 600;
-}
+.level-build-up-note.warn { color: var(--copper); }
 
 .level-station-elev {
-  font-size: 0.74rem;
-  letter-spacing: 0.04em;
+  font-size: 0.72rem;
   color: var(--ink-soft);
   font-variant-numeric: tabular-nums;
   text-align: right;
@@ -3587,7 +3689,6 @@ input.level-station-elev {
 input.level-station-elev:focus {
   outline: none;
 }
-.level-stations button[aria-current="true"] .level-station-elev { color: var(--copper); }
 
 /* Floated onto the sketch instead of a Plan header row, so the canvas
    keeps the strip that used to sit above the level widget + drawing. */
@@ -4134,6 +4235,44 @@ input.level-station-elev:focus {
   height: 16px;
 }
 
+/* Right-click on the plan: Finish (where it differs) and Cancel. */
+.plan-menu {
+  position: fixed;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  min-width: 9rem;
+  padding: 4px;
+  background: #fff;
+  border: 1px solid var(--line);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+}
+
+.plan-menu[hidden] {
+  display: none;
+}
+
+.plan-menu button {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 5px 8px;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.plan-menu button:hover,
+.plan-menu button:focus-visible {
+  background: #eef3ea;
+}
+
+.plan-menu-key {
+  color: #777;
+}
+
 .ribbon-group[data-scale="collapsed"] .ribbon-more,
 .ribbon-group[data-scale="collapsed"] .ribbon-menu {
   display: contents;
@@ -4370,13 +4509,6 @@ input.level-station-elev:focus {
   white-space: nowrap;
 }
 
-.plan-options label.move-disjoin input {
-  width: auto;
-  padding: 0;
-  border: 0;
-  background: transparent;
-}
-
 .plan-options input {
   width: 3.6rem;
   font: inherit;
@@ -4510,8 +4642,7 @@ input.level-station-elev:focus {
 }
 
 /* The running command's settings, as a ribbon group. ribbon-fit.js tightens
-   it, then folds Top and Height into the Top button, before anything clips.
-   Disjoin sits in the Move button's own group instead. */
+   it, then folds Top and Height into the Top button, before anything clips. */
 .ribbon-settings .ribbon-settings-items {
   align-items: flex-start;
   gap: 0;
@@ -4711,21 +4842,6 @@ input.level-station-elev:focus {
   box-shadow: 0 1px 2px rgba(26, 22, 18, 0.12), 0 0 0 1px rgba(26, 22, 18, 0.06);
 }
 
-.ribbon-group .move-disjoin {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 6px;
-  height: var(--row, 24px);
-  margin: 0;
-  padding: 0 8px;
-  font-size: 0.72rem;
-  letter-spacing: 0;
-  text-transform: none;
-  color: var(--ink);
-  white-space: nowrap;
-}
-
 .ribbon-group .roof-overhang {
   display: flex;
   flex-direction: row;
@@ -4880,14 +4996,6 @@ input.level-station-elev:focus {
 
 .temp-dim-input[hidden] {
   display: none !important;
-}
-
-.ribbon-group .move-disjoin input {
-  width: auto;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
 }
 
 /* Merged Types + Inspector dock: one panel, three states
@@ -5534,6 +5642,10 @@ input.level-station-elev:focus {
 
 .section-host { flex: 0 0 auto; }
 
+/* .seg sets display, which beats the hidden attribute. These buttons only
+   place a section cut, so the 3D and elevation views leave the group hidden. */
+.section-host[hidden] { display: none !important; }
+
 .mass-panel {
   width: min(1100px, 100%);
   height: min(760px, 100%);
@@ -5543,6 +5655,14 @@ input.level-station-elev:focus {
 
 .mass-panel.mass-panel--look {
   width: min(1400px, 100%);
+}
+
+.mass-panel.mass-panel--prompt {
+  width: min(1460px, 100%);
+}
+
+.mass-panel.mass-panel--look.mass-panel--prompt {
+  width: min(1760px, 100%);
 }
 
 .mass-split {
@@ -5630,20 +5750,24 @@ input.level-station-elev:focus {
 }
 
 #v2-mass-flip,
-#v2-mass-picture,
+#v2-mass-prompt-close,
 #v2-mass-generate,
-#v2-mass-show-3d,
-#v2-mass-close {
+#v2-mass-show-3d {
   font: inherit;
-  padding: 5px 10px;
+  font-size: 0.78rem;
+  padding: 6px 10px;
   border: 1px solid var(--ink);
   background: #fff;
-  border-radius: 3px;
   cursor: pointer;
 }
 
 #v2-mass-picture[aria-expanded="true"] {
-  box-shadow: inset 0 0 0 2px var(--ink);
+  background: var(--ink);
+  color: var(--paper);
+}
+
+#v2-mass-prompt-close {
+  margin-left: auto;
 }
 
 #v2-mass-generate {
@@ -5663,12 +5787,15 @@ input.level-station-elev:focus {
 }
 
 .mass-prompt {
+  flex: 0 0 460px;
+  width: 460px;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 10px 16px 12px;
-  border-bottom: 1px solid var(--line);
+  padding: 10px 12px 12px;
+  border-left: 1px solid var(--line);
   min-height: 0;
+  min-width: 0;
 }
 
 .mass-prompt[hidden] {
@@ -5684,30 +5811,58 @@ input.level-station-elev:focus {
 
 .mass-prompt-foot {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
+  gap: 8px 12px;
 }
 
 .mass-prompt-count {
-  margin-right: auto;
+  flex: 1 0 100%;
 }
 
-.mass-refs {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.78rem;
-  cursor: pointer;
-  user-select: none;
-  white-space: nowrap;
+.mass-more {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #fffdf8;
 }
 
-.mass-refs[hidden] {
+.mass-more[hidden] {
   display: none !important;
 }
 
-.mass-refs input {
+.mass-more > summary {
+  padding: 6px 10px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.mass-refs {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
   margin: 0;
+  padding: 2px 10px 10px 28px;
+  font-size: 0.78rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.mass-refs input {
+  margin: 2px 0 0;
+}
+
+.mass-refs span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mass-refs small {
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: var(--ink-soft);
 }
 
 .mass-prompt-examples {
@@ -5734,10 +5889,11 @@ input.level-station-elev:focus {
 }
 
 .mass-prompt textarea {
+  flex: 1 1 auto;
   width: 100%;
-  min-height: 4.5rem;
-  max-height: 8rem;
-  resize: vertical;
+  min-height: 0;
+  resize: none;
+  overflow: auto;
   font: inherit;
   font-size: 0.82rem;
   line-height: 1.4;
@@ -7737,8 +7893,9 @@ input.sheet-set-list-name:hover, input.sheet-set-list-name:focus { border-color:
    every other modify tab. Other tabs do not carry it. It does not take a
    strip under the menu, so the drawing does not jump when Adjust opens.
    The group's caption names the mode. The outline on the plan says the same
-   thing: a mode is on. The same bar also mounts on a placing tab while a
-   room, roof, floor, cut or region outline is in progress. */
+   thing: a mode is on. The same bar also mounts second on the row, straight
+   after Modify, for as long as a room, roof, floor, cut, region or property
+   outline tool is armed. It used to sit at the end, past the window. */
 .mode-bar { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px 10px; min-height: 0; padding: 4px 8px; background: rgba(251, 241, 234, 0.96); border: 1px solid rgba(178, 69, 30, 0.4); border-radius: 4px; font-size: 0.78rem; }
 .ribbon-mode { flex: 1 1 auto; min-width: 0; border-right: none; }
 .ribbon-mode-items { align-items: center; min-width: 0; }
@@ -7775,6 +7932,10 @@ input.sheet-set-list-name:hover, input.sheet-set-list-name:focus { border-color:
 .mode-exit { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; padding-left: 12px; border-left: 1px solid rgba(0, 0, 0, 0.15); }
 .mode-exit kbd { font-size: 0.72rem; padding: 2px 5px; border: 1px solid rgba(0, 0, 0, 0.25); border-bottom-width: 2px; border-radius: 3px; background: #faf7f1; color: #6b6256; white-space: nowrap; }
 .mode-bar button.mode-close { border: 0; background: none; font-size: 1.05rem; line-height: 1; padding: 3px 7px; color: #6b6256; }
+/* Drawing an outline: Revit's green tick and red cross. ✗ Cancel is the close, so the bare ✕ goes. */
+.mode-bar.is-sketch #v2-mode-done { background: #2f7a3a; border-color: #2f7a3a; }
+.mode-bar.is-sketch #v2-mode-cancel { color: #b3261e; border-color: #b3261e; }
+.mode-bar.is-sketch button.mode-close { display: none; }
 .mode-bar .sheet-set-panel-row { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
 .planner-canvas-wrap.in-underlay-mode { box-shadow: inset 0 0 0 2px var(--copper, #b2451e); }
 .sheet-set-toast.has-action { display: flex; align-items: center; gap: 12px; }

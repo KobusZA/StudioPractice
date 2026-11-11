@@ -10,7 +10,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,560&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="../shared/tokens.css" />
   <link rel="stylesheet" href="../shared/splash.css" />
-  <link rel="stylesheet" href="./v2.css?v=20261111-section-side" />
+  <link rel="stylesheet" href="./v2.css?v=20261111-mass-host" />
   <!-- Painted before the stylesheet arrives, so a cold load is ink rather
        than a white flash. A reload of this tab skips it. -->
   <style>
@@ -108,9 +108,8 @@
       </div>
       <div class="ribbon-functions" id="v2-ribbon-functions"></div>
       <!-- Parked until the ribbon is drawn. These are the running command's
-           settings; mountRibbonSettings moves them into a Settings group, or
-           Disjoin in beside Move. They stay out of the ribbon's innerHTML so a
-           redraw cannot destroy them. -->
+           settings; mountRibbonSettings moves them into a Settings group.
+           They stay out of the ribbon's innerHTML so a redraw cannot destroy them. -->
       <div id="v2-ribbon-settings-park" hidden>
           <div class="plan-loc words" id="v2-roof-cut-kind" hidden>
             <span class="draw-name">Cut</span>
@@ -210,10 +209,6 @@
             </label>
           </div>
           </div>
-          <label class="move-disjoin" id="v2-move-disjoin" hidden title="Pull the wall off the walls it meets. Hold Alt while dragging to do the same.">
-            <input type="checkbox" id="v2-move-disjoin-box" />
-            Disjoin
-          </label>
       </div>
       <!-- Parked while no underlay mode is running. syncModeBar moves this
            into the ribbon row, so Adjust / Set scale / Align do not add a
@@ -270,26 +265,32 @@
         <aside class="level-widget panel" id="v2-level-widget" hidden>
           <h2>Active cut</h2>
           <p class="level-cut-name" id="v2-cut-name">—</p>
-          <p class="level-cut-meta">
-            <span id="v2-cut-elev">—</span>
-            <span class="level-kind-chip" id="v2-cut-kind">—</span>
-          </p>
-          <label class="level-isolate" title="Show only this cut. Off ghosts the neighbouring level. The tracing sheet stays.">
+          <p class="level-cut-meta" id="v2-cut-meta">—</p>
+          <label class="level-isolate" title="The tracing sheet stays. Hide sheet is how it leaves the plan.">
             <input type="checkbox" id="v2-level-isolate" />
-            Show only this level
+            Show only this cut in the plan
+            <small id="v2-level-isolate-note">Off: the neighbouring level is ghosted.</small>
           </label>
-          <div class="level-house-frame">
-          <svg class="level-house" id="v2-level-house" viewBox="0 0 248 318" role="slider"
-               aria-label="Building cut" aria-orientation="vertical"
-               aria-valuemin="0" tabindex="0"></svg>
+          <div class="level-section-head">
+            <span>Section</span>
+            <span id="v2-section-datum">mm from ground floor FFL</span>
           </div>
-          <ul class="level-stations" id="v2-level-stations"></ul>
-          <label class="level-build-up" title="Screed and finish on the ground floor slab. Ground floor walls start this far below finished floor level. Blank means the DPC is taken at finished floor level.">Floor build-up
-            <span class="plan-context-field">
-              <input id="v2-floor-build-up" type="text" inputmode="decimal" autocomplete="off" placeholder="not stated" aria-label="Floor build-up, mm" />
-              <span>mm</span>
-            </span>
-          </label>
+          <div class="level-house-frame" id="v2-level-frame">
+            <svg class="level-house" id="v2-level-house" role="slider"
+                 aria-label="Building cut" aria-orientation="vertical"
+                 aria-valuemin="0" tabindex="0"></svg>
+            <ol class="level-rail-labels" id="v2-level-labels"></ol>
+          </div>
+          <div class="level-slab-block">
+            <p class="level-eyebrow" id="v2-slab-name">Ground floor slab</p>
+            <label class="level-build-up">Floor build-up
+              <span class="plan-context-field">
+                <input id="v2-floor-build-up" type="text" inputmode="decimal" autocomplete="off" placeholder="e.g. 75" aria-describedby="v2-floor-build-up-note" />
+                <span>mm</span>
+              </span>
+            </label>
+            <p class="level-build-up-note" id="v2-floor-build-up-note"></p>
+          </div>
           <button type="button" class="panel-resize panel-resize-levels" id="v2-resize-levels"
                   aria-label="Resize levels panel" title="Drag to resize" tabindex="0"></button>
         </aside>
@@ -908,9 +909,18 @@
           <button type="button" data-mass-status="existing">Existing</button>
           <button type="button" data-mass-status="planned">Proposed</button>
         </div>
+        <div class="seg" role="group" aria-label="How the model is drawn">
+          <button type="button" data-mass-style="colour" class="active" title="Finishes and shading.">Colour</button>
+          <button type="button" data-mass-style="lines" title="White faces and dark edges, like a hidden-line drawing.">Lines</button>
+          <button type="button" data-mass-style="status" title="Grey for existing, colour for proposed. Nothing is hidden.">Existing / new</button>
+        </div>
         <label class="mass-services" title="Hot water, cold water, drainage, electrical and gas. Drawn in each system's colour, including vertical rises. A run with no height set is left out.">
           <input type="checkbox" id="v2-mass-services" />
           Services
+        </label>
+        <label class="mass-services" title="Show a person and a car beside the building, for scale. They are not counted. Drag them on the plan to move them.">
+          <input type="checkbox" id="v2-mass-figures" />
+          People and cars
         </label>
         <div class="mass-actions">
           <button type="button" id="v2-mass-flip" hidden title="Look the other way. The cut line stays where it is.">Flip look</button>
@@ -919,26 +929,14 @@
             <button type="button" data-section-host="float" title="A window on this screen. The plan stays editable and the section updates.">Float</button>
             <button type="button" data-section-host="screen" title="Its own window, for a second monitor. The section updates as you edit.">Window</button>
           </div>
-          <button type="button" id="v2-mass-picture" aria-expanded="false" aria-controls="v2-mass-prompt">Generate model</button>
+          <div class="seg" role="group" aria-label="Model and plan">
+            <button type="button" id="v2-mass-picture" aria-expanded="false" aria-controls="v2-mass-prompt">Generate model</button>
+            <button type="button" id="v2-mass-close">Back to plan</button>
+          </div>
           <button type="button" id="v2-mass-show-3d" hidden>Back to the model</button>
-          <button type="button" id="v2-mass-close">Back to plan</button>
         </div>
       </header>
       <p class="mass-readout" id="v2-mass-caption" hidden></p>
-      <section class="mass-prompt" id="v2-mass-prompt" hidden>
-        <div class="mass-prompt-examples" id="v2-mass-prompt-examples" role="group" aria-label="Example prompts"></div>
-        <p class="mass-prompt-note" id="v2-mass-prompt-note"></p>
-        <label class="visually-hidden" for="v2-mass-prompt-text">Instruction sent with the 3D view</label>
-        <textarea id="v2-mass-prompt-text" rows="4" maxlength="4000" spellcheck="true"></textarea>
-        <div class="mass-prompt-foot">
-          <p class="mass-prompt-count" id="v2-mass-prompt-count"></p>
-          <label class="mass-refs" id="v2-mass-refs" title="Also sends the opposite side and a higher view of the roof. The photograph still matches this camera. Untick to send only this view.">
-            <input type="checkbox" id="v2-mass-refs-toggle" checked />
-            Send the hidden sides
-          </label>
-          <button type="button" id="v2-mass-generate">Generate</button>
-        </div>
-      </section>
       <div class="mass-split" id="v2-mass-split">
         <div class="canvas-wrap mass-wrap mass-plan-wrap" id="v2-mass-plan-wrap" hidden>
           <p class="mass-pane-label">Plan · distances</p>
@@ -983,6 +981,26 @@
             </div>
           </div>
         </div>
+        <section class="mass-prompt" id="v2-mass-prompt" hidden>
+          <div class="mass-prompt-examples" id="v2-mass-prompt-examples" role="group" aria-label="Example prompts"></div>
+          <p class="mass-prompt-note" id="v2-mass-prompt-note"></p>
+          <label class="visually-hidden" for="v2-mass-prompt-text">Instruction sent with the 3D view</label>
+          <textarea id="v2-mass-prompt-text" rows="16" maxlength="4000" spellcheck="true"></textarea>
+          <details class="mass-more" id="v2-mass-refs">
+            <summary title="Opposite side and a higher view of the roof, so hidden walls and the roof come out right. The picture still matches this camera.">More options</summary>
+            <label class="mass-refs" title="Opposite side and a higher view of the roof, so hidden walls and the roof come out right. The picture still matches this camera. Untick to send only this view.">
+              <input type="checkbox" id="v2-mass-refs-toggle" checked />
+              <span>Send the hidden sides
+                <small>Opposite side and a higher view of the roof, so hidden walls and the roof come out right. The picture still matches this camera.</small>
+              </span>
+            </label>
+          </details>
+          <div class="mass-prompt-foot">
+            <p class="mass-prompt-count" id="v2-mass-prompt-count"></p>
+            <button type="button" id="v2-mass-prompt-close">Close</button>
+            <button type="button" id="v2-mass-generate">Generate</button>
+          </div>
+        </section>
       </div>
     </div>
   </div>
@@ -1385,6 +1403,6 @@
     </form>
   </div>
 
-  <script type="module" src="./ui.js?v=20261111-section-side"></script>
+  <script type="module" src="./ui.js?v=20261111-trim-lengths"></script>
 </body>
 </html>

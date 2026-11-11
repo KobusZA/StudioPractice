@@ -492,6 +492,33 @@ export function slideOpening(doc, pack, walls, opening, x, y) {
   return true;
 }
 
+/**
+ * Move an opening along its own wall to the plan point (x, y). Unlike
+ * slideOpening it does not hop onto a nearer wall: in a 3D view that hop is
+ * hard to predict. A window also takes `sill` in metres above the wall base.
+ * A door's sill is left alone. The sill stays inside the wall, and the
+ * opening stays fully on the wall.
+ */
+export function placeOpeningOnHost(doc, pack, walls, opening, x, y, { sill = null, wallHeight = null } = {}) {
+  const wall = wallForOpening(doc, pack, walls, opening);
+  if (!wall || !opening) return false;
+  const size = openingSize(pack, opening);
+  const width = size.width || 0.9;
+  const room = !opening.wallId ? roomById(doc, opening.roomId) : null;
+  const anchor = room ? roomEdgeSegment(room, opening.edgeIndex ?? 0) : wall;
+  if (!anchor) return false;
+  const onWall = clampT(wallT(wall, x, y), wall, width);
+  const at = pointOnWall(wall, onWall);
+  opening.t = wallT(anchor, at.x, at.y);
+  const sku = skuById(pack, opening.sku);
+  if (sku?.category === "window" && Number.isFinite(sill)) {
+    const height = size.height || 1.2;
+    const maxSill = Number.isFinite(wallHeight) ? Math.max(0, wallHeight - height) : Math.max(0, sill);
+    opening.sill = Math.min(maxSill, Math.max(0, sill));
+  }
+  return true;
+}
+
 export function openingDraftAt(doc, pack, walls, skuId, x, y, handSign = 1) {
   const sku = skuById(pack, skuId);
   if (!sku) return null;

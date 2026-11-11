@@ -618,6 +618,85 @@ export function roofEavesElevation(level) {
   return level.elevation + rise + ROOF_EAVES_LIFT_M;
 }
 
+// --- Active cut panel: names, heights and rail labels ---------------------
+
+const ORDINAL_FLOORS = ["First", "Second", "Third", "Fourth", "Fifth", "Sixth"];
+
+/** The Revit-style abbreviation spelled out; anything else stays as typed. */
+function spelledLevelName(text) {
+  if (/^(GFL|GF|GROUND(\s+FLOOR)?)$/i.test(text)) return "Ground floor";
+  if (/^(FOUNDATIONS?|FDN|FND)$/i.test(text)) return "Foundation";
+  const storey = /^L(\d+)$/i.exec(text);
+  if (storey && ORDINAL_FLOORS[Number(storey[1]) - 1]) return `${ORDINAL_FLOORS[Number(storey[1]) - 1]} floor`;
+  return text;
+}
+
+/**
+ * A level's name for the Active cut panel: the leading number as a muted
+ * code, and the rest spelled out ("01 GFL" -> { code: "01", name: "Ground floor" }).
+ * Display only: ids and the names used elsewhere are untouched.
+ */
+export function levelDisplayName(level) {
+  const raw = String(level?.name || level?.id || "").trim();
+  const m = /^(\d{1,3})\s+(.+)$/.exec(raw);
+  return m ? { code: m[1], name: spelledLevelName(m[2]) } : { code: "", name: spelledLevelName(raw) };
+}
+
+/** `{ code, name }` for a station from `buildHouseStations`. */
+export function stationDisplay(station, levels) {
+  if (station?.kind === "roof") return { code: "", name: "Roof · eaves" };
+  const level = (levels || []).find((l) => l.id === station?.levelId) || { id: station?.levelId };
+  const { code, name } = levelDisplayName(level);
+  if (station?.kind === "ceiling") return { code, name: `${name} · ceiling` };
+  if (station?.kind === "floor") return { code, name: `${name} · floor` };
+  return { code, name };
+}
+
+/** Metres as whole mm with a thin-space thousands separator and a true minus; `signed` adds "+". */
+export function sectionMm(metres, signed = false) {
+  if (!Number.isFinite(metres)) return "—";
+  const mm = Math.round(metres * 1000);
+  const abs = String(Math.abs(mm)).replace(/\B(?=(\d{3})+(?!\d))/g, "\u202f");
+  if (mm < 0) return `\u2212${abs}`;
+  if (signed && mm > 0) return `+${abs}`;
+  return abs;
+}
+
+/**
+ * Where each rail label sits. A label stays level with its tick unless that
+ * would put it closer than `gap` to its neighbour; then the labels spread
+ * out and a leader joins each one back to its tick. `ideal` is in drawing
+ * order (any order); the result is in the same order.
+ */
+export function railLabelYs(ideal, gap, top, bottom) {
+  const order = ideal.map((_, i) => i).sort((a, b) => ideal[a] - ideal[b]);
+  const ys = new Array(ideal.length);
+  order.forEach((i, k) => {
+    ys[i] = k === 0 ? Math.max(top, ideal[i]) : Math.max(ideal[i], ys[order[k - 1]] + gap);
+  });
+  for (let k = order.length - 1; k >= 0; k--) {
+    const i = order[k];
+    const limit = k === order.length - 1 ? bottom : ys[order[k + 1]] - gap;
+    ys[i] = Math.min(ys[i], limit);
+  }
+  return ys;
+}
+
+/**
+ * Whether a slice of the panel's section stays at full strength while "Show
+ * only this cut" is on. Mirrors `isolateShows`: a roof cut keeps the roof, a
+ * ceiling cut keeps that storey's ceiling and walls, a floor or foundation
+ * cut keeps its storey but not the roof. `part` is `{ level, role }`, with
+ * `level` the storey the slice belongs to and `planLevelId` the plan on screen.
+ */
+export function sectionPartShown(stationKind, planLevelId, part) {
+  const role = part?.role;
+  if (stationKind === "roof") return role === "roof";
+  if (part?.level !== planLevelId) return false;
+  if (stationKind === "ceiling") return role === "ceiling" || role === "wall";
+  return role !== "roof";
+}
+
 /**
  * Stations the inspector lists for an object: the same cuts the switcher
  * offers, plus a floor station for the object's current storey if that

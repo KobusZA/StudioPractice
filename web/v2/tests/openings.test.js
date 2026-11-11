@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import { compile } from "../compile.js";
-import { doorSwing, openingDraftAt, openingOnWall, openingSideGaps, pointInDoorSwing, pointInOpeningCut, pointOnOpeningSymbol, slideOpening } from "../openings.js";
+import { doorSwing, openingDraftAt, openingOnWall, openingSideGaps, openingSize, placeOpeningOnHost, pointInDoorSwing, pointInOpeningCut, pointOnOpeningSymbol, slideOpening } from "../openings.js";
 import { normalizeDoc } from "../model.js";
 import { deriveWalls } from "../walls.js";
 import { normalizePackUnits } from "../schema.js";
@@ -254,6 +254,34 @@ test("dragging a door by its swing still slides it along the wall", () => {
   assert.equal(opening.swing, 1, "the swing side under the leaf is the side it already opens to");
   assert.equal(opening.wallId, "s1");
   assert.equal(opening.hand, 1);
+});
+
+test("a 3D drag slides a window along its own wall and raises the sill, without hopping walls", () => {
+  const doc = normalizeDoc({
+    segments: [
+      { id: "s1", sku: "TSP_MAS009", x1: 0, y1: 0, x2: 6, y2: 0 },
+      { id: "s2", sku: "TSP_MAS009", x1: 0, y1: 4, x2: 6, y2: 4 },
+    ],
+    openings: [{ id: "o1", sku: WINDOW, wallId: "s1", t: 0.5, sill: 0.9, status: "planned" }],
+  });
+  const walls = deriveWalls(doc, pack);
+  const opening = doc.openings[0];
+  assert.equal(placeOpeningOnHost(doc, pack, walls, opening, 1.5, 0.2, { sill: 1.1, wallHeight: 2.4 }), true);
+  assert.equal(opening.wallId, "s1");
+  assert.ok(Math.abs(opening.t - 0.25) < 0.05);
+  assert.ok(Math.abs(opening.sill - 1.1) < 1e-6);
+
+  const height = openingSize(pack, opening).height;
+  placeOpeningOnHost(doc, pack, walls, opening, 1.5, 3.9, { sill: 5, wallHeight: 2.4 });
+  assert.equal(opening.wallId, "s1", "a nearer wall does not steal the opening");
+  assert.ok(opening.sill <= 2.4 - height + 1e-6);
+  assert.ok(opening.sill >= 0);
+
+  const door = { id: "d1", sku: DOOR, wallId: "s1", t: 0.5, swing: 1, hand: 1, status: "planned" };
+  doc.openings.push(door);
+  placeOpeningOnHost(doc, pack, walls, door, 3, 0.1, { sill: 1.2, wallHeight: 2.4 });
+  assert.equal(door.sill, undefined, "a door stays on the floor");
+  assert.equal(door.wallId, "s1");
 });
 
 test("dragging a window moves it along its wall even when the pointer leaves the wall line", () => {

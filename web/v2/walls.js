@@ -622,7 +622,7 @@ function enclosedByWalls(px, py, walls) {
 function faceEndsAt(wall, end, others, thicknessOf, frame) {
   const { ux, uy, nx, ny, len, t } = frame;
   const along = end === 1 ? 0 : len;
-  const bare = { plus: along, minus: along };
+  const bare = { plus: along, minus: along, centre: along };
   const ax = wall.x2 - wall.x1;
   const ay = wall.y2 - wall.y1;
   const farX = end === 1 ? wall.x2 : wall.x1;
@@ -693,6 +693,7 @@ function faceEndsAt(wall, end, others, thicknessOf, frame) {
   return {
     plus: stop(1, keepNear(1) ? near : behind),
     minus: stop(-1, keepNear(-1) ? near : behind),
+    centre: stop(0, 0),
   };
 }
 
@@ -715,9 +716,11 @@ function faceEndsAt(wall, end, others, thicknessOf, frame) {
  *   no answer and the faces are the same length (a free wall, or a wall that
  *   turns one way at one end and the other way at the other); `single` is
  *   then the one face to show.
- * - `centre`: the stored centreline, `{ side: 0, x1, y1, x2, y2, length }`.
- *   It is not a length anyone can measure on site, but it is what quantities
- *   are worked from and what an engineer's drawing dimensions.
+ * - `centre`: the centreline, `{ side: 0, x1, y1, x2, y2, length }`, run to
+ *   where it crosses the centreline of the wall at each end, so a wall stored
+ *   short of a corner still reads corner to corner. A bare end stays where
+ *   the wall stops. It is not a length anyone can measure on site, but it is
+ *   what an engineer's drawing dimensions.
  * - `normal`: `{ x, y }`, the unit left-hand normal, so a caller can place
  *   a string on the side of a face.
  */
@@ -752,7 +755,8 @@ export function wallFaceLengths(wall, others, thicknessOf = (w) => Number(w?.thi
   const minus = face(-1, first.minus, last.minus);
   const faces = [plus, minus].filter(Boolean);
   if (!faces.length) return null;
-  const centre = { side: 0, x1: wall.x1, y1: wall.y1, x2: wall.x2, y2: wall.y2, length: len };
+  const centre = face(0, first.centre, last.centre)
+    || { side: 0, x1: wall.x1, y1: wall.y1, x2: wall.x2, y2: wall.y2, length: len };
   const result = { faces, centre, inside: null, outside: null, single: null, normal: { x: nx, y: ny } };
   if (faces.length !== 2) {
     result.single = plus || minus;

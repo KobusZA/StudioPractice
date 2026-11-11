@@ -1,12 +1,13 @@
 // Joinery the Revit template does not contain. Same pattern as a plain
 // opening and a boundary wall: stated here, millimetre geometry, copied into
 // the pack. A run sits on a wall face (BIC, kitchen units). An island and
-// loose furniture are free boxes.
+// loose furniture is a free plan symbol.
 //
 // SANS 10143: simplified outline, wall side on the wall, floor-standing solid,
 // wall-hung dashed. SANS 10400-A: timber colour class. BIC is not a finish —
 // finishes occupy the remaining face (the mosaic above the cupboards).
 
+import { pointInPoly } from "./geom.js";
 import { pointOnWall, wallNormal, wallT, distToWall, wallSnapDist, swingToward } from "./openings.js";
 import { deriveWalls } from "./walls.js";
 import { snapNiceDelta } from "./snap.js";
@@ -25,7 +26,14 @@ function joinery(id, name, family, category, geometry, drawing, extra = {}) {
     geometry,
     cost: { rateRef: null, wasteFactor: null },
     compliance: {},
-    drawing: { colourClass: category === "furniture" ? "other" : "timber", hatch: null, symbol: drawing.symbol, mount: drawing.mount, fullHeight: drawing.fullHeight || false },
+    drawing: {
+      colourClass: category === "furniture" ? "other" : "timber",
+      hatch: null,
+      symbol: drawing.symbol,
+      plan: drawing.plan || null,
+      mount: drawing.mount,
+      fullHeight: drawing.fullHeight || false,
+    },
     schedule: { report: extra.report || (drawing.mount === "free" ? ["count"] : ["count", "length"]), scheduleName: null },
   };
 }
@@ -39,9 +47,29 @@ export const JOINERY_SKUS = [
   joinery("TSP_CAS_KU_ISLAND", "Kitchen island", "Joinery", "casework", { width: 1200, depth: 600, height: 900 }, { symbol: "ISLAND", mount: "free" }),
   joinery("TSP_CAS_VANITY", "Vanity", "Joinery", "casework", { width: 900, depth: 450, height: 850 }, { symbol: "VANITY", mount: "floor" }),
   joinery("TSP_CAS_DESK", "Built-in desk", "Joinery", "casework", { width: 1200, depth: 600, height: 750 }, { symbol: "DESK", mount: "floor" }),
-  joinery("TSP_FUR_BED_QUEEN", "Bed, queen", "Furniture", "furniture", { width: 1600, depth: 2000, height: 500 }, { symbol: "BED", mount: "free" }),
-  joinery("TSP_FUR_TABLE", "Dining table", "Furniture", "furniture", { width: 1600, depth: 900, height: 750 }, { symbol: "TABLE", mount: "free" }),
-  joinery("TSP_FUR_SOFA", "Sofa", "Furniture", "furniture", { width: 2000, depth: 900, height: 850 }, { symbol: "SOFA", mount: "free" }),
+  joinery("TSP_FUR_BED_SINGLE", "Bed, single", "Furniture", "furniture", { width: 920, depth: 1900, height: 500 }, { symbol: "BED", plan: "bed", mount: "free" }),
+  joinery("TSP_FUR_BED_DOUBLE", "Bed, double", "Furniture", "furniture", { width: 1370, depth: 1900, height: 500 }, { symbol: "BED", plan: "bed", mount: "free" }),
+  joinery("TSP_FUR_BED_QUEEN", "Bed, queen", "Furniture", "furniture", { width: 1600, depth: 2000, height: 500 }, { symbol: "BED", plan: "bed", mount: "free" }),
+  joinery("TSP_FUR_BED_KING", "Bed, king", "Furniture", "furniture", { width: 1830, depth: 2000, height: 500 }, { symbol: "BED", plan: "bed", mount: "free" }),
+  joinery("TSP_FUR_BEDSIDE", "Bedside table", "Furniture", "furniture", { width: 450, depth: 400, height: 550 }, { symbol: "BEDSIDE", plan: "bedside", mount: "free" }),
+  joinery("TSP_FUR_SOFA_2", "Sofa, 2-seat", "Furniture", "furniture", { width: 1600, depth: 900, height: 850 }, { symbol: "SOFA", plan: "sofa-2", mount: "free" }),
+  joinery("TSP_FUR_SOFA", "Sofa, 3-seat", "Furniture", "furniture", { width: 2000, depth: 900, height: 850 }, { symbol: "SOFA", plan: "sofa-3", mount: "free" }),
+  joinery("TSP_FUR_ARMCHAIR", "Armchair", "Furniture", "furniture", { width: 850, depth: 900, height: 850 }, { symbol: "CHAIR", plan: "armchair", mount: "free" }),
+  joinery("TSP_FUR_COFFEE", "Coffee table", "Furniture", "furniture", { width: 1200, depth: 600, height: 420 }, { symbol: "TABLE", plan: "coffee", mount: "free" }),
+  joinery("TSP_FUR_TV", "TV unit", "Furniture", "furniture", { width: 1800, depth: 450, height: 500 }, { symbol: "TV", plan: "tv", mount: "free" }),
+  joinery("TSP_FUR_TABLE_4", "Dining table, 4-seat", "Furniture", "furniture", { width: 2200, depth: 1800, height: 750 }, { symbol: "TABLE", plan: "dining-4", mount: "free" }),
+  joinery("TSP_FUR_TABLE", "Dining table, 6-seat", "Furniture", "furniture", { width: 2600, depth: 1900, height: 750 }, { symbol: "TABLE", plan: "dining-6", mount: "free" }),
+  joinery("TSP_FUR_TABLE_8", "Dining table, 8-seat", "Furniture", "furniture", { width: 3100, depth: 1900, height: 750 }, { symbol: "TABLE", plan: "dining-8", mount: "free" }),
+  joinery("TSP_FUR_DESK", "Desk", "Furniture", "furniture", { width: 1400, depth: 1200, height: 750 }, { symbol: "DESK", plan: "desk", mount: "free" }),
+  joinery("TSP_FUR_CHAIR", "Chair", "Furniture", "furniture", { width: 500, depth: 560, height: 850 }, { symbol: "CHAIR", plan: "chair", mount: "free" }),
+  joinery("TSP_FUR_FRIDGE", "Fridge", "Furniture", "furniture", { width: 700, depth: 700, height: 1800 }, { symbol: "FRIDGE", plan: "fridge", mount: "free" }),
+  joinery("TSP_FUR_STOVE", "Stove", "Furniture", "furniture", { width: 600, depth: 600, height: 900 }, { symbol: "STOVE", plan: "stove", mount: "free" }),
+  joinery("TSP_FUR_RUG_SQ_15", "Rug, square, 1.5 m", "Furniture", "furniture", { width: 1500, depth: 1500, height: 15 }, { symbol: "RUG", plan: "carpet-square", mount: "free" }),
+  joinery("TSP_FUR_RUG_SQ_24", "Rug, square, 2.4 m", "Furniture", "furniture", { width: 2400, depth: 2400, height: 15 }, { symbol: "RUG", plan: "carpet-square", mount: "free" }),
+  joinery("TSP_FUR_RUG_SQ_30", "Rug, square, 3 m", "Furniture", "furniture", { width: 3000, depth: 3000, height: 15 }, { symbol: "RUG", plan: "carpet-square", mount: "free" }),
+  joinery("TSP_FUR_RUG_RD_12", "Rug, round, 1.2 m", "Furniture", "furniture", { width: 1200, depth: 1200, height: 15 }, { symbol: "RUG", plan: "carpet-round", mount: "free" }),
+  joinery("TSP_FUR_RUG_RD_18", "Rug, round, 1.8 m", "Furniture", "furniture", { width: 1800, depth: 1800, height: 15 }, { symbol: "RUG", plan: "carpet-round", mount: "free" }),
+  joinery("TSP_FUR_RUG_RD_24", "Rug, round, 2.4 m", "Furniture", "furniture", { width: 2400, depth: 2400, height: 15 }, { symbol: "RUG", plan: "carpet-round", mount: "free" }),
 ];
 
 /** Copy missing joinery types onto a pack. Geometry stays millimetres. */
@@ -484,4 +512,64 @@ export function elevationJoinery(doc, pack, wall, side, flip) {
   }
   out.sort((a, b) => a.from - b.from || a.bottom - b.bottom);
   return out;
+}
+
+function segmentsCross(a, b, c, d) {
+  const rx = b[0] - a[0];
+  const ry = b[1] - a[1];
+  const sx = d[0] - c[0];
+  const sy = d[1] - c[1];
+  const den = rx * sy - ry * sx;
+  if (Math.abs(den) < 1e-12) return false;
+  const t = ((c[0] - a[0]) * sy - (c[1] - a[1]) * sx) / den;
+  const u = ((c[0] - a[0]) * ry - (c[1] - a[1]) * rx) / den;
+  const eps = 1e-8;
+  return t > eps && t < 1 - eps && u > eps && u < 1 - eps;
+}
+
+function footprintsOverlap(a, b) {
+  if (!a || !b || a.length < 3 || b.length < 3) return false;
+  for (const [x, y] of a) if (pointInPoly(x, y, b)) return true;
+  for (const [x, y] of b) if (pointInPoly(x, y, a)) return true;
+  for (let i = 0; i < a.length; i += 1) {
+    const a1 = a[i];
+    const a2 = a[(i + 1) % a.length];
+    for (let j = 0; j < b.length; j += 1) {
+      const b1 = b[j];
+      const b2 = b[(j + 1) % b.length];
+      if (segmentsCross(a1, a2, b1, b2)) return true;
+    }
+  }
+  return false;
+}
+
+function rectPoly(rect) {
+  return [
+    [rect.x, rect.y],
+    [rect.x + rect.w, rect.y],
+    [rect.x + rect.w, rect.y + rect.h],
+    [rect.x, rect.y + rect.h],
+  ];
+}
+
+/** A rug lies on the floor. It may cover other furniture without a clash. */
+export function furnitureIsRug(sku) {
+  const plan = sku?.drawing?.plan;
+  return plan === "carpet-square" || plan === "carpet-round";
+}
+
+/** True when a loose piece's footprint cuts a wall body. Flush with the face does not count. */
+export function furnitureCrossesWall(rect, wallPolys) {
+  if (!rect || !(rect.w > 0) || !(rect.h > 0)) return false;
+  const box = rectPoly(rect);
+  for (const poly of wallPolys || []) {
+    if (footprintsOverlap(box, poly)) return true;
+  }
+  return false;
+}
+
+/** True when two footprints cut each other. Sharing an edge does not count. */
+export function furnitureOverlapsRect(a, b) {
+  if (!a || !b || !(a.w > 0) || !(a.h > 0) || !(b.w > 0) || !(b.h > 0)) return false;
+  return footprintsOverlap(rectPoly(a), rectPoly(b));
 }

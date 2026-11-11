@@ -173,6 +173,31 @@ function bodiesAndMarks(kind, parts, depth, height) {
         frame: null,
       };
     }
+    case "carpet-round": {
+      const ellipses = parts.filter((p) => p.op === "ellipse").sort((a, b) => (b.rx * b.ry) - (a.rx * a.ry));
+      const body = ellipses[0];
+      return {
+        solids: [solid(body, 0, height)].filter(Boolean),
+        marks: ellipses.slice(1).map((p) => mark(p, top)).filter(Boolean),
+        frontCircles: [],
+        frame: null,
+      };
+    }
+    case "bed":
+    case "bedside":
+    case "sofa-2":
+    case "sofa-3":
+    case "armchair":
+    case "coffee":
+    case "tv":
+    case "dining-4":
+    case "dining-6":
+    case "dining-8":
+    case "desk":
+    case "chair":
+    case "fridge":
+    case "stove":
+    case "carpet-square":
     case "basin":
     case "vanity":
     case "bath":
@@ -194,9 +219,9 @@ function bodiesAndMarks(kind, parts, depth, height) {
   }
 }
 
-/** Null unless this sanitary type has a plan symbol to draw. */
+/** Null unless this sanitary or furniture type has a plan symbol to draw. */
 export function sanitaryPreview(sku) {
-  if (sku?.category !== "sanitary") return null;
+  if (sku?.category !== "sanitary" && sku?.category !== "furniture") return null;
   const kind = fixtureSymbolKind(sku);
   if (!kind) return null;
   const { width, depth } = fixtureSize(sku);
@@ -209,7 +234,7 @@ export function sanitaryPreview(sku) {
     width,
     depth,
     height,
-    againstWall: !FREESTANDING.has(kind),
+    againstWall: sku.category === "furniture" ? false : !FREESTANDING.has(kind),
     ...built,
   };
 }

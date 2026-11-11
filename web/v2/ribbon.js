@@ -123,6 +123,8 @@ export const RIBBON = [
         items: [
           { id: "furniture", label: "Furniture", tool: "place", categories: ["furniture"], anchor: true },
           { id: "casework", label: "Casework", tool: "place", categories: ["casework"] },
+          { id: "scale-person", label: "Person", tool: "scale-figure", figure: "person" },
+          { id: "scale-car", label: "Car", tool: "scale-figure", figure: "car" },
           { id: "wall-finishes", label: "Wall finishes", command: "wall-finishes" },
           { id: "finishes", label: "Floor finishes", command: "finishes" },
         ],
@@ -211,6 +213,10 @@ export const RIBBON = [
           { id: "edit-face", label: "Show face", command: "edit-face", contextOnly: true },
           { id: "flip-face", label: "Flip face", command: "flip-face", contextOnly: true },
           { id: "second-screen", label: "Second screen", command: "second-screen", contextOnly: true },
+          // The open wall face or floor picture has its own tab. These two
+          // are that tab's work: add a finish, and close the picture.
+          { id: "add-finish", label: "Add a finish", command: "add-finish", contextOnly: true },
+          { id: "finish-done", label: "Done", command: "finish-done", contextOnly: true },
           { id: "flip-hinge", label: "Flip hinge", command: "flip-hinge", contextOnly: true },
           { id: "flip-swing", label: "Flip swing", command: "flip-swing", contextOnly: true },
           { id: "roof-cut-here", label: "Cut into this roof", command: "roof-cut-here", contextOnly: true },
@@ -325,9 +331,9 @@ export const HINTS = {
   "underlay-toggle": "Hide the sheet without removing it.",
   "trace-view": "Switch between the sheet and the modelled walls. The sheet view keeps PDF openings visible.",
   "underlay-off": "Remove the sheet, or the whole imported plan set, from the plan. Asks first, and can be undone for a few seconds.",
-  walls: "Click to start a wall, click again to end. Chain continues from the last end; untick it to start each wall fresh. Offset shifts the wall off the line you click. Draw on the centreline or a face. Space flips the face. Hold Shift to keep it square. Esc to stop.",
-  boundary: "Click to start a boundary wall or a fence, click again to end. Draw on the centreline or a face. Space flips the face. Hold Shift to keep it square. Esc to stop.",
-  foundations: "Click to start a foundation, click again to end. Draw on the centreline or a face. Space flips the face. Hold Shift to keep it square. Esc to stop.",
+  walls: "Click to start a wall, click again to end. Chain continues from the last end; untick it to start each wall fresh. Offset shifts the wall off the line you click. Draw on the centreline or a face. Space flips the face. Hold Shift to keep it square. Esc, right-click or Exit to stop.",
+  boundary: "Click to start a boundary wall or a fence, click again to end. Draw on the centreline or a face. Space flips the face. Hold Shift to keep it square. Esc, right-click or Exit to stop.",
+  foundations: "Click to start a foundation, click again to end. Draw on the centreline or a face. Space flips the face. Hold Shift to keep it square. Esc, right-click or Exit to stop.",
   floors: "Click around a room to draw a floor slab.",
   roofs: "Click around the outline to draw a roof.",
   "roof-cut": "Click inside a roof, then around the part to cut. Enter closes it. Hole leaves the roof with an opening. Remove takes that part off. Esc steps back.",
@@ -344,20 +350,25 @@ export const HINTS = {
   "service-connect": "Select a route point, then click a placed component to connect it. The point moves onto the component.",
   "service-type": "Select one or more routes, then pick a size or type in the inspector.",
   "service-slope": "Select drainage runs, then set the fall. Flow runs from the first point to the second.",
-  furniture: "Click to place. Beds, tables and sofas are layout outlines, not joinery.",
+  furniture: "Move to see the outline, click to place. Space turns it a quarter turn. A piece that crosses a wall or another piece is marked. A rug may cover other furniture.",
+  "scale-person": "Click to place a person, 1.8 m tall, for scale. It is not counted. Space turns the next one. Drag to move it.",
+  "scale-car": "Click to place a car outline, about 4.7 m long, to check a garage or parking bay. It is not counted. Space turns it.",
   casework: "Click a wall to start the run, then the other end. A cupboard cannot sit off the wall. Wall units are dashed (off the floor). An island is a click to place.",
   rooms: "Click inside the walls. The area is already shown; this names the room. Set its use in the inspector. Where there are no walls, click each corner and press Enter.",
   "room-sep": "Click one end, then the other. Ends snap to wall corners and faces. Type a length, as with a wall. A separation line bounds a room where there is no wall.",
   region: "Click each corner of the patch, then Enter. Pick Brick red, Concrete or Concrete 2 in the inspector. The patch stays ink on the drawing.",
   finishes: "Picture of this floor. Add a finish, then cover the whole floor or draw an area. Floor types stay on Floors.",
+  "add-finish": "Add a finish, then choose where it goes. Nothing is added until then.",
+  "finish-done": "Close this picture. The wall or floor stays selected.",
   dimensions: "Click two points. The dimension stays on this level and prints on its sheet. Select it and press Delete to remove it.",
-  move: "Click the point to move from, then where it should land. Joined walls stay joined. Disjoin, or hold Alt, to pull them apart. Esc cancels.",
-  copy: "Click the point to copy from, then where the copy should land. Esc cancels.",
-  "trim-corner": "Click each wall on the part you want to keep. Esc cancels.",
-  "trim-single": "Click the wall that stays, then the wall to trim, on the part you want to keep. Esc cancels.",
-  "trim-circle": "Move the circle over a corner. A line that crosses inside it loses its shorter part. A line that stops short stretches to a meeting inside the circle. Click applies it. [ and ] resize the circle. Esc stops.",
+  move: "Click the point to move from, then where it should land. Joined walls stay joined. Esc, right-click or Exit cancels.",
+  copy: "Click the point to copy from, then where the copy should land. Esc, right-click or Exit cancels.",
+  "trim-corner": "Click each wall on the part you want to keep. Esc, right-click or Exit cancels.",
+  "trim-single": "Click the wall that stays, then the wall to trim, on the part you want to keep. Esc, right-click or Exit cancels.",
+  "trim-circle": "Move the circle over a corner. A line that crosses inside it loses its shorter part. A line that stops short stretches to a meeting inside the circle. Click applies it. [ and ] resize the circle. Esc, right-click or Exit stops.",
   rotate: "Select something first, then rotate.",
-  attach: "Click a wall or beam on this storey or the one below to sit the selection on top of it. Esc to cancel.",
+  "exit-modify": "Stop and go back to selecting (Esc).",
+  attach: "Click a wall or beam on this storey or the one below to sit the selection on top of it. Esc, right-click or Exit to cancel.",
   detach: "Stop following what the selection sits on, leaving it at the elevation it already has.",
   "view-3d": "Open a massing view of the current plan.",
   "view-camera": "Click where you stand, then click what you look at.",
@@ -399,6 +410,19 @@ export const GROUP_PRIORITY = {
   Sheet: 2,
   // The contextual tabs' Edit group is the one drawn all day: last to shrink.
   Edit: -1,
+  // The Exit button that leads every green tab is the way out: never folded.
+  Select: -1,
+};
+
+/**
+ * The first group of every contextual tab, where Revit keeps its Modify
+ * button: Exit, which stops the armed tool and clears the selection, the same
+ * as Esc taken all the way. The tab headers only switch tabs. Added where the row is drawn, so the tabs themselves, and
+ * what the tests read from them, stay as they were.
+ */
+const EXIT_GROUP = {
+  label: "Select",
+  items: [{ id: "exit-modify", label: "Exit", command: "exit-modify", anchor: true }],
 };
 
 /** First tab id: the permanent tab a first load opens on. */
@@ -544,12 +568,17 @@ export function tabWithStatus(tab) {
 /**
  * A RIBBON item that arms a drawing tool on Build, i.e. places something.
  * Cut roof edits a roof that is already there, so it keeps Modify | Roofs
- * instead of opening Place Cut roof.
+ * instead of opening Place Cut roof. Wall finishes and floor finishes open
+ * a picture of something already drawn, so they are not placing either.
+ * Room separator and Route do draw, but they are commands rather than
+ * catalog tools, so they are named here.
  */
 const NOT_PLACING = new Set(["roof-cut"]);
+const ALSO_PLACING = new Set(["room-sep", "service-route"]);
 
 export function isPlacingItem(item) {
-  return Boolean(item?.tool && item.tabId === "build" && !NOT_PLACING.has(item.id));
+  if (!item || item.tabId !== "build" || NOT_PLACING.has(item.id)) return false;
+  return Boolean(item.tool) || ALSO_PLACING.has(item.id);
 }
 
 /** "Walls" becomes "Wall", "Doors" "Door". Caption words that are not plural stay. */
@@ -569,19 +598,57 @@ function placeName(item) {
 /**
  * The tab shown while a draw tool is armed: Place Wall, Place Door, and so
  * on. Derived from the item that armed it, never written out by hand. It
- * shows the group that item came from, so the wrong type is one click away.
+ * shows the placing tools from the group that item came from, so the wrong
+ * type is one click away. Commands that open an editor (finishes) or edit
+ * something already there (Cut roof) stay off this tab.
  */
 export function placingTab(itemId) {
   const item = ITEM_INDEX.get(itemId);
   if (!isPlacingItem(item)) return null;
   const group = RIBBON.find((t) => t.id === item.tabId)?.groups.find((g) => g.label === item.group);
-  const items = (group?.items || [item]).filter((it) => !it.contextOnly).map((it) => ITEM_INDEX.get(it.id));
+  const items = (group?.items || [item])
+    .map((it) => ITEM_INDEX.get(it.id))
+    .filter((it) => isPlacingItem(it));
   return {
     id: CONTEXT_TAB_ID,
     key: `place:${item.id}`,
     label: `Place ${placeName(item)}`,
-    groups: [{ label: item.group, short: group?.short, large: group?.large, items }],
+    groups: [{ label: item.group, short: group?.short, large: group?.large, items: items.length ? items : [item] }],
   };
+}
+
+/** The picture of a wall face. Trim, split and height stay on Modify | Walls until this closes. */
+const WALL_FINISH_TAB = {
+  groups: [
+    { label: "Finish", items: ["add-finish", "flip-face", "second-screen", "finish-done"] },
+  ],
+};
+
+/** The picture of a floor. The floor's own edit commands stay on Modify | Floors until this closes. */
+const FLOOR_FINISH_TAB = {
+  groups: [
+    { label: "Finish", items: ["add-finish", "second-screen", "finish-done"] },
+  ],
+};
+
+function finishTab(key, label, groups, subject) {
+  const name = String(subject || "").trim();
+  return {
+    id: CONTEXT_TAB_ID,
+    key,
+    label: name ? `${label} · ${name}` : label,
+    groups: resolveGroups(groups),
+  };
+}
+
+/** Modify | Wall finish, while the wall face is open. `subject` is the wall and which side. */
+export function wallFinishTab(subject) {
+  return finishTab("wall-finish", "Wall finish", WALL_FINISH_TAB.groups, subject);
+}
+
+/** Modify | Floor finish, while the floor picture is open. `subject` is the room or slab. */
+export function floorFinishTab(subject) {
+  return finishTab("floor-finish", "Floor finish", FLOOR_FINISH_TAB.groups, subject);
 }
 
 /** A permanent tab's groups: what only a contextual tab shows is left out. */
@@ -635,7 +702,7 @@ export function renderRibbon(tabsEl, functionsEl, state) {
   functionsEl.innerHTML = "";
   functionsEl.classList.toggle("is-contextual", shown === context);
   if (!shown) return;
-  const groups = shown === context ? shown.groups : permanentGroups(shown);
+  const groups = shown === context ? [EXIT_GROUP, ...shown.groups] : permanentGroups(shown);
 
   for (const group of groups) {
     const wrap = document.createElement("div");

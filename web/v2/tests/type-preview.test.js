@@ -58,7 +58,17 @@ test("a washer carries its door on the front face", () => {
   assert.equal(preview.marks.length, 0);
 });
 
-test("only sanitary types with a symbol get a preview", () => {
+test("a named furniture symbol previews, and a plain furniture name does not", () => {
+  const bed = sanitaryPreview({
+    category: "furniture",
+    name: "Bed, queen",
+    family: "Furniture",
+    geometry: { width: 1.6, depth: 2, height: 0.5 },
+    drawing: { plan: "bed" },
+  });
+  assert.equal(bed.kind, "bed");
+  assert.equal(bed.againstWall, false);
+  assert.ok(bed.solids.length >= 1);
   assert.equal(sanitaryPreview(sku("Desk", { width: 1, depth: 0.6 }, "furniture")), null);
   assert.equal(sanitaryPreview(sku("TSP_Dishwasher — 600mm", { width: 0.6, depth: 0.6 }, "casework")), null);
   assert.equal(sanitaryPreview(sku("Mystery fitting", { width: 0.5, depth: 0.5 })), null);

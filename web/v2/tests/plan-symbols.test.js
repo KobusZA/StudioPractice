@@ -95,6 +95,22 @@ test("symbols stay inside the measured footprint", () => {
     ["bidet", 0.38, 0.6],
     ["urinal", 0.35, 0.4],
     ["geyser", 0.55, 0.55],
+    ["bed", 1.6, 2],
+    ["bedside", 0.45, 0.4],
+    ["sofa-2", 1.6, 0.9],
+    ["sofa-3", 2, 0.9],
+    ["armchair", 0.85, 0.9],
+    ["coffee", 1.2, 0.6],
+    ["tv", 1.8, 0.45],
+    ["dining-4", 2.2, 1.8],
+    ["dining-6", 2.6, 1.9],
+    ["dining-8", 3.1, 1.9],
+    ["desk", 1.4, 1.2],
+    ["chair", 0.5, 0.56],
+    ["fridge", 0.7, 0.7],
+    ["stove", 0.6, 0.6],
+    ["carpet-square", 2.4, 2.4],
+    ["carpet-round", 1.8, 1.8],
   ];
   for (const [kind, w, d] of samples) {
     const box = extent(fixturePrimitives(kind, w, d));
@@ -179,4 +195,45 @@ test("paintFixture strokes a WC and leaves a desk alone", () => {
   assert.ok(ops.includes("rect"));
   assert.ok(ops.includes("stroke"));
   assert.equal(paintFixture(ctx, { x: 0, y: 0 }, sku("furniture", "Desk"), (x, y) => [x, y], 10), false);
+});
+
+test("furniture plans are recognised only when the type names its symbol", () => {
+  assert.equal(fixtureSymbolKind(sku("furniture", "Bed, queen")), null);
+  assert.equal(fixtureSymbolKind({
+    ...sku("furniture", "Bed, queen"),
+    drawing: { plan: "bed" },
+  }), "bed");
+});
+
+test("a bed has its headboard at the back and pillows in front", () => {
+  const single = fixturePrimitives("bed", 0.92, 1.9);
+  const pillows = single.filter((p) => p.op === "roundRect");
+  assert.equal(pillows.length, 1);
+  const head = single.filter((p) => p.op === "rect").sort((a, b) => a.h - b.h)[0];
+  assert.equal(head.y, 0);
+  assert.ok(pillows[0].y >= head.h);
+  const queen = fixturePrimitives("bed", 1.6, 2);
+  assert.equal(queen.filter((p) => p.op === "roundRect").length, 2);
+  const box = extent(queen);
+  assert.ok(box.minX >= -1e-6 && box.minY >= -1e-6);
+  assert.ok(box.maxX <= 1.6 + 1e-6 && box.maxY <= 2 + 1e-6);
+});
+
+test("a three-seat sofa shows a back, arms and seat splits", () => {
+  const parts = fixturePrimitives("sofa-3", 2, 0.9);
+  assert.ok(parts.some((p) => p.op === "roundRect"));
+  assert.ok(parts.filter((p) => p.op === "line").length >= 4);
+  const box = extent(parts);
+  assert.ok(box.maxX <= 2 + 1e-6 && box.maxY <= 0.9 + 1e-6);
+});
+
+test("a six-seat table draws the top and a chair at every place", () => {
+  const parts = fixturePrimitives("dining-6", 2.6, 1.9);
+  const rects = parts.filter((p) => p.op === "rect");
+  assert.equal(rects.length, 7);
+  const table = rects.reduce((a, b) => (a.w * a.h > b.w * b.h ? a : b));
+  assert.ok(table.w > 1.4 && table.w < 1.8);
+  const box = extent(parts);
+  assert.ok(box.minX >= -1e-6 && box.minY >= -1e-6);
+  assert.ok(box.maxX <= 2.6 + 1e-6 && box.maxY <= 1.9 + 1e-6);
 });

@@ -18,6 +18,7 @@ import {
   moveWallEnd,
   realignWallFaces,
   shiftJoinedEnds,
+  wallMoveHasJoins,
   retypeSelection,
   rotateSelection,
   selectionBounds,
@@ -400,6 +401,28 @@ test("a wall that only touches nearby is not carried", () => {
   }], { skuById: snapSku });
   assert.deepEqual(changed, []);
   assert.equal(doc.segments[1].y1, 2);
+});
+
+test("a wall move knows whether it has joins to pull apart", () => {
+  const corner = docWith({
+    segments: [wall("w1", 0, 0, 4, 0, "T220"), wall("w2", 4, 0, 4, 3, "T220")],
+  });
+  assert.equal(wallMoveHasJoins(corner, [ref("segment", "w1")], { skuById: snapSku }), true);
+
+  const tee = docWith({
+    segments: [wall("w1", 2, 0, 2, 3, "T220"), wall("w2", 0, 0, 4, 0, "T220")],
+  });
+  assert.equal(wallMoveHasJoins(tee, [ref("segment", "w1")], { skuById: snapSku }), true);
+
+  const apart = docWith({
+    segments: [wall("w1", 0, 0, 4, 0, "T220"), wall("w2", 4, 2, 4, 5, "T220")],
+  });
+  assert.equal(wallMoveHasJoins(apart, [ref("segment", "w1")], { skuById: snapSku }), false);
+
+  const both = docWith({
+    segments: [wall("w1", 0, 0, 4, 0, "T220"), wall("w2", 4, 0, 4, 3, "T220")],
+  });
+  assert.equal(wallMoveHasJoins(both, [ref("segment", "w1"), ref("segment", "w2")], { skuById: snapSku }), false);
 });
 
 test("moving the shared end of a split leaves the other piece", () => {

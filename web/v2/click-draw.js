@@ -450,6 +450,27 @@ export function fitWallArc(seg) {
   else seg.arc = arc;
 }
 
+/**
+ * After an end moves, keep the arc's included angle and let the radius scale
+ * with the new chord, so the curve neither deepens into a hook nor runs out
+ * of radius and goes straight. `old` is the chord before the move.
+ */
+export function keepArcSweep(seg, old) {
+  if (!seg?.arc || !old) return;
+  const before = arcFromRadius(old.x1, old.y1, old.x2, old.y2, seg.arc.radius, seg.arc.side, seg.arc.major === true);
+  const chord = Math.hypot(seg.x2 - seg.x1, seg.y2 - seg.y1);
+  const half = before ? Math.sin(Math.abs(before.sweep) / 2) : 0;
+  if (!before || chord < 1e-9 || half < 1e-9) {
+    fitWallArc(seg);
+    return;
+  }
+  const radius = (chord / 2) / half;
+  seg.arc = before.major
+    ? { radius, side: before.side, major: true }
+    : { radius, side: before.side };
+  fitWallArc(seg);
+}
+
 /** Points along the centreline, including both ends. */
 export function arcPoints(x1, y1, x2, y2, radius, side, step = Math.PI / 18, major = false) {
   const arc = arcFromRadius(x1, y1, x2, y2, radius, side, major);

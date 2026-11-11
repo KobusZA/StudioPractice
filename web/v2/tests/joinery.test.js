@@ -9,6 +9,9 @@ import {
   applyJoineryEdit,
   commitJoineryRun,
   elevationJoinery,
+  furnitureCrossesWall,
+  furnitureIsRug,
+  furnitureOverlapsRect,
   joineryDashed,
   joineryDepth,
   joineryDepthGaps,
@@ -25,6 +28,7 @@ import {
   stretchJoineryDepth,
   stretchJoineryRun,
 } from "../joinery.js";
+import { wallFootprint } from "../drawing-defaults.js";
 import { elevationSvg } from "../wall-elevation-render.js";
 import { compile } from "../compile.js";
 import { normalizePackUnits, validatePack } from "../schema.js";
@@ -49,6 +53,16 @@ test("joinery types validate and fill an empty furniture list", () => {
   assert.ok(sku("TSP_FUR_BED_QUEEN"));
   assert.equal(sku("TSP_CAS_BIC").drawing.colourClass, "timber");
   assert.equal(sku("TSP_FUR_SOFA").category, "furniture");
+  assert.equal(sku("TSP_FUR_SOFA").name, "Sofa, 3-seat");
+  assert.equal(sku("TSP_FUR_BED_QUEEN").drawing.plan, "bed");
+  assert.equal(sku("TSP_FUR_TABLE").drawing.plan, "dining-6");
+  assert.equal(sku("TSP_FUR_TABLE").geometry.width, 2.6);
+  assert.equal(sku("TSP_FUR_FRIDGE").drawing.plan, "fridge");
+  assert.equal(sku("TSP_FUR_DESK").drawing.plan, "desk");
+  assert.equal(furnitureIsRug(sku("TSP_FUR_RUG_SQ_24")), true);
+  assert.equal(furnitureIsRug(sku("TSP_FUR_RUG_RD_18")), true);
+  assert.equal(furnitureIsRug(sku("TSP_FUR_BED_QUEEN")), false);
+  assert.equal(sku("TSP_FUR_RUG_RD_18").geometry.width, 1.8);
 });
 
 test("merging twice does not duplicate", () => {
@@ -275,4 +289,17 @@ test("a kitchen run reports its length on the takeoff", () => {
   const row = payload.instances.find((r) => r.elementId === "i1");
   assert.ok(row);
   assert.ok(Math.abs((row.length || 0) - 2) < 1e-6);
+});
+
+test("furniture that cuts a wall overlaps it, and a piece flush with the face does not", () => {
+  const poly = wallFootprint({ x1: 0, y1: 0, x2: 4, y2: 0, thickness: 0.22 }).map((p) => [p.x, p.y]);
+  assert.equal(furnitureCrossesWall({ x: 1, y: 0.2, w: 1.6, h: 2 }, [poly]), false);
+  assert.equal(furnitureCrossesWall({ x: 1, y: 0.11, w: 1.6, h: 2 }, [poly]), false);
+  assert.equal(furnitureCrossesWall({ x: 1, y: -0.05, w: 1.6, h: 2 }, [poly]), true);
+});
+
+test("furniture that cuts another piece overlaps it, and pieces that only touch do not", () => {
+  const bed = { x: 1, y: 1, w: 1.6, h: 2 };
+  assert.equal(furnitureOverlapsRect(bed, { x: 2, y: 2, w: 2, h: 0.9 }), true);
+  assert.equal(furnitureOverlapsRect(bed, { x: 3, y: 1, w: 2, h: 0.9 }), false);
 });

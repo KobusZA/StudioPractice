@@ -28,6 +28,11 @@ import {
   validateLevelEdit,
   setLevelElevation,
   storeyLevels,
+  levelDisplayName,
+  stationDisplay,
+  sectionMm,
+  railLabelYs,
+  sectionPartShown,
 } from "../level-view.js";
 import { ribbonItems } from "../ribbon.js";
 import { normalizeDoc, emptyDoc } from "../model.js";
@@ -354,6 +359,50 @@ test("the inspector stays on the active cut when that cut belongs to the object'
   assert.equal(selectedInspectorStationId(stations, "01 GFL", "01 GFL::ceiling"), "01 GFL::ceiling");
   assert.equal(selectedInspectorStationId(stations, "01 GFL", "roof"), "roof");
   assert.equal(selectedInspectorStationId(stations, "00 FOUNDATION", "01 GFL::floor"), "00 FOUNDATION::floor");
+});
+
+test("the Active cut panel spells out level names and keeps the number as a code", () => {
+  assert.deepEqual(levelDisplayName(namedLevels[0]), { code: "00", name: "Foundation" });
+  assert.deepEqual(levelDisplayName(namedLevels[1]), { code: "01", name: "Ground floor" });
+  assert.deepEqual(levelDisplayName(namedLevels[2]), { code: "02", name: "First floor" });
+  assert.deepEqual(levelDisplayName(namedLevels[3]), { code: "03", name: "Second floor" });
+  assert.deepEqual(levelDisplayName({ id: "Garage", name: "Garage" }), { code: "", name: "Garage" });
+  const stations = buildHouseStations(visibleLevels(namedLevels, 0));
+  assert.deepEqual(stations.map((s) => stationDisplay(s, namedLevels)), [
+    { code: "00", name: "Foundation" },
+    { code: "01", name: "Ground floor · floor" },
+    { code: "01", name: "Ground floor · ceiling" },
+    { code: "", name: "Roof · eaves" },
+  ]);
+});
+
+test("section heights use a true minus, a thin-space separator and an optional plus", () => {
+  assert.equal(sectionMm(-0.6), "\u2212600");
+  assert.equal(sectionMm(0, true), "0");
+  assert.equal(sectionMm(2.902, true), "+2\u202f902");
+  assert.equal(sectionMm(3.12), "3\u202f120");
+  assert.equal(sectionMm(NaN), "—");
+});
+
+test("rail labels spread apart when ticks are close and stay level when they are not", () => {
+  assert.deepEqual(railLabelYs([200, 100], 21, 10, 290), [200, 100]);
+  const close = railLabelYs([105, 100], 21, 10, 290);
+  assert.equal(close[1], 100);
+  assert.equal(close[0], 121);
+  const crowded = railLabelYs([285, 288], 21, 10, 290);
+  assert.ok(crowded[1] <= 290 && crowded[1] - crowded[0] >= 21);
+});
+
+test("with only this cut shown, the section keeps the same slices the plan does", () => {
+  const wall = { level: "01 GFL", role: "wall" };
+  const ceiling = { level: "01 GFL", role: "ceiling" };
+  const floor = { level: "01 GFL", role: "floor" };
+  const roof = { level: "01 GFL", role: "roof" };
+  const footing = { level: "00 FOUNDATION", role: "foundation" };
+  assert.deepEqual([wall, ceiling, floor, roof, footing].map((p) => sectionPartShown("floor", "01 GFL", p)), [true, true, true, false, false]);
+  assert.deepEqual([wall, ceiling, floor, roof, footing].map((p) => sectionPartShown("ceiling", "01 GFL", p)), [true, true, false, false, false]);
+  assert.deepEqual([wall, ceiling, floor, roof, footing].map((p) => sectionPartShown("roof", "01 GFL", p)), [false, false, false, true, false]);
+  assert.deepEqual([wall, footing].map((p) => sectionPartShown("foundation", "00 FOUNDATION", p)), [false, true]);
 });
 
 test("level elevation overrides lay over the stack without mutating it", () => {
