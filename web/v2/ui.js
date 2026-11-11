@@ -32,8 +32,8 @@
 import { complianceGaps, normalizePackUnits, GEOMETRY_LENGTH_KEYS } from "./schema.js";
 import { RULE_PACK, evaluateCompliance, groupFindingsByPart, summarizeFindings } from "./rules.js";
 import { deriveBuildingLine, hitPropertyLine, setBuildingLine, setPropertyLine, setSgReference } from "./site.js?v=20261015-property";
-import { CONTEXT_TAB_ID, HINTS, firstTabId, floorFinishTab, placingTab, renderRibbon, selectionTab, sheetTab, tabWithStatus, wallFinishTab } from "./ribbon.js?v=20261111-alt-detach";
-import { closeOverflowMenus, decorateRibbon, fitRibbon } from "./ribbon-fit.js?v=20261111-exit-button";
+import { CONTEXT_TAB_ID, HINTS, firstTabId, floorFinishTab, isAnnotatingTab, placingTab, renderRibbon, selectionTab, sheetTab, tabWithStatus, wallFinishTab } from "./ribbon.js?v=20261111-footing-batch";
+import { closeOverflowMenus, decorateRibbon, fitRibbon } from "./ribbon-fit.js?v=20261111-footing-batch";
 import {
   ghostContext,
   MAX_FLOORS_TO_ADD,
@@ -55,6 +55,9 @@ import {
   isReferenceLevel,
   validateLevelEdit,
   setLevelElevation,
+  applyLevelNames,
+  validateLevelRename,
+  setLevelName,
   buildHouseStations,
   inspectorStations,
   selectedInspectorStationId,
@@ -65,7 +68,7 @@ import {
   sectionMm,
   railLabelYs,
   sectionPartShown,
-} from "./level-view.js?v=20261111-active-cut";
+} from "./level-view.js?v=20261111-level-name";
 import { foundationStorey, foundationsOffStorey, isFoundationLevel as levelIsFoundation, placementHintOverride } from "./placement-warn.js?v=20261109-eaves-floor";
 import {
   alignSelection,
@@ -89,7 +92,7 @@ import {
   splitSelection,
   splitWallAt,
   MIN_WALL_SPLIT_M,
-} from "./modify.js?v=20261111-alt-detach";
+} from "./modify.js?v=20261111-annot4";
 import { applyFillet, captureFillets, filletRadiusForPoint, planFillet, planTrimCorner, planTrimSingle, refitFillets, sharpenFillets, trimToBoundary, trimToCorner, wallCanTrim } from "./trim-extend.js?v=20261111-fillet-tangent";
 import { applyCircleTrim, planCircleTrim } from "./circle-trim.js?v=20261108-joinery";
 import {
@@ -149,11 +152,37 @@ import {
   setLineworkListener,
   snapUnderlayWorld,
   snapReferencePixel,
-} from "./underlay.js?v=20261028-eye";
+} from "./underlay.js?v=20261111-notes";
 import { alignablePages, applyCeilingHeights, setCeilingHeight, isPlanPage, mirrorLegacySource, pagesOfSource, sameSheetGeometry, setPageShown, shownPagesBeside } from "./sheet-set.js";
 import { createSheetUi } from "./sheet-ui.js?v=20261109-sheet-mark";
 import { SATELLITE_ATTRIBUTION, locateSuggestion, suggestAddresses } from "./satellite.js?v=20261015-geocode";
 import { pickedDimension, planDimensionLines } from "./dimensions.js?v=20260917-measure";
+import {
+  DEFAULT_DIMENSION_STYLE,
+  DEFAULT_NOTE_STYLE,
+  PLAN_TEXT_SCALE,
+  STANDARD_COLOURS,
+  TEXT_FONTS,
+  createNote,
+  cssFont,
+  dimensionDirFor,
+  dimensionGeometry,
+  dimensionLabel,
+  leaderStart,
+  offsetThrough,
+  overriddenKeys,
+  readableAngle,
+  resolveTextLook,
+  setOverride,
+  styleFromObject,
+  textHeightM,
+  textStyleById,
+  textStyleList,
+  textShiftThrough,
+  toggleOverride,
+  wrapNoteLines,
+} from "./notes.js?v=20261111-annot3";
+import { DEFAULT_LINE_STYLE, LINE_STYLES, lineArrowHeads, lineStyleOf, rectangleSides, sheetLineStroke } from "./line-styles.js?v=20261111-annot3";
 import {
   MIN_TRACE,
   canCommitLine,
@@ -199,7 +228,7 @@ import {
   wallPlanColour,
   WALL_EXISTING_EDGE,
 } from "./drawing-defaults.js?v=20261110-fillet-join";
-import { area as polyArea, bbox, clampDeltaInside, clampToPoly, clipPolygon, clipSegToRect, distToSeg, fitPolygonToHost, formatLengthMm, headingDeg, parseLengthMm, pointInPoly, roundGrid, translatePolyEdge } from "./geom.js?v=20261108-ridge";
+import { area as polyArea, bbox, centroid, clampDeltaInside, clampToPoly, clipPolygon, clipSegToRect, distToSeg, fitPolygonToHost, formatLengthMm, headingDeg, parseLengthMm, pointInPoly, roundGrid, translatePolyEdge } from "./geom.js?v=20261108-ridge";
 import { SNAP_PIXEL_TOL, GAP_MAX_M, ALIGN_ORIGIN_MAX_M, CHAIN_GUIDE_DEG, NICE_MIN_STEP_M, PROBE_VECTORS, applyNicePoint, bestLinearMoveSnap, chainAngleTarget, collectSnapEdges, collectSnapTargets, isExactPointSnap, nearestAlignments, resolveProbes, snapEdgeToLine, snapLengthFrom, snapLinearEnd, snapNiceDelta, snapPoint, snapToFace } from "./snap.js?v=20261110-angle-snap";
 import { DEFAULT_ROOF_OVERHANG_MM, DEFAULT_ROOF_PITCH, ROOF_CUT_MIN_AREA, applyRoofOverhang, commitRoofAnchors, gableProfile, normalizeRoofCutKind, roofEdgeFromBase, roofGuideLines, roofHasBase, floorOffsetMm, roofOffsetMm, roofOverhangMm, roofEaveDropM, roofPitch2Deg, roofPlanAreas, roofRidgeAlongX, roofRidgeOffsetMm } from "./roof.js?v=20261109-floor-offsets";
 import {
@@ -228,13 +257,13 @@ import {
   hostedFinishRegionsOf,
   carryFinishRegionsToLevel,
   translateShape,
-} from "./model.js?v=20261109-floor-offsets";
+} from "./model.js?v=20261111-annot4";
 import { historyAction, historyListHtml } from "./history-panel.js?v=20261103-history-icons";
 import { clearShapeLink, enclosedFace, exteriorOuterFaces, footprintFace, footprintOuterFace, spaceAt, syncRoomBounds } from "./room-bound.js?v=20261108-ridge";
-import { REGION_CONVENTIONS, regionConvention } from "./region.js";
-import { ELEVATION_SNAP, FINISH_MIN_M, OPENING_MIN_M, addFoundationUnderWall, alignOutlineShift, applyBandEdit, applyJoineryFaceEdit, applyOpeningEdit, applyOutlinePoints, applyTypedGap, applyWallTopEdit, axisAlignedOutline, dropGuideZ, elevationModel, faceRefForSelection, foundationTypes, includeDropGuide, maxTypedGap, openingSnapEdges, resizeArchRise, resizeOpeningCorner, snapElevation, translateOutlineEdge, viewedFaceCorners } from "./wall-elevation.js?v=20261109-floor-offsets";
+import { DEFAULT_REGION_CONVENTION, REGION_CONVENTIONS, hatchLines, regionConvention } from "./region.js?v=20261111-annot3";
+import { ELEVATION_SNAP, FINISH_MIN_M, OPENING_MIN_M, addFoundationUnderWall, addFoundationsUnderWalls, alignOutlineShift, applyBandEdit, applyJoineryFaceEdit, applyOpeningEdit, applyOutlinePoints, applyTypedGap, applyWallTopEdit, axisAlignedOutline, dropGuideZ, elevationModel, faceRefForSelection, foundationTypes, includeDropGuide, maxTypedGap, openingSnapEdges, resizeArchRise, resizeOpeningCorner, snapElevation, translateOutlineEdge, viewedFaceCorners, wallFoundationState } from "./wall-elevation.js?v=20261111-footing-batch";
 import { FACE_CORNER_ALONG, FACE_CORNER_TRAVEL, FACE_CUE_INTRO_MS, FACE_CUE_PULSE_MS, FACE_CUE_REST_ALPHA, FACE_PAN_MS, faceCornerMarks, faceCueZoom, faceFrameShift } from "./face-plan-cue.js?v=20261107-face-frame";
-import { createFinishRegion, createFinishRun, dependentsOfWalls, faceArcScale, finishBillNote, finishEditRing, finishProductById, floorCoverage, libraryLine, materializeFinishRing, planWallFinishMarks, presetFromRoom, roomsBySide, rulesFromPreset, savePreset } from "./finish-model.js?v=20261108-face-length";
+import { createFinishRegion, createFinishRun, dependentsOfWalls, faceArcScale, finishBillNote, finishEditRing, finishProductById, floorCoverage, libraryLine, materializeFinishRing, planWallFinishMarks, presetFromRoom, roomsBySide, rulesFromPreset, savePreset } from "./finish-model.js?v=20261111-boq-click";
 import { FINISH_CATEGORIES, finishId, finishSwatch, normalizeFinishProducts, normalizeFinishSettings } from "./finish-data.js";
 import { HEIGHT_PRESETS, bandFaceLine, compareBands, draftBandPreviewHtml, faceFinishHtml, finishCalloutHtml, floorOpenHtml, formatFloorArea, openingCalloutHtml, floorProductSuggestions, parseTarget, productsHtml, roomFinishHtml, slabFinishHtml, targetOptions } from "./finish-panel.js?v=20261108-face-length";
 import { alignCameraShift, centerVerticalFrame, clampElevationView, edgeResizeCursor, elevationFitFrame, elevationGuideLayout, elevationSvg, faceScreenCenter, finishLocate, nudgeIntoView, planFaceFrame, zoomElevationView } from "./wall-elevation-render.js?v=20261109-mirror-corner";
@@ -304,11 +333,13 @@ import {
   levelElevation,
   objectLabel,
   resolvedBase,
-} from "./compile.js?v=20261111-mass-pick";
-import { exportDxf } from "./dxf.js";
+} from "./compile.js?v=20261111-boq-click";
+import { exportDxf } from "./dxf.js?v=20261111-annot3";
 import { exportIfc } from "./ifc.js";
-import { boqRows, bomRows, scheduleTotal } from "./schedule.js";
-import { createMassingView, lookFromClicks, EYE_HEIGHT_M, facesFromPayload, faceStyle, massingLayer, hatchPolygon, paintSpotLevels, rayPlanePoint, strokeFaceEdges } from "./massing.js?v=20261111-mass-style";
+import { boqRows, bomRows, familyHeadingAt, scheduleCode, scheduleLineKey, scheduleTotal } from "./schedule.js?v=20261111-boq-click";
+import { captionBesideName, ensureOpeningMarks, markForNewOpening, markKind, markSide, remarkRetypedWindows, renameMark, shareWindowSize, sizedTypeName, splitWindowType, windowsOfMark } from "./marks.js";
+import { boqDownloadName, boqWorkbook } from "./boq-xlsx.js?v=20261111-boq-style";
+import { createMassingView, cycleStackedHits, lookFromClicks, EYE_HEIGHT_M, facesFromPayload, faceStyle, massingLayer, hatchPolygon, paintSpotLevels, rayPlanePoint, strokeFaceEdges, massViewStyle } from "./massing.js?v=20261111-boq-click";
 import { figureFootprint, figureLabel, figureNose, scaleFigurePair } from "./scale-figures.js?v=20261111-mass-figures";
 import {
   MAX_VISUALIZE_PROMPT,
@@ -420,6 +451,7 @@ const el = {
   scheduleBody: document.getElementById("v2-schedule-body"),
   scheduleClose: document.getElementById("v2-schedule-close"),
   schedulePeek: document.getElementById("v2-schedule-peek"),
+  scheduleDownload: document.getElementById("v2-schedule-download"),
   schedule3d: document.getElementById("v2-schedule-3d"),
   schedule3dCanvas: document.getElementById("v2-schedule-3d-canvas"),
   schedule3dEmpty: document.getElementById("v2-schedule-3d-empty"),
@@ -516,6 +548,29 @@ const el = {
   ribbonTabs: document.getElementById("v2-ribbon-tabs"),
   ribbonFunctions: document.getElementById("v2-ribbon-functions"),
   ribbonSettingsPark: document.getElementById("v2-ribbon-settings-park"),
+  textBar: document.getElementById("v2-text-bar"),
+  textBarStyle: document.getElementById("v2-text-bar-style"),
+  textBarFont: document.getElementById("v2-text-bar-font"),
+  textBarSize: document.getElementById("v2-text-bar-size"),
+  textBarColour: document.getElementById("v2-text-bar-colour"),
+  textBarColours: document.getElementById("v2-text-bar-colours"),
+  textBarPlanOnly: document.getElementById("v2-text-bar-plan-only"),
+  textBarPlanOnlyWrap: document.getElementById("v2-text-bar-plan-only-wrap"),
+  lineBar: document.getElementById("v2-line-bar"),
+  lineBarStyles: document.getElementById("v2-line-bar-styles"),
+  lineBarExport: document.getElementById("v2-line-bar-export"),
+  lineBarShapeWrap: document.getElementById("v2-line-bar-shape-wrap"),
+  lineBarShapes: document.getElementById("v2-line-bar-shapes"),
+  lineBarChainWrap: document.getElementById("v2-line-bar-chain-wrap"),
+  lineBarChain: document.getElementById("v2-line-bar-chain"),
+  lineBarArrows: document.getElementById("v2-line-bar-arrows"),
+  dimBar: document.getElementById("v2-dim-bar"),
+  dimBarDirs: document.getElementById("v2-dim-bar-dirs"),
+  dimBarTextWrap: document.getElementById("v2-dim-bar-text-wrap"),
+  dimBarTextReset: document.getElementById("v2-dim-bar-text-reset"),
+  fillBar: document.getElementById("v2-fill-bar"),
+  fillBarFills: document.getElementById("v2-fill-bar-fills"),
+  roomSizes: document.getElementById("v2-room-sizes"),
   ribbonHint: document.getElementById("v2-ribbon-hint"),
   ribbonHintSlot: document.getElementById("v2-ribbon-hint-slot"),
   ribbonHintInfo: document.getElementById("v2-ribbon-hint-info"),
@@ -551,6 +606,24 @@ const el = {
   wallTopMode: document.getElementById("v2-wall-top-mode"),
   wallTopH: document.getElementById("v2-wall-top-h"),
   tempDim: document.getElementById("v2-temp-dim"),
+  noteEdit: document.getElementById("v2-note-edit"),
+  ctxText: document.getElementById("v2-ctx-text"),
+  ctxNoteTextWrap: document.getElementById("v2-ctx-note-text-wrap"),
+  ctxNoteText: document.getElementById("v2-ctx-note-text"),
+  ctxDimTextWrap: document.getElementById("v2-ctx-dim-text-wrap"),
+  ctxDimPrefix: document.getElementById("v2-ctx-dim-prefix"),
+  ctxDimReplace: document.getElementById("v2-ctx-dim-replace"),
+  ctxDimSuffix: document.getElementById("v2-ctx-dim-suffix"),
+  ctxNoteOnly: document.getElementById("v2-ctx-note-only"),
+  ctxNoteWidth: document.getElementById("v2-ctx-note-width"),
+  ctxNoteLeader: document.getElementById("v2-ctx-note-leader"),
+  ctxNoteRotate: document.getElementById("v2-ctx-note-rotate"),
+  ctxTextReset: document.getElementById("v2-ctx-text-reset"),
+  ctxTextSaveStyle: document.getElementById("v2-ctx-text-save-style"),
+  ctxTextStyleNameWrap: document.getElementById("v2-ctx-text-style-name-wrap"),
+  ctxTextStyleName: document.getElementById("v2-ctx-text-style-name"),
+  ctxTextStyleNameOk: document.getElementById("v2-ctx-text-style-name-ok"),
+  ctxTextNote: document.getElementById("v2-ctx-text-note"),
   floorEdgeMode: document.getElementById("v2-floor-edge-mode"),
   inspectKicker: document.getElementById("v2-inspect-kicker"),
   inspectEmpty: document.getElementById("v2-inspect-empty"),
@@ -596,8 +669,8 @@ const el = {
   ctxNameWrap: document.getElementById("v2-ctx-name-wrap"),
   ctxUse: document.getElementById("v2-ctx-use"),
   ctxUseWrap: document.getElementById("v2-ctx-use-wrap"),
-  ctxRegion: document.getElementById("v2-ctx-region"),
-  ctxRegionWrap: document.getElementById("v2-ctx-region-wrap"),
+  ctxRegionText: document.getElementById("v2-ctx-region-text"),
+  ctxRegionTextWrap: document.getElementById("v2-ctx-region-text-wrap"),
   ctxLen: document.getElementById("v2-ctx-len"),
   ctxLenWrap: document.getElementById("v2-ctx-len-wrap"),
   ctxAng: document.getElementById("v2-ctx-ang"),
@@ -632,6 +705,10 @@ const el = {
   ctxFoundation: document.getElementById("v2-ctx-foundation"),
   ctxFoundationWrap: document.getElementById("v2-ctx-foundation-wrap"),
   ctxFoundationOwn: document.getElementById("v2-ctx-foundation-own"),
+  ctxFootingWrap: document.getElementById("v2-ctx-footing-wrap"),
+  ctxFootingType: document.getElementById("v2-ctx-footing-type"),
+  ctxFootingAdd: document.getElementById("v2-ctx-footing-add"),
+  ctxFootingNote: document.getElementById("v2-ctx-footing-note"),
   floorBuildUp: document.getElementById("v2-floor-build-up"),
   ctxType: document.getElementById("v2-ctx-type"),
   ctxTypeWrap: document.getElementById("v2-ctx-type-wrap"),
@@ -652,10 +729,12 @@ const el = {
   ctxORise: document.getElementById("v2-ctx-orise"),
   ctxORiseWrap: document.getElementById("v2-ctx-orise-wrap"),
   ctxOSizeNote: document.getElementById("v2-ctx-osize-note"),
+  ctxOMark: document.getElementById("v2-ctx-omark"),
+  ctxOMarkWrap: document.getElementById("v2-ctx-omark-wrap"),
+  ctxOTypeNote: document.getElementById("v2-ctx-otype-note"),
+  ctxOTypeSplit: document.getElementById("v2-ctx-otype-split"),
   ctxConvert: document.getElementById("v2-ctx-convert"),
   ctxRemove: document.getElementById("v2-ctx-remove"),
-  ctxOOffset: document.getElementById("v2-ctx-ooffset"),
-  ctxOOffsetWrap: document.getElementById("v2-ctx-ooffset-wrap"),
   ctxFloor: document.getElementById("v2-ctx-floor"),
   ctxFloorWrap: document.getElementById("v2-ctx-floor-wrap"),
   ctxFloorName: document.getElementById("v2-ctx-floor-name"),
@@ -1020,10 +1099,24 @@ function parseMm(raw) {
   return Number.isFinite(n) ? n : null;
 }
 let beamStart = null;
-// Document > Lines > Model / Annotate: the first click of a line, while
-// tool === "model-line" or "annot-line". Same bare-point shape as beamStart -
-// a line is a beam-shaped click-click with no SKU, not a chained wall.
+// Document > Annotate > Line: the first click of a line, while tool ===
+// "line". Same bare-point shape as beamStart - a line is a beam-shaped
+// click-click with no SKU, not a chained wall.
 let lineStart = null;
+// How the next line is drawn, from the Place Line tab: its style, whether it
+// is exported to CAD (a model line) or ink only (annotation), the shape one
+// pick makes, whether a run carries on from the last end, and its arrows.
+const nextLine = { style: DEFAULT_LINE_STYLE, kind: "annotation", shape: "line", chain: false, arrow: "none" };
+// How the next note starts: the last style picked, the way Revit keeps the
+// last text type, plus whatever was set on the Text tab before or while
+// typing. It is the tab's subject while a new note is being typed, or while
+// the tool is on with nothing selected.
+const nextNote = { styleId: DEFAULT_NOTE_STYLE, printable: true };
+// The fill the next region takes, from the Place Fill tab.
+let nextFill = DEFAULT_REGION_CONVENTION;
+// Place Dimension: "auto" picks aligned, horizontal or vertical from where
+// the line is pulled to; the others hold one.
+let nextDimDir = "auto";
 // Site > Property line: the vertices clicked so far, while tool === "property".
 // Closed by clicking near the first point again, Enter, or double-click.
 let siteDraft = null;
@@ -1054,6 +1147,12 @@ let calloutDraft = null;
 let revisionCloudDraft = null;
 // Document > Annotate > Dimensions: the first click while tool === "measure".
 let measureDraft = null;
+// Document > Annotate > Text: the words being typed over the plan. `id` is the
+// note being changed, or null for a new one at (x, y). A dimension's label is
+// typed the same way, with `dimId` set instead.
+let noteEdit = null;
+// The note whose leader tip the next plan click sets.
+let leaderPick = null;
 // Completed two-point strings kept while the measure tool stays armed, so a
 // second pair can sit next to the first until Escape (or the button again)
 // leaves the tool.
@@ -1322,10 +1421,23 @@ let activeLevel = null;
 // is drawn. The widget checkbox and the ribbon command share this flag.
 let isolateCurrentLevel = window.localStorage.getItem("v2-level-isolate") === "1";
 
-// Document -> Annotate -> Dimensions: automatic room/overall strings, shown
-// while the two-point measure tool is armed so the pick has the existing
-// layout sizes next to it.
-let showDimensions = false;
+// Room sizes on the plan strip: each room's width and depth and the overall
+// size, worked out on the fly. A view setting, kept per browser; nothing is
+// placed or printed. Placed dimensions are the Dimensions tool's.
+let showDimensions = window.localStorage.getItem("v2-room-sizes") === "1";
+
+function setShowRoomSizes(on) {
+  showDimensions = Boolean(on);
+  try { window.localStorage.setItem("v2-room-sizes", showDimensions ? "1" : "0"); } catch { /* private mode */ }
+  syncRoomSizesButton();
+  render();
+}
+
+function syncRoomSizesButton() {
+  if (!el.roomSizes) return;
+  el.roomSizes.classList.toggle("active", showDimensions);
+  el.roomSizes.setAttribute("aria-pressed", showDimensions ? "true" : "false");
+}
 
 // The underlay is not a doc entity with a ref (it's a singleton on the doc,
 // not an array member), so it gets its own selection flag rather than going
@@ -1524,11 +1636,6 @@ async function boot() {
     el.ctxUse.innerHTML = ROOM_USES
       .map((u) => `<option value="${escapeHtml(u.id)}">${escapeHtml(u.label)}</option>`)
       .join("");
-  }
-  if (el.ctxRegion) {
-    el.ctxRegion.innerHTML = `<option value="">Not set</option>${
-      REGION_CONVENTIONS.map((c) => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.id)}</option>`).join("")
-    }`;
   }
   drawLevelSwitcher();
   renderGapReport();
@@ -2573,6 +2680,7 @@ function applyTheirDocument(theirDoc) {
  * difference this does nothing, because the signature matches.
  */
 function reconcileNormalisation(serverDoc) {
+  ensureOpeningMarks(store.doc, pack);
   if (docSignature(store.doc) !== docSignature(serverDoc)) store.persist();
 }
 
@@ -2651,6 +2759,8 @@ window.__debug = {
   get shapeDraft() { return shapeDraft; },
   get beamStart() { return beamStart; },
   get lineStart() { return lineStart; },
+  render: () => render(),
+  noteLayout: (note) => noteLayout(note),
 };
 
 // --- geometry helpers ----------------------------------------------------
@@ -2700,7 +2810,7 @@ function snapFrom() {
   }
   if (shapeDraft?.x0 != null) return { x: shapeDraft.x0, y: shapeDraft.y0 };
   if (beamStart) return beamStart;
-  if (measureDraft?.a) return measureDraft.a;
+  if (measureDraft?.a && !measureDraft.b) return measureDraft.a;
   if (tool === "move" && moveSession?.base) return moveSession.base;
   if (tool === "copy" && copySession?.base) return copySession.base;
   const routeFrom = serviceRouteFrom();
@@ -2715,8 +2825,8 @@ function snapFrom() {
 function drawingLineFrom() {
   if (wallDraft) return { x: wallDraft.x1, y: wallDraft.y1 };
   if (beamStart) return beamStart;
-  if (lineStart) return lineStart;
-  if (measureDraft?.a) return measureDraft.a;
+  if (lineStart) return lineStart.arcEnd ? null : lineStart;
+  if (measureDraft?.a && !measureDraft.b) return measureDraft.a;
   if (regionDraft?.length) return regionDraft[regionDraft.length - 1];
   if (roomDraft?.length) return roomDraft[roomDraft.length - 1];
   if (boundaryDraft?.length) return boundaryDraft[boundaryDraft.length - 1];
@@ -2962,7 +3072,7 @@ function buildProbes(point, edges) {
 function snapPreviewTool() {
   return tool === "wall" || tool === "beam" || tool === "room" || tool === "slab"
     || tool === "roof" || tool === "roof-cut" || tool === "property" || tool === "sg-ref" || tool === "camera" || tool === "section"
-    || tool === "callout" || tool === "revision" || tool === "model-line" || tool === "annot-line"
+    || tool === "callout" || tool === "revision" || tool === "line"
     || tool === "separation"
     || tool === "measure" || tool === "service-route" || tool === "region";
 }
@@ -3080,6 +3190,7 @@ function objectPlanRole(obj) {
   if (obj.shape && obj.atEaves === true && skuById(obj.sku)?.category !== "ceiling") return "roof";
   if (obj.shape) return skuById(obj.sku)?.category === "ceiling" ? "ceiling" : "floor";
   if (obj.kind === "model" || obj.kind === "annotation") return "line";
+  if (typeof obj.text === "string" && Object.prototype.hasOwnProperty.call(obj, "printable")) return "line";
   if (Number.isFinite(obj.x1) && Number.isFinite(obj.y1)) {
     const cat = skuById(obj.sku)?.category;
     return cat === "beam" || cat === "column" ? "beam" : "wall";
@@ -3336,12 +3447,17 @@ function syncPackLevels() {
   const typedCeilings = Object.keys(store.doc?.sheetSet?.ceilingHeights || {}).length > 0;
   const elevEdits = store.doc?.levelElevations || {};
   const editedElevations = Object.keys(elevEdits).length > 0;
-  pack = own.length || typedCeilings || editedElevations
+  const nameEdits = store.doc?.levelNames || {};
+  const editedNames = Object.keys(nameEdits).length > 0;
+  pack = own.length || typedCeilings || editedElevations || editedNames
     ? {
         ...templatePack,
-        levels: applyLevelElevations(
-          applyCeilingHeights(mergedLevels(templatePack.levels, own), store.doc?.sheetSet),
-          elevEdits
+        levels: applyLevelNames(
+          applyLevelElevations(
+            applyCeilingHeights(mergedLevels(templatePack.levels, own), store.doc?.sheetSet),
+            elevEdits
+          ),
+          nameEdits
         ),
       }
     : templatePack;
@@ -3373,6 +3489,68 @@ function editStationElevation(span, station) {
     else if (e.key === "Escape") finish(false);
   });
   input.addEventListener("blur", () => finish(false));
+}
+
+/** Turn a station's level name into a text field; Enter commits, Escape cancels. */
+function editStationName(span, station) {
+  if (station.kind === "roof") return;
+  const level = (pack.levels || []).find((l) => l.id === station.levelId);
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "level-rail-name";
+  input.maxLength = 40;
+  input.value = levelDisplayName(level || { id: station.levelId }).name;
+  input.setAttribute("aria-label", "Level name");
+  span.replaceWith(input);
+  input.focus();
+  input.select();
+  let done = false;
+  const finish = (commit) => {
+    if (done) return;
+    done = true;
+    if (commit) commitStationName(station, input.value);
+    else drawLevelSwitcher();
+  };
+  input.addEventListener("click", (e) => e.stopPropagation());
+  input.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if (e.key === "Enter") finish(true);
+    else if (e.key === "Escape") finish(false);
+  });
+  input.addEventListener("blur", () => finish(false));
+}
+
+function commitStationName(station, text) {
+  const raw = String(text ?? "").trim();
+  const level = (pack.levels || []).find((l) => l.id === station.levelId);
+  const shown = levelDisplayName(level || { id: station.levelId }).name;
+  if (raw === shown) {
+    drawLevelSwitcher();
+    return;
+  }
+  const check = validateLevelRename(pack.levels || [], station.levelId, raw);
+  if (!check.ok) {
+    setStatusMessage(check.message, "warn");
+    drawLevelSwitcher();
+    return;
+  }
+  const previous = level?.name || station.levelId;
+  store.pushUndo(`Renamed ${previous} to ${raw}`);
+  const inserted = (store.doc.levels || []).find((l) => l.id === station.levelId);
+  if (inserted) {
+    inserted.name = raw;
+    if (store.doc.levelNames && Object.prototype.hasOwnProperty.call(store.doc.levelNames, station.levelId)) {
+      store.doc.levelNames = setLevelName(store.doc.levelNames, station.levelId, null);
+    }
+  } else {
+    store.doc.levelNames = setLevelName(store.doc.levelNames, station.levelId, raw);
+  }
+  store.persist();
+  setStatusMessage(`${previous} is now ${raw}.`, "ok");
+  syncPackLevels();
+  drawLevelSwitcher();
+  drawRibbon();
+  render();
 }
 
 function commitStationEdit(station, text) {
@@ -3843,12 +4021,13 @@ function drawHouse() {
     el.levelLabels.innerHTML = houseStations.map((s, i) => {
       const d = stationDisplay(s, widgetLevels);
       const mm = sectionMm(s.elevation);
-      const title = s.kind === "roof" ? `${d.name}, ${mm} mm` : `${d.name}, ${mm} mm. Double-click the height to change it.`;
+      const title = s.kind === "roof" ? `${d.name}, ${mm} mm` : `${d.name}, ${mm} mm. Double-click the name or the height to change it.`;
+      const editable = s.kind === "roof" ? "" : " is-editable";
       return `<li style="top:${labelYs[i] - 10}px">
         <button type="button" data-i="${i}" title="${escapeHtml(title)}">
           <span class="level-rail-code">${escapeHtml(d.code)}</span>
-          <span class="level-rail-name">${escapeHtml(d.name)}</span>
-          <span class="level-station-elev">${mm}</span>
+          <span class="level-rail-name${editable}">${escapeHtml(d.name)}</span>
+          <span class="level-station-elev${editable}">${mm}</span>
         </button>
       </li>`;
     }).join("");
@@ -4019,11 +4198,17 @@ function wireLevelWidget() {
   });
 
   el.levelLabels?.addEventListener("dblclick", (e) => {
-    const span = e.target.closest("span.level-station-elev");
     const btn = e.target.closest("button");
-    if (!span || !btn) return;
+    if (!btn) return;
     const station = houseStations[Number(btn.dataset.i)];
-    if (station) editStationElevation(span, station);
+    if (!station || station.kind === "roof") return;
+    const elev = e.target.closest("span.level-station-elev");
+    if (elev) {
+      editStationElevation(elev, station);
+      return;
+    }
+    const name = e.target.closest("span.level-rail-name");
+    if (name) editStationName(name, station);
   });
 
   el.levelLabels?.addEventListener("click", (e) => {
@@ -4586,7 +4771,9 @@ function currentContextTab() {
   if (finish) return finish;
   if (!panMode && tool !== "select") {
     const placing = placingTab(activeFunction);
-    if (placing) return tabWithStatus(withSubject(placing, placingSubject()));
+    if (placing) {
+      return isAnnotatingTab(placing) ? placing : tabWithStatus(withSubject(placing, placingSubject()));
+    }
   }
   const keys = selectionKindKeys();
   let tab = selectionTab(keys);
@@ -4596,7 +4783,13 @@ function currentContextTab() {
   if (!tab && store.selected.length > 1) {
     tab = { id: CONTEXT_TAB_ID, key: "multi", label: "Multi-Select", groups: [] };
   }
-  return tab ? tabWithStatus(tab) : null;
+  if (!tab) return null;
+  const all = (...kinds) => store.selected.length > 0 && store.selected.every((ref) => kinds.includes(ref.kind));
+  // Text, lines and fills name their own tab, where their settings sit.
+  if (all("note", "dimension")) return { ...tab, label: all("dimension") ? "Dimensions" : "Text" };
+  if (all("line")) return tabWithStatus({ ...tab, label: "Lines" });
+  if (all("region")) return tabWithStatus({ ...tab, label: "Fill" });
+  return tabWithStatus(tab);
 }
 
 /** Append the thing this tab is about, so the tab names the mode and the object. */
@@ -4735,6 +4928,7 @@ function render() {
   syncSheets();
   draw();
   syncTempDim();
+  placeNoteEditor();
   syncSizeHud();
   // The green tab is settled before the tool settings, so the location line
   // appears with Modify | Walls in the same frame the tab opens.
@@ -5355,6 +5549,7 @@ function drawPlanLevel(levelId, walls, { ghost = false, look = "down", allow = (
       for (const cloud of (store.doc.revisionClouds || []).filter((c) => onLevel(c, levelId))) {
         drawCloudMark(cloud.rect, cloud.rev || "");
       }
+      drawNotes(levelId);
     }
   }
   if (!ghost && allow("item")) {
@@ -6326,7 +6521,50 @@ function drawOpening(opening, walls, { preview = false } = {}) {
     strokeJamb(wall, a);
     strokeJamb(wall, b);
   }
+  if (!preview && opening.mark) drawOpeningMark(opening, wall, placed);
   ctx.restore();
+}
+
+/** Plan tag: a door's number in a circle, a window's type mark in a hexagon. */
+function paintMarkTag(c, x, y, text, kind, { size = 10, ink = "#1a1612", paper = "#fffdf8" } = {}) {
+  c.save();
+  c.font = `600 ${size}px "Source Sans 3", sans-serif`;
+  const r = Math.max(size * 0.95, c.measureText(text).width / 2 + size * 0.35);
+  c.beginPath();
+  if (kind === "door") {
+    c.arc(x, y, r, 0, Math.PI * 2);
+  } else {
+    for (let i = 0; i < 6; i += 1) {
+      const angle = (Math.PI / 3) * i;
+      const px = x + Math.cos(angle) * r * 1.12;
+      const py = y + Math.sin(angle) * r;
+      if (i === 0) c.moveTo(px, py);
+      else c.lineTo(px, py);
+    }
+    c.closePath();
+  }
+  c.fillStyle = paper;
+  c.fill();
+  c.setLineDash([]);
+  c.lineWidth = 1;
+  c.strokeStyle = ink;
+  c.stroke();
+  c.fillStyle = ink;
+  c.textAlign = "center";
+  c.textBaseline = "middle";
+  c.fillText(text, x, y + 0.5);
+  c.restore();
+}
+
+function drawOpeningMark(opening, wall, placed) {
+  const kind = markKind(pack, opening);
+  if (!kind || cam.scale < 18) return;
+  const n = markSide(store.doc, wall, placed, opening, kind);
+  const mx = (placed.a.x + placed.b.x) / 2;
+  const my = (placed.a.y + placed.b.y) / 2;
+  const reach = (wall.thickness || 0.22) / 2 + 16 / cam.scale;
+  const [x, y] = worldToScreen(mx + n.x * reach, my + n.y * reach);
+  paintMarkTag(ctx, x, y, opening.mark, kind);
 }
 
 /**
@@ -6406,17 +6644,17 @@ function measureLivePoint() {
 function drawSavedDimensions() {
   for (const dim of store.doc.dimensions || []) {
     if (!onActiveLevel(dim) || !planObjectVisible(dim) || !keptByCut(dim, "line")) continue;
-    const selected = store.isSelected("dimension", dim.id);
-    drawPickedDimension(
-      { x: dim.x1, y: dim.y1 },
-      { x: dim.x2, y: dim.y2 },
-      `${formatLengthMm(Math.hypot(dim.x2 - dim.x1, dim.y2 - dim.y1))} mm`,
-      selected,
-    );
+    paintDimension(ctx, dim, worldToScreen, cam.scale, PLAN_TEXT_SCALE, { selected: store.isSelected("dimension", dim.id) });
   }
 }
 
 function drawMeasureDraft() {
+  if (measureDraft.b) {
+    if (!hoverPoint) return;
+    const dim = draftDimension(hoverPoint);
+    if (dimensionGeometry(dim).length > 1e-4) paintDimension(ctx, dim, worldToScreen, cam.scale, PLAN_TEXT_SCALE, { selected: true });
+    return;
+  }
   const target = measureLivePoint();
   if (!target) {
     const [ax, ay] = worldToScreen(measureDraft.a.x, measureDraft.a.y);
@@ -6587,22 +6825,66 @@ function drawBeam(beam, { marker = false } = {}) {
   ctx.restore();
 }
 
-/** A model line reads as a thin real edge (solid); an annotation line reads
- * as a drafting note (dashed, lighter) - the same visual distinction Revit
- * draws between a model line and a detail line. Neither carries a SKU, so
- * unlike `drawBeam()` there is no width to size the stroke against. */
+/** A line in its style (line-styles.js). An annotation line is a little
+ * lighter than a model line, which takes its existing/proposed colour. */
 function drawLine(line) {
-  const [ax, ay] = worldToScreen(line.x1, line.y1);
-  const [bx, by] = worldToScreen(line.x2, line.y2);
+  const look = lineStyleOf(line);
   ctx.save();
   ctx.strokeStyle = line.kind === "annotation" ? "#5a5044" : statusStroke(objectStatus(line));
-  ctx.lineWidth = 1;
-  ctx.setLineDash(line.kind === "annotation" ? [6, 4] : []);
-  ctx.beginPath();
-  ctx.moveTo(ax, ay);
-  ctx.lineTo(bx, by);
-  ctx.stroke();
+  ctx.lineWidth = look.planWidth;
+  ctx.setLineDash(look.planDash);
+  paintLine(ctx, line, worldToScreen, cam.scale, Math.max(7, look.planWidth * 4));
   ctx.restore();
+}
+
+/** A line's arc, or null for a straight one. */
+function lineArc(line) {
+  if (!line?.arc) return null;
+  return arcFromRadius(line.x1, line.y1, line.x2, line.y2, line.arc.radius, line.arc.side, line.arc.major === true);
+}
+
+/**
+ * Stroke a line, straight or arced, in the stroke already set on `c`, then
+ * fill its arrowheads `head` pixels long. `project` only scales and shifts,
+ * so the arc's angles carry over.
+ */
+function paintLine(c, line, project, pxPerM, head) {
+  const arc = lineArc(line);
+  c.beginPath();
+  if (arc) {
+    const [cx, cy] = project(arc.cx, arc.cy);
+    c.arc(cx, cy, arc.radius * pxPerM, arc.a0, arc.a0 + arc.sweep, arc.sweep < 0);
+  } else {
+    const [ax, ay] = project(line.x1, line.y1);
+    const [bx, by] = project(line.x2, line.y2);
+    c.moveTo(ax, ay);
+    c.lineTo(bx, by);
+  }
+  c.stroke();
+  const heads = lineArrowHeads(line, arc);
+  if (!heads.length) return;
+  c.save();
+  c.setLineDash([]);
+  c.fillStyle = c.strokeStyle;
+  const half = head * 0.32;
+  for (const h of heads) {
+    const [tx, ty] = project(h.x, h.y);
+    const ux = h.dir.x;
+    const uy = h.dir.y;
+    c.beginPath();
+    c.moveTo(tx, ty);
+    c.lineTo(tx - ux * head - uy * half, ty - uy * head + ux * half);
+    c.lineTo(tx - ux * head + uy * half, ty - uy * head - ux * half);
+    c.closePath();
+    c.fill();
+  }
+  c.restore();
+}
+
+/** Distance from a plan point to a line, along its arc when it has one. */
+function distToLine(line, wx, wy) {
+  const arc = lineArc(line);
+  return arc ? distToArc(arc, wx, wy) : distToSeg(line.x1, line.y1, line.x2, line.y2, wx, wy);
 }
 
 function drawSeparation(line) {
@@ -6622,20 +6904,104 @@ function drawSeparation(line) {
 function drawRegion(region) {
   const poly = shapePolygon(region.shape);
   if (poly.length < 3) return;
-  const look = regionConvention(region.convention);
-  ctx.save();
-  pathForPoly(poly);
-  if (look) {
-    ctx.fillStyle = look.fill;
-    ctx.fill();
-    ctx.strokeStyle = look.stroke;
-  } else {
-    ctx.strokeStyle = "#8a7d6c";
+  const pxPerMm = (PLAN_TEXT_SCALE / 1000) * cam.scale;
+  paintRegion(ctx, poly.map(([x, y]) => worldToScreen(x, y)), regionConvention(region.convention), { pxPerMm, plan: true });
+  paintRegionLabel(ctx, region, worldToScreen, cam.scale, PLAN_TEXT_SCALE);
+}
+
+/** Where a fill's words sit: the middle, plus wherever they were dragged. */
+function regionLabelPoint(region) {
+  const [cx, cy] = centroid(shapePolygon(region.shape));
+  return { x: cx + (region.textDx || 0), y: cy + (region.textDy || 0) };
+}
+
+/** Words in a fill, centred on its label point. Returns the screen box, or null. */
+function paintRegionLabel(c, region, project, pxPerM, scale) {
+  const text = (region.text || "").trim();
+  if (!text) return null;
+  const look = textLook("note", { styleId: DEFAULT_NOTE_STYLE });
+  const px = textHeightM(look, scale) * pxPerM;
+  if (px < 0.6) return null;
+  const at = regionLabelPoint(region);
+  const [x, y] = project(at.x, at.y);
+  c.save();
+  c.font = cssFont(look, px);
+  c.fillStyle = look.colour;
+  c.textAlign = "center";
+  c.textBaseline = "middle";
+  const width = c.measureText(text).width;
+  c.fillText(text, x, y);
+  c.restore();
+  return { x: x - width / 2, y: y - px / 2, w: width, h: px };
+}
+
+/** True when a plan point is on a fill's words. */
+function regionLabelHit(region, wx, wy) {
+  const text = (region?.text || "").trim();
+  if (!text) return false;
+  const look = textLook("note", { styleId: DEFAULT_NOTE_STYLE });
+  const hM = textHeightM(look);
+  const m = textMeasure();
+  m.font = cssFont(look, TEXT_MEASURE_PX);
+  const half = (m.measureText(text).width * hM) / TEXT_MEASURE_PX / 2 + hM * 0.4;
+  const at = regionLabelPoint(region);
+  return Math.abs(wx - at.x) <= half && Math.abs(wy - at.y) <= hM * 0.8;
+}
+
+/**
+ * A fill on the plan or a sheet. `pts` are on screen; `pxPerMm` sizes a
+ * hatch in paper millimetres. With no fill picked it is an outline. A
+ * masking fill has no edge on paper; on the plan a faint one keeps it
+ * findable.
+ */
+function paintRegion(c, pts, look, { pxPerMm, plan = false }) {
+  const trace = () => {
+    c.beginPath();
+    pts.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y)));
+    c.closePath();
+  };
+  c.save();
+  c.setLineDash([]);
+  if (look?.fill) {
+    trace();
+    c.fillStyle = look.fill;
+    c.fill();
   }
-  ctx.lineWidth = 1;
-  ctx.setLineDash(look ? [] : [4, 3]);
-  ctx.stroke();
-  ctx.restore();
+  if (look?.hatch) {
+    c.save();
+    trace();
+    c.clip();
+    const xs = pts.map((p) => p[0]);
+    const ys = pts.map((p) => p[1]);
+    const box = { minX: Math.min(...xs), maxX: Math.max(...xs), minY: Math.min(...ys), maxY: Math.max(...ys) };
+    const spacing = Math.max(4, look.spacingMm * pxPerMm);
+    c.strokeStyle = look.stroke;
+    c.lineWidth = plan ? 0.8 : Math.max(0.5, 0.13 * pxPerMm);
+    c.beginPath();
+    for (const angle of look.hatch) {
+      for (const [x1, y1, x2, y2] of hatchLines(box, angle, spacing)) {
+        c.moveTo(x1, y1);
+        c.lineTo(x2, y2);
+      }
+    }
+    c.stroke();
+    c.restore();
+  }
+  trace();
+  c.lineWidth = 1;
+  if (!look) {
+    c.strokeStyle = "#8a7d6c";
+    if (plan) c.setLineDash([4, 3]);
+    c.stroke();
+  } else if (look.stroke) {
+    c.strokeStyle = look.stroke;
+    c.stroke();
+  } else if (plan) {
+    c.strokeStyle = "rgba(90, 80, 68, 0.45)";
+    c.setLineDash([2, 3]);
+    c.stroke();
+  }
+  c.restore();
 }
 
 function drawCloudMark(rect, label) {
@@ -6810,6 +7176,19 @@ function drawSelectionHighlights(walls) {
     } else if (ref.kind === "region") {
       pathForPoly(shapePolygon(obj.shape));
       ctx.stroke();
+      if (obj.text && refsToDraw().length === 1) {
+        const look = textLook("note", { styleId: DEFAULT_NOTE_STYLE });
+        const px = textHeightM(look) * cam.scale;
+        const at = regionLabelPoint(obj);
+        const [x, y] = worldToScreen(at.x, at.y);
+        const m = textMeasure();
+        m.font = cssFont(look, px);
+        const w = m.measureText(obj.text).width;
+        ctx.save();
+        ctx.setLineDash([3, 2]);
+        ctx.strokeRect(x - w / 2 - 3, y - px / 2 - 2, w + 6, px + 4);
+        ctx.restore();
+      }
     } else if (ref.kind === "revisionCloud") {
       ctx.strokeRect(
         ...(() => {
@@ -6818,8 +7197,33 @@ function drawSelectionHighlights(walls) {
           return [Math.min(ax, bx), Math.min(ay, by), Math.abs(bx - ax), Math.abs(by - ay)];
         })(),
       );
-    } else if (ref.kind === "segment" || ref.kind === "beam" || ref.kind === "line" || ref.kind === "dimension" || ref.kind === "separation") {
-      const arc = ref.kind === "segment" ? liveArc(obj) : null;
+    } else if (ref.kind === "note") {
+      const layout = noteLayout(obj);
+      ctx.lineWidth = 1.4;
+      ctx.setLineDash([4, 3]);
+      pathForPoly(layout.outline);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      if (refsToDraw().length === 1) {
+        ctx.fillStyle = "#f4ede1";
+        ctx.lineWidth = 1.6;
+        for (const [wx, wy] of [layout.sides.l, layout.sides.r]) {
+          const [hx, hy] = worldToScreen(wx, wy);
+          ctx.fillRect(hx - 3, hy - HANDLE / 2, 6, HANDLE);
+          ctx.strokeRect(hx - 3, hy - HANDLE / 2, 6, HANDLE);
+        }
+      }
+      if (obj.leader && refsToDraw().length === 1) {
+        const [hx, hy] = worldToScreen(obj.leader.x, obj.leader.y);
+        ctx.fillStyle = "#f4ede1";
+        ctx.lineWidth = 1.6;
+        ctx.fillRect(hx - HANDLE / 2, hy - HANDLE / 2, HANDLE, HANDLE);
+        ctx.strokeRect(hx - HANDLE / 2, hy - HANDLE / 2, HANDLE, HANDLE);
+      }
+    } else if (ref.kind === "dimension") {
+      // Drawn in the selection colour by drawSavedDimensions; the ends are handles.
+    } else if (ref.kind === "segment" || ref.kind === "beam" || ref.kind === "line" || ref.kind === "separation") {
+      const arc = ref.kind === "segment" ? liveArc(obj) : ref.kind === "line" ? lineArc(obj) : null;
       if (arc) strokeScreenArc(arc);
       else {
         const [ax, ay] = worldToScreen(obj.x1, obj.y1);
@@ -8635,7 +9039,7 @@ function linearEnds(obj, kind) {
 }
 
 function drawEndpointHandles() {
-  const sel = soleLinearSelection();
+  const sel = soleLinearSelection() || soleDimensionSelection();
   if (!sel || drag || attachPick) return;
   const { ref, obj } = sel;
   const ends = linearEnds(obj, ref.kind);
@@ -8896,7 +9300,7 @@ function drawWallEditPreview() {
 }
 
 function endpointHandleHit(wx, wy) {
-  const sel = soleLinearSelection();
+  const sel = soleLinearSelection() || soleDimensionSelection();
   if (!sel) return null;
   const { ref, obj } = sel;
   const tol = (HANDLE / 2 + 4) / cam.scale;
@@ -10386,15 +10790,29 @@ function drawLineDraft() {
   ctx.beginPath();
   ctx.arc(sx, sy, 4, 0, Math.PI * 2);
   ctx.fill();
-  if (end && lineLength(lineStart, end) >= 0.05) {
-    const [ex, ey] = worldToScreen(end.x, end.y);
+  if (tool === "line" && (lineStart.arcEnd || nextLine.shape === "rect")) {
+    const look = lineStyleOf(nextLine);
     ctx.strokeStyle = COLOUR.hover;
-    ctx.lineWidth = 1.4;
-    ctx.setLineDash(tool === "annot-line" || tool === "separation" ? [6, 4] : []);
-    ctx.beginPath();
-    ctx.moveTo(sx, sy);
-    ctx.lineTo(ex, ey);
-    ctx.stroke();
+    ctx.lineWidth = Math.max(1.4, look.planWidth);
+    ctx.setLineDash(look.planDash);
+    if (lineStart.arcEnd && end) {
+      const arc = lineArcThrough(lineStart, lineStart.arcEnd, end);
+      const draft = { x1: lineStart.x, y1: lineStart.y, x2: lineStart.arcEnd.x, y2: lineStart.arcEnd.y, arrow: nextLine.arrow, ...(arc ? { arc } : {}) };
+      paintLine(ctx, draft, worldToScreen, cam.scale, Math.max(7, look.planWidth * 4));
+    } else if (end && nextLine.shape === "rect") {
+      for (const side of rectangleSides(lineStart, end)) paintLine(ctx, side, worldToScreen, cam.scale, 0);
+    }
+    ctx.restore();
+    if (end && nextLine.shape === "rect") drawLengthLabel(lineStart.x, lineStart.y, end.x, lineStart.y);
+    return;
+  }
+  if (end && lineLength(lineStart, end) >= 0.05) {
+    const look = tool === "line" ? lineStyleOf(nextLine) : null;
+    ctx.strokeStyle = COLOUR.hover;
+    ctx.lineWidth = look ? Math.max(1.4, look.planWidth) : 1.4;
+    ctx.setLineDash(look ? look.planDash : tool === "separation" ? [6, 4] : []);
+    const draft = { x1: lineStart.x, y1: lineStart.y, x2: end.x, y2: end.y, arrow: look ? nextLine.arrow : null };
+    paintLine(ctx, draft, worldToScreen, cam.scale, look ? Math.max(7, look.planWidth * 4) : 0);
   }
   ctx.restore();
   if (end) drawLengthLabel(lineStart.x, lineStart.y, end.x, end.y);
@@ -10468,13 +10886,20 @@ function refsInMarquee(box) {
   }
   for (const line of store.doc.lines.filter(onActiveLevel)) {
     if (!planObjectVisible(line) || !keptByCut(line, "line")) continue;
-    const lineBox = { x: Math.min(line.x1, line.x2), y: Math.min(line.y1, line.y2), w: Math.max(0.02, Math.abs(line.x2 - line.x1)), h: Math.max(0.02, Math.abs(line.y2 - line.y1)) };
-    if (test(lineBox)) hits.push({ kind: "line", id: line.id });
+    const arc = lineArc(line);
+    const ends = [[line.x1, line.y1], [line.x2, line.y2], ...(arc ? [[arc.crownX, arc.crownY]] : [])];
+    const lb = bbox(ends);
+    if (test({ ...lb, w: Math.max(0.02, lb.w), h: Math.max(0.02, lb.h) })) hits.push({ kind: "line", id: line.id });
   }
   for (const dim of (store.doc.dimensions || []).filter(onActiveLevel)) {
     if (!planObjectVisible(dim) || !keptByCut(dim, "line")) continue;
-    const dimBox = { x: Math.min(dim.x1, dim.x2), y: Math.min(dim.y1, dim.y2), w: Math.max(0.02, Math.abs(dim.x2 - dim.x1)), h: Math.max(0.02, Math.abs(dim.y2 - dim.y1)) };
-    if (test(dimBox)) hits.push({ kind: "dimension", id: dim.id });
+    const g = dimensionGeometry(dim);
+    const dimBox = bbox([[dim.x1, dim.y1], [dim.x2, dim.y2], [g.a.x, g.a.y], [g.b.x, g.b.y]]);
+    if (test({ ...dimBox, w: Math.max(0.02, dimBox.w), h: Math.max(0.02, dimBox.h) })) hits.push({ kind: "dimension", id: dim.id });
+  }
+  for (const note of (store.doc.notes || []).filter(onActiveLevel)) {
+    if (!keptByCut(note, "line")) continue;
+    if (test(bbox(noteLayout(note).outline))) hits.push({ kind: "note", id: note.id });
   }
   for (const item of store.doc.items.filter(onActiveLevel)) {
     if (!planObjectVisible(item) || !keptByCut(item, "item")) continue;
@@ -10680,6 +11105,8 @@ function hitTest(wx, wy, { skipServices = false, skipAreas = false } = {}) {
     const sku = skuById(seg.sku);
     if (distToWallLine(seg, wx, wy) < wallHitTol(sku)) return { kind: "segment", id: seg.id };
   }
+  const noteHit = noteAt(wx, wy);
+  if (noteHit) return noteHit;
   // No SKU to size a hit tolerance from, unlike a beam/wall - a fixed
   // pick width close to the drawn stroke is all a line needs.
   for (let i = (store.doc.revisionClouds || []).length - 1; i >= 0; i -= 1) {
@@ -10694,7 +11121,7 @@ function hitTest(wx, wy, { skipServices = false, skipAreas = false } = {}) {
     for (let i = (store.doc.regions || []).length - 1; i >= 0; i -= 1) {
       const region = store.doc.regions[i];
       if (!onActiveLevel(region) || !planObjectVisible(region)) continue;
-      if (pointInPoly(wx, wy, shapePolygon(region.shape))) return { kind: "region", id: region.id };
+      if (regionLabelHit(region, wx, wy) || pointInPoly(wx, wy, shapePolygon(region.shape))) return { kind: "region", id: region.id };
     }
   }
   for (let i = (store.doc.separations || []).length - 1; i >= 0; i -= 1) {
@@ -10706,12 +11133,13 @@ function hitTest(wx, wy, { skipServices = false, skipAreas = false } = {}) {
   for (let i = lines.length - 1; i >= 0; i -= 1) {
     const line = lines[i];
     if (!planObjectVisible(line) || !keptByCut(line, "line")) continue;
-    if (distToSeg(line.x1, line.y1, line.x2, line.y2, wx, wy) < 0.15) return { kind: "line", id: line.id };
+    if (distToLine(line, wx, wy) < 0.15) return { kind: "line", id: line.id };
   }
   for (let i = (store.doc.dimensions || []).length - 1; i >= 0; i -= 1) {
     const dim = store.doc.dimensions[i];
     if (!onActiveLevel(dim) || !planObjectVisible(dim) || !keptByCut(dim, "line")) continue;
-    if (distToSeg(dim.x1, dim.y1, dim.x2, dim.y2, wx, wy) < 0.2) return { kind: "dimension", id: dim.id };
+    const { a, b } = dimensionGeometry(dim);
+    if (distToSeg(a.x, a.y, b.x, b.y, wx, wy) < dimensionHitTol(dim) || dimensionLabelHit(dim, wx, wy)) return { kind: "dimension", id: dim.id };
   }
   if (skipAreas) return null;
   const slabs = store.doc.slabs.filter(onActiveLevel);
@@ -10857,6 +11285,8 @@ function inspectKindLabel(kind, sku) {
   if (kind === "separation") return "Separation";
   if (kind === "region") return "Region";
   if (kind === "revisionCloud") return "Revision cloud";
+  if (kind === "note") return "Text";
+  if (kind === "dimension") return "Dimension";
   return "";
 }
 
@@ -10875,6 +11305,7 @@ const HISTORY_KIND = {
   separation: "separation",
   region: "region",
   dimension: "dimension",
+  note: "note",
   revisionCloud: "revision cloud",
 };
 
@@ -10886,8 +11317,19 @@ function historyThing(ref) {
   const kind = (inspectKindLabel(ref.kind, sku) || HISTORY_KIND[ref.kind] || "object").toLowerCase();
   const name = obj?.name && String(obj.name).trim();
   if (name && name.toLowerCase() !== kind) return `${kind} ${name}`;
+  if (ref.kind === "opening" && obj?.mark) return `${kind} ${obj.mark}`;
   if (sku?.name && sku.name.toLowerCase() !== kind) return `${kind} ${sku.name}`;
   return kind;
+}
+
+/** A placed opening named as drawn: its type name and size at the size it actually is, not the catalogue's. */
+function openingTypeLabel(opening) {
+  const sku = skuById(opening?.sku);
+  if (!sku) return null;
+  const size = openingSize(pack, opening);
+  if (!Number.isFinite(size.width) || !Number.isFinite(size.height)) return { name: sku.name, dims: skuDimLabel(sku) };
+  const dims = `${Math.round(size.width * 1000)} × ${Math.round(size.height * 1000)} mm`;
+  return { name: sizedTypeName(sku, size), dims: isArchHead(sku) ? `${dims}, arched head` : dims };
 }
 
 function historyDid(verb, refs = store.selected) {
@@ -11004,17 +11446,31 @@ function syncTypeCurrent() {
       .map(currentSkuOfRef)
       .filter(Boolean);
     const distinct = new Set(skus.map((s) => s.id));
+    const openings = store.selected.every((ref) => ref.kind === "opening")
+      ? store.selected.map((ref) => openingTypeLabel(objByRef(ref))).filter(Boolean)
+      : [];
+    const sized = openings.length && new Set(openings.map((l) => l.name)).size === 1 ? openings[0] : null;
     if (el.typeCurrentName) {
       el.typeCurrentName.textContent = distinct.size === 0 ? "Pick a type"
-        : distinct.size === 1 ? skus[0].name
+        : distinct.size === 1 ? (sized?.name || skus[0].name)
         : "Multiple types";
     }
-    if (el.typeCurrentMeta) el.typeCurrentMeta.textContent = distinct.size === 1 ? skuDimLabel(skus[0]) : "";
+    if (el.typeCurrentMeta) {
+      const meta = distinct.size === 1 ? (sized?.dims || (openings.length ? "Multiple sizes" : skuDimLabel(skus[0]))) : "";
+      el.typeCurrentMeta.textContent = captionBesideName(el.typeCurrentName?.textContent, meta);
+    }
+    return;
+  }
+  const opening = !wallDraft && store.selected.length === 1 && store.primary?.kind === "opening" ? objByRef(store.primary) : null;
+  const sized = opening ? openingTypeLabel(opening) : null;
+  if (sized) {
+    if (el.typeCurrentName) el.typeCurrentName.textContent = sized.name;
+    if (el.typeCurrentMeta) el.typeCurrentMeta.textContent = captionBesideName(sized.name, sized.dims);
     return;
   }
   const sku = contextSku();
   if (el.typeCurrentName) el.typeCurrentName.textContent = sku?.name || "Pick a type";
-  if (el.typeCurrentMeta) el.typeCurrentMeta.textContent = sku ? skuDimLabel(sku) : "";
+  if (el.typeCurrentMeta) el.typeCurrentMeta.textContent = sku ? captionBesideName(sku.name, skuDimLabel(sku)) : "";
 }
 
 function placingToolArmed() {
@@ -11151,6 +11607,7 @@ function applySkuToSelection(sku) {
     store.dropUndo();
     return false;
   }
+  remarkRetypedWindows(store.doc, pack, result.refs.filter((ref) => ref.kind === "opening").map((ref) => ref.id));
   store.setSelection(result.refs, store.primary);
   store.persist();
   setStatusMessage(result.message, result.skipped.length ? "warn" : "ok");
@@ -11512,7 +11969,11 @@ function skuCount(categories) {
 }
 
 /** The running command's controls. They live outside the ribbon so a redraw, which replaces the row's HTML, cannot destroy them. */
-const RIBBON_SETTING_NODES = ["roofCutKindBar", "shapeLink", "roofOverhang", "wallOpts"];
+const RIBBON_SETTING_NODES = ["roofCutKindBar", "shapeLink", "roofOverhang", "wallOpts", "dimBar", "textBar", "lineBar", "fillBar"];
+
+function ribbonSettingPieces() {
+  return RIBBON_SETTING_NODES.map((key) => el[key]).filter(Boolean);
+}
 
 /** The Adjust / Set scale / Align strip. It lives in the ribbon row, not under it. */
 function modeBarPark() {
@@ -11561,8 +12022,14 @@ function mountModeBar() {
   // Finish and Cancel were only visible on a short tab such as a finish.
   // An outline puts them second, straight after Modify.
   if (sketching) {
-    const lead = row.querySelector(":scope > .ribbon-group");
-    row.insertBefore(wrap, lead ? lead.nextSibling : null);
+    const groups = [...row.querySelectorAll(":scope > .ribbon-group")];
+    // On Document the annotate tools are the row. The outline bar was
+    // landing in front of them; it belongs after that group.
+    const annotate = tool === "region"
+      ? groups.find((g) => g.querySelector(":scope > .ribbon-group-label")?.textContent === "Annotate")
+      : null;
+    const after = annotate || groups[0];
+    row.insertBefore(wrap, after ? after.nextSibling : null);
   } else {
     row.appendChild(wrap);
   }
@@ -11597,7 +12064,7 @@ function mountRibbonSettings(force = false) {
   parkRibbonSettings();
   host?.remove();
 
-  const pieces = [el.roofCutKindBar, el.shapeLink, el.roofOverhang, el.wallOpts].filter((node) => node && !node.hidden);
+  const pieces = ribbonSettingPieces().filter((node) => !node.hidden);
   if (!pieces.length) return true;
   const wrap = document.createElement("div");
   wrap.className = "ribbon-group ribbon-settings";
@@ -11633,11 +12100,11 @@ function mountRibbonSettings(force = false) {
 
 /** True when the visible controls are already where this row should show them. */
 function ribbonSettingsMounted(row, host) {
-  for (const node of [el.roofCutKindBar, el.shapeLink, el.roofOverhang, el.wallOpts]) {
-    if (node && !node.hidden && !host?.contains(node)) return false;
+  for (const node of ribbonSettingPieces()) {
+    if (!node.hidden && !host?.contains(node)) return false;
   }
   if (host) {
-    const held = [el.roofCutKindBar, el.shapeLink, el.roofOverhang, el.wallOpts].some((node) => node && host.contains(node));
+    const held = ribbonSettingPieces().some((node) => host.contains(node));
     if (!held) return false;
   }
   return true;
@@ -11806,6 +12273,20 @@ function updateRibbonHint() {
     setRibbonHint("Drag to move the plan. Esc or Pan again goes back to the tool you were using.");
     return;
   }
+  if (leaderPick) {
+    setRibbonHint("Click where the leader's arrow should point. It snaps to walls and corners. Esc cancels.");
+    return;
+  }
+  if (noteEdit) {
+    setRibbonHint(noteEdit.dimId
+      ? "Type the words to show instead of the number. Clear it to show the measured length. Enter sets it, Esc cancels."
+      : "Enter places the note. Shift+Enter starts a new line. Esc cancels. Clicking away keeps it.");
+    return;
+  }
+  if (tool === "text") {
+    setRibbonHint(HINTS.text);
+    return;
+  }
   // While the attach target pick is armed the hint is the live preview of what
   // the hovered candidate would do, or why it cannot be picked.
   if (tool === "move") {
@@ -11886,12 +12367,16 @@ function updateRibbonHint() {
     setRibbonHint(revisionCloudDraft?.a ? "Click the opposite corner." : HINTS.revision);
     return;
   }
-  if (tool === "model-line" || tool === "annot-line" || tool === "separation") {
-    setRibbonHint(lineStart
-      ? (tool === "separation"
-        ? "Click the other end, or type a length and press Enter. Ends snap to wall corners and faces."
-        : "Click the other end.")
-      : HINTS[tool === "annot-line" ? "annot-lines" : tool === "separation" ? "room-sep" : "model-lines"]);
+  if (tool === "line" || tool === "separation") {
+    let hint = HINTS[tool === "separation" ? "room-sep" : "lines"];
+    if (lineStart && tool === "separation") hint = "Click the other end, or type a length and press Enter. Ends snap to wall corners and faces.";
+    else if (lineStart?.arcEnd) hint = "Click a point the arc passes through.";
+    else if (lineStart && nextLine.shape === "rect") hint = "Click the opposite corner.";
+    else if (lineStart && nextLine.shape === "arc") hint = "Click the other end of the arc.";
+    else if (lineStart) hint = nextLine.chain
+      ? "Click the next point, or type a length and press Enter. Esc ends the run."
+      : "Click the other end, or type a length and press Enter.";
+    setRibbonHint(hint);
     return;
   }
   if (tool === "room" && roomDraft?.length) {
@@ -11939,12 +12424,14 @@ function updateRibbonHint() {
         ? "Click the next corner on this floor, or the first to close. Finish or Enter closes the shape. Backspace removes the last corner."
         : "Click corners on this floor. They snap to its edges. Enter closes the shape.")
       : (regionDraft?.length
-        ? "Click the next corner, or the first to close. Finish or Enter closes the region. Backspace removes the last corner."
+        ? (regionDraft.length >= 3
+          ? "Click the next corner. To close the fill, click the first corner, double-click, or press Enter. Backspace removes the last corner."
+          : "Click the next corner. A fill needs at least three. Backspace removes the last corner.")
         : HINTS.region));
     return;
   }
   if (tool === "measure") {
-    setRibbonHint(measureDraft?.a ? "Click the other end." : HINTS.dimensions);
+    setRibbonHint(measureDraft?.b ? "Move to place the line, then click. Pull it above or below for a horizontal dimension, to the side for a vertical one." : measureDraft?.a ? "Click the other end." : HINTS.dimensions);
     return;
   }
   if (tool === "service-route" && serviceRoute) {
@@ -12189,6 +12676,16 @@ function ribbonCommandState(item) {
       title: attached.length ? HINTS.detach : "Nothing selected is attached to anything.",
     };
   }
+  if (item.id === "add-foundation") {
+    const state = footingBatchState();
+    if (!state.ids.length) return { disabled: true, title: "Select one or more walls first." };
+    if (!state.skuId) return { disabled: true, title: "This job has no foundation types." };
+    if (!state.eligible) {
+      const why = footingSkipText(state);
+      return { disabled: true, title: why ? `No selected wall takes a foundation: ${why}.` : "No selected wall takes a foundation." };
+    }
+    return { title: HINTS["add-foundation"] };
+  }
   if (item.id === "move") {
     if (tool === "move") return { active: true, title: HINTS.move };
     const target = resolveMoveTarget();
@@ -12237,6 +12734,9 @@ function ribbonCommandState(item) {
   }
   if (item.id === "dimensions") {
     return { active: tool === "measure", title: HINTS.dimensions };
+  }
+  if (item.id === "text") {
+    return { active: tool === "text", title: HINTS.text };
   }
   if (item.id === "sheet-list") {
     const has = Boolean(store.doc.sheetSet);
@@ -12346,7 +12846,6 @@ function onRibbonFunction(item) {
   roofCutDraft = null;
   regionDraft = null;
   measureDraft = null;
-  showDimensions = false;
   underlaySelected = false;
   trimCorner = item.id === "trim-corner" ? { mode: "corner", first: null }
     : item.id === "trim-single" ? { mode: "single", first: null }
@@ -12496,8 +12995,8 @@ function runCommand(name) {
     case "elevation": openElevationPicker(); return;
     case "callout": startCalloutCrop(); return;
     case "revision": startRevisionCloud(); return;
-    case "model-lines": startLineTool("model"); return;
-    case "annot-lines": startLineTool("annotation"); return;
+    case "text": startTextTool(); return;
+    case "lines": startLineTool(); return;
     case "room-sep": startSeparation(); return;
     case "region": startRegion(); return;
     case "finishes": openFloorFinishes(); return;
@@ -12530,6 +13029,7 @@ function runCommand(name) {
     case "service-slope": focusServiceField("fall"); return;
     case "attach": startAttachPick(); return;
     case "detach": runDetach(); return;
+    case "add-foundation": focusFootingBatch(); return;
     case "select-similar": runSelectSimilar(); return;
     case "exit-modify": exitModify(); return;
     case "move": startMove(); return;
@@ -14144,35 +14644,262 @@ function finishRevisionCloud(target) {
   render();
 }
 
-// --- lines (Document > Lines > Model / Annotate) ----------------------------
+// --- lines (Document > Annotate > Line) ---------------------------------------
 //
 // Click-click, one segment per pair of clicks and staying armed for the next
 // one - the beam tool's shape, not the wall tool's typed-length chain, since
-// a line has no thickness/SKU to size against. `tool` itself carries which
-// of the two ribbon buttons armed it ("model-line" / "annot-line") rather
-// than a second state variable, the same way "section"/"elevation"/"callout"
-// are each their own `tool` value instead of one "view" tool plus a flag.
+// a line has no thickness/SKU to size against. The style and the Export to
+// CAD tick are on the Place Line tab (`nextLine`), and on Modify | Lines for
+// lines already drawn.
 
-function startLineTool(kind) {
+function startLineTool() {
   lineStart = null;
-  tool = kind === "annotation" ? "annot-line" : "model-line";
-  activeFunction = kind === "annotation" ? "annot-lines" : "model-lines";
+  tool = "line";
+  activeFunction = "lines";
   underlaySelected = false;
   store.clearSelection();
   syncToolButtons();
   drawRibbon();
-  setStatusMessage(HINTS[activeFunction], "ok");
+  setStatusMessage(HINTS.lines, "ok");
   render();
 }
 
-function commitLine(kind, a, b) {
-  if (!canCommitLine(a, b)) return;
-  store.pushUndo(historyPlaced("Drew", "line"));
-  store.doc.lines.push({
-    id: nid("ln"), kind, level: activeLevel, x1: a.x, y1: a.y, x2: b.x, y2: b.y, status: placementStatus(),
-  });
-  store.persist();
+function newLine(a, b, extra = {}) {
+  return {
+    id: nid("ln"), kind: nextLine.kind, style: nextLine.style, level: activeLevel,
+    x1: a.x, y1: a.y, x2: b.x, y2: b.y, status: placementStatus(),
+    ...(nextLine.arrow !== "none" ? { arrow: nextLine.arrow } : {}),
+    ...extra,
+  };
 }
+
+function commitLine(a, b, extra = {}) {
+  if (!canCommitLine(a, b)) return false;
+  store.pushUndo(historyPlaced("Drew", extra.arc ? "arc" : "line"));
+  store.doc.lines.push(newLine(a, b, extra));
+  store.persist();
+  return true;
+}
+
+function commitLineRectangle(a, b) {
+  if (Math.abs(b.x - a.x) < 0.05 || Math.abs(b.y - a.y) < 0.05) {
+    setStatusMessage("Pull the corner away on both sides to make a rectangle.", "warn");
+    return false;
+  }
+  store.pushUndo(historyPlaced("Drew", "rectangle"));
+  for (const side of rectangleSides(a, b)) {
+    const line = newLine({ x: side.x1, y: side.y1 }, { x: side.x2, y: side.y2 });
+    delete line.arrow;
+    store.doc.lines.push(line);
+  }
+  store.persist();
+  return true;
+}
+
+/** The arc through a third point, or null when the point is on the chord. */
+function lineArcThrough(a, b, p) {
+  const arc = arcThroughPoint(a.x, a.y, b.x, b.y, p.x, p.y);
+  return arc ? { radius: arc.radius, side: arc.side, ...(arc.major ? { major: true } : {}) } : null;
+}
+
+/** The second click of Line: a run, a rectangle, or the end of an arc's chord. */
+function placeLineEnd(end) {
+  const start = lineStart;
+  if (nextLine.shape === "rect") {
+    if (commitLineRectangle(start, end)) lineStart = null;
+    sizeDraft = null;
+    return;
+  }
+  if (nextLine.shape === "arc") {
+    if (lineLength(start, end) < 0.05) return;
+    lineStart = { x: start.x, y: start.y, arcEnd: { x: end.x, y: end.y } };
+    return;
+  }
+  const placed = commitLine(start, end);
+  lineStart = placed && nextLine.chain ? { x: end.x, y: end.y } : null;
+  sizeDraft = lineStart ? { lockW: false, lockH: false, typedW: "", typedH: "", axis: "w" } : null;
+}
+
+/** The third click of an arc: the point it passes through. */
+function placeLineArc(p) {
+  const { arcEnd } = lineStart;
+  const arc = lineArcThrough(lineStart, arcEnd, p);
+  const placed = commitLine(lineStart, arcEnd, arc ? { arc } : {});
+  lineStart = placed && nextLine.chain ? { x: arcEnd.x, y: arcEnd.y } : null;
+}
+
+/** Separation, or Line drawing straight runs: both take a typed length and angle. */
+function typedRunDraft() {
+  if (!lineStart) return false;
+  return tool === "separation" || (tool === "line" && nextLine.shape === "line");
+}
+
+/** The Line tab's subject: the selected lines, or the next line while the tool is on. */
+function lineTargets() {
+  const refs = store.selected;
+  if (refs.length && refs.every((ref) => ref.kind === "line")) {
+    return refs.map((ref) => objByRef(ref)).filter(Boolean);
+  }
+  return tool === "line" ? [nextLine] : [];
+}
+
+function editLines(label, fn) {
+  const lines = lineTargets();
+  if (!lines.length) return;
+  if (lines[0] === nextLine) {
+    fn(nextLine);
+    render();
+    return;
+  }
+  store.pushUndo(label);
+  for (const line of lines) fn(line);
+  store.persist();
+  render();
+}
+
+function syncLineBar() {
+  if (!el.lineBar) return;
+  const lines = lineTargets();
+  setHidden(el.lineBar, !lines.length);
+  if (!lines.length) return;
+  if (el.lineBarStyles && !el.lineBarStyles.children.length) {
+    el.lineBarStyles.innerHTML = LINE_STYLES.map((s) => {
+      const dash = s.planDash.length ? ` stroke-dasharray="${s.planDash.map((d) => d / 2).join(" ")}"` : "";
+      return `<button type="button" data-line-style="${s.id}" aria-pressed="false" aria-label="${s.label}" title="${s.label}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${Math.min(3.2, s.planWidth * 1.2)}" aria-hidden="true"><path d="M2 12h20"${dash}/></svg></button>`;
+    }).join("");
+    for (const btn of el.lineBarStyles.querySelectorAll("[data-line-style]")) {
+      btn.addEventListener("click", () => {
+        const style = LINE_STYLES.find((s) => s.id === btn.dataset.lineStyle);
+        editLines(`Set the line style to ${style.label.toLowerCase()}`, (line) => { line.style = style.id; });
+      });
+    }
+  }
+  const styles = new Set(lines.map((line) => lineStyleOf(line).id));
+  for (const btn of el.lineBarStyles.querySelectorAll("[data-line-style]")) {
+    const pressed = styles.size === 1 && styles.has(btn.dataset.lineStyle);
+    btn.classList.toggle("active", pressed);
+    btn.setAttribute("aria-pressed", pressed ? "true" : "false");
+  }
+  const exported = lines.filter((line) => line.kind === "model").length;
+  el.lineBarExport.checked = exported === lines.length;
+  el.lineBarExport.indeterminate = exported > 0 && exported < lines.length;
+  const placing = lines[0] === nextLine;
+  setHidden(el.lineBarShapeWrap, !placing);
+  setHidden(el.lineBarChainWrap, !placing || nextLine.shape === "rect");
+  if (placing) {
+    for (const btn of el.lineBarShapes.querySelectorAll("[data-line-shape]")) {
+      const pressed = btn.dataset.lineShape === nextLine.shape;
+      btn.classList.toggle("active", pressed);
+      btn.setAttribute("aria-pressed", pressed ? "true" : "false");
+    }
+    el.lineBarChain.checked = nextLine.chain;
+  }
+  const arrows = new Set(lines.map((line) => line.arrow || "none"));
+  for (const btn of el.lineBarArrows.querySelectorAll("[data-line-arrow]")) {
+    const pressed = arrows.size === 1 && arrows.has(btn.dataset.lineArrow);
+    btn.classList.toggle("active", pressed);
+    btn.setAttribute("aria-pressed", pressed ? "true" : "false");
+  }
+}
+
+el.lineBarShapes?.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-line-shape]");
+  if (!btn || btn.dataset.lineShape === nextLine.shape) return;
+  nextLine.shape = btn.dataset.lineShape;
+  lineStart = null;
+  sizeDraft = null;
+  updateRibbonHint();
+  render();
+});
+
+el.lineBarChain?.addEventListener("change", (e) => {
+  nextLine.chain = e.target.checked;
+  updateRibbonHint();
+  render();
+});
+
+el.lineBarArrows?.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-line-arrow]");
+  if (!btn) return;
+  const arrow = btn.dataset.lineArrow;
+  editLines(arrow === "none" ? "Took the arrowheads off a line" : "Put arrowheads on a line", (line) => {
+    if (line === nextLine) line.arrow = arrow;
+    else if (arrow === "none") delete line.arrow;
+    else line.arrow = arrow;
+  });
+});
+
+el.lineBarExport?.addEventListener("change", (e) => {
+  const on = e.target.checked;
+  editLines(on ? "Exported a line to CAD" : "Kept a line off the CAD export", (line) => {
+    // A line saved before styles takes its look from its kind; keep that look.
+    line.style = lineStyleOf(line).id;
+    line.kind = on ? "model" : "annotation";
+  });
+});
+
+/** The selected dimensions, when the selection is only dimensions. */
+function selectedDimensions() {
+  const refs = store.selected;
+  if (!refs.length || !refs.every((ref) => ref.kind === "dimension")) return [];
+  return refs.map((ref) => objByRef(ref)).filter(Boolean);
+}
+
+/** Place Dimension sets how the next one measures; Modify | Dimensions changes the selected ones. */
+function syncDimBar() {
+  if (!el.dimBar) return;
+  const dims = selectedDimensions();
+  const placing = tool === "measure";
+  setHidden(el.dimBar, !placing && !dims.length);
+  if (!placing && !dims.length) return;
+  const dirs = new Set(dims.map((dim) => dim.dir || "aligned"));
+  for (const btn of el.dimBarDirs.querySelectorAll("[data-dim-dir]")) {
+    const dir = btn.dataset.dimDir;
+    setHidden(btn, dir === "auto" && !placing);
+    const pressed = placing ? nextDimDir === dir : dirs.size === 1 && dirs.has(dir);
+    btn.classList.toggle("active", pressed);
+    btn.setAttribute("aria-pressed", pressed ? "true" : "false");
+  }
+  setHidden(el.dimBarTextWrap, placing || !dims.some((dim) => dim.textShift));
+}
+
+el.dimBarDirs?.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-dim-dir]");
+  if (!btn) return;
+  const dir = btn.dataset.dimDir;
+  if (tool === "measure") {
+    nextDimDir = dir;
+    render();
+    return;
+  }
+  const dims = selectedDimensions().filter((dim) => (dim.dir || "aligned") !== dir);
+  if (!dims.length || dir === "auto") return;
+  const turned = dims.filter((dim) => dimensionGeometry({ ...dim, dir }).length > 1e-4);
+  if (!turned.length) {
+    setStatusMessage(`Those points line up, so a ${dir} dimension would measure nothing.`, "warn");
+    return;
+  }
+  store.pushUndo(`Made a dimension ${dir}`);
+  for (const dim of turned) {
+    const mid = dimensionGeometry(dim).mid;
+    if (dir === "aligned") delete dim.dir;
+    else dim.dir = dir;
+    const offset = Math.round(offsetThrough(dim, mid) * 100) / 100;
+    if (offset) dim.offset = offset;
+    else delete dim.offset;
+  }
+  store.persist();
+  render();
+});
+
+el.dimBarTextReset?.addEventListener("click", () => {
+  const dims = selectedDimensions().filter((dim) => dim.textShift);
+  if (!dims.length) return;
+  store.pushUndo("Put a dimension's number back on its line");
+  for (const dim of dims) delete dim.textShift;
+  store.persist();
+  render();
+});
 
 function startSeparation() {
   lineStart = null;
@@ -14230,23 +14957,75 @@ function finishRegionDraft() {
     return;
   }
   if (!Array.isArray(store.doc.regions)) store.doc.regions = [];
-  store.pushUndo("Drew region");
+  store.pushUndo("Drew a fill");
   const region = {
     id: nid("rg"),
     level: activeLevel,
-    convention: null,
+    convention: nextFill,
     status: placementStatus(),
     shape: polyShape(regionDraft.map((p) => [p.x, p.y])),
   };
   store.doc.regions.push(region);
-  regionDraft = null;
-  tool = "select";
-  activeFunction = null;
-  store.setSelection([{ kind: "region", id: region.id }]);
-  syncToolButtons();
-  drawRibbon();
+  // Stay armed for the next one, the way Line and Text do.
+  regionDraft = [];
   store.persist();
-  setStatusMessage("Region saved. Pick Brick red, Concrete or Concrete 2 in the inspector.", "ok");
+  setStatusMessage(`${regionConvention(nextFill)?.label || "Outline"} fill placed. Click to start the next one, or Esc to stop.`, "ok");
+  updateRibbonHint();
+  render();
+}
+
+/** The Fill tab's subject: the selected fills, or the next one while the tool is on. */
+function fillTargets() {
+  const refs = store.selected;
+  if (refs.length && refs.every((ref) => ref.kind === "region")) {
+    return refs.map((ref) => objByRef(ref)).filter(Boolean);
+  }
+  return tool === "region" && !regionFinish ? [null] : [];
+}
+
+function fillSwatch(look) {
+  if (!look) return '<span class="fill-swatch" style="border-style:dashed"></span>';
+  if (look.hatch) {
+    const cross = look.hatch.length > 1 ? '<path d="M0 0l18 14M6 0l12 9.3M0 4.7l12 9.3"/>' : "";
+    return `<svg class="fill-swatch" viewBox="0 0 18 14" fill="none" stroke="${look.stroke}" stroke-width="1" aria-hidden="true"><path d="M0 14L18 0M-6 14L12 0M6 14L24 0"/>${cross}</svg>`;
+  }
+  return `<span class="fill-swatch" style="background:${look.fill}"></span>`;
+}
+
+function syncFillBar() {
+  if (!el.fillBar) return;
+  const targets = fillTargets();
+  setHidden(el.fillBar, !targets.length);
+  if (!targets.length) return;
+  if (el.fillBarFills && !el.fillBarFills.children.length) {
+    el.fillBarFills.innerHTML = [{ id: "", label: "Outline", look: null }, ...REGION_CONVENTIONS.map((c) => ({ id: c.id, label: c.label, look: c }))]
+      .map((f) => `<button type="button" data-fill="${escapeHtml(f.id)}" aria-pressed="false" title="${escapeHtml(f.label)}">${fillSwatch(f.look)}${escapeHtml(f.label)}</button>`)
+      .join("");
+    for (const btn of el.fillBarFills.querySelectorAll("[data-fill]")) {
+      btn.addEventListener("click", () => setFill(btn.dataset.fill || null));
+    }
+  }
+  const values = new Set(targets.map((region) => (region ? region.convention || "" : nextFill || "")));
+  for (const btn of el.fillBarFills.querySelectorAll("[data-fill]")) {
+    const pressed = values.size === 1 && values.has(btn.dataset.fill);
+    btn.classList.toggle("active", pressed);
+    btn.setAttribute("aria-pressed", pressed ? "true" : "false");
+  }
+}
+
+function setFill(convention) {
+  const targets = fillTargets();
+  if (!targets.length) return;
+  const label = regionConvention(convention)?.label || "outline only";
+  if (targets[0] === null) {
+    nextFill = convention;
+    setStatusMessage(`The next fill is ${label.toLowerCase()}. Click its corners.`, "ok");
+    render();
+    return;
+  }
+  store.pushUndo(`Set the fill to ${label.toLowerCase()}`);
+  for (const region of targets) region.convention = convention;
+  store.persist();
   render();
 }
 
@@ -14321,7 +15100,6 @@ function startMeasure() {
   measureDraft = { a: null };
   tool = "measure";
   activeFunction = "dimensions";
-  showDimensions = true;
   underlaySelected = false;
   store.clearSelection();
   syncToolButtons();
@@ -14332,7 +15110,6 @@ function startMeasure() {
 
 function stopMeasure() {
   measureDraft = null;
-  showDimensions = false;
   if (tool === "measure") tool = "select";
   if (activeFunction === "dimensions") activeFunction = null;
   syncToolButtons();
@@ -14340,25 +15117,987 @@ function stopMeasure() {
   render();
 }
 
-function finishMeasure(target) {
-  const dim = pickedDimension(measureDraft.a, target);
-  if (!dim) {
+/** The second point of a dimension: check it, then wait for the line to be placed. */
+function pickMeasureEnd(target) {
+  if (!pickedDimension(measureDraft.a, target)) {
     setStatusMessage("The two points need to be different.", "warn");
+    return;
+  }
+  measureDraft = { a: measureDraft.a, b: target };
+  updateRibbonHint();
+  render();
+}
+
+/** The dimension being placed, with its line through `p`. */
+function draftDimension(p) {
+  const { a, b } = measureDraft;
+  const dir = nextDimDir === "auto" ? dimensionDirFor(a, b, p) : nextDimDir;
+  const dim = { x1: a.x, y1: a.y, x2: b.x, y2: b.y };
+  if (dir !== "aligned") dim.dir = dir;
+  const offset = Math.round(offsetThrough(dim, p) * 100) / 100;
+  if (offset) dim.offset = offset;
+  return dim;
+}
+
+function finishMeasure(target) {
+  const dim = draftDimension(target);
+  if (!(dimensionGeometry(dim).length > 1e-4)) {
+    setStatusMessage("Those points line up, so there is nothing to measure that way. Pull the line the other way, or pick Aligned.", "warn");
     return;
   }
   if (!Array.isArray(store.doc.dimensions)) store.doc.dimensions = [];
   store.pushUndo("Drew a dimension");
-  store.doc.dimensions.push({
-    id: nid("dim"),
-    level: activeLevel,
-    x1: dim.a.x, y1: dim.a.y, x2: dim.b.x, y2: dim.b.y,
-  });
+  store.doc.dimensions.push({ id: nid("dim"), level: activeLevel, ...dim });
   store.persist();
   measureDraft = { a: null };
-  setStatusMessage(dim.label, "ok");
+  setStatusMessage(dimensionLabel(dim).measured, "ok");
   updateRibbonHint();
   render();
 }
+
+// --- text (Document > Annotate > Text) ----------------------------------------
+//
+// A note is the user's words, styled; a placed dimension's label shares the
+// same styles. The one canvas painter serves the plan (at PLAN_TEXT_SCALE) and
+// the sheet (at the sheet's scale), so a note looks the same in both.
+
+function textStyles() {
+  return textStyleList(store.doc, pack);
+}
+
+function textFallback(kind) {
+  return kind === "dimension" ? DEFAULT_DIMENSION_STYLE : DEFAULT_NOTE_STYLE;
+}
+
+function textLook(kind, obj) {
+  return resolveTextLook(textStyles(), obj, textFallback(kind));
+}
+
+let textMeasureCtx = null;
+function textMeasure() {
+  if (!textMeasureCtx) textMeasureCtx = document.createElement("canvas").getContext("2d");
+  return textMeasureCtx;
+}
+
+// Widths are measured at this font size and scaled, so a layout in metres
+// does not depend on the zoom it was measured at.
+const TEXT_MEASURE_PX = 100;
+
+/**
+ * A note's text box in world metres at a drawing scale: its lines, their
+ * widths, and the outline (turned about the anchor) used for picking and
+ * the selection box. The anchor is the top left of the box. The box is as
+ * wide as the longest line, or the wrap width; alignment places each line
+ * inside it, so changing the alignment never moves the box.
+ */
+function noteLayout(note, scale = PLAN_TEXT_SCALE) {
+  const look = textLook("note", note);
+  const hM = textHeightM(look, scale);
+  const m = textMeasure();
+  m.font = cssFont(look, TEXT_MEASURE_PX);
+  const perPx = hM / TEXT_MEASURE_PX;
+  const wrapM = note.widthMm ? (note.widthMm / 1000) * scale : null;
+  const lines = wrapNoteLines(note.text, wrapM ? wrapM / perPx : null, (s) => m.measureText(s).width);
+  const widths = lines.map((line) => m.measureText(line).width * perPx);
+  const w = wrapM ?? Math.max(hM * 0.5, ...widths);
+  const lineH = hM * 1.25;
+  const h = lines.length * lineH;
+  const left = 0;
+  const textX = look.align === "center" ? w / 2 : look.align === "right" ? w : 0;
+  const pad = hM * 0.3;
+  const theta = -((note.rotation || 0) * Math.PI) / 180;
+  const cos = Math.cos(theta);
+  const sin = Math.sin(theta);
+  const toWorld = (u, v) => [note.x + u * cos - v * sin, note.y + u * sin + v * cos];
+  const box = { x: left - pad, y: -pad, w: w + pad * 2, h: h + pad * 2 };
+  const outline = [
+    [box.x, box.y], [box.x + box.w, box.y], [box.x + box.w, box.y + box.h], [box.x, box.y + box.h],
+  ].map(([u, v]) => toWorld(u, v));
+  let leader = null;
+  if (note.leader) {
+    const du = note.leader.x - note.x;
+    const dv = note.leader.y - note.y;
+    const start = leaderStart(box, { x: du * cos + dv * sin, y: -du * sin + dv * cos });
+    leader = { from: toWorld(start.x, start.y), to: [note.leader.x, note.leader.y] };
+  }
+  const sides = { l: toWorld(box.x, box.y + box.h / 2), r: toWorld(box.x + box.w, box.y + box.h / 2) };
+  return { look, hM, lines, widths, w, h, lineH, pad, theta, cos, sin, textX, box, outline, leader, sides };
+}
+
+function paintLeader(c, project, leader, px, colour) {
+  const [fx, fy] = project(leader.from[0], leader.from[1]);
+  const [tx, ty] = project(leader.to[0], leader.to[1]);
+  const len = Math.hypot(tx - fx, ty - fy);
+  if (len < 1) return;
+  const ux = (tx - fx) / len;
+  const uy = (ty - fy) / len;
+  const head = Math.min(len * 0.5, Math.max(4, px * 0.8));
+  const half = head * 0.32;
+  c.save();
+  c.strokeStyle = colour;
+  c.fillStyle = colour;
+  c.lineWidth = Math.max(0.7, px * 0.07);
+  c.setLineDash([]);
+  c.beginPath();
+  c.moveTo(fx, fy);
+  c.lineTo(tx - ux * head * 0.8, ty - uy * head * 0.8);
+  c.stroke();
+  c.beginPath();
+  c.moveTo(tx, ty);
+  c.lineTo(tx - ux * head - uy * half, ty - uy * head + ux * half);
+  c.lineTo(tx - ux * head + uy * half, ty - uy * head - ux * half);
+  c.closePath();
+  c.fill();
+  c.restore();
+}
+
+/** Underline one drawn line of text whose anchor is at x = 0 for its alignment. */
+function underlineText(c, align, width, y, px) {
+  const x0 = align === "center" ? -width / 2 : align === "right" ? -width : 0;
+  c.lineWidth = Math.max(0.6, px * 0.06);
+  c.beginPath();
+  c.moveTo(x0, y);
+  c.lineTo(x0 + width, y);
+  c.stroke();
+}
+
+/**
+ * Paint a note through `project` (world -> canvas px). `pxPerM` is that
+ * projection's scale and `scale` the drawing scale its text is sized for.
+ * A plan-only note is drawn muted with a dashed box on the plan; sheets
+ * never call this for one.
+ */
+function paintNote(c, note, project, pxPerM, scale, { plan = false } = {}) {
+  const L = noteLayout(note, scale);
+  const px = L.hM * pxPerM;
+  if (px < 0.6) return L;
+  const muted = plan && !note.printable;
+  const colour = muted ? "#8a7d6c" : L.look.colour;
+  const [ax, ay] = project(note.x, note.y);
+  c.save();
+  c.translate(ax, ay);
+  c.rotate(L.theta);
+  c.font = cssFont(L.look, px);
+  c.fillStyle = colour;
+  c.strokeStyle = colour;
+  c.textBaseline = "top";
+  c.textAlign = L.look.align;
+  const gap = (L.lineH - L.hM) * pxPerM / 2;
+  if (L.look.box || muted) {
+    c.lineWidth = Math.max(0.6, px * 0.06);
+    if (!L.look.box) c.setLineDash([3, 3]);
+    c.strokeRect(L.box.x * pxPerM, L.box.y * pxPerM, L.box.w * pxPerM, L.box.h * pxPerM);
+    c.setLineDash([]);
+  }
+  c.translate(L.textX * pxPerM, 0);
+  L.lines.forEach((line, i) => {
+    const y = i * L.lineH * pxPerM + gap;
+    c.fillText(line, 0, y);
+    if (L.look.underline && line) underlineText(c, L.look.align, L.widths[i] * pxPerM, y + px * 1.02, px);
+  });
+  c.restore();
+  if (L.leader) paintLeader(c, project, L.leader, px, colour);
+  return L;
+}
+
+/**
+ * A placed dimension: witness lines from the measured points to the line,
+ * architectural ticks, and the label above the line, never upside down. A
+ * replaced number is drawn in red so it is never read as a measurement.
+ */
+function paintDimension(c, dim, project, pxPerM, scale, { selected = false, lineWidth = 1 } = {}) {
+  const g = dimensionGeometry(dim);
+  const look = textLook("dimension", dim);
+  const label = dimensionLabel(dim);
+  const ink = selected ? COLOUR.selection : "#1a1612";
+  const textInk = selected ? COLOUR.selection : label.replaced ? "#b2451e" : look.colour;
+  const [ax, ay] = project(g.a.x, g.a.y);
+  const [bx, by] = project(g.b.x, g.b.y);
+  const len = Math.hypot(bx - ax, by - ay);
+  if (len < 1) return;
+  const ux = (bx - ax) / len;
+  const uy = (by - ay) / len;
+  c.save();
+  c.strokeStyle = ink;
+  c.lineWidth = lineWidth;
+  c.setLineDash([]);
+  g.from.forEach((p, i) => {
+    const [px0, py0] = project(p.x, p.y);
+    const [px1, py1] = i ? [bx, by] : [ax, ay];
+    const d = Math.hypot(px1 - px0, py1 - py0);
+    if (d < 3) return;
+    const wx = (px1 - px0) / d;
+    const wy = (py1 - py0) / d;
+    c.beginPath();
+    c.moveTo(px0 + wx * 2, py0 + wy * 2);
+    c.lineTo(px1 + wx * 3, py1 + wy * 3);
+    c.stroke();
+  });
+  c.beginPath();
+  c.moveTo(ax - ux * 3, ay - uy * 3);
+  c.lineTo(bx + ux * 3, by + uy * 3);
+  c.stroke();
+  const tick = 4;
+  const tx = (ux - uy) / Math.SQRT2;
+  const ty = (uy + ux) / Math.SQRT2;
+  c.lineWidth = lineWidth * 1.6;
+  for (const [x, y] of [[ax, ay], [bx, by]]) {
+    c.beginPath();
+    c.moveTo(x - tx * tick, y - ty * tick);
+    c.lineTo(x + tx * tick, y + ty * tick);
+    c.stroke();
+  }
+  const px = textHeightM(look, scale) * pxPerM;
+  const [lx, ly] = project(g.label.x, g.label.y);
+  if (g.leaderTo && px >= 0.6 && label.text) {
+    const [qx, qy] = project(g.leaderTo.x, g.leaderTo.y);
+    c.lineWidth = lineWidth * 0.8;
+    c.beginPath();
+    c.moveTo(lx, ly);
+    c.lineTo(qx, qy);
+    c.stroke();
+    c.beginPath();
+    c.arc(qx, qy, Math.max(1.2, lineWidth * 1.3), 0, Math.PI * 2);
+    c.fillStyle = ink;
+    c.fill();
+  }
+  if (px >= 0.6 && label.text) {
+    c.translate(lx, ly);
+    c.rotate(readableAngle(bx - ax, by - ay));
+    c.font = cssFont(look, px);
+    c.textAlign = "center";
+    c.textBaseline = "bottom";
+    c.fillStyle = textInk;
+    c.strokeStyle = textInk;
+    const y = -Math.max(2, px * 0.25);
+    c.fillText(label.text, 0, y);
+    const width = c.measureText(label.text).width;
+    if (look.underline) underlineText(c, "center", width, y + px * 0.12, px);
+    if (look.box) {
+      c.lineWidth = Math.max(0.6, px * 0.06);
+      c.strokeRect(-width / 2 - px * 0.3, y - px * 1.25, width + px * 0.6, px * 1.4);
+    }
+  }
+  c.restore();
+}
+
+/** The note under a plan point, its words or its leader. */
+function noteAt(wx, wy) {
+  const notes = store.doc.notes || [];
+  for (let i = notes.length - 1; i >= 0; i -= 1) {
+    const note = notes[i];
+    if (!onActiveLevel(note) || !keptByCut(note, "line") || noteEdit?.id === note.id) continue;
+    const L = noteLayout(note);
+    if (pointInPoly(wx, wy, L.outline)) return { kind: "note", id: note.id };
+    if (L.leader && distToSeg(L.leader.from[0], L.leader.from[1], L.leader.to[0], L.leader.to[1], wx, wy) < 0.12) {
+      return { kind: "note", id: note.id };
+    }
+  }
+  return null;
+}
+
+function dimensionHitTol(dim) {
+  return Math.max(0.2, textHeightM(textLook("dimension", dim)) * 1.6);
+}
+
+/** True when a plan point is on a dimension's number, which sits just above its label point. */
+function dimensionLabelHit(dim, wx, wy) {
+  const label = dimensionLabel(dim);
+  if (!label.text) return false;
+  const g = dimensionGeometry(dim);
+  const look = textLook("dimension", dim);
+  const hM = textHeightM(look);
+  const m = textMeasure();
+  m.font = cssFont(look, TEXT_MEASURE_PX);
+  const half = (m.measureText(label.text).width * hM) / TEXT_MEASURE_PX / 2 + hM * 0.3;
+  const dx = wx - g.label.x;
+  const dy = wy - g.label.y;
+  const along = Math.abs(dx * g.dir.x + dy * g.dir.y);
+  const across = Math.abs(dx * g.normal.x + dy * g.normal.y);
+  return along <= half && across <= hM * 1.6;
+}
+
+/** The dimension whose number is under a plan point. */
+function dimensionLabelAt(wx, wy) {
+  const dims = store.doc.dimensions || [];
+  for (let i = dims.length - 1; i >= 0; i -= 1) {
+    const dim = dims[i];
+    if (!onActiveLevel(dim) || !planObjectVisible(dim) || !keptByCut(dim, "line")) continue;
+    if (dimensionLabelHit(dim, wx, wy)) return dim;
+  }
+  return null;
+}
+
+function soleNote() {
+  if (store.selected.length !== 1 || store.selected[0].kind !== "note") return null;
+  return objByRef(store.selected[0]);
+}
+
+function soleDimensionSelection() {
+  if (store.selected.length !== 1 || store.selected[0].kind !== "dimension") return null;
+  const obj = objByRef(store.selected[0]);
+  return obj ? { ref: store.selected[0], obj } : null;
+}
+
+/** The selected note's leader arrow under the pointer: its own handle. */
+function noteLeaderHit(wx, wy) {
+  const note = soleNote();
+  if (!note?.leader) return null;
+  const tol = (HANDLE / 2 + 4) / cam.scale;
+  return Math.hypot(note.leader.x - wx, note.leader.y - wy) <= tol ? { id: note.id } : null;
+}
+
+/** A side of the selected note's text box: drag it to set the wrap width. */
+function noteSideHit(wx, wy) {
+  const note = soleNote();
+  if (!note || noteEdit) return null;
+  const L = noteLayout(note);
+  const tol = (HANDLE / 2 + 4) / cam.scale;
+  for (const side of ["r", "l"]) {
+    const [sx, sy] = L.sides[side];
+    if (Math.hypot(sx - wx, sy - wy) <= tol) return { id: note.id, side };
+  }
+  return null;
+}
+
+/** Drag a side of a note's box: the other side stays where it is. */
+function dragNoteSide(d, wx, wy) {
+  const note = objByRef({ kind: "note", id: d.id });
+  if (!note) return;
+  const u = (wx - d.x0) * d.cos + (wy - d.y0) * d.sin;
+  const minM = d.hM * 2;
+  const left = d.side === "l" ? Math.min(u + d.pad, d.right - minM) : 0;
+  const right = d.side === "r" ? Math.max(u - d.pad, minM) : d.right;
+  const mm = Math.round(((right - left) / PLAN_TEXT_SCALE) * 1000 * 2) / 2;
+  note.widthMm = Math.max(1, mm);
+  note.x = d.x0 + left * d.cos;
+  note.y = d.y0 + left * d.sin;
+  d.moved = true;
+}
+
+function drawNotes(levelId) {
+  for (const note of (store.doc.notes || []).filter((n) => onLevel(n, levelId))) {
+    if (noteEdit?.id === note.id) continue;
+    paintNote(ctx, note, worldToScreen, cam.scale, PLAN_TEXT_SCALE, { plan: true });
+  }
+}
+
+function startTextTool() {
+  closeNoteEditor();
+  leaderPick = null;
+  tool = "text";
+  activeFunction = "text";
+  underlaySelected = false;
+  store.clearSelection();
+  syncToolButtons();
+  drawRibbon();
+  setStatusMessage(HINTS.text, "ok");
+  render();
+}
+
+const TEXT_KEYS = { b: "bold", i: "italic", u: "underline" };
+
+/** True while the Text tab sets the next note rather than anything already drawn. */
+function textDraftActive() {
+  if (noteEdit) return !noteEdit.id && !noteEdit.dimId;
+  return tool === "text" && !textSelectionRefs();
+}
+
+/** What the Text tab and the inspector change: the words being typed, the selection, or the next note. */
+function textTargetRows() {
+  if (noteEdit?.dimId || noteEdit?.id) {
+    const ref = noteEdit.dimId ? { kind: "dimension", id: noteEdit.dimId } : { kind: "note", id: noteEdit.id };
+    const obj = objByRef(ref);
+    return obj ? [{ ref, obj }] : [];
+  }
+  if (textDraftActive()) return [{ ref: { kind: "note", id: null }, obj: nextNote, draft: true }];
+  return textSelection();
+}
+
+/** Put the caret back in the words after a click on the tab took it away. */
+function refocusNoteEditor() {
+  if (!noteEdit || !el.noteEdit || el.noteEdit.hidden) return;
+  if (activeEl() !== el.noteEdit) el.noteEdit.focus();
+}
+
+/** Open the typing box: a new note at a point, an existing note, or a dimension's number. */
+function openNoteEditor(edit) {
+  if (!el.noteEdit) return;
+  noteEdit = edit;
+  let text = "";
+  if (edit.dimId) {
+    const dim = objByRef({ kind: "dimension", id: edit.dimId });
+    text = dim?.textOverride || dimensionLabel(dim || {}).measured;
+  } else if (edit.id) {
+    text = objByRef({ kind: "note", id: edit.id })?.text || "";
+  }
+  el.noteEdit.value = text;
+  setHidden(el.noteEdit, false);
+  placeNoteEditor();
+  setTimeout(() => {
+    if (noteEdit !== edit || el.noteEdit.hidden) return;
+    el.noteEdit.focus();
+    el.noteEdit.select();
+  }, 0);
+  setStatusMessage(edit.dimId
+    ? "Type the words to show instead of the number, such as EQ. Clear it to show the measured length. Enter sets it, Esc cancels."
+    : "Type the note. Enter places it, Shift+Enter starts a new line, Esc cancels.", "ok");
+  updateRibbonHint();
+  render();
+}
+
+function closeNoteEditor() {
+  noteEdit = null;
+  if (el.noteEdit && !el.noteEdit.hidden) {
+    setHidden(el.noteEdit, true);
+    if (activeEl() === el.noteEdit) el.noteEdit.blur();
+  }
+}
+
+/** Keep the typing box over its words through pan and zoom, sized to what is typed. */
+function placeNoteEditor() {
+  if (!noteEdit || !el.noteEdit) return;
+  const input = el.noteEdit;
+  let look;
+  let at;
+  if (noteEdit.dimId) {
+    const dim = objByRef({ kind: "dimension", id: noteEdit.dimId });
+    if (!dim) {
+      closeNoteEditor();
+      return;
+    }
+    look = textLook("dimension", dim);
+    at = dimensionGeometry(dim).label;
+  } else {
+    const note = noteEdit.id ? objByRef({ kind: "note", id: noteEdit.id }) : null;
+    if (noteEdit.id && !note) {
+      closeNoteEditor();
+      return;
+    }
+    look = note ? textLook("note", note) : textLook("note", nextNote);
+    at = note || noteEdit;
+  }
+  const px = Math.max(12, Math.min(40, textHeightM(look) * cam.scale));
+  const m = textMeasure();
+  m.font = cssFont(look, px);
+  const lines = input.value.split("\n");
+  const wrapMm = noteEdit.dimId ? null : (noteEdit.id ? objByRef({ kind: "note", id: noteEdit.id })?.widthMm : nextNote.widthMm);
+  const wrapPx = wrapMm ? (wrapMm / 1000) * PLAN_TEXT_SCALE * cam.scale * (px / Math.max(1e-6, textHeightM(look) * cam.scale)) : 0;
+  const w = Math.max(80, wrapPx, ...lines.map((line) => m.measureText(line).width)) + px;
+  const h = lines.length * px * 1.25;
+  const canvasRect = el.canvas.getBoundingClientRect();
+  const wrapRect = el.canvasWrap.getBoundingClientRect();
+  const [sx, sy] = worldToScreen(at.x, at.y);
+  let left = canvasRect.left - wrapRect.left + sx;
+  let top = canvasRect.top - wrapRect.top + sy;
+  if (noteEdit.dimId) {
+    left -= w / 2;
+    top -= h + 6;
+  }
+  input.style.font = cssFont(look, px);
+  input.style.textDecoration = look.underline ? "underline" : "none";
+  input.style.color = look.colour;
+  input.style.textAlign = noteEdit.dimId ? "center" : look.align;
+  input.style.width = `${w}px`;
+  input.style.height = `${h}px`;
+  input.style.left = `${left - 5}px`;
+  input.style.top = `${top - 3}px`;
+}
+
+function commitNoteEditor() {
+  const edit = noteEdit;
+  if (!edit) return;
+  const text = (el.noteEdit?.value || "").replace(/\s+$/, "");
+  closeNoteEditor();
+  if (edit.dimId) {
+    const dim = objByRef({ kind: "dimension", id: edit.dimId });
+    if (!dim) {
+      render();
+      return;
+    }
+    const typed = text.trim();
+    const next = typed && typed !== dimensionLabel({ ...dim, textOverride: "" }).measured ? typed : "";
+    if ((dim.textOverride || "") !== next) {
+      store.pushUndo(next ? `Replaced the number on a dimension with ${next}` : "Showed the measured length on a dimension again");
+      if (next) dim.textOverride = next;
+      else delete dim.textOverride;
+      store.persist();
+      setStatusMessage(next ? "The number is replaced, so it is drawn in red. Clear it to show the measured length." : "The dimension shows its measured length.", "ok");
+    }
+    render();
+    return;
+  }
+  if (edit.id) {
+    const note = objByRef({ kind: "note", id: edit.id });
+    if (note && !text.trim()) {
+      store.pushUndo("Deleted a note");
+      store.doc.notes = store.doc.notes.filter((n) => n.id !== note.id);
+      store.clearSelection();
+      store.persist();
+      setStatusMessage("The note was empty, so it was removed.", "ok");
+    } else if (note && text !== note.text) {
+      store.pushUndo("Changed the words of a note");
+      note.text = text;
+      store.persist();
+    }
+    render();
+    return;
+  }
+  if (!text.trim()) {
+    render();
+    return;
+  }
+  store.pushUndo("Placed a note");
+  createNote(store.doc, {
+    id: nid("nt"), x: edit.x, y: edit.y, level: edit.level, text,
+    styleId: nextNote.styleId, override: nextNote.override, printable: nextNote.printable,
+  });
+  store.persist();
+  setStatusMessage(tool === "text" ? "Note placed. Click to place another, or Esc to stop." : "Note placed.", "ok");
+  updateRibbonHint();
+  render();
+}
+
+el.noteEdit?.addEventListener("keydown", (ev) => {
+  // The plan's own keys (Delete, Space, digits, shortcuts) must not act while typing.
+  ev.stopPropagation();
+  const textKey = TEXT_KEYS[ev.key.toLowerCase()];
+  if ((ev.ctrlKey || ev.metaKey) && !ev.shiftKey && !ev.altKey && textKey && !noteEdit?.dimId) {
+    ev.preventDefault();
+    toggleTextProp(textKey);
+    return;
+  }
+  if (ev.key === "Enter" && !ev.shiftKey) {
+    ev.preventDefault();
+    commitNoteEditor();
+  } else if (ev.key === "Escape") {
+    ev.preventDefault();
+    closeNoteEditor();
+    updateRibbonHint();
+    render();
+  }
+});
+
+el.noteEdit?.addEventListener("input", placeNoteEditor);
+
+// Clicking away keeps what was typed, the way a word processor does.
+el.noteEdit?.addEventListener("blur", () => {
+  const edit = noteEdit;
+  if (!edit) return;
+  setTimeout(() => {
+    if (noteEdit !== edit || activeEl() === el.noteEdit || !document.hasFocus()) return;
+    // Setting the size or style on the Text tab is part of typing the note.
+    if (el.textBar?.contains(activeEl())) return;
+    commitNoteEditor();
+  }, 0);
+});
+
+/** Set the arrow end of a note's leader. */
+function finishLeaderPick(wx, wy) {
+  const note = objByRef({ kind: "note", id: leaderPick });
+  leaderPick = null;
+  if (note) {
+    const p = applySnap(wx, wy);
+    store.pushUndo("Added a leader to a note");
+    note.leader = { x: p.x, y: p.y };
+    store.persist();
+    snapGuide = null;
+    setStatusMessage("Leader added. Drag its arrow to point somewhere else.", "ok");
+  }
+  updateRibbonHint();
+  render();
+}
+
+// --- the Text inspector (notes and dimension labels) ---------------------------
+
+function textSelectionRefs() {
+  if (wallDraft) return null;
+  const refs = store.selected;
+  if (!refs.length || !refs.every((r) => r.kind === "note" || r.kind === "dimension")) return null;
+  return refs;
+}
+
+function textSelection() {
+  return (textSelectionRefs() || [])
+    .map((ref) => ({ ref, obj: objByRef(ref) }))
+    .filter((row) => row.obj);
+}
+
+/**
+ * Apply one edit to every note and dimension the Text tab is on as a single
+ * undo step. The next note is not on the drawing yet, so changing it is not
+ * an undo step: the typing box just takes the new look.
+ */
+function editTextSelection(label, fn) {
+  const rows = textTargetRows();
+  if (!rows.length) return;
+  if (rows[0].draft) {
+    for (const row of rows) fn(row);
+    placeNoteEditor();
+    refocusNoteEditor();
+    render();
+    return;
+  }
+  store.pushUndo(label);
+  const before = JSON.stringify(rows.map((row) => row.obj));
+  for (const row of rows) fn(row);
+  if (JSON.stringify(rows.map((row) => row.obj)) === before) {
+    store.dropUndo();
+    refocusNoteEditor();
+    render();
+    return;
+  }
+  store.persist();
+  placeNoteEditor();
+  refocusNoteEditor();
+  render();
+}
+
+function setTextProp(key, value) {
+  const styles = textStyles();
+  editTextSelection(`Set the ${key === "sizeMm" ? "text size" : key === "colour" ? "text colour" : key} of ${textTargetRows().length === 1 ? "a note" : "the selection"}`, ({ ref, obj }) => {
+    setOverride(styles, obj, key, value, textFallback(ref.kind));
+  });
+}
+
+/** A named style for the Text tab's subject, dropping its own settings. */
+function setTextStyle(id) {
+  if (!id) return;
+  const name = textStyleById(textStyles(), id).name;
+  const rows = textTargetRows();
+  editTextSelection(`Set the text style to ${name}`, ({ ref, obj }) => {
+    if (ref.kind === "dimension" && id === DEFAULT_DIMENSION_STYLE) delete obj.styleId;
+    else obj.styleId = id;
+    delete obj.override;
+  });
+  if (rows.some((row) => row.ref.kind === "note")) nextNote.styleId = id;
+}
+
+/** Bold, italic, underline or box: all on unless every selected object already has it. */
+function toggleTextProp(key) {
+  const rows = textTargetRows();
+  if (!rows.length) return;
+  const styles = textStyles();
+  const allOn = rows.every(({ ref, obj }) => textLook(ref.kind, obj)[key]);
+  editTextSelection(`${allOn ? "Turned off" : "Turned on"} ${key}`, ({ ref, obj }) => {
+    setOverride(styles, obj, key, !allOn, textFallback(ref.kind));
+  });
+}
+
+function syncTextInspector(refs) {
+  if (!el.ctxText) return;
+  const rows = refs ? textSelection() : [];
+  setHidden(el.ctxText, !rows.length);
+  if (!rows.length) {
+    setHidden(el.ctxTextStyleNameWrap, true);
+    return;
+  }
+  const overridden = new Set(rows.flatMap(({ obj }) => overriddenKeys(obj)));
+  const single = rows.length === 1;
+  const note = single && rows[0].ref.kind === "note" ? rows[0].obj : null;
+  const dim = single && rows[0].ref.kind === "dimension" ? rows[0].obj : null;
+  const allNotes = rows.every((row) => row.ref.kind === "note");
+
+  setHidden(el.ctxNoteTextWrap, !note);
+  if (note && activeEl() !== el.ctxNoteText) el.ctxNoteText.value = note.text;
+  setHidden(el.ctxDimTextWrap, !dim);
+  if (dim) {
+    if (activeEl() !== el.ctxDimPrefix) el.ctxDimPrefix.value = dim.prefix || "";
+    if (activeEl() !== el.ctxDimReplace) el.ctxDimReplace.value = dim.textOverride || "";
+    if (activeEl() !== el.ctxDimSuffix) el.ctxDimSuffix.value = dim.suffix || "";
+    el.ctxDimReplace.placeholder = dimensionLabel(dim).measured;
+  }
+  setHidden(el.ctxNoteOnly, !allNotes);
+  if (allNotes) {
+    if (activeEl() !== el.ctxNoteWidth) el.ctxNoteWidth.value = note?.widthMm ? String(note.widthMm) : "";
+    el.ctxNoteWidth.disabled = !note;
+    setHidden(el.ctxNoteLeader, !note);
+    if (note) el.ctxNoteLeader.textContent = note.leader ? "Remove leader" : leaderPick === note.id ? "Click the plan…" : "Add leader";
+  }
+  el.ctxTextReset.disabled = overridden.size === 0;
+  el.ctxTextSaveStyle.disabled = !single;
+  if (!single) setHidden(el.ctxTextStyleNameWrap, true);
+
+  let hint = "";
+  if (dim && dimensionLabel(dim).replaced) hint = "The number is replaced, so it is drawn in red. Clear Replace number to show the measured length again.";
+  else if (dim) hint = "Drag the line to pull it off the points. Drag an end to measure something else. Double-click the number to replace it.";
+  else if (note) hint = "Drag to move it. Drag a side of the box to make it wider or narrower; the words wrap and line up inside it. Double-click to change the words.";
+  else hint = `${rows.length} selected. Changes apply to all of them.`;
+  hint += " Style, size, bold, colour and alignment are on the Text tab.";
+  if (overridden.size) hint += " A red mark on the tab is a setting this object has instead of its style's.";
+  el.ctxTextNote.textContent = hint;
+}
+
+function wireTextInspector() {
+  el.ctxNoteText?.addEventListener("change", (e) => {
+    const note = soleNote();
+    if (!note) return;
+    const text = e.target.value.replace(/\s+$/, "");
+    if (!text.trim()) {
+      e.target.value = note.text;
+      setStatusMessage("A note needs words. Press Delete to remove it.", "warn");
+      return;
+    }
+    if (text === note.text) return;
+    store.pushUndo("Changed the words of a note");
+    note.text = text;
+    store.persist();
+    render();
+  });
+  const dimField = (input, key, noun) => input?.addEventListener("change", (e) => {
+    const sel = soleDimensionSelection();
+    if (!sel) return;
+    const value = e.target.value.trim();
+    if ((sel.obj[key] || "") === value) return;
+    store.pushUndo(value ? `Set the ${noun} of a dimension to ${value}` : `Cleared the ${noun} of a dimension`);
+    if (value) sel.obj[key] = value;
+    else delete sel.obj[key];
+    store.persist();
+    render();
+  });
+  dimField(el.ctxDimPrefix, "prefix", "words before the number");
+  dimField(el.ctxDimReplace, "textOverride", "replacement for the number");
+  dimField(el.ctxDimSuffix, "suffix", "words after the number");
+
+  el.ctxNoteWidth?.addEventListener("change", (e) => {
+    const note = soleNote();
+    if (!note) return;
+    const raw = String(e.target.value).trim().replace(",", ".");
+    const value = raw ? Number(raw) : null;
+    if (raw && !(value > 0)) {
+      render();
+      return;
+    }
+    const next = value ? Math.round(value * 10) / 10 : null;
+    if ((note.widthMm || null) === next) return;
+    store.pushUndo(next ? `Wrapped a note at ${next} mm` : "Stopped wrapping a note");
+    note.widthMm = next;
+    store.persist();
+    render();
+  });
+  el.ctxNoteLeader?.addEventListener("click", () => {
+    const note = soleNote();
+    if (!note) return;
+    if (note.leader) {
+      store.pushUndo("Removed the leader of a note");
+      note.leader = null;
+      store.persist();
+      render();
+      return;
+    }
+    leaderPick = note.id;
+    setStatusMessage("Click where the arrow should point. Esc cancels.", "ok");
+    updateRibbonHint();
+    render();
+  });
+  el.ctxNoteRotate?.addEventListener("click", () => {
+    editTextSelection("Turned a note", ({ obj }) => {
+      obj.rotation = ((obj.rotation || 0) + 90) % 180;
+    });
+  });
+  el.ctxTextReset?.addEventListener("click", () => {
+    editTextSelection("Reset the text to its style", ({ obj }) => {
+      delete obj.override;
+    });
+  });
+  el.ctxTextSaveStyle?.addEventListener("click", () => {
+    if (!textSelection().length) return;
+    setHidden(el.ctxTextStyleNameWrap, false);
+    el.ctxTextStyleName.value = "";
+    el.ctxTextStyleName.focus();
+  });
+  const saveStyle = () => {
+    const rows = textSelection();
+    const name = el.ctxTextStyleName.value.trim();
+    if (rows.length !== 1 || !name) {
+      if (!name) setStatusMessage("Type a name for the style.", "warn");
+      return;
+    }
+    if (textStyles().some((s) => s.name.toLowerCase() === name.toLowerCase())) {
+      setStatusMessage(`There is already a style called ${name}.`, "warn");
+      return;
+    }
+    const { ref, obj } = rows[0];
+    store.pushUndo(`Saved the text style ${name}`);
+    styleFromObject(store.doc, textStyles(), obj, name, textFallback(ref.kind));
+    if (ref.kind === "note") {
+      nextNote.styleId = obj.styleId;
+      delete nextNote.override;
+    }
+    store.persist();
+    setHidden(el.ctxTextStyleNameWrap, true);
+    setStatusMessage(`Style ${name} saved. Pick it for any note or dimension.`, "ok");
+    render();
+  };
+  el.ctxTextStyleNameOk?.addEventListener("click", saveStyle);
+  el.ctxTextStyleName?.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if (e.key === "Enter") {
+      e.preventDefault();
+      saveStyle();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      setHidden(el.ctxTextStyleNameWrap, true);
+    }
+  });
+}
+
+wireTextInspector();
+
+// --- the Text tab (Place Text, Modify | Text) ----------------------------------
+//
+// The same settings as the inspector, on the ribbon, so they can be set
+// while typing: the typing box keeps the caret, and the note it places, or
+// the next one, takes what was picked.
+
+let textBarOptionsKey = "";
+
+/** The standard colours as swatch buttons, then Custom, which shows the
+ *  picked colour when it is not one of the standard ones. */
+function syncColourSwatches(host, current) {
+  if (!host) return;
+  if (!host.childElementCount) {
+    host.innerHTML = `${STANDARD_COLOURS.map((c) =>
+      `<button type="button" class="colour-swatch" data-colour="${c.hex}" aria-pressed="false" aria-label="${escapeHtml(c.name)}" title="${escapeHtml(c.name)}"><span style="background:${c.hex}"></span></button>`).join("")
+    }<button type="button" class="colour-swatch is-custom" data-colour="custom" aria-pressed="false" title="Pick any colour">Custom<span hidden></span></button>`;
+  }
+  const value = current ? current.toLowerCase() : null;
+  const standard = STANDARD_COLOURS.some((c) => c.hex === value);
+  for (const btn of host.querySelectorAll("[data-colour]")) {
+    const custom = btn.dataset.colour === "custom";
+    const pressed = custom ? Boolean(value) && !standard : btn.dataset.colour === value;
+    btn.classList.toggle("active", pressed);
+    btn.setAttribute("aria-pressed", pressed ? "true" : "false");
+    if (custom) {
+      const chip = btn.querySelector("span");
+      chip.hidden = !pressed;
+      if (pressed) chip.style.background = value;
+    }
+  }
+}
+
+function syncTextBar() {
+  if (!el.textBar) return;
+  const on = tool === "text" || Boolean(noteEdit) || Boolean(textSelectionRefs());
+  const rows = on ? textTargetRows() : [];
+  setHidden(el.textBar, !rows.length);
+  if (!rows.length) return;
+  const styles = textStyles();
+  const optionsKey = styles.map((s) => `${s.id}:${s.name}`).join("|");
+  if (optionsKey !== textBarOptionsKey) {
+    el.textBarStyle.innerHTML = `<option value="" disabled hidden>Mixed</option>${
+      styles.map((s) => `<option value="${escapeHtml(s.id)}">${escapeHtml(s.name)}</option>`).join("")}`;
+    textBarOptionsKey = optionsKey;
+  }
+  if (el.textBarFont && !el.textBarFont.options.length) {
+    el.textBarFont.innerHTML = TEXT_FONTS.map((f) => `<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`).join("");
+  }
+  const looks = rows.map(({ ref, obj }) => textLook(ref.kind, obj));
+  const look = looks[0];
+  const shared = (key) => looks.every((l) => l[key] === look[key]);
+  const overridden = new Set(rows.flatMap(({ obj }) => overriddenKeys(obj)));
+  if (activeEl() !== el.textBarStyle) el.textBarStyle.value = shared("id") ? look.id : "";
+  if (activeEl() !== el.textBarFont) el.textBarFont.value = shared("font") ? look.font : "";
+  if (activeEl() !== el.textBarSize) el.textBarSize.value = shared("sizeMm") ? String(look.sizeMm) : "";
+  el.textBarSize.placeholder = shared("sizeMm") ? "" : "Mixed";
+  if (activeEl() !== el.textBarColour) el.textBarColour.value = look.colour;
+  syncColourSwatches(el.textBarColours, shared("colour") ? look.colour : null);
+  for (const btn of el.textBar.querySelectorAll("[data-text-bar-toggle]")) {
+    const key = btn.dataset.textBarToggle;
+    const pressed = looks.every((l) => l[key]);
+    btn.classList.toggle("active", pressed);
+    btn.setAttribute("aria-pressed", pressed ? "true" : "false");
+    btn.classList.toggle("is-override", overridden.has(key));
+  }
+  for (const btn of el.textBar.querySelectorAll("[data-text-bar-align]")) {
+    const pressed = shared("align") && look.align === btn.dataset.textBarAlign;
+    btn.classList.toggle("active", pressed);
+    btn.setAttribute("aria-pressed", pressed ? "true" : "false");
+    btn.classList.toggle("is-override", pressed && overridden.has("align"));
+  }
+  for (const label of el.textBar.querySelectorAll("[data-text-bar-prop]")) {
+    label.classList.toggle("is-override", overridden.has(label.dataset.textBarProp));
+  }
+  const notes = rows.filter((row) => row.ref.kind === "note");
+  setHidden(el.textBarPlanOnlyWrap, notes.length !== rows.length);
+  if (notes.length === rows.length) {
+    const planOnly = notes.filter(({ obj }) => obj.printable === false).length;
+    el.textBarPlanOnly.checked = planOnly === notes.length;
+    el.textBarPlanOnly.indeterminate = planOnly > 0 && planOnly < notes.length;
+  }
+}
+
+function wireTextBar() {
+  if (!el.textBar) return;
+  // A press on a button must not take the caret out of the words being typed.
+  el.textBar.addEventListener("mousedown", (e) => {
+    if (e.target.closest("button") && noteEdit) e.preventDefault();
+  });
+  // Leaving the tab for anything but the words places what was typed.
+  el.textBar.addEventListener("focusout", () => {
+    setTimeout(() => {
+      if (!noteEdit || !document.hasFocus()) return;
+      const now = activeEl();
+      if (now === el.noteEdit || el.textBar.contains(now)) return;
+      commitNoteEditor();
+    }, 0);
+  });
+  // The plan's keys must not act while a field here has the caret.
+  el.textBar.addEventListener("keydown", (e) => {
+    if (!e.target.matches("input, select")) return;
+    e.stopPropagation();
+    if (e.key === "Enter") {
+      e.preventDefault();
+      e.target.dispatchEvent(new Event("change", { bubbles: true }));
+      refocusNoteEditor();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      syncTextBar();
+      refocusNoteEditor();
+    }
+  });
+  el.textBarStyle?.addEventListener("change", (e) => setTextStyle(e.target.value));
+  el.textBarFont?.addEventListener("change", (e) => setTextProp("font", e.target.value));
+  el.textBarSize?.addEventListener("change", (e) => {
+    const value = Number(String(e.target.value).replace(",", "."));
+    if (!(value > 0)) {
+      syncTextBar();
+      return;
+    }
+    setTextProp("sizeMm", value);
+  });
+  el.textBarColour?.addEventListener("change", (e) => {
+    setTextProp("colour", e.target.value);
+    refocusNoteEditor();
+  });
+  el.textBarColours?.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-colour]");
+    if (!btn) return;
+    if (btn.dataset.colour !== "custom") {
+      setTextProp("colour", btn.dataset.colour);
+      return;
+    }
+    try {
+      el.textBarColour.showPicker();
+    } catch {
+      el.textBarColour.click();
+    }
+  });
+  for (const btn of el.textBar.querySelectorAll("[data-text-bar-toggle]")) {
+    btn.addEventListener("click", () => toggleTextProp(btn.dataset.textBarToggle));
+  }
+  for (const btn of el.textBar.querySelectorAll("[data-text-bar-align]")) {
+    btn.addEventListener("click", () => setTextProp("align", btn.dataset.textBarAlign));
+  }
+  el.textBarPlanOnly?.addEventListener("change", (e) => {
+    const planOnly = e.target.checked;
+    editTextSelection(planOnly ? "Kept a note off the sheets" : "Put a note back on the sheets", ({ obj }) => {
+      obj.printable = !planOnly;
+    });
+  });
+}
+
+wireTextBar();
 
 function wireMassing() {
   wireVisualizePrompt();
@@ -14401,13 +16140,13 @@ function wireMassing() {
   let savedStyle = "colour";
   try {
     const stored = window.localStorage.getItem(MASS_STYLE_KEY);
-    if (stored === "lines" || stored === "status") savedStyle = stored;
+    savedStyle = massViewStyle(stored);
     if (el.massFigures) el.massFigures.checked = window.localStorage.getItem(MASS_FIGURES_KEY) === "1";
   } catch { /* private mode */ }
   document.querySelectorAll("[data-mass-style]").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.massStyle === savedStyle);
     btn.addEventListener("click", () => {
-      const next = btn.dataset.massStyle === "lines" || btn.dataset.massStyle === "status" ? btn.dataset.massStyle : "colour";
+      const next = massViewStyle(btn.dataset.massStyle);
       document.querySelectorAll("[data-mass-style]").forEach((b) => b.classList.toggle("active", b === btn));
       try { window.localStorage.setItem(MASS_STYLE_KEY, next); } catch { /* private mode */ }
       massView.setStyle(next);
@@ -14732,6 +16471,14 @@ function drawSheetOpening(sctx, project, pxPerM, form, walls) {
     sctx.lineTo(b[0], b[1]);
     sctx.stroke();
   }
+  if (form.mark && form.markSide) {
+    const size = Math.max(7, Math.min(10, pxPerM * 0.09));
+    const reach = (host?.thickness || 0.22) / 2 + (size * 1.6) / pxPerM;
+    const mx = (line.start[0] + line.end[0]) / 2 + form.markSide.x * reach;
+    const my = (line.start[1] + line.end[1]) / 2 + form.markSide.y * reach;
+    const [tx, ty] = project(mx, my);
+    paintMarkTag(sctx, tx, ty, form.mark, form.kind === "Window" ? "window" : "door", { size, paper: "#fdfaf3" });
+  }
   sctx.restore();
 }
 
@@ -14869,6 +16616,15 @@ function drawActiveSheet() {
     for (const shape of [store.doc.site?.propertyLine, store.doc.site?.buildingLine]) {
       for (const p of shapePolygon(shape)) sitePoints.push(p);
     }
+    const onLevel = (obj) => !planLevel || !obj?.level || obj.level === planLevel;
+    for (const dim of (store.doc.dimensions || []).filter(onLevel)) {
+      const g = dimensionGeometry(dim);
+      sitePoints.push([g.a.x, g.a.y], [g.b.x, g.b.y], [dim.x1, dim.y1], [dim.x2, dim.y2], [g.label.x, g.label.y]);
+    }
+    for (const note of (store.doc.notes || []).filter((n) => n.printable && onLevel(n))) {
+      sitePoints.push([note.x, note.y]);
+      if (note.leader) sitePoints.push([note.leader.x, note.leader.y]);
+    }
   }
   const planExtent = forms && view.kind === "plan"
     ? planExtentFromPayload(payload, { forms, extraPoints: sitePoints })
@@ -14998,19 +16754,17 @@ function drawActiveSheet() {
       paintFixture(sctx, item, sku, project, pxPerM);
     }
     // Lines are not compiled (model.js LINE_KINDS): drawn from the document,
-    // and only the storey this sheet is set to.
+    // and only the storey this sheet is set to. Both kinds print, in their
+    // style at paper size.
     for (const line of (store.doc.lines || []).filter(onSheetLevel)) {
-      if (line.kind !== "model") continue;
-      const a = project(line.x1, line.y1);
-      const b = project(line.x2, line.y2);
-      sctx.beginPath();
-      sctx.moveTo(a[0], a[1]);
-      sctx.lineTo(b[0], b[1]);
+      const stroke = sheetLineStroke(lineStyleOf(line), pxPerMm);
       sctx.strokeStyle = "#1a1612";
-      sctx.lineWidth = 1;
-      sctx.setLineDash([]);
-      sctx.stroke();
+      sctx.lineWidth = stroke.width;
+      sctx.setLineDash(stroke.dash);
+      paintLine(sctx, line, project, pxPerM, 2.5 * pxPerMm);
     }
+    sctx.lineWidth = 1;
+    sctx.setLineDash([]);
     for (const line of (store.doc.separations || []).filter(onSheetLevel)) {
       const a = project(line.x1, line.y1);
       const b = project(line.x2, line.y2);
@@ -15026,23 +16780,8 @@ function drawActiveSheet() {
     for (const region of (store.doc.regions || []).filter(onSheetLevel)) {
       const poly = shapePolygon(region.shape);
       if (poly.length < 3) continue;
-      const look = regionConvention(region.convention);
-      sctx.beginPath();
-      poly.forEach(([x, y], i) => {
-        const p = project(x, y);
-        if (i === 0) sctx.moveTo(p[0], p[1]);
-        else sctx.lineTo(p[0], p[1]);
-      });
-      sctx.closePath();
-      if (look) {
-        sctx.fillStyle = look.fill;
-        sctx.fill();
-        sctx.strokeStyle = look.stroke;
-      } else {
-        sctx.strokeStyle = "#8a7d6c";
-      }
-      sctx.lineWidth = 1;
-      sctx.stroke();
+      paintRegion(sctx, poly.map(([x, y]) => project(x, y)), regionConvention(region.convention), { pxPerMm });
+      paintRegionLabel(sctx, region, project, pxPerM, scaleN);
     }
     for (const room of payload.rooms || []) {
       if (planLevel && room.level !== planLevel) continue;
@@ -15078,11 +16817,11 @@ function drawActiveSheet() {
       for (const line of drawn) drawSheetDimension(sctx, project, line);
     }
     for (const dim of (store.doc.dimensions || []).filter(onSheetLevel)) {
-      const len = Math.hypot(dim.x2 - dim.x1, dim.y2 - dim.y1);
-      drawSheetDimension(sctx, project, {
-        x1: dim.x1, y1: dim.y1, x2: dim.x2, y2: dim.y2,
-        kind: "h", extFrom: [], label: `${formatLengthMm(len)} mm`,
-      });
+      paintDimension(sctx, dim, project, pxPerM, scaleN, { lineWidth: 0.8 });
+    }
+    // A plan-only note is a working note: it never prints.
+    for (const note of (store.doc.notes || []).filter(onSheetLevel)) {
+      if (note.printable) paintNote(sctx, note, project, pxPerM, scaleN);
     }
     // Revision clouds linked to this sheet, and only this storey.
     for (const cloud of revisionCloudsForSheet(store.doc, sheet.id).filter(onSheetLevel)) {
@@ -17528,7 +19267,7 @@ function beginPan(ev) {
 // Drags that edit geometry already in the document mutate it live, off the
 // speculative undo entry pushed on pointer-down. Cancelling one therefore
 // means rolling that entry back, not just forgetting the drag.
-const REVERTIBLE_DRAGS = new Set(["move", "segment-end", "joinery-end", "roof-ridge", "shape-vertex", "shape-edge", "roof-cut-vertex", "roof-cut-move", "region-vertex", "region-edge", "region-move", "property-vertex", "property-move", "underlay-move", "underlay-scale", "underlay-rotate"]);
+const REVERTIBLE_DRAGS = new Set(["move", "segment-end", "joinery-end", "dim-offset", "dim-text", "region-label", "note-leader", "note-width", "roof-ridge", "shape-vertex", "shape-edge", "roof-cut-vertex", "roof-cut-move", "region-vertex", "region-edge", "region-move", "property-vertex", "property-move", "underlay-move", "underlay-scale", "underlay-rotate"]);
 
 /**
  * Drop the in-progress click–click segment (or last property-line vertex)
@@ -17585,6 +19324,20 @@ function abortClickDraft() {
 function cancelDrawing() {
   // A click waiting on the PDF index must not place a point after Escape.
   pdfSnapClickGate += 1;
+  if (noteEdit) {
+    closeNoteEditor();
+    updateRibbonHint();
+    render();
+    return;
+  }
+  if (leaderPick) {
+    leaderPick = null;
+    snapGuide = null;
+    setStatusMessage("No leader added.", "ok");
+    updateRibbonHint();
+    render();
+    return;
+  }
   if (tool === "move") {
     cancelMoveStep();
     return;
@@ -17745,7 +19498,6 @@ function cancelDrawing() {
   calloutDraft = null;
   revisionCloudDraft = null;
   measureDraft = null;
-  showDimensions = false;
   if (tool !== "select") {
     tool = "select";
     syncToolButtons();
@@ -17853,6 +19605,8 @@ function wireToolbar() {
   document.getElementById("v2-pan")?.addEventListener("click", () => setPanMode(!panMode));
   document.getElementById("v2-sheet-hide")?.addEventListener("click", () => toggleUnderlayVisibility());
   document.getElementById("v2-sheet-view")?.addEventListener("click", () => toggleTraceView());
+  el.roomSizes?.addEventListener("click", () => setShowRoomSizes(!showDimensions));
+  syncRoomSizesButton();
   document.querySelectorAll("[data-tool]").forEach((btn) => {
     btn.addEventListener("click", () => {
       setPanMode(false);
@@ -17863,7 +19617,6 @@ function wireToolbar() {
         // hint does not keep pointing at it. The type list stays on the last
         // category so a selected wall can still be retyped.
         activeFunction = null;
-        showDimensions = false;
         measureDraft = null;
         drawRibbon();
         renderPalette();
@@ -18071,6 +19824,42 @@ function onPointerDown(ev) {
   hoverPoint = { x: wx, y: wy };
   orthoHeld = ev.shiftKey;
 
+  // A click away from the words being typed keeps them. That click is the
+  // whole press: it does not also start the next note.
+  if (noteEdit && ev.button === 0) {
+    commitNoteEditor();
+    return;
+  }
+
+  if (leaderPick && ev.button === 0) {
+    finishLeaderPick(wx, wy);
+    return;
+  }
+
+  if (tool === "text" && ev.button === 0) {
+    underlaySelected = false;
+    const hit = noteAt(wx, wy);
+    if (hit) {
+      store.selectOne(hit);
+      openNoteEditor({ id: hit.id });
+      return;
+    }
+    store.clearSelection();
+    openNoteEditor({ id: null, x: wx, y: wy, level: activeLevel });
+    return;
+  }
+
+  // Double-click a note to change its words, or a dimension to replace its number.
+  if (tool === "select" && ev.button === 0 && ev.detail >= 2 && !ev.shiftKey && !attachPick) {
+    const textHit = hitTest(wx, wy);
+    if (textHit?.kind === "note" || textHit?.kind === "dimension") {
+      drag = null;
+      store.selectOne(textHit);
+      openNoteEditor(textHit.kind === "note" ? { id: textHit.id } : { dimId: textHit.id });
+      return;
+    }
+  }
+
   if (tool === "move" && ev.button === 0 && moveSession) {
     onMoveClick(wx, wy);
     return;
@@ -18127,6 +19916,29 @@ function onPointerDown(ev) {
       render();
       return;
     }
+  }
+
+  const leaderGrab = (attachPick || tool !== "select" || ev.shiftKey) ? null : noteLeaderHit(wx, wy);
+  if (leaderGrab) {
+    store.pushUndo("Moved the arrow of a note's leader", { pending: true });
+    drag = { kind: "note-leader", id: leaderGrab.id, moved: false };
+    el.canvas.setPointerCapture(ev.pointerId);
+    render();
+    return;
+  }
+
+  const sideGrab = (attachPick || tool !== "select" || ev.shiftKey) ? null : noteSideHit(wx, wy);
+  if (sideGrab) {
+    const note = objByRef({ kind: "note", id: sideGrab.id });
+    const L = noteLayout(note);
+    store.pushUndo("Changed the width of a note's text box", { pending: true });
+    drag = {
+      kind: "note-width", id: note.id, side: sideGrab.side, moved: false,
+      x0: note.x, y0: note.y, cos: L.cos, sin: L.sin, pad: L.pad, hM: L.hM, right: L.w,
+    };
+    el.canvas.setPointerCapture(ev.pointerId);
+    render();
+    return;
   }
 
   const handle = (attachPick || tool !== "select") ? null : endpointHandleHit(wx, wy);
@@ -18440,7 +20252,11 @@ function onPointerDown(ev) {
       render();
       return;
     }
-    finishMeasure(p);
+    if (!measureDraft.b) {
+      pickMeasureEnd(p);
+      return;
+    }
+    finishMeasure({ x: wx, y: wy });
     return;
   }
   // A route still being drawn keeps the click, so the next point can land
@@ -18504,7 +20320,8 @@ function onPointerDown(ev) {
     underlaySelected = false;
     const p = applySnap(wx, wy);
     if (!regionDraft) regionDraft = [];
-    if (polyCanClose(regionDraft, p)) {
+    // The first click of a double-click placed the last corner; the second closes it.
+    if (polyCanClose(regionDraft, p) || (ev.detail >= 2 && regionDraft.length >= 3)) {
       finishRegionDraft();
       return;
     }
@@ -18557,17 +20374,21 @@ function onPointerDown(ev) {
     render();
     return;
   }
-  if (tool === "model-line" || tool === "annot-line" || tool === "separation") {
+  if (tool === "line" || tool === "separation") {
     underlaySelected = false;
-    if (!lineStart) {
+    if (tool === "line" && lineStart?.arcEnd) {
+      placeLineArc(applySnap(wx, wy));
+      snapGuide = null;
+    } else if (!lineStart) {
       lineStart = applySnap(wx, wy);
-      if (tool === "separation") sizeDraft = { lockW: false, lockH: false, typedW: "", typedH: "", axis: "w" };
+      if (typedRunDraft()) sizeDraft = { lockW: false, lockH: false, typedW: "", typedH: "", axis: "w" };
     } else {
       const end = applySnap(wx, wy);
-      if (tool === "separation") commitSeparation(lineStart, end);
-      else commitLine(tool === "annot-line" ? "annotation" : "model", lineStart, end);
-      lineStart = null;
-      if (tool === "separation") sizeDraft = null;
+      if (tool === "separation") {
+        commitSeparation(lineStart, end);
+        lineStart = null;
+        sizeDraft = null;
+      } else placeLineEnd(end);
       snapGuide = null;
     }
     updateRibbonHint();
@@ -18640,6 +20461,26 @@ function onPointerDown(ev) {
       el.canvas.setPointerCapture(ev.pointerId);
     } else if (slideSocket) {
       drag = { kind: "socket", id: socketItem.id, x0: wx, y0: wy, moved: false };
+      el.canvas.setPointerCapture(ev.pointerId);
+    } else if (hit.kind === "region" && store.selected.length === 1) {
+      const region = objByRef(hit);
+      if (region && regionLabelHit(region, wx, wy)) {
+        const at = regionLabelPoint(region);
+        drag = { kind: "region-label", id: region.id, x0: wx, y0: wy, grab: { x: wx - at.x, y: wy - at.y }, moved: false };
+        el.canvas.setPointerCapture(ev.pointerId);
+      } else {
+        drag = { kind: "move", snaps: store.snapshotMoveTargets(store.selected), x0: wx, y0: wy, moved: false };
+      }
+    } else if (hit.kind === "dimension" && store.selected.length === 1) {
+      // The measured points stay; the drag pulls the line off them, or the
+      // number along or off the line.
+      const dim = objByRef(hit);
+      const onText = dim && dimensionLabelHit(dim, wx, wy);
+      drag = { kind: onText ? "dim-text" : "dim-offset", id: hit.id, x0: wx, y0: wy, moved: false };
+      if (onText) {
+        const g = dimensionGeometry(dim);
+        drag.grab = { x: wx - g.label.x, y: wy - g.label.y };
+      }
       el.canvas.setPointerCapture(ev.pointerId);
     } else {
       drag = { kind: "move", snaps: store.snapshotMoveTargets(store.selected), x0: wx, y0: wy, moved: false };
@@ -20587,6 +22428,58 @@ function onPointerMove(ev) {
     render();
     return;
   }
+  if (drag?.kind === "dim-offset") {
+    const dim = objByRef({ kind: "dimension", id: drag.id });
+    if (dim && (drag.moved || Math.hypot(wx - drag.x0, wy - drag.y0) * cam.scale > 3)) {
+      drag.moved = true;
+      el.canvas.style.cursor = "grabbing";
+      const offset = Math.round(offsetThrough(dim, { x: wx, y: wy }) * 100) / 100;
+      if (offset) dim.offset = offset;
+      else delete dim.offset;
+    }
+    render();
+    return;
+  }
+  if (drag?.kind === "region-label") {
+    const region = objByRef({ kind: "region", id: drag.id });
+    if (region && (drag.moved || Math.hypot(wx - drag.x0, wy - drag.y0) * cam.scale > 3)) {
+      drag.moved = true;
+      el.canvas.style.cursor = "grabbing";
+      const [cx, cy] = centroid(shapePolygon(region.shape));
+      region.textDx = Math.round((wx - drag.grab.x - cx) * 1000) / 1000;
+      region.textDy = Math.round((wy - drag.grab.y - cy) * 1000) / 1000;
+    }
+    render();
+    return;
+  }
+  if (drag?.kind === "dim-text") {
+    const dim = objByRef({ kind: "dimension", id: drag.id });
+    if (dim && (drag.moved || Math.hypot(wx - drag.x0, wy - drag.y0) * cam.scale > 3)) {
+      drag.moved = true;
+      el.canvas.style.cursor = "grabbing";
+      const at = { x: wx - drag.grab.x, y: wy - drag.grab.y };
+      const shift = textShiftThrough(dim, at, 6 / cam.scale);
+      if (shift) dim.textShift = shift;
+      else delete dim.textShift;
+    }
+    render();
+    return;
+  }
+  if (drag?.kind === "note-width") {
+    dragNoteSide(drag, wx, wy);
+    render();
+    return;
+  }
+  if (drag?.kind === "note-leader") {
+    const note = objByRef({ kind: "note", id: drag.id });
+    if (note) {
+      const p = applySnap(wx, wy);
+      note.leader = { x: p.x, y: p.y };
+      drag.moved = true;
+    }
+    render();
+    return;
+  }
   if (drag?.kind === "segment-end") {
     if (drag.target === "segment") applyDraggedWallEnd(drag, wx, wy, ev.shiftKey);
     else {
@@ -20837,6 +22730,7 @@ function gestureBecomesStep(live) {
   if (live.kind === "shape-vertex" || live.kind === "shape-edge") return Boolean(live.moved || live.inserted);
   if (live.kind === "roof-cut-vertex" || live.kind === "roof-cut-move") return Boolean(live.moved);
   if (live.kind === "roof-ridge") return Boolean(live.moved);
+  if (live.kind === "dim-offset" || live.kind === "dim-text" || live.kind === "region-label" || live.kind === "note-leader" || live.kind === "note-width") return Boolean(live.moved);
   if (live.kind === "region-vertex" || live.kind === "region-edge" || live.kind === "region-move") return Boolean(live.moved || live.inserted);
   if (live.kind === "property-vertex" || live.kind === "property-move") return Boolean(live.moved);
   return false;
@@ -20891,6 +22785,10 @@ function onPointerUp(ev) {
     if (!drag.moved) store.dropUndo({ pendingOnly: true });
     else if (drag.kind === "socket") rehomeConnectedNodes(store.doc, pack);
   } else if (drag.kind === "joinery-end") {
+    if (!drag.moved) store.dropUndo({ pendingOnly: true });
+    else store.persist();
+  } else if (drag.kind === "dim-offset" || drag.kind === "dim-text" || drag.kind === "region-label" || drag.kind === "note-leader" || drag.kind === "note-width") {
+    snapGuide = null;
     if (!drag.moved) store.dropUndo({ pendingOnly: true });
     else store.persist();
   } else if (drag.kind === "underlay-move" || drag.kind === "underlay-scale" || drag.kind === "underlay-rotate") {
@@ -21035,8 +22933,8 @@ function announceSelectedFinish(id = selectedBandId) {
 }
 
 /**
- * Delete with the wall itself selected, and no finish picked on it.
- * Names the wall and whatever on it would go with it.
+ * Delete with the wall or foundation itself selected, and no finish picked on it.
+ * Names what is selected and whatever on it would go with it.
  */
 function elevationWallDeletePrompt() {
   const segments = store.selected.filter((r) => r.kind === "segment");
@@ -21061,14 +22959,17 @@ function elevationWallDeletePrompt() {
   const plugs = (store.doc.items || []).filter((item) => item.host === "wall" && segments.some((s) => s.id === item.wallId)).length;
   if (plugs) parts.push(plugs === 1 ? "1 plug" : `${plugs} plugs`);
   const many = segments.length > 1;
-  const lead = many ? `These ${segments.length} walls will be deleted.` : "The wall will be deleted.";
+  const foundations = segments.every((r) => segmentCategory(objByRef(r)) === "foundation");
+  const noun = foundations ? "foundation" : "wall";
+  const nouns = foundations ? "foundations" : "walls";
+  const lead = many ? `These ${segments.length} ${nouns} will be deleted.` : `The ${noun} will be deleted.`;
   const extra = parts.length ? ` ${joinWords(parts)} on ${many ? "them" : "it"} will be deleted too.` : "";
   return {
-    title: many ? `Delete these ${segments.length} walls?` : "Delete this wall?",
+    title: many ? `Delete these ${segments.length} ${nouns}?` : `Delete this ${noun}?`,
     message: `${lead}${extra}`,
-    action: many ? "Delete walls" : "Delete wall",
-    cancel: many ? "Keep the walls" : "Keep the wall",
-    kept: many ? "The walls stay." : "The wall stays.",
+    action: many ? `Delete ${nouns}` : `Delete ${noun}`,
+    cancel: many ? `Keep the ${nouns}` : `Keep the ${noun}`,
+    kept: many ? `The ${nouns} stay.` : `The ${noun} stays.`,
   };
 }
 
@@ -21563,7 +23464,7 @@ function wireKeyboard() {
     } else if (ev.key === "Enter" && wallDraft) {
       ev.preventDefault();
       finishWallSegment();
-    } else if (ev.key === "Enter" && tool === "separation" && lineStart) {
+    } else if (ev.key === "Enter" && typedRunDraft()) {
       ev.preventDefault();
       finishSeparationDraft();
     } else if (ev.key === "Enter" && shapeDraft?.rect) {
@@ -21594,6 +23495,9 @@ function wireKeyboard() {
       render();
     } else if ((ev.key === "Delete" || ev.key === "Backspace") && underlaySelected) {
       removeUnderlay();
+    } else if ((ev.ctrlKey || ev.metaKey) && !ev.shiftKey && !ev.altKey && TEXT_KEYS[ev.key.toLowerCase()] && (textSelectionRefs() || textDraftActive())) {
+      ev.preventDefault();
+      toggleTextProp(TEXT_KEYS[ev.key.toLowerCase()]);
     } else if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "y") {
       ev.preventDefault();
       runCommand("redo");
@@ -21815,7 +23719,10 @@ function placeOpening(wx, wy) {
   if (!draft) return;
   store.pushUndo(historyPlaced("Placed", "opening"));
   const id = nid("o");
-  store.doc.openings.push({ id, status: placementStatus(), ...draft });
+  const opening = { id, status: placementStatus(), ...draft };
+  const mark = markForNewOpening(store.doc, pack, opening);
+  if (mark) opening.mark = mark;
+  store.doc.openings.push(opening);
   store.selectOne({ kind: "opening", id });
   const placedSku = skuById(draft.sku);
   const door = openingStaysArmed(placedSku?.category);
@@ -21831,11 +23738,12 @@ function placeOpening(wx, wy) {
   }
   updateRibbonHint();
   store.persist();
+  const marked = mark ? ` ${mark}` : "";
   setStatusMessage(door
-    ? "Door placed. Click the wall to place another of the same type. Esc stops."
+    ? `Door${marked} placed. Click the wall to place another of the same type. Esc stops.`
     : placedSku?.category === "opening"
       ? "Opening placed. Drag a corner on the elevation to change its size."
-      : "Window placed. Drag it along the wall to move it. Press Delete to remove it.", "ok");
+      : `Window${marked} placed. Drag it along the wall to move it. Press Delete to remove it.`, "ok");
   renderPalette();
   render();
 }
@@ -22009,7 +23917,7 @@ function wallDraftLength() {
 /** A typed length wins over the snapped cursor, the same way a wall draft does.
  * Direction stays the pointer's, including a snap onto a wall corner or face. */
 function lockSeparationEnd(point) {
-  if (tool !== "separation" || !lineStart || !sizeDraft?.lockW || !point) return point;
+  if (!typedRunDraft() || !sizeDraft?.lockW || !point) return point;
   const len = parseLengthInput(sizeDraft.typedW, segmentLength(lineStart.x, lineStart.y, point.x, point.y) || MIN_TRACE);
   return setLineLength(lineStart, point, len, (n) => roundGrid(n, activeGrid()));
 }
@@ -22058,9 +23966,14 @@ function setSeparationDraftHeading(deg) {
 function finishSeparationDraft() {
   if (!lineStart) return;
   const end = snapGuide ? { x: snapGuide.x, y: snapGuide.y } : hoverPoint;
-  if (end) commitSeparation(lineStart, end);
-  lineStart = null;
-  sizeDraft = null;
+  if (tool === "line") {
+    if (end) placeLineEnd(end);
+    else lineStart = null;
+  } else {
+    if (end) commitSeparation(lineStart, end);
+    lineStart = null;
+    sizeDraft = null;
+  }
   snapGuide = null;
   updateRibbonHint();
   render();
@@ -22120,7 +24033,7 @@ function syncSizeHud() {
 function handleSizeTyping(ev) {
   const moving = tool === "move" && moveSession?.base;
   const copying = tool === "copy" && copySession?.base;
-  const sepDraft = tool === "separation" && lineStart;
+  const sepDraft = typedRunDraft();
   if (!wallDraft && !shapeDraft && !sepDraft && !moving && !copying && !arcEdit) return false;
   if (ev.target !== el.hudW && ev.target !== el.hudH && ev.target !== el.ctxLen && ev.target !== el.ctxAng) return false;
   if (!sizeDraft) sizeDraft = { lockW: false, lockH: false, typedW: "", typedH: "", axis: "w" };
@@ -22146,7 +24059,7 @@ function handleDraftNumericShortcut(ev) {
   if (ev.ctrlKey || ev.metaKey || ev.altKey) return false;
   const moving = tool === "move" && moveSession?.base;
   const copying = tool === "copy" && copySession?.base;
-  const sepDraft = tool === "separation" && lineStart;
+  const sepDraft = typedRunDraft();
   if (!wallDraft && !shapeDraft && !sepDraft && !moving && !copying && !arcEdit) return false;
   if (ev.key.length !== 1 || !/[0-9.,]/.test(ev.key)) return false;
   const tag = activeEl()?.tagName;
@@ -22686,6 +24599,7 @@ function syncHeightFields(obj, kind) {
   setHidden(el.ctxOHeightWrap, !opening);
   setHidden(el.ctxORiseWrap, !arch);
   setHidden(el.ctxOSizeNote, !size?.nonStandard);
+  syncOpeningMarkFields(opening);
   const joineryItem = kind === "item" && obj?.host === "joinery" ? obj : null;
   const joinerySku = joineryItem ? skuById(joineryItem.sku) : null;
   const joineryWall = joineryItem ? wallsCache.find((w) => w.id === joineryItem.wallId) : null;
@@ -22779,9 +24693,69 @@ function setOpeningSize(field, raw, { allowZero = false } = {}) {
       opening.height = Number.isFinite(typeH) && Math.abs(typeH - fitted.height) < 0.0005 ? null : fitted.height;
     }
   }
+  if (field === "width" || field === "height") {
+    const others = shareWindowSize(store.doc, pack, opening.id);
+    if (others) setStatusMessage(`Resized type ${opening.mark}: ${others + 1} windows now ${field === "width" ? "this width" : "this height"}.`, "ok");
+  }
   store.persist();
   render();
 }
+
+/** Mark field, and for a window the type it belongs to. */
+function syncOpeningMarkFields(opening) {
+  const kind = opening ? markKind(pack, opening) : null;
+  setHidden(el.ctxOMarkWrap, !kind);
+  setHidden(el.ctxOTypeNote, kind !== "window");
+  if (!kind) return;
+  if (el.ctxOMark && activeEl() !== el.ctxOMark) el.ctxOMark.value = opening.mark || "";
+  if (kind !== "window") return;
+  const count = windowsOfMark(store.doc, pack, opening.mark).length;
+  const text = el.ctxOTypeNote?.querySelector("span");
+  if (text) {
+    text.textContent = count > 1
+      ? `Size changes apply to all ${count} ${opening.mark} windows.`
+      : `Only window of type ${opening.mark}.`;
+  }
+  setHidden(el.ctxOTypeSplit, count < 2);
+}
+
+el.ctxOMark?.addEventListener("change", (e) => {
+  const opening = soleOf("opening");
+  if (!opening) return;
+  const before = opening.mark;
+  const typed = String(e.target.value).trim();
+  if (typed === before) return;
+  store.pushUndo(`Renumbered ${before || historyThing(store.primary)} to ${typed}`);
+  const result = renameMark(store.doc, pack, opening, typed);
+  if (!result.ok) {
+    store.dropUndo();
+    e.target.value = before || "";
+    setStatusMessage(result.message, "warn");
+    return;
+  }
+  store.persist();
+  setStatusMessage(result.count > 1 ? `Renumbered ${result.count} windows to ${opening.mark}.` : `Renumbered to ${opening.mark}.`, "ok");
+  render();
+});
+
+el.ctxOMark?.addEventListener("keydown", (ev) => {
+  if (ev.key !== "Enter" && ev.key !== "Escape") return;
+  ev.preventDefault();
+  ev.stopPropagation();
+  if (ev.key === "Escape") el.ctxOMark.value = soleOf("opening")?.mark || "";
+  el.ctxOMark.blur();
+});
+
+el.ctxOTypeSplit?.addEventListener("click", () => {
+  const opening = soleOf("opening");
+  if (!opening || markKind(pack, opening) !== "window") return;
+  const before = opening.mark;
+  store.pushUndo(`Split ${historyThing(store.primary)} off type ${before}`);
+  const mark = splitWindowType(store.doc, pack, opening);
+  store.persist();
+  setStatusMessage(`This window is now type ${mark}. Its size no longer follows ${before}.`, "ok");
+  render();
+});
 function setFieldLead(wrap, text) {
   if (!wrap) return;
   const node = [...wrap.childNodes].find((n) => n.nodeType === 3);
@@ -23673,7 +25647,7 @@ function applyElevationDrag(doc, face, d) {
   if (d.part === "wall-top") return applyWallTopEdit(doc, pack, face, edit.height, wallsCache);
   if (d.band) applyBandEdit(doc, pack, face, d.id, edit, wallsCache);
   else if (d.joinery) applyJoineryFaceEdit(doc, pack, face, d.id, edit, wallsCache);
-  else applyOpeningEdit(doc, pack, face, d.id, edit, wallsCache);
+  else if (applyOpeningEdit(doc, pack, face, d.id, edit, wallsCache)) shareWindowSize(doc, pack, d.id);
   return null;
 }
 
@@ -25751,7 +27725,7 @@ function commitTypedGap() {
     if (Math.abs(next.sill - target.sill) > 1e-9) edit.sill = next.sill;
     if (Math.abs(next.height - target.height) > 1e-9) edit.height = next.height;
     if (edit.left != null || edit.width != null || edit.sill != null || edit.height != null) {
-      applyOpeningEdit(store.doc, pack, face, d.id, edit, wallsCache);
+      if (applyOpeningEdit(store.doc, pack, face, d.id, edit, wallsCache)) shareWindowSize(store.doc, pack, d.id);
     }
   });
   const model = elevationModel(store.doc, pack, face, wallsCache);
@@ -27554,27 +29528,14 @@ el.elevEdgeMode?.addEventListener("click", (ev) => {
   render();
 });
 
-el.ctxOOffset?.addEventListener("change", (e) => {
-  const opening = soleOf("opening");
-  const value = typedMm(e.target.value, { allowZero: true });
-  const face = selectedElevationFace();
-  if (!opening || !face || value === undefined || value === null) { render(); return; }
-  store.pushUndo(historyDid("Moved"));
-  applyOpeningEdit(store.doc, pack, face, opening.id, { left: value }, wallsCache);
-  store.persist();
-  render();
-});
-
-/** Inspector side of the elevation: the small preview, Show face, and the opening's offset.
- *  The preview does not drag wall height; that handle is only on the open elevation. */
+/** Inspector side of the elevation: the small preview and Show face.
+ *  The preview does not drag wall height; that handle is only on the open elevation.
+ *  Position along the wall stays in the opening heading. */
 function syncElevationPreview() {
   const face = selectedElevationFace();
   const model = face ? elevationModelNow(face) : null;
   const faceOpen = Boolean(model && elevationOpen && !serviceDockActive());
   setHidden(el.ctxElevWrap, !model || faceOpen);
-  const opening = model && selectedOpeningId() ? model.openings.find((o) => o.id === selectedOpeningId()) : null;
-  setHidden(el.ctxOOffsetWrap, !opening);
-  if (opening && el.ctxOOffset && activeEl() !== el.ctxOOffset) el.ctxOOffset.value = formatLengthMm(opening.offset);
   if (!model) {
     elevPreviewKey = "";
     elevPreviewLayout = null;
@@ -29237,7 +31198,7 @@ function restoreFold(node) {
 }
 
 function faceOpeningFieldNodes() {
-  return [el.ctxSillWrap, el.ctxOWidthWrap, el.ctxOHeightWrap, el.ctxORiseWrap, el.ctxOOffsetWrap, el.ctxOSizeNote].filter(Boolean);
+  return [el.ctxOMarkWrap, el.ctxSillWrap, el.ctxOWidthWrap, el.ctxOHeightWrap, el.ctxORiseWrap, el.ctxOSizeNote, el.ctxOTypeNote].filter(Boolean);
 }
 
 function faceWallFieldNodes() {
@@ -29389,6 +31350,8 @@ function syncPlanContext() {
   roofCutNoteText = "";
   followNoteText = "";
   polyHintText = "";
+  const textRefs = serviceDockActive() ? null : textSelectionRefs();
+  syncTextInspector(textRefs);
   syncPlanFilterButtons();
   syncServiceProfileDock();
   if (serviceDockActive()) {
@@ -29443,7 +31406,7 @@ function syncPlanContext() {
   const shapePoly = (room || slab || roof) && obj.shape?.kind === "poly";
   const floorSlab = slab && skuById(obj.sku)?.category !== "ceiling";
   const multi = !draft && refs.length > 1;
-  const multiStatusObjs = multi ? refs.map((ref) => {
+  const multiStatusObjs = multi ? refs.filter((ref) => ref.kind !== "note" && ref.kind !== "dimension").map((ref) => {
     const obj = objByRef(ref);
     if (!obj) return null;
     // A route point has no status of its own. The radios read the network's.
@@ -29461,7 +31424,7 @@ function syncPlanContext() {
   const showInspect = Boolean(el.inspectFields) && (linear || room || region || slab || roof || opening || item);
   const editingProperty = propertySelected && !draft && refs.length === 0;
   const creating = !showInspect && !multi && !editingProperty && placingToolArmed();
-  const dockState = editingProperty || showInspect ? "edit" : multiTypeable ? "edit" : creating ? "create" : "empty";
+  const dockState = editingProperty || showInspect || textRefs ? "edit" : multiTypeable ? "edit" : creating ? "create" : "empty";
   // The open face is the editor, so the inspector is only who the wall is and
   // its list. The type picker, status and cut level stay with the closed wall.
   const faceEditing = Boolean(elevationOpen && !draft && !multi && (linear || opening) && selectedElevationFace());
@@ -29505,6 +31468,12 @@ function syncPlanContext() {
     syncInspectKicker(skuById(placeSkuId)?.name || "");
   } else if (draft) {
     syncInspectKicker(skuById(placeSkuId)?.name || "—");
+  } else if (obj && ref.kind === "note") {
+    syncInspectKicker(obj.text.split("\n")[0].slice(0, 40));
+  } else if (obj && ref.kind === "dimension") {
+    syncInspectKicker(dimensionLabel(obj).text);
+  } else if (obj && ref.kind === "opening") {
+    syncInspectKicker(obj.mark || obj.id);
   } else if (obj) {
     syncInspectKicker(obj.name || obj.id || "—");
   } else {
@@ -29515,7 +31484,7 @@ function syncPlanContext() {
   const placingShape = tool === "slab" || tool === "roof";
   const cuttingRoof = tool === "roof-cut";
   const placingWall = tool === "wall";
-  const placingSep = tool === "separation" && Boolean(lineStart);
+  const placingSep = typedRunDraft();
   const moving = tool === "move" && Boolean(moveSession?.base);
   const copying = tool === "copy" && Boolean(copySession?.base);
   const placing = moving || copying;
@@ -29560,7 +31529,7 @@ function syncPlanContext() {
     }
   }
   const showMultiStatus = multiStatusObjs.length > 0;
-  setHidden(el.inspectFields, !showInspect && !creating && !editingProperty && !showMultiStatus);
+  setHidden(el.inspectFields, !showInspect && !creating && !editingProperty && !showMultiStatus && !placingSep);
   setHidden(el.ctxProperty, !editingProperty);
   setHidden(el.inspectEmpty, dockState !== "empty" || showMultiStatus);
   if (el.inspectEmpty && dockState === "empty") {
@@ -29571,7 +31540,7 @@ function syncPlanContext() {
 
   if (placingSep) {
     setHidden(el.inspectEmpty, true);
-    syncInspectKicker("Separation");
+    syncInspectKicker(tool === "line" ? "Line" : "Separation");
     setHidden(el.ctxLenWrap, false);
     setHidden(el.ctxAngWrap, false);
     setHidden(el.ctxWWrap, true);
@@ -29594,14 +31563,14 @@ function syncPlanContext() {
     setHidden(el.ctxHWrap, true);
     setHidden(el.wallOpts, true);
   }
-  if (!placing && !showInspect && !showGeom && !creating && !editingProperty) {
+  syncFootingBatch(draft || faceEditing || placing || placingSep || tool !== "select" ? [] : refs);
+  if (!placing && !placingSep && !showInspect && !showGeom && !creating && !editingProperty) {
     if (!roof) setHidden(el.roofCutPanel, true);
     planContextKey = "";
     setHidden(el.ctxElevWrap, true);
     setHidden(el.ctxFloorWrap, true);
     setHidden(el.ctxFloor, true);
     floorCardKey = "";
-    setHidden(el.ctxOOffsetWrap, true);
     setHidden(el.ctxFinish, true);
     setHidden(el.ctxLenWrap, true);
     setHidden(el.ctxAngWrap, true);
@@ -29609,7 +31578,7 @@ function syncPlanContext() {
     setHidden(el.ctxHWrap, true);
     setHidden(el.ctxNameWrap, true);
     setHidden(el.ctxUseWrap, true);
-    setHidden(el.ctxRegionWrap, true);
+    setHidden(el.ctxRegionTextWrap, true);
     setHidden(el.ctxFormWrap, true);
     setHidden(el.ctxPitchWrap, true);
     setHidden(el.ctxRidgeWrap, true);
@@ -29629,6 +31598,8 @@ function syncPlanContext() {
     setHidden(el.ctxOHeightWrap, true);
     setHidden(el.ctxORiseWrap, true);
     setHidden(el.ctxOSizeNote, true);
+    setHidden(el.ctxOMarkWrap, true);
+    setHidden(el.ctxOTypeNote, true);
     setHidden(el.ctxConvert, true);
     setHidden(el.ctxRemove, true);
     setHidden(el.ctxAttachWrap, true);
@@ -29640,7 +31611,7 @@ function syncPlanContext() {
 
   setHidden(el.ctxNameWrap, !room);
   setHidden(el.ctxUseWrap, !room);
-  setHidden(el.ctxRegionWrap, !region);
+  setHidden(el.ctxRegionTextWrap, !(region && !multi));
   setHidden(el.ctxLenWrap, !(linear || placingSep || placing || joinerySel));
   setHidden(el.ctxAngWrap, !((linear || placingSep) && !placing));
   setHidden(el.ctxWWrap, !(rect || linear || joinerySel) || placing);
@@ -29726,6 +31697,11 @@ function syncPlanContext() {
   } else if (!showType) {
     planContextKey = "";
   }
+  if (showType && kind === "opening" && obj) {
+    const chosen = el.ctxType.selectedOptions?.[0];
+    const label = openingTypeLabel(obj)?.name;
+    if (chosen && label && chosen.textContent !== label) chosen.textContent = label;
+  }
 
   if (placing) {
     syncMoveDistanceField();
@@ -29759,7 +31735,7 @@ function syncPlanContext() {
   }
   if (room && activeEl() !== el.ctxName) el.ctxName.value = obj.name;
   if (room && activeEl() !== el.ctxUse) el.ctxUse.value = obj.use;
-  if (region && activeEl() !== el.ctxRegion) el.ctxRegion.value = obj.convention || "";
+  if (region && !multi && activeEl() !== el.ctxRegionText) el.ctxRegionText.value = obj.text || "";
   if (rect) {
     if (activeEl() !== el.ctxW) el.ctxW.value = formatLengthMm(obj.shape.w);
     if (activeEl() !== el.ctxH) el.ctxH.value = formatLengthMm(obj.shape.h);
@@ -29798,6 +31774,10 @@ function syncPlanContext() {
 function finishPlanContext() {
   const any = [el.ctxLenWrap, el.ctxAngWrap, el.ctxWWrap, el.ctxHWrap].some((node) => node && !node.hidden);
   setHidden(el.planOptions, !any);
+  syncTextBar();
+  syncLineBar();
+  syncFillBar();
+  syncDimBar();
   if (mountRibbonSettings(false)) requestAnimationFrame(() => fitRibbon(el.ribbonFunctions));
 }
 
@@ -29828,7 +31808,7 @@ el.ctxLen?.addEventListener("input", (ev) => {
     render();
     return;
   }
-  if (wallDraft || (tool === "separation" && lineStart)) {
+  if (wallDraft || typedRunDraft()) {
     if (!sizeDraft) sizeDraft = { lockW: false, lockH: false, typedW: "", typedH: "", axis: "w" };
     sizeDraft.lockW = true;
     sizeDraft.typedW = ev.target.value;
@@ -29995,7 +31975,7 @@ el.ctxAng?.addEventListener("change", (ev) => {
     render();
     return;
   }
-  if (tool === "separation" && lineStart) {
+  if (typedRunDraft()) {
     const end = snapGuide || hoverPoint || lineStart;
     const cur = headingDeg(lineStart.x, lineStart.y, end.x, end.y);
     setSeparationDraftHeading(parseDegrees(ev.target.value, cur));
@@ -30071,11 +32051,18 @@ el.ctxUse?.addEventListener("change", (e) => {
   render();
 });
 
-el.ctxRegion?.addEventListener("change", (e) => {
+el.ctxRegionText?.addEventListener("change", (e) => {
   const region = soleOf("region");
   if (!region) return;
-  store.pushUndo(`Set the region of ${historyThing(store.primary)} to ${e.target.value || "not set"}`);
-  region.convention = e.target.value || null;
+  const text = e.target.value.trim();
+  if ((region.text || "") === text) return;
+  store.pushUndo(text ? "Wrote in a fill" : "Cleared the words in a fill");
+  if (text) region.text = text;
+  else {
+    delete region.text;
+    delete region.textDx;
+    delete region.textDy;
+  }
   store.persist();
   render();
 });
@@ -30288,6 +32275,117 @@ el.ctxFoundationOwn?.addEventListener("click", () => {
   const under = seg ? derivedFoundationUnder(seg.id) : null;
   if (under) drawFoundationAsOwnWall(under);
 });
+
+// The foundation type last chosen for "Foundation under", kept while the
+// session lasts so the next selection starts on it.
+let footingBatchSku = null;
+let footingBatchCache = { key: "", walls: null, value: null };
+
+/** The type "Foundation under" will use: the last choice, else the job's default, else the first. */
+function footingBatchSkuId() {
+  const types = pack ? foundationTypes(pack) : [];
+  return (types.find((t) => t.id === footingBatchSku)
+    || types.find((t) => t.id === pack?.system?.defaultFoundationSku)
+    || types[0])?.id ?? null;
+}
+
+/** Selected drawn walls, and how many of them would take a footing of the chosen type. */
+function footingBatchState(refs = store.selected) {
+  const ids = refs.filter((r) => r.kind === "segment").map((r) => r.id);
+  const skuId = footingBatchSkuId();
+  const key = `${skuId}|${ids.join(",")}`;
+  if (footingBatchCache.key === key && footingBatchCache.walls === wallsCache) return footingBatchCache.value;
+  const counts = { eligible: 0, has: 0, level: 0, foundation: 0 };
+  for (const id of skuId ? ids : []) {
+    const state = wallFoundationState(store.doc, pack, wallsCache.find((w) => w.id === id), wallsCache, skuId);
+    if (state.offer) counts.eligible += 1;
+    else if (state.reason in counts) counts[state.reason] += 1;
+  }
+  const value = { ids, skuId, ...counts };
+  footingBatchCache = { key, walls: wallsCache, value };
+  return value;
+}
+
+/** "2 already have one; 1 is not on the ground floor." Empty when nothing is left out. */
+function footingSkipText({ has = 0, level = 0, foundation = 0 }) {
+  const parts = [];
+  if (has) parts.push(`${has} already ${has === 1 ? "has" : "have"} one`);
+  if (level) parts.push(`${level} ${level === 1 ? "is" : "are"} not on the ground floor`);
+  if (foundation) parts.push(`${foundation} ${foundation === 1 ? "is a foundation" : "are foundations"}`);
+  return parts.join("; ");
+}
+
+/**
+ * "Foundation under" with one or more walls selected on the plan. Shown when
+ * at least one of them would take a footing; an open wall face has its own
+ * + Foundation instead.
+ */
+function syncFootingBatch(refs) {
+  const wrap = el.ctxFootingWrap;
+  if (!wrap) return;
+  const state = refs.length && pack ? footingBatchState(refs) : null;
+  const show = Boolean(state && state.skuId && state.eligible);
+  setHidden(wrap, !show);
+  if (!show) return;
+  const select = el.ctxFootingType;
+  const types = foundationTypes(pack);
+  const signature = types.map((t) => t.id).join("|");
+  if (select && select.dataset.types !== signature) {
+    select.dataset.types = signature;
+    select.innerHTML = types.map((t) => `<option value="${escapeHtml(t.id)}">${escapeHtml(t.name)}</option>`).join("");
+  }
+  if (select && activeEl() !== select && select.value !== state.skuId) select.value = state.skuId;
+  const many = state.ids.length > 1;
+  if (el.ctxFootingAdd) {
+    el.ctxFootingAdd.title = many
+      ? `Add this foundation under ${state.eligible} of the ${state.ids.length} selected walls`
+      : "Add this foundation under the selected wall";
+  }
+  const skipped = footingSkipText(state);
+  if (el.ctxFootingNote) {
+    el.ctxFootingNote.textContent = many && state.eligible < state.ids.length
+      ? `Goes under ${state.eligible} of ${state.ids.length}. ${skipped.charAt(0).toUpperCase()}${skipped.slice(1)}.`
+      : "";
+  }
+}
+
+/** Put the chosen foundation type under every selected wall that would take it. One undo step. */
+function addFootingsUnderSelection() {
+  const state = footingBatchState();
+  if (!state.eligible || !state.skuId) return;
+  store.pushUndo(historyDid("Added a foundation under"));
+  const result = addFoundationsUnderWalls(store.doc, pack, state.ids, state.skuId, wallsCache);
+  if (!result.added.length) {
+    store.dropUndo();
+    return;
+  }
+  store.persist();
+  const n = result.added.length;
+  const skipped = footingSkipText(result.skipped);
+  setStatusMessage(`Added ${result.name} under ${n === 1 ? "1 wall" : `${n} walls`}.${skipped ? ` Left out: ${skipped}.` : ""}`, "ok");
+  render();
+}
+
+/** The ribbon's Foundation under: the open face's own + Foundation, else the inspector's type list. */
+function focusFootingBatch() {
+  if (selectedElevationFace() && !el.faceFoundation?.hidden) {
+    beginFoundationPick();
+    return;
+  }
+  if (el.ctxFootingWrap && !el.ctxFootingWrap.hidden) {
+    el.ctxFootingWrap.scrollIntoView?.({ block: "nearest" });
+    el.ctxFootingType?.focus();
+    return;
+  }
+  setStatusMessage("Select one or more walls on the ground floor first.", "warn");
+}
+
+el.ctxFootingType?.addEventListener("change", (e) => {
+  footingBatchSku = e.target.value || null;
+  render();
+});
+
+el.ctxFootingAdd?.addEventListener("click", addFootingsUnderSelection);
 
 function syncFloorBuildUp() {
   if (houseBuildUpMm() !== houseDrawnBuildUp) drawHouse();
@@ -30654,17 +32752,25 @@ let schedulePeeking = false;
 // own instance, so picking a line out here never touches the plan camera, the
 // active level or the selection. A 2D/3D radio flips the same model between a
 // fixed top-down plan and the orbit view; the pick shows in whichever is on.
+// A click in the pane does the reverse: it picks the matching element in the
+// list. The last stack is remembered so a second click on the same spot
+// walks to the object behind.
 const scheduleView3d = el.schedule3dCanvas
   ? createMassingView({
     canvas: el.schedule3dCanvas,
     emptyEl: el.schedule3dEmpty,
     captionEl: null,
     titleEl: null,
+    onPick: (hits) => onScheduleModelPick(hits),
   })
   : null;
 // What is picked right now, so "Exit to drawing" can hand the very same
 // elements to the plan locator.
 let schedule3dTarget = null;
+// Last click in the model pane: the stack under the cursor and which entry
+// is showing. A click on a schedule line clears it, so the next model click
+// starts at the front again.
+let scheduleModelPick = { key: "", index: -1, count: 0 };
 
 function scheduleModelIs2d() {
   return document.querySelector('input[name="v2-schedule-view"]:checked')?.value === "2d";
@@ -30672,6 +32778,7 @@ function scheduleModelIs2d() {
 
 function clearSchedulePicks() {
   schedule3dTarget = null;
+  scheduleModelPick = { key: "", index: -1, count: 0 };
   el.scheduleBody?.querySelectorAll(".picked").forEach((n) => n.classList.remove("picked"));
 }
 
@@ -30679,11 +32786,14 @@ function syncSchedule3dChrome(hits) {
   if (el.schedule3dDrawing) el.schedule3dDrawing.disabled = !schedule3dTarget;
   if (!el.schedule3dNote) return;
   const hint = scheduleModelIs2d() ? "scroll to zoom" : "drag to orbit · scroll to zoom";
+  const cycle = scheduleModelPick.count > 1
+    ? ` · ${scheduleModelPick.index + 1} of ${scheduleModelPick.count} under the cursor, click again for the next`
+    : "";
   if (!schedule3dTarget) {
-    el.schedule3dNote.textContent = "Click a line to pick it out.";
+    el.schedule3dNote.textContent = "Click a line, or click the model. Click again to cycle through what is under the cursor.";
   } else if (hits) {
     const n = schedule3dTarget.refs.length;
-    el.schedule3dNote.textContent = `${schedule3dTarget.label || "Selection"} · ${n} element${n === 1 ? "" : "s"} in orange · ${hint}`;
+    el.schedule3dNote.textContent = `${schedule3dTarget.label || "Selection"} · ${n} element${n === 1 ? "" : "s"} in orange${cycle} · ${hint}`;
   } else {
     el.schedule3dNote.textContent = "Not a solid in the model (e.g. derived from a room) - use Exit to drawing.";
   }
@@ -30699,6 +32809,8 @@ function loadSchedule3d() {
   scheduleView3d.setOrbit();
   scheduleView3d.setServices(serviceMassingRoutes(store.doc, pack));
   scheduleView3d.setServiceNodes(serviceMassingNodes(store.doc, pack));
+  scheduleView3d.setShowServices(true);
+  scheduleView3d.setBillFaces(out.finishFaces || []);
   scheduleView3d.setPayload(out);
   scheduleView3d.setHighlight([]);
   syncSchedule3dChrome(0);
@@ -30707,25 +32819,74 @@ function loadSchedule3d() {
 }
 
 function applySchedule3dPick() {
-  if (!scheduleView3d) return;
+  if (!scheduleView3d) return 0;
   const hits = scheduleView3d.setHighlight(schedule3dTarget ? schedule3dTarget.refs.map((ref) => ref.id) : []);
   syncSchedule3dChrome(hits);
+  return hits;
 }
 
 /** A click on a schedule line or element. Full table: pick it out in the
  *  model pane (the drawing is untouched). Side view: the pane is gone, so the
  *  click goes to the real drawing instead. */
 function pickScheduleRefs(refs, label, pickedEl) {
-  if (!refs.length) return;
+  if (!refs.length) return 0;
   clearSchedulePicks();
   pickedEl?.classList.add("picked");
   schedule3dTarget = { refs, label };
   if (schedulePeeking) {
     locateScheduleRefs(refs, label);
+    return 0;
+  }
+  return applySchedule3dPick();
+}
+
+/** The bill element a model hit belongs to, or null when that solid is not
+ *  a line in this schedule (a scale figure, an implied quantity). */
+function scheduleElementAt(hit) {
+  for (let i = 0; i < scheduleRowsCache.length; i += 1) {
+    const row = scheduleRowsCache[i];
+    const elements = row.elements || [];
+    for (let j = 0; j < elements.length; j += 1) {
+      const element = elements[j];
+      const kind = element.kind || element.pickKind;
+      if (!kind || element.id !== hit.id) continue;
+      if (hit.selectKind && kind !== hit.selectKind) continue;
+      return { group: i, elementIndex: j, row, element };
+    }
+  }
+  return null;
+}
+
+/** A click in the model pane. The front listed element is selected first.
+ *  Another click on the same stack selects the one behind it, and so on. */
+function onScheduleModelPick(hits) {
+  const listed = [];
+  for (const hit of hits || []) {
+    const found = scheduleElementAt(hit);
+    if (found) listed.push({ hit, found });
+  }
+  if (!listed.length) {
+    clearSchedulePicks();
+    applySchedule3dPick();
     return;
   }
-  applySchedule3dPick();
+  const next = cycleStackedHits(scheduleModelPick, listed.map((entry) => entry.hit));
+  const chosen = listed[next.index];
+  scheduleOpenGroups.add(scheduleGroupKey(chosen.found.row));
+  paintSchedule();
+  const node = el.scheduleBody?.querySelector(
+    `.schedule-element[data-group="${chosen.found.group}"][data-element="${chosen.found.elementIndex}"]`,
+  );
+  const visible = pickScheduleRefs(
+    [{ kind: chosen.found.element.kind, id: chosen.found.element.id }],
+    chosen.found.element.id,
+    node,
+  );
+  scheduleModelPick = { key: next.key, index: next.index, count: listed.length };
+  node?.scrollIntoView({ block: "nearest" });
+  syncSchedule3dChrome(visible);
 }
+
 /** shared money formatter for the priced BOQ view - ZAR unless the loaded
  *  rate book states otherwise. */
 function money(rate, symbol) {
@@ -30746,16 +32907,32 @@ function levelName(levelId) {
 /** Stable identity of a rolled-up line across recompiles - the same key
  *  schedule.js's groupByModel() groups on. */
 function scheduleGroupKey(row) {
-  return row.model || row.category || "unmodelled";
+  return row.key || scheduleLineKey(row);
 }
 
 /** The drawn elements behind a line, as selection refs. Elements with no
  *  `kind` (a room-derived wall, a recipe-implied quantity) are not refs to
- *  anything and are dropped. */
+ *  anything and are dropped. A finish or a room-derived wall still has a
+ *  `pickKind`, so the model can point at it. */
+function scheduleModelRef(element) {
+  if (!element) return null;
+  const kind = element.kind || element.pickKind;
+  if (!kind) return null;
+  return {
+    kind,
+    id: element.id,
+    ...(element.wallId ? { wallId: element.wallId } : {}),
+    ...(element.roomId ? { roomId: element.roomId } : {}),
+    ...(element.side === 1 || element.side === -1 ? { side: element.side } : {}),
+  };
+}
+
+function scheduleModelRefs(row) {
+  return (row?.elements || []).map(scheduleModelRef).filter(Boolean);
+}
+
 function scheduleGroupRefs(row) {
-  return (row?.elements || [])
-    .filter((element) => element.kind)
-    .map((element) => ({ kind: element.kind, id: element.id }));
+  return scheduleModelRefs(row);
 }
 
 function elementRowHtml(groupIndex, element, elementIndex) {
@@ -30763,8 +32940,8 @@ function elementRowHtml(groupIndex, element, elementIndex) {
     Number.isFinite(element.angle) ? `${element.angle.toFixed(0)}°` : null,
     element.gradient || null,
   ].filter(Boolean).join(" · ");
-  const label = `${element.id}${element.status ? ` · ${element.status === "planned" ? "proposed" : element.status}` : ""}${detail ? ` · ${detail}` : ""}`;
-  const locatable = Boolean(element.kind);
+  const label = `${element.mark || element.id}${element.status ? ` · ${element.status === "planned" ? "proposed" : element.status}` : ""}${detail ? ` · ${detail}` : ""}`;
+  const locatable = Boolean(element.kind || element.pickKind);
   return `
     <div class="schedule-element${locatable ? " locatable" : ""}" data-group="${groupIndex}" data-element="${elementIndex}"
       title="${locatable ? "Click to pick this element out" : "Not a drawn element - nothing to pick out"}">
@@ -30783,7 +32960,7 @@ function scheduleRowsHtml(rows, { priced }) {
   const body = rows.map((row, i) => {
     const first = `
       <td class="schedule-caret"><button type="button" class="schedule-caret-btn" aria-expanded="${scheduleOpenGroups.has(scheduleGroupKey(row))}" aria-label="Show or hide the elements on this line" title="Show or hide the elements on this line"></button></td>
-      <td>${escapeHtml(row.model || "")}</td>
+      <td>${escapeHtml(scheduleCode(row))}</td>
       <td class="wrap">${escapeHtml(row.description || "")}</td>
       <td>${escapeHtml(row.category || "")}</td>
       <td class="num">${fmtQty(row.qty, row.unit)}</td>
@@ -30801,8 +32978,12 @@ function scheduleRowsHtml(rows, { priced }) {
     const rowTitle = refCount
       ? `Click to pick out all ${refCount} drawn element${refCount === 1 ? "" : "s"} on this line`
       : "Nothing drawn on this line";
+    const family = familyHeadingAt(rows, i);
+    const heading = family
+      ? `<tr class="schedule-family-row"><td colspan="${colspan}">${escapeHtml(family)}</td></tr>`
+      : "";
     return `
-      <tr class="schedule-group-row${open ? " open" : ""}" data-group="${i}" title="${rowTitle}">${first}${priceCells}</tr>
+      ${heading}<tr class="schedule-group-row${open ? " open" : ""}" data-group="${i}" title="${rowTitle}">${first}${priceCells}</tr>
       <tr class="schedule-elements-row" data-group="${i}"${open ? "" : " hidden"}>
         <td colspan="${colspan}"><div class="schedule-elements">${elements || '<p class="hint">Nothing drawn against this line yet.</p>'}</div></td>
       </tr>`;
@@ -30828,12 +33009,14 @@ function scheduleCompactHtml(rows, { priced }) {
       ? `Click to pick out all ${refCount} drawn element${refCount === 1 ? "" : "s"} on this line`
       : "Nothing drawn on this line";
     const amount = priced ? (row.priced ? money(row.amount, symbol) : "—") : "";
+    const family = familyHeadingAt(rows, i);
+    const heading = family ? `<div class="schedule-family">${escapeHtml(family)}</div>` : "";
     return `
-      <div class="schedule-line">
+      ${heading}<div class="schedule-line">
         <div class="schedule-group-row${open ? " open" : ""}" data-group="${i}" title="${rowTitle}">
           <button type="button" class="schedule-caret-btn" aria-expanded="${open}" aria-label="Show or hide the elements on this line" title="Show or hide the elements on this line"></button>
           <div class="schedule-line-body">
-            <div class="schedule-line-model">${escapeHtml(row.model || "—")}</div>
+            <div class="schedule-line-model">${escapeHtml(scheduleCode(row) || "—")}</div>
             <div class="schedule-line-desc">${escapeHtml(row.description || "")}</div>
             <div class="schedule-line-meta">
               <span class="schedule-line-cat">${escapeHtml(row.category || "")}</span>
@@ -30901,6 +33084,7 @@ function openSchedule(title, rows, { priced }) {
       ...(priced ? [rateBook?.name, rateBookEffective()] : []),
     ].filter(Boolean).join(" · ");
   }
+  if (el.scheduleDownload) el.scheduleDownload.hidden = !priced;
   // Warnings are inserted after this returns. Clear first so a second open
   // does not keep the previous banner.
   if (el.scheduleBody) el.scheduleBody.replaceChildren();
@@ -30971,8 +33155,14 @@ function elementCenter(ref, obj, walls = null) {
       const sum = poly.reduce((s, p) => ({ x: s.x + p[0], y: s.y + p[1] }), { x: 0, y: 0 });
       return { x: sum.x / poly.length, y: sum.y / poly.length };
     }
-    case "segment": case "beam": case "line":
+    case "segment": case "beam": case "line": case "derivedWall":
       return { x: (obj.x1 + obj.x2) / 2, y: (obj.y1 + obj.y2) / 2 };
+    case "finishRegion": {
+      const poly = finishRegionPolygon(store.doc, obj);
+      if (poly.length < 3) return null;
+      const sum = poly.reduce((s, p) => ({ x: s.x + p[0], y: s.y + p[1] }), { x: 0, y: 0 });
+      return { x: sum.x / poly.length, y: sum.y / poly.length };
+    }
     case "item": case "stair":
       return Number.isFinite(obj.x) && Number.isFinite(obj.y) ? { x: obj.x, y: obj.y } : null;
     case "opening": {
@@ -30997,8 +33187,13 @@ function elementExtent(ref, obj, walls = null) {
       if (poly.length >= 3) return poly.map(([x, y]) => ({ x, y }));
       break;
     }
-    case "segment": case "beam": case "line":
+    case "segment": case "beam": case "line": case "derivedWall":
       return [{ x: obj.x1, y: obj.y1 }, { x: obj.x2, y: obj.y2 }];
+    case "finishRegion": {
+      const poly = finishRegionPolygon(store.doc, obj);
+      if (poly.length >= 3) return poly.map(([x, y]) => ({ x, y }));
+      break;
+    }
     default: break;
   }
   const center = elementCenter(ref, obj, walls);
@@ -31299,6 +33494,35 @@ function drawFacePlanCue() {
 }
 
 /**
+ * A bill ref turned into something the plan can show. A finish and a
+ * room-derived wall are not document entities; the host wall, room or floor
+ * region is what the plan can select. A room-derived wall is only flashed.
+ */
+function scheduleLocateEntry(ref) {
+  if (ref?.kind === "finish" || ref?.kind === "derivedWall") {
+    const walls = deriveWalls(store.doc, pack);
+    const wallId = ref.wallId || (ref.kind === "derivedWall" ? ref.id : null);
+    if (wallId) {
+      const wall = walls.find((w) => w.id === wallId);
+      if (wall?.drawn) {
+        const obj = objectByRef(store.doc, { kind: "segment", id: wall.id });
+        if (obj) return { ref: { kind: "segment", id: wall.id }, obj };
+      }
+      if (wall) return { ref: { kind: "derivedWall", id: wall.id }, obj: wall, flashOnly: true };
+    }
+    if (ref.roomId) {
+      const obj = objectByRef(store.doc, { kind: "room", id: ref.roomId });
+      if (obj) return { ref: { kind: "room", id: ref.roomId }, obj };
+    }
+    const region = (store.doc.finishRegions || []).find((r) => r.id === ref.id);
+    if (region) return { ref: { kind: "finishRegion", id: region.id }, obj: region };
+    return null;
+  }
+  const obj = objectByRef(store.doc, ref);
+  return obj ? { ref, obj } : null;
+}
+
+/**
  * Output > Schedules > Show on plan / Show all. Selects every ref it can
  * still find, switches to the storey most of them are on, pans to them, and
  * flashes them. The schedule stays open in peek mode: the point of clicking
@@ -31310,9 +33534,7 @@ function drawFacePlanCue() {
  * than left for the user to notice.
  */
 function locateScheduleRefs(refs, label) {
-  const found = refs
-    .map((ref) => ({ ref, obj: objectByRef(store.doc, ref) }))
-    .filter((entry) => entry.obj);
+  const found = refs.map(scheduleLocateEntry).filter(Boolean);
   if (!found.length) {
     setStatusMessage(
       refs.length === 1
@@ -31356,15 +33578,17 @@ function locateScheduleRefs(refs, label) {
     .map((entry) => elementCenter(entry.ref, entry.obj, walls))
     .filter(Boolean);
 
-  const selection = found.map((entry) => entry.ref);
-  store.setSelection(selection, selection[0]);
+  const selection = found.filter((entry) => !entry.flashOnly).map((entry) => entry.ref);
+  if (selection.length) store.setSelection(selection, selection[0]);
   startLocateFlash(centres, activeLevel);
 
   const elsewhere = found.length - onLevel.length;
   const what = label ? ` of ${label}` : "";
+  const one = found[0]?.ref;
+  const oneName = one?.kind === "derivedWall" ? "room wall" : one?.kind === "finishRegion" ? "floor finish" : one?.kind;
   setStatusMessage(
     found.length === 1
-      ? `Showing ${found[0].ref.kind} ${found[0].ref.id} on ${levelName(activeLevel)}.`
+      ? `Showing ${oneName} on ${levelName(activeLevel)}.`
       : `Selected ${found.length} element${found.length === 1 ? "" : "s"}${what}. ${onLevel.length} shown on ${levelName(activeLevel)}${elsewhere ? `, ${elsewhere} on other storeys` : ""}.`,
     "ok",
   );
@@ -31387,9 +33611,28 @@ function toggleScheduleGroup(groupRow) {
   else scheduleOpenGroups.add(key);
 }
 
+function downloadBoqWorkbook() {
+  if (!schedulePriced) return;
+  const info = store.doc?.projectInfo || {};
+  const bytes = boqWorkbook({
+    rows: scheduleRowsCache,
+    jobNumber: info.jobNumber || "",
+    clientName: info.clientName || "",
+    rateBookName: rateBook?.name || "",
+    rateBookEffective: rateBookEffective(),
+    symbol: rateBook?.symbol || "R",
+    prepared: new Date(),
+  });
+  downloadBlob(
+    new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),
+    boqDownloadName(info.jobNumber),
+  );
+}
+
 function wireSchedule() {
   el.scheduleClose?.addEventListener("click", closeSchedule);
   el.schedulePeek?.addEventListener("click", () => setSchedulePeek(!schedulePeeking));
+  el.scheduleDownload?.addEventListener("click", downloadBoqWorkbook);
   el.scheduleOverlay?.addEventListener("click", (event) => {
     // In peek mode the backdrop is not there to be dismissed - it is the plan.
     if (event.target === el.scheduleOverlay && !schedulePeeking) closeSchedule();
@@ -31412,7 +33655,9 @@ function wireSchedule() {
     if (elementRow) {
       const row = scheduleRowsCache[Number(elementRow.dataset.group)];
       const element = row?.elements?.[Number(elementRow.dataset.element)];
-      if (element?.kind) pickScheduleRefs([{ kind: element.kind, id: element.id }], element.id, elementRow);
+      if (element && scheduleModelRef(element)) {
+        pickScheduleRefs([scheduleModelRef(element)], element.id, elementRow);
+      }
       return;
     }
     // Only the chevron expands/collapses; the rest of the row just picks.

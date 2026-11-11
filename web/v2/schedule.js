@@ -14,6 +14,8 @@
 // row. A SKU with no rate on file prices at `null`, not `0`: a blank gets
 // queried, a wrong number gets built (PHILOSOPHY.md).
 
+import { compareMarks, formatMarks, sizedTypeName } from "./marks.js";
+
 /** The measure a schedule unit reads off a rolled-up row, mirroring v1's
  *  extras.js convention so a QS sees the same numbers in both apps. */
 export function qtyForUnit(row, unit) {
@@ -44,9 +46,76 @@ function boxFields(group) {
   return Number.isFinite(group.boxesExact) ? { boxes: Math.ceil(group.boxesExact - 1e-9) } : {};
 }
 
+function openingFamily(row) {
+  return row?.marks?.length && row.family ? row.family : "";
+}
+
 function sortByCategoryModel(a, b) {
-  return (a.category || "").localeCompare(b.category || "")
-    || (a.model || "").localeCompare(b.model || "");
+  const byCategory = (a.category || "").localeCompare(b.category || "");
+  if (byCategory) return byCategory;
+  const byFamily = openingFamily(a).localeCompare(openingFamily(b));
+  if (byFamily) return byFamily;
+  if (a.marks?.length && b.marks?.length) return compareMarks(a.marks[0], b.marks[0]);
+  return (a.model || "").localeCompare(b.model || "");
+}
+
+/**
+ * The model column. A window or door line is its mark (W1, or D1–D3), because
+ * the catalogue code carries a size the opening may no longer have. `model`
+ * stays that catalogue code, which is what the rate book is keyed on.
+ */
+export function scheduleCode(row) {
+  return row?.code || row?.model || "";
+}
+
+/** A family subheading where two or more window or door lines share a family. */
+export function familyHeadingAt(rows, index) {
+  const row = rows?.[index];
+  const family = openingFamily(row);
+  if (!family) return null;
+  const count = rows.filter((other) => other.category === row.category && openingFamily(other) === family).length;
+  if (count < 2) return null;
+  const prev = rows[index - 1];
+  if (prev && prev.category === row.category && openingFamily(prev) === family) return null;
+  return family;
+}
+
+/**
+ * Which line a row rolls up into. A window is one line per type mark (W1, W2),
+ * whatever its catalogue product. A door, numbered on its own, rolls up with
+ * the doors of the same product and actual size. The type name carries that
+ * size, so a resized door is never counted under its catalogue size.
+ */
+export function scheduleLineKey(row) {
+  const base = row.model || row.category || "unmodelled";
+  if (row.kind !== "opening") return base;
+  if (row.markKind === "window" && row.mark) return `${base}|${row.mark}`;
+  return `${base}|${row.type || ""}`;
+}
+
+/** "Window-Fixed — 600 x 900mm" under family "Window-Fixed" reads once, not twice. */
+function familyAndType(group) {
+  const family = String(group.family || "").trim();
+  const type = String(group.type || "").trim();
+  if (family && type.toLowerCase().startsWith(family.toLowerCase())) return type;
+  return `${family} ${type}`.trim();
+}
+
+/**
+ * A line's description. The mark is the model column, not repeated here. An
+ * opening states the size it is drawn at, also when the text comes from a rate
+ * book written against the catalogue size. A size off the catalogue names the
+ * product it was priced from.
+ */
+function describe(group, text) {
+  const sized = group.openingSize ? sizedTypeName({ name: text }, group.openingSize) : text;
+  if (!group.nonStandardSize) return sized;
+  const basis = group.model ? `; based on ${group.model}` : "";
+  return `${sized} (non-standard size, firm to confirm${basis})`.trim();
+}
+
+function codeField(group) {
+  return group.marks?.length ? { code: formatMarks(group.marks) } : {};
 }
 
 /**
@@ -63,9 +132,10 @@ function sortByCategoryModel(a, b) {
 function groupByModel(instances) {
   const groups = new Map();
   for (const row of instances || []) {
-    const key = row.model || row.category || "unmodelled";
+    const key = scheduleLineKey(row);
     if (!groups.has(key)) {
       groups.set(key, {
+        key,
         model: row.model || "",
         category: row.category || "",
         family: row.family || "",
@@ -75,6 +145,7 @@ function groupByModel(instances) {
         // A line compile.js derived (a bend counted from the route, with no
         // fitting type in the template) rather than one the drawing placed.
         derived: Boolean(row.derived),
+        marks: [],
         count: 0,
         length: 0,
         area: 0,
@@ -93,12 +164,20 @@ function groupByModel(instances) {
     // Finishes (finish-model.js): an allowance is flagged, and the product's
     // waste is carried beside the measured quantity, never inside it.
     if (row.pcAllowance) group.pcAllowance = true;
+    if (row.mark && !group.marks.includes(row.mark)) group.marks.push(row.mark);
+    if (row.nonStandardSize) group.nonStandardSize = true;
+    if (row.openingSize && !group.openingSize) group.openingSize = row.openingSize;
     if (Number.isFinite(row.orderQuantity)) group.orderQuantity = (group.orderQuantity || 0) + row.orderQuantity;
     if (Number.isFinite(row.boxes)) group.boxesExact = (group.boxesExact || 0) + row.boxes;
     if (row.elementId) {
       group.elements.push({
         id: row.elementId,
+        ...(row.mark ? { mark: row.mark } : {}),
         kind: row.kind ?? null,
+        ...(row.pickKind ? { pickKind: row.pickKind } : {}),
+        ...(row.wallId ? { wallId: row.wallId } : {}),
+        ...(row.side === 1 || row.side === -1 ? { side: row.side } : {}),
+        ...(row.roomId ? { roomId: row.roomId } : {}),
         level: row.level ?? null,
         status: row.status ?? null,
         length: row.length || 0,
@@ -123,7 +202,8 @@ export function bomRows(compiled) {
     .map((group) => ({
       ...group,
       ...boxFields(group),
-      description: `${group.family} ${group.type}`.trim(),
+      ...codeField(group),
+      description: describe(group, familyAndType(group)),
       qty: qtyForUnit(group, group.unit),
       // What to order once the SKU's wastage is added to the measured qty.
       // Present only when a SKU states a wasteFactor; qty stays measured.
@@ -147,9 +227,10 @@ export function boqRows(compiled, rateBook) {
       return {
         ...group,
         ...boxFields(group),
+        ...codeField(group),
         unit,
         qty,
-        description: rate?.description || `${group.family} ${group.type}`.trim(),
+        description: describe(group, rate?.description || familyAndType(group)),
         rate: rate ? rate.rate : null,
         amount: rate ? qty * rate.rate : null,
         priced: Boolean(rate),

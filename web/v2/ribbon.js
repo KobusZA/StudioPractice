@@ -136,18 +136,13 @@ export const RIBBON = [
     label: "Document",
     groups: [
       {
-        label: "Lines",
-        items: [
-          { id: "model-lines", label: "Model", command: "model-lines" },
-          { id: "annot-lines", label: "Annotate", command: "annot-lines" },
-        ],
-      },
-      {
         label: "Annotate",
         items: [
+          { id: "text", label: "Text", command: "text" },
           { id: "dimensions", label: "Dimensions", command: "dimensions" },
+          { id: "lines", label: "Line", command: "lines" },
+          { id: "region", label: "Fill", command: "region" },
           { id: "revision", label: "Revision cloud", command: "revision" },
-          { id: "region", label: "Region", command: "region" },
         ],
       },
       {
@@ -204,6 +199,7 @@ export const RIBBON = [
           { id: "copy", label: "Copy", command: "copy", needsSelection: true, contextOnly: true },
           { id: "attach", label: "Attach base", command: "attach", needsSelection: true, contextOnly: true },
           { id: "detach", label: "Detach base", command: "detach", needsSelection: true, contextOnly: true },
+          { id: "add-foundation", label: "Foundation under", command: "add-foundation", needsSelection: true, contextOnly: true },
           // Defined here once, shown only on the contextual tabs
           // (`contextOnly`): they act on one kind of selection.
           // "Split here" drags along the selected wall. "Split" above halves a room, floor or roof.
@@ -356,11 +352,12 @@ export const HINTS = {
   casework: "Click a wall to start the run, then the other end. A cupboard cannot sit off the wall. Wall units are dashed (off the floor). An island is a click to place.",
   rooms: "Click inside the walls. The area is already shown; this names the room. Set its use in the inspector. Where there are no walls, click each corner and press Enter.",
   "room-sep": "Click one end, then the other. Ends snap to wall corners and faces. Type a length, as with a wall. A separation line bounds a room where there is no wall.",
-  region: "Click each corner of the patch, then Enter. Pick Brick red, Concrete or Concrete 2 in the inspector. The patch stays ink on the drawing.",
+  region: "Pick the fill on the tab, then click each corner. Click the first corner again, double-click, or press Enter to close it. The fill is ink on the drawing, not a floor.",
   finishes: "Picture of this floor. Add a finish, then cover the whole floor or draw an area. Floor types stay on Floors.",
   "add-finish": "Add a finish, then choose where it goes. Nothing is added until then.",
   "finish-done": "Close this picture. The wall or floor stays selected.",
-  dimensions: "Click two points. The dimension stays on this level and prints on its sheet. Select it and press Delete to remove it.",
+  dimensions: "Click two points, then click where the line goes. Pull it above or below for horizontal, to the side for vertical, or pick one on the tab. Drag the number to move it along or off the line. Double-click the number to add words or replace it.",
+  text: "Click where the note goes and type. Set the style, size and bold on the tab as you type. Enter places it, Shift+Enter starts a new line, Esc cancels. Double-click a note to change its words.",
   move: "Click the point to move from, then where it should land. Joined walls stay joined. Esc, right-click or Exit cancels.",
   copy: "Click the point to copy from, then where the copy should land. Esc, right-click or Exit cancels.",
   "trim-corner": "Click each wall on the part you want to keep. Esc, right-click or Exit cancels.",
@@ -370,14 +367,14 @@ export const HINTS = {
   "exit-modify": "Stop and go back to selecting (Esc).",
   attach: "Click a wall or beam on this storey or the one below to sit the selection on top of it. Esc, right-click or Exit to cancel.",
   detach: "Stop following what the selection sits on, leaving it at the elevation it already has.",
+  "add-foundation": "Choose a foundation type in the inspector, then Add puts it under every selected wall, the same as + Foundation on a wall elevation.",
   "view-3d": "Open a massing view of the current plan.",
   "view-camera": "Click where you stand, then click what you look at.",
   section: "Click the two ends of the cut, then click the side you want to look toward.",
   elevation: "Pick a compass side to extrude an orthographic elevation from the plan.",
   callout: "Click two opposite corners to box a detail crop of the plan.",
   revision: "Click two opposite corners. The cloud stays on the plan, where you can select it. Link it to a revision from the Sheets panel.",
-  "model-lines": "Click one end, then the other. A model line is a modelled fact, like a wall with no thickness.",
-  "annot-lines": "Click one end, then the other. An annotation line is a mark on this drawing only, never exported.",
+  lines: "Click one end, then the other, or type a length. On the tab: a line, a rectangle or an arc, Chain to keep going from the last end, arrowheads, and the style. Tick Export to CAD to send it to the DXF and IFC as well.",
   compile: "Build the bill of quantities from what you have drawn.",
   boq: "Bill of quantities: priced schedule of what you have drawn, one line per SKU.",
   bom: "Bill of materials: unpriced takeoff of what you have drawn, one line per SKU.",
@@ -456,6 +453,7 @@ export const CONTEXT_TABS = {
       { label: "View", items: ["edit-face", "flip-face", "second-screen"] },
       { label: "Finishes", items: ["wall-finishes"] },
       { label: "Height", items: ["attach", "detach"] },
+      { label: "Foundation", items: ["add-foundation"] },
       { label: "Arrange", items: ["group", "ungroup"] },
     ],
   },
@@ -575,10 +573,19 @@ export function tabWithStatus(tab) {
  */
 const NOT_PLACING = new Set(["roof-cut"]);
 const ALSO_PLACING = new Set(["room-sep", "service-route"]);
+/** Document > Annotate: each places ink on the drawing, so each opens Place Text, Place Line, ... */
+const ANNOTATING = new Set(["text", "dimensions", "lines", "region", "revision"]);
 
 export function isPlacingItem(item) {
-  if (!item || item.tabId !== "build" || NOT_PLACING.has(item.id)) return false;
+  if (!item || NOT_PLACING.has(item.id)) return false;
+  if (item.tabId === "document") return ANNOTATING.has(item.id);
+  if (item.tabId !== "build") return false;
   return Boolean(item.tool) || ALSO_PLACING.has(item.id);
+}
+
+/** A placing tab whose subject is drawing ink, not existing or proposed work. */
+export function isAnnotatingTab(tab) {
+  return Boolean(tab?.key?.startsWith("place:") && ["text", "dimensions", "revision"].includes(tab.key.slice(6)));
 }
 
 /** "Walls" becomes "Wall", "Doors" "Door". Caption words that are not plural stay. */

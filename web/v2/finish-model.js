@@ -18,8 +18,9 @@
 // Heights are metres above the wall's base; offsets are metres from the
 // wall's first end (the elevation view converts to viewing order).
 
-import { arcFromRadius } from "./click-draw.js";
-import { area as polyArea, clipPolygon, distToSeg, pointInPoly } from "./geom.js";
+import { arcFromRadius, arcPoints } from "./click-draw.js";
+import { area as polyArea, clipPolygon, distToSeg, pointInPoly, segNormal } from "./geom.js";
+import { floorLevel } from "./floor-levels.js";
 import { effectiveLevel, finishRegionPolygon, finishRegionSlab, polyShape, roomArea, roomPolygon, shapeAsPoly } from "./model.js";
 import { archRise, archVoidPolygon } from "./arch-head.js";
 import { isArchHead, openingOnWall, openingSize, pointOnWall, skuById, wallForOpening, wallNormal } from "./openings.js";
@@ -557,6 +558,187 @@ function bandMeta(doc, item, warnings, label) {
   return { category, product };
 }
 
+function levelZ(pack, levelId) {
+  const hit = (pack?.levels || []).find((l) => l.id === levelId || l.name === levelId);
+  return hit?.elevation ?? 0;
+}
+
+function swatchRgba(hex, alpha) {
+  const raw = String(hex || "").replace("#", "");
+  const h = raw.length === 3 ? raw.split("").map((c) => c + c).join("") : raw;
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  if (![r, g, b].every((n) => Number.isFinite(n))) return `rgba(60,122,82,${alpha})`;
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+/** Coats sit on the wall. Paint and tile stand proud of them. Skirting is proudest, so a click on the bottom hits it first. */
+function finishProud(category) {
+  if (category === "skirting") return 0.028;
+  if (category === "plaster" || category === "render" || category === "facebrick") return 0.012;
+  if (category === "rhinolite") return 0.018;
+  return 0.022;
+}
+
+function centreSamples(wall) {
+  const straight = () => {
+    const d = wall.length || Math.hypot(wall.x2 - wall.x1, wall.y2 - wall.y1);
+    return [{ x: wall.x1, y: wall.y1, d: 0 }, { x: wall.x2, y: wall.y2, d }];
+  };
+  if (!wall?.arc || !(wall.arc.radius > 0)) return straight();
+  const pts = arcPoints(wall.x1, wall.y1, wall.x2, wall.y2, wall.arc.radius, wall.arc.side, Math.PI / 18, wall.arc.major === true);
+  if (!pts || pts.length < 2) return straight();
+  const out = [{ x: pts[0][0], y: pts[0][1], d: 0 }];
+  let d = 0;
+  for (let i = 1; i < pts.length; i += 1) {
+    d += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+    out.push({ x: pts[i][0], y: pts[i][1], d });
+  }
+  return out;
+}
+
+function pointAtDistance(samples, dist) {
+  const last = samples[samples.length - 1];
+  if (dist <= samples[0].d) return { ...samples[0], d: dist };
+  if (dist >= last.d) return { ...last, d: dist };
+  for (let i = 1; i < samples.length; i += 1) {
+    if (samples[i].d + 1e-9 < dist) continue;
+    const a = samples[i - 1];
+    const b = samples[i];
+    const span = b.d - a.d || 1;
+    const t = (dist - a.d) / span;
+    return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, d: dist };
+  }
+  return last;
+}
+
+function samplesBetween(wall, from, to) {
+  const all = centreSamples(wall);
+  const mid = all.filter((p) => p.d > from + 1e-4 && p.d < to - 1e-4);
+  return [pointAtDistance(all, from), ...mid, pointAtDistance(all, to)];
+}
+
+/** Quads on one face, just outside the wall, from `from` to `to` and `bottom` to `top`. */
+function wallFaceQuads(wall, rect, zBase, side, proud) {
+  const samples = samplesBetween(wall, rect.from, rect.to);
+  const dist = (wall.thickness || 0.22) / 2 + proud;
+  const quads = [];
+  for (let i = 0; i < samples.length - 1; i += 1) {
+    const a = samples[i];
+    const b = samples[i + 1];
+    if (Math.hypot(b.x - a.x, b.y - a.y) < 1e-5) continue;
+    const n = segNormal(a.x, a.y, b.x, b.y, side);
+    const ax = a.x + n.x * dist;
+    const ay = a.y + n.y * dist;
+    const bx = b.x + n.x * dist;
+    const by = b.y + n.y * dist;
+    quads.push([
+      [ax, ay, zBase + rect.bottom],
+      [bx, by, zBase + rect.bottom],
+      [bx, by, zBase + rect.top],
+      [ax, ay, zBase + rect.top],
+    ]);
+  }
+  return quads;
+}
+
+function bandPieces(band, openings) {
+  if (band.outline) return [{ from: band.from, to: band.to, bottom: band.bottom, top: band.top }];
+  let rects = [{ from: band.from, to: band.to, bottom: band.bottom, top: band.top }];
+  const linear = FINISH_CATEGORIES[band.category]?.unit === "m";
+  for (const opening of openings) {
+    const cut = linear
+      ? (opening.cutsSkirting ? { from: opening.from, to: opening.to, bottom: -1, top: 1e9 } : null)
+      : opening;
+    if (!cut) continue;
+    rects = rects.flatMap((rect) => subtractRect(rect, cut));
+  }
+  return rects.filter((rect) => rect.to - rect.from > 1e-4 && rect.top - rect.bottom > 1e-4);
+}
+
+function clickFace(id, pts, swatch, status) {
+  if (!pts || pts.length < 3) return null;
+  return {
+    pts,
+    id,
+    selectKind: "finish",
+    kind: "finish",
+    finish: true,
+    fill: swatchRgba(swatch, 0.92),
+    stroke: swatch,
+    status: status === "existing" ? "existing" : "planned",
+  };
+}
+
+/**
+ * One pickable face per finish the bill counts. A wall finish stands just
+ * proud of that side, with door and window holes left open so a click on the
+ * opening still hits the opening. A floor finish sits just above the room.
+ */
+function finishClickFaces({ doc, pack, walls, wallBases, bands, openingsOf, rowIds }) {
+  const faces = [];
+  const ranked = [...(bands || [])].filter((b) => (b.quantity || 0) > EPS && b.category !== "none");
+  ranked.sort((a, b) => finishProud(a.category) - finishProud(b.category));
+  for (const band of ranked) {
+    const wall = walls.get(band.wallId);
+    if (!wall) continue;
+    const spec = FINISH_CATEGORIES[band.category];
+    if (!spec) continue;
+    const product = finishProductById(doc, band.productId);
+    const swatch = band.category === "paint" && product?.swatch ? product.swatch : finishSwatch(band.category);
+    const zBase = wallBases?.get(wall.id)?.elevation ?? levelZ(pack, wall.level);
+    const proud = finishProud(band.category);
+    const status = wall.status || "planned";
+    if (band.outline && spec.unit !== "m") {
+      const samples = centreSamples(wall);
+      const dist = (wall.thickness || 0.22) / 2 + proud;
+      const pts = band.outline.map(([s, z]) => {
+        const p = pointAtDistance(samples, s);
+        const ahead = pointAtDistance(samples, Math.min(samples[samples.length - 1].d, s + 0.05));
+        const n = segNormal(p.x, p.y, ahead.x + (ahead.x === p.x && ahead.y === p.y ? 1 : 0), ahead.y, band.side);
+        return [p.x + n.x * dist, p.y + n.y * dist, zBase + z];
+      });
+      const face = clickFace(band.id, pts, swatch, status);
+      if (face) faces.push(face);
+      continue;
+    }
+    for (const piece of bandPieces(band, openingsOf(wall))) {
+      for (const quad of wallFaceQuads(wall, piece, zBase, band.side, proud)) {
+        const face = clickFace(band.id, quad, swatch, status);
+        if (face) faces.push(face);
+      }
+    }
+  }
+  for (const room of doc.rooms || []) {
+    for (const rule of room.finishes || []) {
+      if (rule.surface !== "floor" || !rowIds?.has(`rule:${rule.id}:floor`)) continue;
+      const poly = roomPolygon(room);
+      const product = finishProductById(doc, rule.productId);
+      const category = product?.category || rule.category;
+      const swatch = finishSwatch(category);
+      const face = clickFace(
+        `rule:${rule.id}:floor`,
+        poly.map(([x, y]) => [x, y, floorLevel(pack, room) + 0.22]),
+        swatch,
+        room.status,
+      );
+      if (face) faces.push(face);
+    }
+  }
+  for (const region of doc.finishRegions || []) {
+    if (!rowIds?.has(region.id)) continue;
+    const poly = finishRegionPolygon(doc, region);
+    const product = finishProductById(doc, region.productId);
+    const category = product?.category || region.category;
+    const room = (doc.rooms || []).find((r) => r.id === region.roomId) || null;
+    const z = (room ? floorLevel(pack, room) : levelZ(pack, region.level)) + 0.26;
+    const face = clickFace(region.id, poly.map(([x, y]) => [x, y, z]), finishSwatch(category), room?.status);
+    if (face) faces.push(face);
+  }
+  return faces;
+}
+
 /**
  * Everything finished on this document's walls and floors.
  *
@@ -721,6 +903,7 @@ export function resolveFinishes(doc, pack, walls, { wallBases = null, onlyWallId
     rows.push(finishRow({
       pack, doc, spec, product, category: band.category, quantity, elementId: band.id, level: wall.level,
       status: wall.status || "planned", surface: "wall", face: band.kind, source: band.source,
+      wallId: wall.id, side: band.side, roomId: band.roomId,
     }));
   }
 
@@ -743,6 +926,7 @@ export function resolveFinishes(doc, pack, walls, { wallBases = null, onlyWallId
           pack, doc, spec, product: meta.product, category: meta.category, quantity,
           elementId: `rule:${rule.id}:floor`, level: effectiveLevel(room, pack),
           status: room.status === "existing" ? "existing" : "planned", surface: "floor", face: null, source: "rule",
+          roomId: room.id,
         }));
       }
     }
@@ -759,6 +943,7 @@ export function resolveFinishes(doc, pack, walls, { wallBases = null, onlyWallId
         pack, doc, spec, product: meta.product, category: meta.category, quantity: area,
         elementId: region.id, level: region.level || (room ? effectiveLevel(room, pack) : null),
         status: room?.status === "existing" ? "existing" : "planned", surface: "floor", face: null, source: "region",
+        roomId: room?.id || null,
       }));
     }
   }
@@ -766,10 +951,14 @@ export function resolveFinishes(doc, pack, walls, { wallBases = null, onlyWallId
   // "No finish" pieces are not bands (they measure nothing), but the panel lists
   // them so a taken-off default can be put back.
   const removed = explicit.filter((b) => b.category === "none").map((b) => ({ ...b, quantity: 0, unit: "m2" }));
-  return { bands, rows, warnings, regionAreas: regionAreas.byRoom, removed };
+  const faces = onlyWallId ? [] : finishClickFaces({
+    doc, pack, walls: wallById, wallBases, bands, openingsOf,
+    rowIds: new Set(rows.map((row) => row.elementId)),
+  });
+  return { bands, rows, warnings, regionAreas: regionAreas.byRoom, removed, faces };
 }
 
-function finishRow({ doc, spec, product, category, quantity, elementId, level, status, surface, face, source }) {
+function finishRow({ doc, spec, product, category, quantity, elementId, level, status, surface, face, source, wallId, side, roomId }) {
   const pc = spec.needsProduct && !product;
   const note = category === "paint" ? finishBillNote(category, product) : null;
   let type = product
@@ -788,13 +977,20 @@ function finishRow({ doc, spec, product, category, quantity, elementId, level, s
     colourClass: "other",
     status,
     level,
+    // Not a plan object (a finish is a face on a wall or a floor), so `kind`
+    // stays empty and the plan locator is not handed a missing entity. The
+    // bill's model still picks it: `pickKind` matches the face's selectKind.
     kind: null,
+    pickKind: "finish",
     finish: true,
     finishCategory: category,
     surface,
     source,
   };
   if (face) row.face = face;
+  if (wallId) row.wallId = wallId;
+  if (side === 1 || side === -1) row.side = side;
+  if (roomId) row.roomId = roomId;
   if (spec.unit === "m") row.length = quantity;
   else row.area = quantity;
   if (pc) row.pcAllowance = true;

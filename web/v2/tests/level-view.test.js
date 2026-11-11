@@ -27,6 +27,9 @@ import {
   applyLevelElevations,
   validateLevelEdit,
   setLevelElevation,
+  applyLevelNames,
+  validateLevelRename,
+  setLevelName,
   storeyLevels,
   levelDisplayName,
   stationDisplay,
@@ -177,6 +180,7 @@ test("Remove floor deletes work on that storey and leaves the ground floor", () 
     ceilingHeights: { "03 L2": 2.6 },
   };
   doc.levelElevations = { "03 L2": 6.2, "01 GFL": 0.1 };
+  doc.levelNames = { "03 L2": "Second", "01 GFL": "Ground" };
   doc.levels = [{ id: "Garage", name: "Garage", elevation: 5.8, parentId: "03 L2", userSupplied: true }];
   const merged = mergedLevels(levels, doc.levels);
   const target = floorRemovalTarget(merged, doc.floorsRevealed, { activeLevelId: "01 GFL" });
@@ -203,6 +207,8 @@ test("Remove floor deletes work on that storey and leaves the ground floor", () 
   assert.equal(doc.sheetSet.ceilingHeights["03 L2"], undefined);
   assert.equal(doc.levelElevations["03 L2"], undefined);
   assert.equal(doc.levelElevations["01 GFL"], 0.1);
+  assert.equal(doc.levelNames["03 L2"], undefined);
+  assert.equal(doc.levelNames["01 GFL"], "Ground");
   assert.deepEqual(doc.levels, []);
 });
 
@@ -210,6 +216,7 @@ test("standing on an inserted level removes that level and not a revealed floor"
   const doc = emptyDoc();
   doc.floorsRevealed = 1;
   doc.levels = [{ id: "Mezz", name: "Mezz", elevation: 1.5, userSupplied: true }];
+  doc.levelNames = { Mezz: "Mezzanine" };
   doc.segments = [{ id: "m", level: "Mezz" }, { id: "up", level: "02 L1" }];
   const merged = mergedLevels(levels, doc.levels);
   const target = floorRemovalTarget(merged, doc.floorsRevealed, { activeLevelId: "Mezz" });
@@ -218,6 +225,7 @@ test("standing on an inserted level removes that level and not a revealed floor"
   applyFloorRemoval(doc, target);
   assert.equal(doc.floorsRevealed, 1, "the revealed template storey stays");
   assert.deepEqual(doc.levels, []);
+  assert.equal(doc.levelNames.Mezz, undefined);
   assert.deepEqual(doc.segments.map((s) => s.id), ["up"]);
 });
 
@@ -429,6 +437,44 @@ test("setLevelElevation sets and clears, and normalizeDoc keeps only finite over
   assert.deepEqual(emptyDoc().levelElevations, {});
   const doc = normalizeDoc({ ...emptyDoc(), levelElevations: { a: 3, b: "x", c: null } });
   assert.deepEqual(doc.levelElevations, { a: 3 });
+});
+
+test("a typed level name shows as typed, and a template name still spells out", () => {
+  const renamed = applyLevelNames(namedLevels, { "01 GFL": "GF" });
+  assert.equal(renamed.find((l) => l.id === "01 GFL").id, "01 GFL");
+  assert.equal(renamed.find((l) => l.id === "01 GFL").name, "GF");
+  assert.equal(namedLevels.find((l) => l.id === "01 GFL").name, "01 GFL");
+  assert.deepEqual(levelDisplayName(renamed.find((l) => l.id === "01 GFL")), { code: "", name: "GF" });
+  assert.deepEqual(levelDisplayName(namedLevels[1]), { code: "01", name: "Ground floor" });
+  assert.deepEqual(levelDisplayName({ id: "04 L3", name: "04 L3", userSupplied: true }), { code: "", name: "04 L3" });
+  const ground = buildHouseStations(renamed).filter((s) => s.levelId === "01 GFL");
+  assert.deepEqual(ground.map((s) => stationDisplay(s, renamed)), [
+    { code: "", name: "GF · floor" },
+    { code: "", name: "GF · ceiling" },
+  ]);
+});
+
+test("renaming a level refuses a blank, a long name, and another level's id or name", () => {
+  assert.match(validateLevelRename(namedLevels, "01 GFL", "  ").message, /Name the level/);
+  assert.match(validateLevelRename(namedLevels, "01 GFL", "x".repeat(41)).message, /40/);
+  assert.match(validateLevelRename(namedLevels, "01 GFL", "02 l1").message, /already exists/);
+  assert.match(validateLevelRename(namedLevels, "02 L1", "01 GFL").message, /already exists/);
+  assert.equal(validateLevelRename(namedLevels, "01 GFL", "Ground").ok, true);
+  assert.match(validateLevelRename(namedLevels, "nope", "Ground").message, /no longer exists/);
+});
+
+test("clearing a name override restores the template name", () => {
+  const set = setLevelName({}, "01 GFL", "  Ground  ");
+  assert.deepEqual(set, { "01 GFL": "Ground" });
+  assert.equal(applyLevelNames(namedLevels, set).find((l) => l.id === "01 GFL").name, "Ground");
+  assert.equal(applyLevelNames(namedLevels, setLevelName(set, "01 GFL", null)).find((l) => l.id === "01 GFL").name, "01 GFL");
+  assert.equal(applyLevelNames(namedLevels, {}), namedLevels);
+});
+
+test("normalizeDoc keeps only non-empty level names", () => {
+  assert.deepEqual(emptyDoc().levelNames, {});
+  const doc = normalizeDoc({ ...emptyDoc(), levelNames: { a: " Ground ", b: "  ", c: 3, d: null } });
+  assert.deepEqual(doc.levelNames, { a: "Ground" });
 });
 
 import { levelAboveRise, defaultWallTop, planLevelOf, onPlanOf, fflLabel, isReferenceLevel } from "../level-view.js";

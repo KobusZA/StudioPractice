@@ -1446,7 +1446,8 @@ export function facesFromPayload(payload, statusFilter = "both") {
   for (const form of forms) pushFormFaces(faces, form, openings);
   conformWallsToRoofs(faces, forms);
   // selectKind is the document object a click should select. A room-derived
-  // wall has none: it exists only for this extrusion.
+  // wall is "derivedWall": the bill's model can point at it, and it is not a
+  // segment in the document.
   const kindOf = new Map();
   for (const form of forms) {
     if (form.elementId && form.selectKind) kindOf.set(form.elementId, form.selectKind);
@@ -1523,6 +1524,41 @@ export function pointHitsProjected(x, y, pts, tol = 3) {
   return false;
 }
 
+/** Distance from a screen point to a projected segment, in pixels. */
+function screenDistToSeg(x, y, a, b) {
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  const len2 = dx * dx + dy * dy;
+  let t = len2 < 1e-6 ? 0 : ((x - a[0]) * dx + (y - a[1]) * dy) / len2;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(a[0] + dx * t - x, a[1] + dy * t - y);
+}
+
+/** Pipes and bends under a canvas pixel, nearest first. Faces are picked separately. */
+export function pickServiceHits(x, y, frame) {
+  const hits = [];
+  const seen = new Set();
+  const nodes = [...(frame?.nodes || [])].sort((a, b) => {
+    const da = Math.hypot((a.p?.[0] || 0) - x, (a.p?.[1] || 0) - y);
+    const db = Math.hypot((b.p?.[0] || 0) - x, (b.p?.[1] || 0) - y);
+    return da - db;
+  });
+  for (const node of nodes) {
+    if (!node?.id || !node.p || seen.has(node.id)) continue;
+    if (Math.hypot(node.p[0] - x, node.p[1] - y) > 10) continue;
+    seen.add(node.id);
+    hits.push({ id: node.id, kind: node.kind, selectKind: node.selectKind });
+  }
+  const edges = [...(frame?.services || [])].sort((a, b) => screenDistToSeg(x, y, a.a, a.b) - screenDistToSeg(x, y, b.a, b.b));
+  for (const edge of edges) {
+    if (!edge?.id || !edge.a || !edge.b || seen.has(edge.id)) continue;
+    if (screenDistToSeg(x, y, edge.a, edge.b) > (edge.tol || 6)) continue;
+    seen.add(edge.id);
+    hits.push({ id: edge.id, kind: edge.kind, selectKind: edge.selectKind });
+  }
+  return hits;
+}
+
 /**
  * Elements under a canvas pixel, front first. `items` is the painted list,
  * far faces first, each `{ id, kind, selectKind, pts }`. One entry per
@@ -1539,6 +1575,22 @@ export function pickProjected(x, y, items) {
     hits.push({ id: item.id, kind: item.kind, selectKind: item.selectKind });
   }
   return hits;
+}
+
+/**
+ * Which entry a repeated click should take. `hits` is front first, as
+ * pickProjected returns them. The same stack advances one step and wraps;
+ * a different stack, or the first click, starts at the front. Highlighting
+ * paints the chosen face on top, but the next pick still uses this geometric
+ * order, so the step has to be remembered rather than re-read from the picture.
+ */
+export function cycleStackedHits(previous, hits) {
+  const list = hits || [];
+  const key = list.map((hit) => `${hit.selectKind || ""}:${hit.id}`).join("|");
+  if (!key) return { key: "", index: -1 };
+  const same = previous?.key === key && Number.isInteger(previous.index) && previous.index >= 0;
+  const index = same ? (previous.index + 1) % list.length : 0;
+  return { key, index };
 }
 
 /** Orbit projection. The third component is depth, and it grows away from
@@ -1818,12 +1870,19 @@ export function faceStyle(face) {
   return { fill: face.fill, stroke: face.stroke };
 }
 
+/** colour | lines | status | xray. Anything else is colour. */
+export function massViewStyle(next) {
+  return next === "lines" || next === "status" || next === "xray" ? next : "colour";
+}
+
 /**
  * How one face is painted in this view. Colour is the shaded model.
  * Lines is a hidden-line drawing: white faces, dark edges. Existing / new
  * recolours every element and leaves the Both / Existing / Proposed filter
- * to hide things. A person or car stays an outline in every style. A cut
- * face keeps its poché colour.
+ * to hide things. X-ray keeps these colours; the canvas fades the model and
+ * paints the selection orange, the same treatment as a quantities pick.
+ * A person or car stays an outline in every style. A cut face keeps its
+ * poché colour.
  */
 export function viewFaceStyle(face, viewStyle = "colour") {
   if (face?.kind === "figure") {
@@ -2022,7 +2081,7 @@ export function createMassingView({ canvas, emptyEl, hintEl, titleEl, onDraw, on
   const ctx = canvas.getContext("2d");
   const cam = createCamera();
   let statusFilter = "both";
-  // colour | lines | status. A view setting, not a change to the model.
+  // colour | lines | status | xray. A view setting, not a change to the model.
   let viewStyle = "colour";
   let payload = null;
   let serviceRoutes = [];
@@ -2037,8 +2096,10 @@ export function createMassingView({ canvas, emptyEl, hintEl, titleEl, onDraw, on
   // everything else is faded and these are painted in the accent colour.
   let highlight = new Set();
   let highlightHits = 0;
-  // Click selection. Independent of the schedule's "show in 3D" highlight:
-  // the building stays solid and the chosen element is tinted.
+  // Click selection. Independent of the schedule's "show in 3D" highlight.
+  // In colour, lines, and existing/new the building stays solid and the
+  // chosen element is tinted. In x-ray the rest of the model is see-through
+  // and the chosen element is the same orange as a quantities pick.
   let selected = new Set();
   let figures = [];
   // The last live frame, so a click can be tested against what was drawn
@@ -2048,9 +2109,17 @@ export function createMassingView({ canvas, emptyEl, hintEl, titleEl, onDraw, on
   let serviceNodes = [];
   let flashStart = 0;
   let flashRaf = 0;
+  // Finishes and anything else the bill can point at that is not a building
+  // solid. The main 3D view leaves this empty.
+  let billFaces = [];
 
   function setServiceNodes(nodes) {
     serviceNodes = Array.isArray(nodes) ? nodes : [];
+    draw();
+  }
+
+  function setBillFaces(faces) {
+    billFaces = Array.isArray(faces) ? faces : [];
     draw();
   }
 
@@ -2121,7 +2190,7 @@ export function createMassingView({ canvas, emptyEl, hintEl, titleEl, onDraw, on
   }
 
   function setStyle(next) {
-    viewStyle = next === "lines" || next === "status" ? next : "colour";
+    viewStyle = massViewStyle(next);
     draw();
   }
 
@@ -2222,9 +2291,11 @@ export function createMassingView({ canvas, emptyEl, hintEl, titleEl, onDraw, on
     const modelFaces = flat && viewCam.mode === "orbit"
       ? allFaces.filter((face) => face.kind !== "roof" || highlight.has(face.id))
       : allFaces;
+    const bill = billFaces.filter((face) => face?.pts?.length >= 3 && statusVisible(face.status, statusFilter));
     const drawnFigures = showFigures ? scaleFigures : [];
     const faces = [
       ...modelFaces,
+      ...bill,
       ...drawnFigures.flatMap((fig) => figureFaces(fig, viewCam)),
     ];
     const routes = showServices ? serviceRoutesInView(serviceRoutes, statusFilter, viewCam) : [];
@@ -2344,6 +2415,27 @@ export function createMassingView({ canvas, emptyEl, hintEl, titleEl, onDraw, on
       return b.depth - a.depth;
     });
     if (live) {
+      const visibleItems = projected
+        .filter((item) => item.face.kind !== "ground")
+        .map((item) => ({
+          id: item.face.id,
+          kind: item.face.kind,
+          selectKind: item.face.selectKind || null,
+          pts: item.pts,
+        }));
+      // In the plan the roof is not drawn (it would hide the floor). It stays
+      // at the back of the click stack, so the first click is what you see
+      // and a later click reaches the roof.
+      const roofItems = flat && viewCam.mode === "orbit"
+        ? allFaces
+          .filter((face) => face.kind === "roof" && face.selectKind && !highlight.has(face.id))
+          .map((face) => ({
+            id: face.id,
+            kind: face.kind,
+            selectKind: face.selectKind,
+            pts: face.pts.map((p) => projectWorld(p)),
+          }))
+        : [];
       pickFrame = {
         mode: viewCam.mode,
         origin: origin.slice(),
@@ -2352,18 +2444,16 @@ export function createMassingView({ canvas, emptyEl, hintEl, titleEl, onDraw, on
         scale,
         yaw: viewCam.yaw,
         pitch: viewCam.pitch,
-        items: projected
-          .filter((item) => item.face.kind !== "ground")
-          .map((item) => ({
-            id: item.face.id,
-            kind: item.face.kind,
-            selectKind: item.face.selectKind || null,
-            pts: item.pts,
-          })),
+        items: [...roofItems, ...visibleItems],
+        services: [],
+        nodes: [],
       };
     }
 
     const picking = highlight.size > 0;
+    // X-ray is the quantities pick left on: everything is see-through, and
+    // the current selection is painted in the same orange.
+    const xray = viewStyle === "xray" && !picking;
     highlightHits = 0;
     const drawFace = (item, picked) => {
       const style = viewFaceStyle(item.face, viewStyle);
@@ -2398,13 +2488,14 @@ export function createMassingView({ canvas, emptyEl, hintEl, titleEl, onDraw, on
     const pickedItems = [];
     for (const item of projected) {
       if (massingLayer(item.face) >= 2) paintSite();
-      const picked = picking && item.face.kind !== "ground" && item.face.kind !== "figure" && highlight.has(item.face.id);
+      const accentId = picking ? highlight.has(item.face.id) : xray && selected.has(item.face.id);
+      const picked = accentId && item.face.kind !== "ground" && item.face.kind !== "figure";
       if (picked) {
         pickedItems.push(item);
-        highlightHits += 1;
+        if (picking) highlightHits += 1;
         continue;
       }
-      if (picking) viewCtx.globalAlpha = 0.2;
+      if ((picking || xray) && item.face.kind !== "figure") viewCtx.globalAlpha = 0.2;
       drawFace(item, false);
       viewCtx.globalAlpha = 1;
     }
@@ -2412,7 +2503,7 @@ export function createMassingView({ canvas, emptyEl, hintEl, titleEl, onDraw, on
     // Picked faces go on top of the faded building, so a hit is never hidden
     // behind a wall that merely happens to be nearer the camera.
     for (const item of pickedItems) drawFace(item, true);
-    if (live && selected.size && !picking) {
+    if (live && selected.size && !picking && !xray) {
       viewCtx.save();
       for (const item of projected) {
         if (item.face.kind === "ground" || !selected.has(item.face.id)) continue;
@@ -2440,6 +2531,30 @@ export function createMassingView({ canvas, emptyEl, hintEl, titleEl, onDraw, on
       }
       return isCutView ? sectionScale : scale;
     };
+    if (live && pickFrame) {
+      pickFrame.services = routes.map((route) => {
+        const a = projectRoute(route.a);
+        const b = projectRoute(route.b);
+        return {
+          id: route.id,
+          selectKind: "serviceEdge",
+          kind: "service",
+          a,
+          b,
+          tol: routeStrokeWidth(route.diameter, routePx(a, b)) + 5,
+        };
+      });
+      pickFrame.nodes = showServices
+        ? serviceNodes
+          .filter((node) => statusVisible(node.status, statusFilter))
+          .map((node) => ({
+            id: node.id,
+            selectKind: "serviceNode",
+            kind: "service",
+            p: projectRoute(node.p),
+          }))
+        : [];
+    }
     // Fittings (bends) are service nodes: too small to read as faces, so a
     // picked one gets a solid marker plus a short pulsing ring.
     const pickedNodes = picking && showServices
@@ -2481,6 +2596,12 @@ export function createMassingView({ canvas, emptyEl, hintEl, titleEl, onDraw, on
       highlightHits += pickedRoutes.length;
       viewCtx.globalAlpha = 0.2;
       paintServiceRoutes(viewCtx, routes.filter((route) => !highlight.has(route.id)), projectRoute, routePx, isLook);
+      viewCtx.globalAlpha = 1;
+      paintServiceRoutes(viewCtx, pickedRoutes.map((route) => ({ ...route, colour: "#ea580c", dash: null, diameter: 0.08 })), projectRoute, routePx, isLook);
+    } else if (xray) {
+      const pickedRoutes = routes.filter((route) => selected.has(route.id));
+      viewCtx.globalAlpha = 0.2;
+      paintServiceRoutes(viewCtx, routes.filter((route) => !selected.has(route.id)), projectRoute, routePx, isLook);
       viewCtx.globalAlpha = 1;
       paintServiceRoutes(viewCtx, pickedRoutes.map((route) => ({ ...route, colour: "#ea580c", dash: null, diameter: 0.08 })), projectRoute, routePx, isLook);
     } else {
@@ -2529,7 +2650,8 @@ export function createMassingView({ canvas, emptyEl, hintEl, titleEl, onDraw, on
 
   function pickAt(sx, sy) {
     if (!pickFrame) return [];
-    return pickProjected(sx, sy, pickFrame.items);
+    const faces = pickProjected(sx, sy, pickFrame.items);
+    return [...pickServiceHits(sx, sy, pickFrame), ...faces];
   }
 
   // A drag starts a move only when the front element is a window or door.
@@ -2552,10 +2674,13 @@ export function createMassingView({ canvas, emptyEl, hintEl, titleEl, onDraw, on
   }
 
   canvas.addEventListener("pointerdown", (event) => {
-    if (flat && cam.mode === "orbit") return;
+    // The schedule's top-down plan does not orbit. A click still picks,
+    // because storeys pile up on the same pixel.
+    const plan = flat && cam.mode === "orbit";
+    if (plan && !onPick) return;
     const at = canvasPoint(event);
     const hits = onPick ? pickAt(at.sx, at.sy) : [];
-    const opening = openingUnder(hits, event);
+    const opening = plan ? null : openingUnder(hits, event);
     drag = {
       x: event.clientX,
       y: event.clientY,
@@ -2570,11 +2695,16 @@ export function createMassingView({ canvas, emptyEl, hintEl, titleEl, onDraw, on
       openingId: opening?.id || null,
       openingStarted: false,
       moved: false,
+      plan,
     };
     if (opening) canvas.style.cursor = "grab";
     canvas.setPointerCapture(event.pointerId);
   });
   canvas.addEventListener("pointermove", (event) => {
+    if (drag?.plan) {
+      if (Math.hypot(event.clientX - drag.x, event.clientY - drag.y) > 4) drag.moved = true;
+      return;
+    }
     if (!drag) {
       if (!onOpeningDrag || cam.mode !== "orbit" || flat) return;
       const at = canvasPoint(event);
@@ -2646,6 +2776,7 @@ export function createMassingView({ canvas, emptyEl, hintEl, titleEl, onDraw, on
     setSite,
     setServices,
     setServiceNodes,
+    setBillFaces,
     setShowServices,
     setLook,
     setSection,

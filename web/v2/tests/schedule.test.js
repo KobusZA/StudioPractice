@@ -98,6 +98,9 @@ test("a directly-drawn wall segment is selectable, unlike a room-derived one", (
 
   const roomDerivedRow = out.instances.find((r) => r.model === "TSP_MAS009" && r.elementId !== "drawn1");
   assert.equal(roomDerivedRow.kind, null);
+  assert.equal(roomDerivedRow.pickKind, "derivedWall");
+  const form = out.sketchForms.find((f) => f.elementId === roomDerivedRow.elementId);
+  assert.equal(form.selectKind, "derivedWall");
 });
 
 test("boqRows prices what the rate book states, and leaves the rest as null, never 0", () => {
@@ -139,4 +142,34 @@ test("scheduleTotal sums only priced lines", () => {
   const expected = rows.reduce((sum, row) => sum + (row.amount || 0), 0);
   assert.equal(scheduleTotal(rows), expected);
   assert.ok(scheduleTotal(rows) > 0);
+});
+
+test("a finish on the bill is a face the model can pick, not a plan entity", () => {
+  const out = compile(twoRoomDoc(), pack);
+  const plaster = out.instances.find((row) => row.finish && row.finishCategory === "plaster");
+  assert.ok(plaster);
+  assert.equal(plaster.kind, null);
+  assert.equal(plaster.pickKind, "finish");
+  const face = out.finishFaces.find((f) => f.id === plaster.elementId);
+  assert.equal(face.selectKind, "finish");
+  assert.ok(face.pts.length >= 3);
+  const line = boqRows(out, null).find((row) => row.elements.some((el) => el.id === plaster.elementId));
+  assert.equal(line.elements.find((el) => el.id === plaster.elementId).pickKind, "finish");
+});
+
+test("a placed stair is a solid with the stair's own id", () => {
+  const priced = structuredClone(pack);
+  priced.skus.push({
+    id: "ST",
+    name: "Stair",
+    category: "stair",
+    unit: "ea",
+    geometry: { width: 0.9, going: 0.26, riser: 0.175 },
+  });
+  const doc = normalizeDoc({ stairs: [{ id: "st1", sku: "ST", x: 1, y: 2, level: "01 GFL" }] });
+  const out = compile(doc, priced);
+  const form = out.sketchForms.find((f) => f.elementId === "st1");
+  assert.equal(form.selectKind, "stair");
+  assert.ok(form.profileLoops[0].curves.length >= 4);
+  assert.equal(out.instances.find((row) => row.elementId === "st1").kind, "stair");
 });

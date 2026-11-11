@@ -433,20 +433,20 @@ belong to one printed drawing, not to the SKU catalog or the rule pack.
   where the crop sits - sections and elevations do not draw an on-plan
   marker yet either, so this is not a gap unique to callout.
 
-- **Document > Lines is one object, two ribbon buttons.** `model-lines` and
-  `annot-lines` used to both read "Week 3, with the sheet system" as a todo.
-  Unlike section/elevation/callout, a line is simple enough that it did not
-  get its own file: `model.js`'s `LINE_KINDS` (`["model", "annotation"]`)
-  documents the one distinction between the two buttons, `doc.lines` holds
-  both (level-scoped, no SKU - a line is a mark, not a catalog item), and
-  `ui.js` commits one with the beam tool's own click-click shape (`tool`
-  itself is `"model-line"` or `"annot-line"`, the same "the tool value
-  carries the choice" pattern `"section"`/`"elevation"`/`"callout"` already
-  use, rather than a second state variable). A model line ghosts to a
+- **Document > Annotate > Line is one object, one ribbon button.** It was
+  two buttons (`model-lines`, `annot-lines`) that drew the same line, which
+  nobody could tell apart on the plan. Now the Place Line tab carries a
+  line style (`line-styles.js`: thin, medium, heavy, dashed, hidden,
+  centre, saved as `style`) and an Export to CAD tick, which sets the
+  line's `kind`: `model.js`'s `LINE_KINDS` (`["model", "annotation"]`).
+  `doc.lines` holds both (level-scoped, no SKU - a line is a mark, not a
+  catalog item), and `ui.js` commits one with the beam tool's own
+  click-click shape. A line saved before styles keeps the look it had: an
+  annotation line dashed, a model line thin. A model line ghosts to a
   neighbouring level exactly as a wall/beam does - it is a modelled fact,
-  even though it is flat - and prints on a sheet's plan/callout viewport; an
-  annotation line does neither: it is a drafting mark on this drawing only,
-  the same distinction Revit draws between a Model Line and a Detail Line.
+  even though it is flat; an annotation line does not. Both print on a
+  sheet's plan/callout viewport in their style. This is the distinction
+  Revit draws between a Model Line and a Detail Line.
   Neither compiles into a 3D face or a schedule row — compile.js never reads
   `doc.lines`. The DXF and IFC exports write model lines and leave annotation
   lines out, and the export report names the annotation lines it left behind.
@@ -456,6 +456,26 @@ belong to one printed drawing, not to the SKU catalog or the rule pack.
   narrower, gated on the pre-existing `ATTACHABLE_KINDS` (`segment | beam`
   only) instead, since a line has no template-stated height for a base to
   resolve against.
+  A line may also carry `arrow` (`start | end | both`, omitted for none) and
+  `arc` (`{ radius, side, major? }`, the same arc a curved wall saves, read
+  through `click-draw.js`'s `arcFromRadius`). The Place Line tab draws a
+  line, a rectangle (four lines) or an arc (two ends, then a point on it),
+  with Chain carrying on from the last end. An arced model line goes to the
+  DXF as an ARC. Mirroring flips `arc.side`, since a mirror swaps the run's
+  left and right.
+
+- **A placed dimension measures aligned, horizontal or vertical.**
+  `doc.dimensions` rows may carry `dir` (`horizontal | vertical`, omitted for
+  aligned) and `textShift` (`{ along, off }` metres from the middle of the
+  dimension line, omitted when the number sits there). `notes.js`'s
+  `dimensionGeometry` measures along `dir` from the first point, so a
+  horizontal one reads only the x distance however the points slope.
+  Dragging the number off the line draws a short leader back to it.
+  A fill may carry `text`, drawn at its centre, and `textDx` / `textDy` for
+  where those words were dragged. The words are typed in the inspector.
+  A note's `x`/`y` is the top left of its text box; `align` places each line
+  inside the box (as wide as the longest line, or `widthMm`), so changing the
+  alignment never moves the box.
 
 - **A revision cloud is an annotation on top of a viewport, not a fifth
   viewport kind.** `ribbon.js`'s `revision` (Document > Annotate) used to
@@ -673,6 +693,26 @@ page to another floor changes `levelId` only; its placement, anchor and
 both arrive and cannot conflict, which is precisely why note-taking is allowed
 offline when geometry editing is not. The table exists; the route is step 8.
 
+## Windows and doors are identified by mark, not size
+
+Catalogue type names carry the catalogue size (`TSP_WIN_600_X_900MM`,
+"Window-Fixed — 600 x 900mm"), so a resized window used to be scheduled under a
+size it no longer had. Each opening row now carries `mark` ([marks.js](marks.js)):
+
+- **Windows carry a type mark** (`W1`, `W2`). Every window with the same mark is
+  the same product at the same width and height. A size change applies to the
+  whole type; "Make new type" splits one window off first. Sill is per window.
+- **Doors carry their own number** (`D1`, `D2`), unique on the job.
+- Marks are assigned on placement and, for documents saved before this, on
+  open. They never change when an opening is moved or resized. A window type
+  can be renamed (all its windows follow), and a door renumbered (D1.03 is fine)
+  as long as the number is not already taken.
+
+The BOQ/BOM has one line per window mark, and one line per door product and
+actual size listing its numbers ("D1–D3"). The description carries the actual
+size, not the catalogue size. Plan and sheet tags draw the mark (a hexagon for a
+window, a circle for a door), and IFC writes it as the window or door `Tag`.
+
 ## Open decisions carried into week 2
 
 1. **`floorToCeiling` was null on every level; the real export supplies it.**
@@ -722,6 +762,7 @@ offline when geometry editing is not. The table exists; the route is step 8.
 | [../../server/](../../server/) | The system of record: accounts, `project` and `drawing` rows |
 | [walls.js](walls.js) | Wall derivation from polygons |
 | [openings.js](openings.js) | Host validation, opening placement, Part O areas |
+| [marks.js](marks.js) | Window type marks and door numbers: assignment, repair, renaming, sized type names |
 | [compile.js](compile.js) | Extract payload, recipes, quantities, base-attach resolution |
 | [schedule.js](schedule.js) | BOQ (priced) and BOM (unpriced) rollups of `compile()`'s instances, one line per SKU |
 | [ifc.js](ifc.js) | IFC 2x3 export: a model file Revit can Open → IFC, then Save As |

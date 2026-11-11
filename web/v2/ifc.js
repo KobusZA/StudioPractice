@@ -497,7 +497,7 @@ export function exportIfc(doc, pack, { now = new Date(), author = "", organisati
     const leafShape = box(width, host.wall.thickness, height);
     const leafRef = f.add(isWindow ? "IFCWINDOW" : "IFCDOOR", [
       s(ifcGuid(`opening:${opening.id}`)), owner, s(label), "$", s(objectTypeFor(sku, isWindow ? "Window" : "Door")),
-      placement, leafShape, s(opening.id), r(height), r(width),
+      placement, leafShape, s(opening.mark || opening.id), r(height), r(width),
     ]);
     f.add("IFCRELFILLSELEMENT", [
       s(ifcGuid(`fills:${opening.id}`)), owner, "$", "$", openingRef, leafRef,

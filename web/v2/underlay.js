@@ -1271,6 +1271,12 @@ function translateLevelPlan(doc, levelId, dx, dy) {
       obj.y += dy;
     }
   }
+  for (const note of doc.notes || []) {
+    if (!onLevel(note, levelId) || !Number.isFinite(note.x) || !Number.isFinite(note.y)) continue;
+    note.x += dx;
+    note.y += dy;
+    if (note.leader) note.leader = { x: note.leader.x + dx, y: note.leader.y + dy };
+  }
   for (const cloud of doc.revisionClouds || []) {
     if (!onLevel(cloud, levelId) || !cloud.rect) continue;
     const rect = cloud.rect;

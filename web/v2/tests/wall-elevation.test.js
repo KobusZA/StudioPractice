@@ -8,7 +8,7 @@ import { normalizeDoc } from "../model.js";
 import { normalizePackUnits } from "../schema.js";
 import { deriveWalls } from "../walls.js";
 import { createFinishRun } from "../finish-model.js";
-import { addFoundationUnderWall, alignOutlineShift, applyOpeningEdit, applyTypedGap, applyWallTopEdit, axisAlignedOutline, dropGuideZ, elevationModel, faceRefForSelection, foundationTypes, includeDropGuide, maxTypedGap, openingSnapEdges, resizeOpeningCorner, snapElevation, translateOutlineEdge } from "../wall-elevation.js";
+import { addFoundationUnderWall, addFoundationsUnderWalls, alignOutlineShift, applyOpeningEdit, applyTypedGap, applyWallTopEdit, axisAlignedOutline, dropGuideZ, elevationModel, faceRefForSelection, foundationTypes, includeDropGuide, maxTypedGap, openingSnapEdges, resizeOpeningCorner, snapElevation, translateOutlineEdge, wallFoundationState } from "../wall-elevation.js";
 import { centerVerticalFrame, elevationSvg, faceScreenCenter, planFaceFrame } from "../wall-elevation-render.js";
 
 test("flipping the face reads the opposite edge from the other end", async () => {
@@ -260,6 +260,44 @@ test("the new footing is filed on the foundation storey when the pack has one", 
   assert.equal(faced.foundations.length, 1);
   assert.ok(Math.abs(faced.foundations[0].base - -0.6) < 1e-9);
   assert.ok(Math.abs(faced.foundations[0].top) < 1e-9);
+});
+
+test("one foundation type goes under every selected wall that would take it from its elevation", () => {
+  const doc = normalizeDoc({
+    segments: [
+      { id: "w1", sku: "TSP_MAS009", level: "01 GFL", x1: 0, y1: 0, x2: 6, y2: 0 },
+      { id: "w2", sku: "TSP_MAS009", level: "01 GFL", x1: 6, y1: 0, x2: 6, y2: 4 },
+      { id: "w3", sku: "TSP_MAS009", level: "01 GFL", x1: 6, y1: 4, x2: 0, y2: 4 },
+      { id: "up", sku: "TSP_MAS009", level: "02 L1", x1: 0, y1: 0, x2: 6, y2: 0 },
+      { id: "had", sku: "TSP_CON052", level: "01 GFL", x1: 6, y1: 4, x2: 0, y2: 4, baseOffset: -0.6 },
+    ],
+  });
+  const before = doc.segments.length;
+  const result = addFoundationsUnderWalls(doc, pack, ["w1", "w2", "w2", "w3", "up", "had"], "TSP_CON052");
+  assert.equal(result.added.length, 2);
+  assert.equal(doc.segments.length, before + 2);
+  assert.deepEqual(result.skipped, { has: 1, level: 1, foundation: 1 });
+  for (const id of ["w1", "w2"]) {
+    const wall = doc.segments.find((s) => s.id === id);
+    const foot = doc.segments.find((s) => result.added.includes(s.id) && s.x1 === wall.x1 && s.y1 === wall.y1);
+    assert.ok(foot, `a footing follows ${id}`);
+    assert.equal(foot.sku, "TSP_CON052");
+    assert.equal(foot.x2, wall.x2);
+    assert.equal(foot.y2, wall.y2);
+    assert.equal(elevationModel(doc, pack, { wallId: id }).foundationOffer, null, `${id} now has its footing`);
+  }
+  const again = addFoundationsUnderWalls(doc, pack, ["w1", "w2"], "TSP_CON052");
+  assert.equal(again.added.length, 0);
+  assert.equal(again.skipped.has, 2);
+});
+
+test("the batch and the elevation agree on which walls take a footing", () => {
+  const doc = drawnDoc();
+  const walls = deriveWalls(doc, pack);
+  const wall = walls.find((w) => w.id === "w1");
+  const state = wallFoundationState(doc, pack, wall, walls, "TSP_CON052");
+  const model = elevationModel(doc, pack, { wallId: "w1" }, walls, "TSP_CON052");
+  assert.deepEqual(state.offer, model.foundationOffer);
 });
 
 test("a wall's own height sets the top", () => {
@@ -622,6 +660,61 @@ test("a selected window is dimensioned with the sill below and the height to the
 
   const plain = elevationSvg(m, { width: 640, height: 280, selectedId: null });
   assert.doesNotMatch(plain.svg, /data-elev-dim=/);
+
+  const face = (m.faceScale > 0 ? m.faceScale : 1);
+  const from = Number.isFinite(m.faceFrom) ? m.faceFrom : 0;
+  const to = Number.isFinite(m.faceTo) ? m.faceTo : m.length;
+  const left = Math.round((o.offset - from) * face * 1000);
+  const right = Math.round((to - o.offset - o.width) * face * 1000);
+  assert.match(live.svg, new RegExp(`data-elev-dim="left">${left}<`));
+  assert.match(live.svg, new RegExp(`data-elev-dim="right">${right}<`));
+  const leftTag = live.svg.match(/<text[^>]*data-elev-dim="left"[^>]*>/);
+  assert.ok(yOf(leftTag) > sillLine, "the gaps to the wall ends sit below the opening");
+});
+
+test("nearby openings are dimensioned without a string across everything in between", async () => {
+  const { elevationSvg } = await import("../wall-elevation-render.js");
+  const at = (from, width) => (from + width / 2) / 6;
+  const crowded = drawnDoc([
+    { id: "a", sku: "TSP_WN1212", wallId: "w1", t: at(0.3, 0.7), width: 0.7, height: 1.2, sill: 0.9 },
+    { id: "b", sku: "TSP_WN1212", wallId: "w1", t: at(1.4, 0.7), width: 0.7, height: 1.2, sill: 0.9 },
+    { id: "c", sku: "TSP_WN1212", wallId: "w1", t: at(2.5, 1), width: 1, height: 1.2, sill: 0.9 },
+  ]);
+  const many = elevationModel(crowded, pack, { wallId: "w1" });
+  const packed = elevationSvg(many, { width: 800, height: 360, interactive: true, selectedId: "c" }).svg;
+  assert.match(packed, /data-elev-dim="left">400</, "the near gap is the next window, 400 mm away");
+  assert.doesNotMatch(packed, /data-elev-dim="left-wall"/, "a further window already fills that side, so the wall gap is not drawn across it");
+  assert.match(packed, /data-elev-dim="right">2500</);
+
+  const clear = drawnDoc([
+    { id: "b", sku: "TSP_WN1212", wallId: "w1", t: at(1.4, 0.7), width: 0.7, height: 1.2, sill: 0.9 },
+    { id: "c", sku: "TSP_WN1212", wallId: "w1", t: at(2.5, 1), width: 1, height: 1.2, sill: 0.9 },
+  ]);
+  const pair = elevationModel(clear, pack, { wallId: "w1" });
+  const open = elevationSvg(pair, { width: 800, height: 360, interactive: true, selectedId: "c" }).svg;
+  assert.match(open, /data-elev-dim="left">400</);
+  assert.match(open, /data-elev-dim="left-wall">1400</, "the clear run from the neighbour back to the wall stays");
+
+  const stacked = drawnDoc([
+    { id: "low", sku: "TSP_WN1212", wallId: "w1", t: 0.5, width: 1.2, height: 0.25, sill: 0.35 },
+    { id: "c", sku: "TSP_WN1212", wallId: "w1", t: 0.5, width: 1.2, height: 1, sill: 1 },
+  ]);
+  const stack = elevationModel(stacked, pack, { wallId: "w1" });
+  const above = elevationSvg(stack, { width: 800, height: 420, interactive: true, selectedId: "c" }).svg;
+  assert.match(above, /data-elev-dim="sill">400</, "the sill run stops at the opening below");
+  assert.match(above, /data-elev-dim="base">350</);
+  assert.doesNotMatch(above, /data-elev-dim="sill">1000</);
+
+  const aside = drawnDoc([
+    { id: "low", sku: "TSP_WN1212", wallId: "w1", t: at(0.3, 0.8), width: 0.8, height: 0.4, sill: 0 },
+    { id: "c", sku: "TSP_WN1212", wallId: "w1", t: at(2.5, 1), width: 1, height: 1.2, sill: 0.9 },
+  ]);
+  const missed = elevationModel(aside, pack, { wallId: "w1" });
+  const high = elevationSvg(missed, { width: 800, height: 360, interactive: true, selectedId: "c" }).svg;
+  const host = missed.openings.find((o) => o.id === "c");
+  const left = Math.round(host.offset * 1000);
+  assert.match(high, new RegExp(`data-elev-dim="left">${left}<`), "a window that does not face this one is not a side dimension");
+  assert.doesNotMatch(high, /data-elev-dim="left-wall"/);
 });
 
 test("a short wall still shows the next floor, and the top storey shows the roof", async () => {

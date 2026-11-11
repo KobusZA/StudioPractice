@@ -139,6 +139,13 @@ export function rotateSelection(doc, refs, { degrees = 90 } = {}) {
       if (obj.base) obj.base = rotateShape(obj.base, turn);
       mapRoofCuts(obj, (shape) => rotateShape(shape, turn));
       if (obj.seed) [obj.seed.x, obj.seed.y] = turn(obj.seed.x, obj.seed.y);
+      if (ref.kind === "region" && (obj.textDx || obj.textDy)) {
+        let dx = obj.textDx || 0;
+        let dy = obj.textDy || 0;
+        for (let i = 0; i < ((turns % 4) + 4) % 4; i += 1) [dx, dy] = [dy, -dx];
+        if (dx) obj.textDx = dx; else delete obj.textDx;
+        if (dy) obj.textDy = dy; else delete obj.textDy;
+      }
     } else if (obj.rect && Number.isFinite(obj.rect.minX)) {
       obj.rect = rectFromCorners(obj.rect, turn);
     } else if (ENDPOINTED.has(ref.kind)) {
@@ -146,7 +153,10 @@ export function rotateSelection(doc, refs, { degrees = 90 } = {}) {
       [obj.x2, obj.y2] = turn(obj.x2, obj.y2);
     } else if (obj.x !== undefined) {
       [obj.x, obj.y] = turn(obj.x, obj.y);
+      if (obj.leader) [obj.leader.x, obj.leader.y] = turn(obj.leader.x, obj.leader.y);
       obj.rotation = ((obj.rotation || 0) + turns * 90) % 360;
+      // Drawing text reads from the bottom or from the left, never upside down.
+      if (ref.kind === "note") obj.rotation %= 180;
     }
   }
   return done(`Rotated ${rows.length} object${rows.length === 1 ? "" : "s"} ${turns * 90}°.`);
@@ -287,6 +297,12 @@ export function mirrorSelection(doc, refs, { axis = "v" } = {}) {
       if (obj.base) obj.base = rotateShape(obj.base, flip);
       mapRoofCuts(obj, (shape) => rotateShape(shape, flip));
       if (obj.seed) [obj.seed.x, obj.seed.y] = flip(obj.seed.x, obj.seed.y);
+      if (ref.kind === "region" && (obj.textDx || obj.textDy)) {
+        const dx = axis === "h" ? (obj.textDx || 0) : -(obj.textDx || 0);
+        const dy = axis === "h" ? -(obj.textDy || 0) : (obj.textDy || 0);
+        if (dx) obj.textDx = dx; else delete obj.textDx;
+        if (dy) obj.textDy = dy; else delete obj.textDy;
+      }
     } else if (obj.rect && Number.isFinite(obj.rect.minX)) {
       obj.rect = rectFromCorners(obj.rect, flip);
     } else if (ENDPOINTED.has(ref.kind)) {
@@ -294,12 +310,19 @@ export function mirrorSelection(doc, refs, { axis = "v" } = {}) {
       [obj.x2, obj.y2] = flip(obj.x2, obj.y2);
     } else if (obj.x !== undefined) {
       [obj.x, obj.y] = flip(obj.x, obj.y);
+      if (obj.leader) [obj.leader.x, obj.leader.y] = flip(obj.leader.x, obj.leader.y);
     }
     // swing is which side of the wall, and mirroring reverses that wall's
     // normal, so it swaps. hand is which end of the same wall; those ends
     // move with the mirror, so the hinge stays on its jamb.
     if (ref.kind === "opening" && obj.swing !== undefined) obj.swing = -obj.swing;
     if (ref.kind === "segment" && obj.location) obj.location = mirroredWallLocation(obj.location);
+    // A mirror turns the run's left-hand side into its right.
+    if (obj.arc && (obj.arc.side === 1 || obj.arc.side === -1)) obj.arc.side = -obj.arc.side;
+    if (ref.kind === "dimension") {
+      if (obj.offset) obj.offset = -obj.offset;
+      if (obj.textShift?.off) obj.textShift.off = -obj.textShift.off;
+    }
   }
   return done(`Mirrored ${rows.length} object${rows.length === 1 ? "" : "s"} about the ${axis === "h" ? "horizontal" : "vertical"} centre.`);
 }
@@ -343,6 +366,7 @@ export function copySelection(doc, refs, { dx = null, dy = 0 } = {}) {
     } else if (copy.x !== undefined) {
       copy.x = copy.x + offsetX;
       copy.y = copy.y + dy;
+      if (copy.leader) copy.leader = { x: copy.leader.x + offsetX, y: copy.leader.y + dy };
     } else {
       // An opening is anchored to a host, not to coordinates, so a blind copy
       // would land on the same spot on the same wall.
@@ -423,6 +447,7 @@ function translateObject(ref, obj, dx, dy, doc = null) {
   } else if (obj.x !== undefined) {
     obj.x = obj.x + dx;
     obj.y = obj.y + dy;
+    if (obj.leader) obj.leader = { x: obj.leader.x + dx, y: obj.leader.y + dy };
   }
 }
 

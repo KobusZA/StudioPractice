@@ -46,7 +46,7 @@ import {
   skuById,
   wallForOpening,
 } from "./openings.js";
-import { deriveDrawnWalls, deriveWalls, isExternalWall, skuDrawnHeight } from "./walls.js";
+import { deriveDrawnWalls, deriveWalls, isExternalWall, isStripFooting, skuDrawnHeight } from "./walls.js";
 import {
   ceilingElevation,
   floorLevel,
@@ -56,8 +56,9 @@ import {
 } from "./floor-levels.js";
 import { arcPoints } from "./click-draw.js";
 import { edgeHomeLevel, runGradient, serviceTakeoff } from "./services.js";
-import { finishRegionAreas, resolveFinishes, wallFaceFills } from "./finish-model.js";
+import { finishRegionAreas, resolveFinishes, wallFaceFills } from "./finish-model.js?v=20261111-boq-click";
 import { joineryAlong, joineryHeights, joineryIsRun, joineryPolygon } from "./joinery.js";
+import { markKind, markSide, sizedTypeName } from "./marks.js";
 
 const CATEGORY_TO_SCHEDULE = {
   wall: "Walls",
@@ -645,6 +646,9 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
     // shared wall exists only for the duration of this compile and has
     // nothing on the plan a click could select, so it carries no kind.
     row.kind = wall.drawn ? "segment" : null;
+    // A room-derived wall is drawn, and the bill can point at it, but it is
+    // not a segment in the document, so the plan locator is not given one.
+    if (!wall.drawn) row.pickKind = "derivedWall";
     if (wall.derived) {
       row.derived = true;
       row.hostWallId = wall.hostWallId;
@@ -653,8 +657,9 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
 
     sketchForms.push({
       kind: "Wall",
-      // A room-derived wall is not a document object, so a click cannot select it.
-      selectKind: wall.drawn ? "segment" : null,
+      // A room-derived wall is not a document object. The bill's model still
+      // picks it; the plan locator does not, because there is no segment to select.
+      selectKind: wall.drawn ? "segment" : "derivedWall",
       elementId: wall.id,
       name: sku.name,
       thickness: wall.thickness,
@@ -688,9 +693,16 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
 
     const row = baseRow(pack, sku, opening.id, objectStatus(opening));
     applyMeasures(row, sku, { count: 1, area: openingVoidArea(size.width, size.height, sku, size.rise) });
+    row.type = sizedTypeName(sku, size);
+    if (Number.isFinite(size.width) && Number.isFinite(size.height)) row.openingSize = { width: size.width, height: size.height };
+    const kind = markKind(pack, opening);
+    if (kind) {
+      row.markKind = kind;
+      if (opening.mark) row.mark = opening.mark;
+    }
     if (size.nonStandard) {
       row.nonStandardSize = true;
-      nonStandardOpenings.push(`${sku.name} ${Math.round(size.width * 1000)} x ${Math.round(size.height * 1000)} mm on ${levelName(pack, wall.level)}`);
+      nonStandardOpenings.push(`${opening.mark ? `${opening.mark} ` : ""}${row.type} on ${levelName(pack, wall.level)}`);
     }
     row.hostWallId = wall.id;
     row.external = isExternalWall(wall);
@@ -710,6 +722,7 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
       // foundation is not left sitting at the level datum below it.
       elevation: wallBases.get(wall.id)?.elevation ?? levelElevation(pack, wall.level),
       status: objectStatus(opening),
+      ...(kind && opening.mark ? { mark: opening.mark, markSide: markSide(doc, wall, placed, opening, kind) } : {}),
       profileLoops: [{
         length: placed.width,
         curves: [{
@@ -835,6 +848,42 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
     row.level = stair.level || defaultLevelFor(pack, sku);
     row.kind = "stair";
     instances.push(row);
+
+    if (Number.isFinite(stair.x) && Number.isFinite(stair.y)) {
+      const g = sku.geometry || {};
+      const width = g.width > 0 ? g.width : 0.9;
+      const going = g.going > 0 ? g.going : 0.25;
+      const riser = g.riser > 0 ? g.riser : 0.175;
+      const levelId = row.level;
+      const levelRec = (pack.levels || []).find((l) => l.id === levelId);
+      const rise = (Number(levelRec?.floorToFloor) > 0.2 ? levelRec.floorToFloor : null)
+        ?? (pack.system?.wallHeight > 0.2 ? pack.system.wallHeight : 2.7);
+      const steps = Math.max(2, Math.round(rise / riser));
+      const length = going * steps;
+      const rot = ((Number(stair.rotation) || 0) * Math.PI) / 180;
+      const dx = Math.cos(rot);
+      const dy = Math.sin(rot);
+      const px = -dy * width;
+      const py = dx * width;
+      const x = stair.x;
+      const y = stair.y;
+      sketchForms.push({
+        kind: "Extrusion",
+        selectKind: "stair",
+        elementId: stair.id,
+        name: sku.name,
+        isSolid: true,
+        depth: riser * steps,
+        elevation: levelElevation(pack, levelId),
+        profileLoops: [polyLoop([
+          [x, y],
+          [x + dx * length, y + dy * length],
+          [x + dx * length + px, y + dy * length + py],
+          [x + px, y + py],
+        ])],
+        status: objectStatus(stair),
+      });
+    }
   }
 
   // --- services ------------------------------------------------------------
@@ -924,6 +973,9 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
     sketchForms,
     rooms,
     warnings,
+    // Faces the bill can click that are not building solids: each finish, proud
+    // of the wall or floor it covers. The main 3D view does not draw these.
+    finishFaces: finishes.faces,
     // Additive: per-network totals and the drainage findings. `schematicLength`
     // is shown for information and is in no instance row.
     services: {
@@ -963,18 +1015,72 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
 }
 
 /**
+ * Metres of `wall` that one of `drawn` already runs under: parallel, within
+ * reach of its line, overlapping along it. The same test the wall elevation
+ * uses to show a footing under a wall. Overlapping footings count once.
+ */
+function coveredLength(wall, drawn) {
+  const dx = wall.x2 - wall.x1;
+  const dy = wall.y2 - wall.y1;
+  const len = Math.hypot(dx, dy);
+  if (!(len > 0)) return 0;
+  const ux = dx / len;
+  const uy = dy / len;
+  const spans = [];
+  for (const f of drawn) {
+    const fdx = f.x2 - f.x1;
+    const fdy = f.y2 - f.y1;
+    const fl = Math.hypot(fdx, fdy) || 1;
+    if (Math.abs((fdx * ux + fdy * uy) / fl) < 0.996) continue;
+    const mx = (f.x1 + f.x2) / 2 - wall.x1;
+    const my = (f.y1 + f.y2) / 2 - wall.y1;
+    if (Math.abs(mx * uy - my * ux) > ((wall.thickness || 0) + (f.thickness || 0)) / 2 + 0.05) continue;
+    const a = (f.x1 - wall.x1) * ux + (f.y1 - wall.y1) * uy;
+    const b = (f.x2 - wall.x1) * ux + (f.y2 - wall.y1) * uy;
+    const from = Math.max(0, Math.min(a, b));
+    const to = Math.min(len, Math.max(a, b));
+    if (to > from) spans.push([from, to]);
+  }
+  spans.sort((p, q) => p[0] - q[0]);
+  let covered = 0;
+  let end = -Infinity;
+  for (const [from, to] of spans) {
+    if (to <= end) continue;
+    covered += to - Math.max(from, end);
+    end = to;
+  }
+  return Math.min(covered, wall.length ?? len);
+}
+
+/**
  * Implied quantities: things the contractor never draws but the QS must price.
  * A masonry wall implies a foundation under it; a room implies a floor.
+ * A foundation drawn along part of a room wall takes that part out of the
+ * implied length, and only that part. A footing does not cover a foundation
+ * wall's length or the other way round.
  */
 function explodeRecipes(doc, pack, instances, roomWalls) {
   const hasFloor = instances.some((row) => row.category === "Floors");
-  const drawnFoundation = deriveDrawnWalls(doc, pack)
-    .some((w) => skuById(pack, w.sku)?.category === "foundation");
+  const drawnFoundations = deriveDrawnWalls(doc, pack)
+    .filter((w) => skuById(pack, w.sku)?.category === "foundation");
 
   const lengthBySku = new Map();
   for (const wall of roomWalls) {
     lengthBySku.set(wall.sku, (lengthBySku.get(wall.sku) || 0) + wall.length);
   }
+  const uncoveredCache = new Map();
+  const uncoveredLength = (wallSku, strip) => {
+    const key = `${wallSku}|${strip}`;
+    if (!uncoveredCache.has(key)) {
+      const cover = drawnFoundations.filter((f) => isStripFooting(skuById(pack, f.sku)) === strip);
+      let len = 0;
+      for (const wall of roomWalls) {
+        if (wall.sku === wallSku) len += wall.length - coveredLength(wall, cover);
+      }
+      uncoveredCache.set(key, len);
+    }
+    return uncoveredCache.get(key);
+  };
   const areaByWallSku = new Map();
   const perimeterByWallSku = new Map();
   for (const room of doc.rooms || []) {
@@ -992,10 +1098,13 @@ function explodeRecipes(doc, pack, instances, roomWalls) {
     const prev = implied.get(add.id) || { sku: add, length: 0, area: 0 };
 
     if (rule.per === "wallLength") {
-      if (add.category === "foundation" && drawnFoundation) continue;
-      const len = lengthBySku.get(rule.whenSku) || 0;
-      if (len <= 0) continue;
+      const foundation = add.category === "foundation";
+      const len = foundation
+        ? uncoveredLength(rule.whenSku, isStripFooting(add))
+        : lengthBySku.get(rule.whenSku) || 0;
+      if (len <= 1e-6) continue;
       prev.length += len;
+      if (foundation) prev.perWall = true;
     } else if (rule.per === "roomPerimeter") {
       const len = perimeterByWallSku.get(rule.whenSku) || 0;
       if (len <= 0) continue;
@@ -1012,8 +1121,8 @@ function explodeRecipes(doc, pack, instances, roomWalls) {
   }
 
   let n = 1;
-  for (const { sku, length, area } of implied.values()) {
-    if (instances.some((row) => row.model === sku.id)) continue;
+  for (const { sku, length, area, perWall } of implied.values()) {
+    if (!perWall && instances.some((row) => row.model === sku.id)) continue;
     const g = sku.geometry || {};
     const row = baseRow(pack, sku, `impl${n}`, "planned");
     row.family = sku.family || sku.name;

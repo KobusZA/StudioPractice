@@ -210,6 +210,7 @@ const FLOOR_OWNED = [
   ["finishRuns", "wall finish", "wall finishes"],
   ["items", "placed item", "placed items"],
   ["dimensions", "dimension", "dimensions"],
+  ["notes", "note", "notes"],
   ["revisionClouds", "revision cloud", "revision clouds"],
   ["serviceNodes", "service point", "service points"],
 ];
@@ -312,7 +313,7 @@ export function applyFloorRemoval(doc, target) {
     }
     doc[key] = stay;
   };
-  for (const key of ["rooms", "segments", "slabs", "roofs", "beams", "stairs", "lines", "separations", "regions", "dimensions", "revisionClouds"]) {
+  for (const key of ["rooms", "segments", "slabs", "roofs", "beams", "stairs", "lines", "separations", "regions", "dimensions", "notes", "revisionClouds"]) {
     take(key);
   }
   take("openings", (row) => walls.has(row.wallId));
@@ -335,6 +336,9 @@ export function applyFloorRemoval(doc, target) {
   if (Array.isArray(doc.levels)) doc.levels = doc.levels.filter((level) => !ids.has(level.id));
   if (doc.levelElevations) {
     for (const id of ids) delete doc.levelElevations[id];
+  }
+  if (doc.levelNames) {
+    for (const id of ids) delete doc.levelNames[id];
   }
   const set = doc.sheetSet;
   if (set) {
@@ -545,6 +549,54 @@ export function setLevelElevation(overrides, levelId, metres) {
   return next;
 }
 
+// --- Rename a level per job ------------------------------------------------
+//
+// `doc.levelNames[levelId] = name` lays over a template level, like
+// `levelElevations`. A level the document inserted is renamed on its own
+// entry instead; this map is only the template overlay. The id never changes,
+// so every object that points at the level still does.
+
+/** Overlay per-job names on a level list (new objects, input untouched).
+ * A renamed level is marked `nameFromUser` so the rail shows the text as
+ * typed, without the template's code split or spelling-out. */
+export function applyLevelNames(levels, names) {
+  if (!names || !Object.keys(names).length) return levels;
+  return (levels || []).map((l) => {
+    const name = names[l.id];
+    if (typeof name !== "string" || !name.trim()) return l;
+    return { ...l, name: name.trim(), nameFromUser: true };
+  });
+}
+
+/**
+ * Whether `levelId` may take `text` as its name, one message per cause.
+ * `levels` is the stack as currently seen (overrides already applied).
+ * A name equal to another level's id or name would make `id === x || name === x`
+ * lookups point at the wrong level.
+ */
+export function validateLevelRename(levels, levelId, text) {
+  const name = String(text ?? "").trim();
+  if (!name) return { ok: false, message: "Name the level, e.g. Ground floor." };
+  if (name.length > 40) return { ok: false, message: "A level name can be at most 40 characters." };
+  const ordered = levels || [];
+  if (!ordered.some((l) => l.id === levelId)) return { ok: false, message: "That level no longer exists." };
+  const key = name.toLowerCase();
+  const clash = ordered.find(
+    (l) => l.id !== levelId && (String(l.id).toLowerCase() === key || String(l.name ?? "").toLowerCase() === key)
+  );
+  if (clash) return { ok: false, message: `A level called "${clash.name || clash.id}" already exists.` };
+  return { ok: true, message: name };
+}
+
+/** Return the new `levelNames` map with `levelId` set (or cleared on a blank). Pure. */
+export function setLevelName(names, levelId, text) {
+  const next = { ...(names || {}) };
+  const trimmed = text === null || text === undefined ? "" : String(text).trim();
+  if (!trimmed) delete next[levelId];
+  else next[levelId] = trimmed;
+  return next;
+}
+
 // --- Active-cut stations (floor / ceiling / roof) ------------------------
 //
 // The house widget, keyboard paging and the inspector all have to name the
@@ -638,6 +690,9 @@ function spelledLevelName(text) {
  */
 export function levelDisplayName(level) {
   const raw = String(level?.name || level?.id || "").trim();
+  // A name the user typed, or a level they inserted, is shown as typed.
+  // Spelling-out and the leading code belong to template names only.
+  if (level?.userSupplied || level?.nameFromUser) return { code: "", name: raw };
   const m = /^(\d{1,3})\s+(.+)$/.exec(raw);
   return m ? { code: m[1], name: spelledLevelName(m[2]) } : { code: "", name: spelledLevelName(raw) };
 }

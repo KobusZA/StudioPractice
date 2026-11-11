@@ -620,13 +620,49 @@ function alignLines(parts, model, guides, xOf, yOf, W, H) {
   }
 }
 
-/** Vertical dimension string beside a selected opening. `kind` is `sill`
- * (floor to sill, drawn below the frame) or `ceiling` (head to the top of
- * the wall). Ticks are the oblique marks used on an architectural elevation. */
-function dimensionRun(parts, { y1, y2, dx, side, jamb, label, kind, H }) {
+const DIM_MIN = 0.005;
+const DIM_LABEL_PX = 6.2;
+
+function dimLabelBox(x, y, anchor, text) {
+  const width = String(text).length * DIM_LABEL_PX + 2;
+  const left = anchor === "start" ? x : anchor === "end" ? x - width : x - width / 2;
+  return { left, right: left + width, top: y - 9, bottom: y + 2 };
+}
+
+function dimHits(box, taken) {
+  return taken.some((b) => box.left < b.right + 3 && b.left < box.right + 3 && box.top < b.bottom + 3 && b.top < box.bottom + 3);
+}
+
+/** Keep a dimension's caption when it has room. An outer string gives way
+ *  when its caption would sit on one already drawn. */
+function placeDimText(parts, x, y, anchor, label, kind, taken, { required = false, awayY = 0 } = {}) {
+  const tryAt = (yy) => {
+    const box = dimLabelBox(x, yy, anchor, label);
+    if (dimHits(box, taken)) return false;
+    parts.push(`<text x="${x}" y="${yy}" text-anchor="${anchor}" class="elev-dim" data-elev-dim="${kind}">${label}</text>`);
+    taken.push(box);
+    return true;
+  };
+  if (tryAt(y)) return true;
+  if (awayY && tryAt(y + awayY)) return true;
+  if (!required) return false;
+  const box = dimLabelBox(x, y, anchor, label);
+  parts.push(`<text x="${x}" y="${y}" text-anchor="${anchor}" class="elev-dim" data-elev-dim="${kind}">${label}</text>`);
+  taken.push(box);
+  return true;
+}
+
+/** Vertical dimension string beside a selected opening. Ticks are the oblique
+ *  marks used on an architectural elevation. */
+function dimensionRun(parts, { y1, y2, dx, side, jamb, label, kind, H, taken, required = false }) {
   const top = Math.min(y1, y2);
   const bot = Math.max(y1, y2);
-  if (bot - top < 1 || !label) return;
+  if (bot - top < 1 || !label) return false;
+  const ty = Math.min(H - 3, Math.max(9, (top + bot) / 2 + 3));
+  const anchor = side > 0 ? "start" : "end";
+  const tx = dx + side * 5;
+  const awayY = ty > (top + bot) / 2 ? 12 : -12;
+  if (!required && !placeDimText(parts, tx, ty, anchor, label, kind, taken, { awayY })) return false;
   const dir = dx >= jamb ? 1 : -1;
   const witness = (yy) => {
     parts.push(`<line x1="${jamb + dir * 2}" y1="${yy}" x2="${dx + dir * 3}" y2="${yy}" class="elev-dim-ext"/>`);
@@ -635,9 +671,25 @@ function dimensionRun(parts, { y1, y2, dx, side, jamb, label, kind, H }) {
   witness(top);
   witness(bot);
   parts.push(`<line x1="${dx}" y1="${top}" x2="${dx}" y2="${bot}" class="elev-dim-line"/>`);
-  const ty = Math.min(H - 3, Math.max(9, (top + bot) / 2 + 3));
-  const anchor = side > 0 ? "start" : "end";
-  parts.push(`<text x="${dx + side * 5}" y="${ty}" text-anchor="${anchor}" class="elev-dim" data-elev-dim="${kind}">${label}</text>`);
+  if (required) placeDimText(parts, tx, ty, anchor, label, kind, taken, { required: true, awayY });
+  return true;
+}
+
+/** Horizontal clearance, on one line under the opening or above a door. */
+function dimensionRunH(parts, { x1, x2, y, label, kind, taken, required = false, awayY = 12 }) {
+  const left = Math.min(x1, x2);
+  const right = Math.max(x1, x2);
+  if (right - left < 1 || !label) return false;
+  const tx = (left + right) / 2;
+  const ty = y - 3;
+  if (!required && !placeDimText(parts, tx, ty, "middle", label, kind, taken, { awayY })) return false;
+  parts.push(`<line x1="${left}" y1="${y - 6}" x2="${left}" y2="${y + 6}" class="elev-dim-ext"/>`);
+  parts.push(`<line x1="${right}" y1="${y - 6}" x2="${right}" y2="${y + 6}" class="elev-dim-ext"/>`);
+  parts.push(`<line x1="${left}" y1="${y}" x2="${right}" y2="${y}" class="elev-dim-line"/>`);
+  parts.push(`<line x1="${left - 3.2}" y1="${y + 3.2}" x2="${left + 3.2}" y2="${y - 3.2}" class="elev-dim-tick"/>`);
+  parts.push(`<line x1="${right - 3.2}" y1="${y + 3.2}" x2="${right + 3.2}" y2="${y - 3.2}" class="elev-dim-tick"/>`);
+  if (required) placeDimText(parts, tx, ty, "middle", label, kind, taken, { required: true, awayY });
+  return true;
 }
 
 const CUT_EPS = 1e-4;
@@ -682,26 +734,140 @@ function cutFill(outer, holes, xOf, yOf, base) {
   return `<path d="${[outer, ...holes].map(ring).join("")}" fill-rule="evenodd"`;
 }
 
-function dimensionOpening(parts, { x, y, w, h, opening, model, yOf, W, H }) {
-  const floorY = yOf(model.base);
-  const ceilY = yOf(model.top);
-  const sillY = y + h;
-  const toCeiling = model.height - opening.sill - opening.height;
-  const showSill = opening.category !== "door" && opening.sill > 0.005;
-  const showCeiling = toCeiling > 0.005;
-  if (!showSill && !showCeiling) return;
+function overlapLen(a0, a1, b0, b1) {
+  return Math.min(a1, b1) - Math.max(a0, b0);
+}
+
+/** Other openings, joinery and wall returns on this face. Finishes are left
+ *  out: a paint band is not something an opening is set out from. */
+function openingNeighbors(model, opening) {
+  const boxes = [];
+  const add = (s0, s1, z0, z1) => {
+    if (!(s1 - s0 > DIM_MIN) || !(z1 - z0 > DIM_MIN)) return;
+    boxes.push({ s0, s1, z0, z1 });
+  };
+  for (const o of model.openings || []) {
+    if (o.id === opening.id) continue;
+    add(o.offset, o.offset + o.width, o.sill || 0, (o.sill || 0) + (o.height || 0));
+  }
+  for (const j of model.joinery || []) add(j.from, j.to, j.bottom || 0, j.top || 0);
+  const base = model.base || 0;
+  for (const p of model.projections || []) add(p.from, p.to, p.base - base, p.top - base);
+  return boxes;
+}
+
+/** The closest box on one side of an edge, when the two actually face each
+ *  other. A window higher up the wall is not a left-hand neighbour. */
+function nearestOnSide(boxes, side, edge, u0, u1) {
+  let best = null;
+  for (const box of boxes) {
+    let gap = null;
+    if (side === "left" && box.s1 < edge - DIM_MIN && overlapLen(u0, u1, box.z0, box.z1) > 0.02) gap = edge - box.s1;
+    else if (side === "right" && box.s0 > edge + DIM_MIN && overlapLen(u0, u1, box.z0, box.z1) > 0.02) gap = box.s0 - edge;
+    else if (side === "down" && box.z1 < edge - DIM_MIN && overlapLen(u0, u1, box.s0, box.s1) > 0.02) gap = edge - box.z1;
+    else if (side === "up" && box.z0 > edge + DIM_MIN && overlapLen(u0, u1, box.s0, box.s1) > 0.02) gap = box.z0 - edge;
+    if (gap == null || gap <= DIM_MIN) continue;
+    if (!best || gap < best.gap - 1e-6) best = { gap, box };
+  }
+  return best;
+}
+
+/** Another object already sits between the nearest neighbour and the wall,
+ *  so a second dimension would run across it. */
+function blocksRemainder(boxes, side, near, u0, u1) {
+  if (!near) return false;
+  const box = near.box;
+  for (const other of boxes) {
+    if (other === box) continue;
+    if (side === "left" || side === "right") {
+      if (overlapLen(u0, u1, other.z0, other.z1) <= 0.02) continue;
+      if (side === "left" && other.s1 <= box.s0 + 1e-3 && other.s1 > DIM_MIN) return true;
+      if (side === "right" && other.s0 >= box.s1 - 1e-3) return true;
+    } else if (overlapLen(u0, u1, other.s0, other.s1) > 0.02) {
+      if (side === "down" && other.z1 <= box.z0 + 1e-3 && other.z1 > DIM_MIN) return true;
+      if (side === "up" && other.z0 >= box.z1 - 1e-3) return true;
+    }
+  }
+  return false;
+}
+
+/** Gap to the nearest facing object, then the rest of the way to the wall
+ *  when that rest is clear. With nothing in the way, one run reaches the wall. */
+function sideSegments(near, edge, wall, scale, kindNear, kindFar, blocked, vertical) {
+  const towardWall = wall < edge;
+  if (!near) {
+    const span = Math.abs(edge - wall);
+    if (span <= DIM_MIN) return [];
+    return [{ a: wall, b: edge, metres: span * scale, kind: kindNear }];
+  }
+  const facing = towardWall ? edge - near.gap : edge + near.gap;
+  const segs = [{ a: facing, b: edge, metres: near.gap * scale, kind: kindNear }];
+  if (blocked) return segs;
+  const outer = towardWall
+    ? (vertical ? near.box.z0 : near.box.s0)
+    : (vertical ? near.box.z1 : near.box.s1);
+  const rest = Math.abs(outer - wall);
+  if (rest <= DIM_MIN) return segs;
+  segs.push({ a: wall, b: outer, metres: rest * scale, kind: kindFar, outer: true });
+  return segs;
+}
+
+function dimensionOpening(parts, { x, y, w, h, opening, model, xOf, yOf, W, H }) {
+  const taken = [];
+  const scale = faceScaleOf(model);
+  const faceFrom = Number.isFinite(model.faceFrom) ? model.faceFrom : 0;
+  const faceTo = Number.isFinite(model.faceTo) ? model.faceTo : model.length;
+  const s0 = opening.offset;
+  const s1 = opening.offset + opening.width;
+  const z0 = opening.sill || 0;
+  const z1 = z0 + (opening.height || 0);
+  const boxes = openingNeighbors(model, opening);
+  const leftNear = nearestOnSide(boxes, "left", s0, z0, z1);
+  const rightNear = nearestOnSide(boxes, "right", s1, z0, z1);
+  const downNear = nearestOnSide(boxes, "down", z0, s0, s1);
+  const upNear = nearestOnSide(boxes, "up", z1, s0, s1);
 
   const gap = 20;
   const right = x + w + gap;
   const side = right + 32 <= W - 4 ? 1 : -1;
   const dx = side > 0 ? right : x - gap;
   const jamb = side > 0 ? x + w : x;
-  if (showSill) {
-    dimensionRun(parts, { y1: floorY, y2: sillY, dx, side, jamb, label: mm(opening.sill), kind: "sill", H });
+  const drawVert = (segs) => {
+    const first = segs.filter((seg) => !seg.outer);
+    const rest = segs.filter((seg) => seg.outer);
+    for (const seg of [...first, ...rest]) {
+      const y1 = yOf(model.base + seg.a);
+      const y2 = yOf(model.base + seg.b);
+      if (seg.outer && Math.abs(y2 - y1) < 28) continue;
+      dimensionRun(parts, {
+        y1, y2, dx, side, jamb, label: mm(seg.metres), kind: seg.kind, H, taken, required: !seg.outer,
+      });
+    }
+  };
+  if (opening.category !== "door") {
+    drawVert(sideSegments(downNear, z0, 0, 1, "sill", "base", blocksRemainder(boxes, "down", downNear, s0, s1), true));
   }
-  if (showCeiling) {
-    dimensionRun(parts, { y1: y, y2: ceilY, dx, side, jamb, label: mm(toCeiling), kind: "ceiling", H });
-  }
+  drawVert(sideSegments(upNear, z1, model.height, 1, "ceiling", "top", blocksRemainder(boxes, "up", upNear, s0, s1), true));
+
+  const below = y + h + 16;
+  const above = y - 16;
+  const under = (opening.sill || 0) >= 0.05 && below <= H - 12;
+  const yLine = under ? below : above >= 12 ? above : Math.min(H - 12, Math.max(12, below));
+  const awayY = yLine > y ? 12 : -12;
+  const drawHoriz = (segs) => {
+    const first = segs.filter((seg) => !seg.outer);
+    const rest = segs.filter((seg) => seg.outer);
+    for (const seg of [...first, ...rest]) {
+      const x1 = xOf(seg.a);
+      const x2 = xOf(seg.b);
+      if (seg.outer && Math.abs(x2 - x1) < 28) continue;
+      dimensionRunH(parts, {
+        x1, x2, y: yLine, label: mm(seg.metres), kind: seg.kind, taken, required: !seg.outer, awayY,
+      });
+    }
+  };
+  drawHoriz(sideSegments(leftNear, s0, faceFrom, scale, "left", "left-wall", blocksRemainder(boxes, "left", leftNear, z0, z1), false));
+  drawHoriz(sideSegments(rightNear, s1, faceTo, scale, "right", "right-wall", blocksRemainder(boxes, "right", rightNear, z0, z1), false));
 }
 
 function bandPolygon(b) {
@@ -1077,14 +1243,16 @@ export function elevationSvg(model, { width, height, interactive = false, select
     }
     if (sel) {
       // Setting-out, the way an elevation is dimensioned: the opening size
-      // stays on the frame, the sill height is the run below it, and the
-      // run above it is the height from the head up to the ceiling (the
-      // top of this wall).
+      // stays on the frame. The runs beside it are the sill and the height
+      // to the ceiling; the runs under it (above a door) are the gaps to
+      // the two ends of the wall. A nearer opening, fitting or return takes
+      // that side, and the rest of the way to the wall is kept only when
+      // nothing else sits in between.
       const headRoom = y - yOf(model.top);
       const labelY = headRoom >= 32 ? Math.max(10, y - 16) : Math.min(y + h - 4, y + 16);
       const riseNote = o.head === "arch" && o.rise > 0 ? `  rise ${mm(o.rise)}` : "";
       parts.push(`<text x="${x + w / 2}" y="${labelY}" text-anchor="middle" class="elev-dim">${mm(o.width)} × ${mm(o.height)}${riseNote}</text>`);
-      dimensionOpening(parts, { x, y, w, h, opening: o, model, yOf, W, H });
+      dimensionOpening(parts, { x, y, w, h, opening: o, model, xOf, yOf, W, H });
     }
     if (interactive && sel) {
       // A window, a plain opening, and an arch are resized from four corners.

@@ -29,6 +29,8 @@ import {
   normalizeRoomFinishes,
 } from "./finish-data.js";
 import { knownConvention } from "./region.js";
+import { cleanLineArc, knownLineArrow, knownLineStyle } from "./line-styles.js";
+import { cleanDimensionText, normalizeNotes, normalizeTextStyles } from "./notes.js";
 import { normalizeSatelliteUnderlay } from "./satellite.js";
 import { normalizeSheetSet } from "./sheet-set.js";
 import { expandServiceRefs, normalizeServices } from "./service-model.js";
@@ -51,6 +53,7 @@ export const ENTITY_KINDS = [
   "separation",
   "region",
   "revisionCloud",
+  "note",
   // 2.5D services (service-model.js). A network is not selectable - it is a
   // grouping, not a thing on the plan - so only nodes and edges have refs.
   "serviceNode",
@@ -58,15 +61,16 @@ export const ENTITY_KINDS = [
 ];
 
 /**
- * Document > Lines: two ribbon buttons (`model-lines`, `annot-lines`) over
- * one object shape - a level-scoped line segment with no SKU, since a line
- * is a mark, not a catalog item. The two kinds share every field; only their
- * meaning differs, the same distinction Revit's Model Line vs Detail Line
- * draws: a model line is a modelled fact (it ghosts to a neighbouring level
- * the way a wall/beam does, and is what a DXF/IFC export would eventually
- * hand a receiving Revit user), an annotation line is a drafting mark on
+ * Document > Annotate > Line: one ribbon button over one object shape - a
+ * level-scoped line segment with no SKU, since a line is a mark, not a
+ * catalog item. How it looks is its `style` (line-styles.js). Its `kind` is
+ * the Export to CAD tick on the tab, the same distinction Revit's Model Line
+ * vs Detail Line draws: a model line is a modelled fact (it ghosts to a
+ * neighbouring level the way a wall/beam does, and is what a DXF/IFC export
+ * hands a receiving Revit user), an annotation line is a drafting mark on
  * this drawing only (it does not ghost - see ui.js's drawPlanLevel - and is
- * never exported as if it were part of the building). Neither compiles into
+ * never exported as if it were part of the building). Both print on a
+ * sheet. Neither compiles into
  * a 3D face or a schedule row: a Revit model line is a flat sketch line on
  * its work plane too, not a solid, so `compile.js` never reads `doc.lines`.
  * The DXF and IFC exports do write model lines (a receiving Revit user can
@@ -149,19 +153,24 @@ export function emptyDoc() {
     figures: [],
     beams: [],
     stairs: [],
-    // Document > Lines (`model-lines`/`annot-lines`) - see LINE_KINDS above
-    // for why one array serves both ribbon buttons.
+    // Document > Annotate > Line - see LINE_KINDS above for why one array
+    // serves both kinds.
     lines: [],
     // Build > Rooms > Separate. A line that bounds a room where there is
     // no wall. Not a model line (it is not part of the building export) and
     // not an annotation line (the room outline follows it).
     separations: [],
-    // Document > Annotate > Region. A filled patch on the drawing. `convention`
-    // is one of region.js's three template names, or null until the user picks one.
+    // Document > Annotate > Fill. A filled patch on the drawing. `convention`
+    // is one of region.js's fills; null draws an outline only.
     regions: [],
     // Document > Annotate > Dimensions. A placed string, not a scratch
     // measurement: it stays on its level's plan and prints on that level's sheet.
     dimensions: [],
+    // Document > Annotate > Text (notes.js). The user's own words on this
+    // level's plan; `textStyles` holds the styles the job added beyond the
+    // built-in and pack ones.
+    notes: [],
+    textStyles: [],
     // 2.5D service routing - see service-model.js. Normalised, not nested:
     // a route that rises through three storeys is one network whose nodes
     // carry their own level, not three per-level copies.
@@ -220,6 +229,10 @@ export function emptyDoc() {
     // Per-job elevation overrides, { [levelId]: metres } - level-view.js's
     // applyLevelElevations(). Empty means the template/inserted values stand.
     levelElevations: {},
+    // Per-job display names for template levels, { [levelId]: name }.
+    // A level this document inserted is renamed on its own `levels` entry.
+    // The id never changes. Empty means the template name stands.
+    levelNames: {},
     // Finishes (finish-model.js). Products the job uses, drawn runs on wall
     // faces, floor regions, saved room-finish presets, and two job settings.
     finishProducts: [],
@@ -411,6 +424,7 @@ const KIND_TO_ARRAY = {
   region: "regions",
   revisionCloud: "revisionClouds",
   dimension: "dimensions",
+  note: "notes",
   serviceNode: "serviceNodes",
   serviceEdge: "serviceEdges",
   // A floor finish region is not an entity of its own on the plan (it is never
@@ -913,7 +927,7 @@ export class PlanStore {
       else if (obj.x1 !== undefined) {
         snaps.push({ ref, x1: obj.x1, y1: obj.y1, x2: obj.x2, y2: obj.y2 });
       } else if (obj.x !== undefined) {
-        snaps.push({ ref, x: obj.x, y: obj.y });
+        snaps.push({ ref, x: obj.x, y: obj.y, leader: obj.leader ? { ...obj.leader } : null });
       } else if (obj.rect && Number.isFinite(obj.rect.minX)) {
         snaps.push({ ref, rect: clone(obj.rect) });
       }
@@ -957,6 +971,7 @@ export class PlanStore {
       } else {
         obj.x = snapVal(snap.x + dx);
         obj.y = snapVal(snap.y + dy);
+        if (snap.leader) obj.leader = { x: snapVal(snap.leader.x + dx), y: snapVal(snap.leader.y + dy) };
       }
     }
   }
@@ -983,6 +998,7 @@ const PLAN_MARK_ARRAYS = [
   "regions",
   "finishRegions",
   "dimensions",
+  "notes",
   "serviceNodes",
   "serviceEdges",
   "revisionClouds",
@@ -1021,6 +1037,7 @@ const JOB_CONTENT_ARRAYS = [
   "finishRuns",
   "finishProducts",
   "dimensions",
+  "notes",
   "serviceNetworks",
   "serviceNodes",
   "serviceEdges",
@@ -1261,12 +1278,18 @@ export function normalizeDoc(raw) {
       const x2 = lineCoord(l?.x2);
       const y2 = lineCoord(l?.y2);
       if (!l?.id || [x1, y1, x2, y2].some((v) => v === null) || !LINE_KINDS.includes(l.kind)) return null;
+      const style = knownLineStyle(l.style);
+      const arrow = knownLineArrow(l.arrow);
+      const arc = cleanLineArc(l.arc);
       return {
         id: l.id,
         kind: l.kind,
         level: l.level || null,
         x1, y1, x2, y2,
         status: l.status === "existing" ? "existing" : "planned",
+        ...(style ? { style } : {}),
+        ...(arrow ? { arrow } : {}),
+        ...(arc ? { arc } : {}),
       };
     })
     .filter(Boolean);
@@ -1286,12 +1309,18 @@ export function normalizeDoc(raw) {
         ? r.shape
         : null;
       if (!r?.id || !shape) return null;
+      const text = typeof r.text === "string" ? r.text.trim() : "";
+      const textDx = typeof r.textDx === "number" && Number.isFinite(r.textDx) ? r.textDx : 0;
+      const textDy = typeof r.textDy === "number" && Number.isFinite(r.textDy) ? r.textDy : 0;
       return {
         id: r.id,
         level: r.level || null,
         convention: knownConvention(r.convention),
         status: r.status === "existing" ? "existing" : "planned",
         shape,
+        ...(text ? { text } : {}),
+        ...(text && textDx ? { textDx } : {}),
+        ...(text && textDy ? { textDy } : {}),
       };
     })
     .filter(Boolean);
@@ -1303,9 +1332,11 @@ export function normalizeDoc(raw) {
       const y2 = lineCoord(d?.y2);
       if (!d?.id || [x1, y1, x2, y2].some((v) => v === null)) return null;
       if (Math.hypot(x2 - x1, y2 - y1) <= 0) return null;
-      return { id: d.id, level: d.level || null, x1, y1, x2, y2 };
+      return { id: d.id, level: d.level || null, x1, y1, x2, y2, ...cleanDimensionText(d) };
     })
     .filter(Boolean);
+  doc.notes = normalizeNotes(raw.notes);
+  doc.textStyles = normalizeTextStyles(raw.textStyles);
   Object.assign(doc, normalizeServices(raw, { itemIds: new Set(doc.items.map((i) => i.id)) }));
   doc.groups = Array.isArray(raw.groups) ? raw.groups : [];
   doc.sheets = Array.isArray(raw.sheets) ? raw.sheets : [];
@@ -1440,6 +1471,13 @@ export function normalizeDoc(raw) {
     for (const [k, v] of Object.entries(raw.levelElevations)) if (num(v) !== null) doc.levelElevations[k] = v;
   }
 
+  doc.levelNames = {};
+  if (raw.levelNames && typeof raw.levelNames === "object") {
+    for (const [k, v] of Object.entries(raw.levelNames)) {
+      if (typeof v === "string" && v.trim()) doc.levelNames[k] = v.trim();
+    }
+  }
+
   doc.finishProducts = normalizeFinishProducts(raw.finishProducts);
   doc.finishRuns = normalizeFinishRuns(raw.finishRuns);
   doc.finishRegions = normalizeFinishRegions(raw.finishRegions);
@@ -1517,6 +1555,10 @@ export function migrateOpening(o) {
   // A missing rise is a semicircle. A stored rise may be taller than half the
   // current width; drawing caps it, and a later widening brings it back.
   row.rise = Number.isFinite(row.rise) && row.rise > 0 ? row.rise : null;
+  // W1 / D3 (marks.js). Missing until the pack is known to say window or door.
+  const mark = typeof row.mark === "string" ? row.mark.trim() : "";
+  if (mark) row.mark = mark;
+  else delete row.mark;
   return row;
 }
 

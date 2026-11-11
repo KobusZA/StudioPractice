@@ -537,10 +537,33 @@ test("masonry walls imply a foundation by wall length", () => {
   assert.equal(Math.round(implied.length * 1e6) / 1e6, 27);
 });
 
-test("a drawn foundation suppresses the implied one", () => {
+test("a drawn foundation takes only the wall it runs under out of the implied one", () => {
   const doc = twoRoomDoc();
   doc.segments.push({
-    id: "t1", sku: "TSP_CON052", x1: 0, y1: -0.4, x2: 8, y2: -0.4, status: "planned",
+    id: "t1", sku: "TSP_CON052", x1: 0, y1: 0, x2: 8, y2: 0, status: "planned",
+  });
+  const out = compile(doc, pack);
+  const implied = out.instances.filter((r) => r.implied && r.model === "TSP_CON052");
+  assert.equal(implied.length, 1);
+  assert.equal(Math.round(implied[0].length * 1e6) / 1e6, 27 - 8);
+});
+
+test("overlapping drawn footings along one wall count once against the implied one", () => {
+  const doc = twoRoomDoc();
+  doc.segments.push(
+    { id: "t1", sku: "TSP_CON052", x1: 0, y1: 0, x2: 5, y2: 0, status: "planned" },
+    { id: "t2", sku: "TSP_CON052", x1: 3, y1: 0, x2: 8, y2: 0, status: "planned" },
+  );
+  const out = compile(doc, pack);
+  const implied = out.instances.find((r) => r.implied && r.model === "TSP_CON052");
+  assert.equal(Math.round(implied.length * 1e6) / 1e6, 27 - 8);
+});
+
+test("footings drawn under every room wall leave no implied foundation", () => {
+  const doc = twoRoomDoc();
+  const lines = [[0, 0, 8, 0], [8, 0, 8, 4], [8, 4, 4, 4], [4, 4, 4, 0], [4, 3, 0, 3], [0, 3, 0, 0]];
+  lines.forEach(([x1, y1, x2, y2], i) => {
+    doc.segments.push({ id: `t${i}`, sku: "TSP_CON052", x1, y1, x2, y2, status: "planned" });
   });
   const out = compile(doc, pack);
   assert.equal(out.instances.filter((r) => r.implied && r.model === "TSP_CON052").length, 0);

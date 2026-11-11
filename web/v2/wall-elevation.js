@@ -500,6 +500,10 @@ export function addFoundationUnderWall(doc, pack, faceRef, walls = null, skuId =
   if (!wall || wall.category === "foundation") return null;
   const offer = elevationModel(doc, pack, faceRef, all, skuId)?.foundationOffer;
   if (!offer) return null;
+  return placeFooting(doc, pack, wall, offer);
+}
+
+function placeFooting(doc, pack, wall, offer) {
   const home = foundationStorey(pack.levels || []);
   const levelId = home?.id || wall.level;
   const seg = {
@@ -515,6 +519,45 @@ export function addFoundationUnderWall(doc, pack, faceRef, walls = null, skuId =
   };
   (doc.segments || (doc.segments = [])).push(seg);
   return { id: seg.id, name: offer.name };
+}
+
+/**
+ * Why a wall would or would not take a footing from the elevation, without
+ * building its whole face: `{ offer }` when it would, else `{ reason }`:
+ * "foundation" (it is one), "has" (a footing is already drawn under it) or
+ * "level" (it does not start on the ground storey, or the job has no type).
+ */
+export function wallFoundationState(doc, pack, wall, all, skuId = null) {
+  if (!wall) return { reason: "missing" };
+  if (wall.category === "foundation") return { reason: "foundation" };
+  const sku = skuById(pack, wall.sku);
+  const base = resolvedBase(doc, pack, wall, wall.height || sku?.geometry?.height || pack.system?.wallHeight || 0).elevation;
+  const foundations = foundationsUnder(doc, pack, wall, all, base, false);
+  if (foundations.some((f) => !f.derived)) return { reason: "has" };
+  const offer = foundationOfferFor(pack, base, skuId, foundations.some((f) => f.derived));
+  return offer ? { offer } : { reason: "level" };
+}
+
+/**
+ * Add a footing of type `skuId` under every wall in `wallIds` that would take
+ * one from its elevation. The rest are counted by reason, as in
+ * `wallFoundationState`. Mutates `doc` (the caller owns undo and persist).
+ * Returns `{ added, name, skipped: { has, level, foundation } }`.
+ */
+export function addFoundationsUnderWalls(doc, pack, wallIds, skuId = null, walls = null) {
+  const all = walls || deriveWalls(doc, pack);
+  const out = { added: [], name: null, skipped: { has: 0, level: 0, foundation: 0 } };
+  for (const wallId of new Set(wallIds || [])) {
+    const state = wallFoundationState(doc, pack, all.find((w) => w.id === wallId), all, skuId);
+    if (!state.offer) {
+      if (state.reason in out.skipped) out.skipped[state.reason] += 1;
+      continue;
+    }
+    const added = placeFooting(doc, pack, all.find((w) => w.id === wallId), state.offer);
+    out.added.push(added.id);
+    out.name = added.name;
+  }
+  return out;
 }
 
 /**

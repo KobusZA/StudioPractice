@@ -25,6 +25,8 @@ import {
   orbitRay,
   rayPlanePoint,
   pickProjected,
+  pickServiceHits,
+  cycleStackedHits,
   EYE_HEIGHT_M,
   LOOK_NEAR,
   MASSING_PITCH_MIN,
@@ -172,6 +174,38 @@ test("a click hits the front element, then the one behind it", () => {
   assert.equal(over[0].selectKind, "opening");
   assert.equal(pickProjected(80, 80, [back, front])[0].id, "wall");
   assert.equal(pickProjected(200, 200, [back, front]).length, 0);
+});
+
+test("repeated clicks on the same stack walk back through it", () => {
+  const hits = [
+    { id: "win", selectKind: "opening" },
+    { id: "wall", selectKind: "segment" },
+  ];
+  const first = cycleStackedHits(null, hits);
+  assert.equal(first.index, 0);
+  const second = cycleStackedHits(first, hits);
+  assert.equal(second.index, 1);
+  assert.equal(second.key, first.key);
+  const third = cycleStackedHits(second, hits);
+  assert.equal(third.index, 0);
+  const moved = cycleStackedHits(second, [hits[1]]);
+  assert.equal(moved.index, 0);
+  assert.notEqual(moved.key, second.key);
+  assert.equal(cycleStackedHits(first, []).index, -1);
+});
+
+test("a click on a pipe or a bend is that service, in front of the face behind it", () => {
+  const frame = {
+    nodes: [{ id: "bend", selectKind: "serviceNode", kind: "service", p: [10, 10] }],
+    services: [{ id: "run", selectKind: "serviceEdge", kind: "service", a: [0, 20], b: [40, 20], tol: 6 }],
+  };
+  const bend = pickServiceHits(10, 12, frame);
+  assert.equal(bend[0].id, "bend");
+  assert.equal(bend[0].selectKind, "serviceNode");
+  const run = pickServiceHits(20, 22, frame);
+  assert.equal(run[0].id, "run");
+  assert.equal(run[0].selectKind, "serviceEdge");
+  assert.equal(pickServiceHits(80, 80, frame).length, 0);
 });
 
 test("3D faces remember which document object a click selects", () => {

@@ -1096,7 +1096,8 @@ tbody tr:hover { background: rgba(26, 22, 18, 0.04); }
 /* `.planner-fields label { display: flex }` outranks the browser's own
    [hidden] rule, so fields the inspector hides (Name, Use, Form, Pitch...)
    would otherwise still show on objects they do not apply to. */
-.planner-fields [hidden] {
+.planner-fields [hidden],
+.planner-fields[hidden] {
   display: none !important;
 }
 
@@ -1216,6 +1217,44 @@ tbody tr:hover { background: rgba(26, 22, 18, 0.04); }
 .ctx-status-line > span {
   font-size: 11px;
   color: var(--ink-soft);
+}
+/* Foundation under the selected walls: the caption on its own line, then the
+   type and Add sharing the next line at the same height. The inspector's
+   buttons otherwise stretch to the whole label, which left Add a tall box
+   beside the caption. */
+.ctx-foundation-batch {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "label label"
+    "type add"
+    "note note";
+  align-items: stretch;
+  gap: 4px 8px;
+}
+.ctx-foundation-batch[hidden] {
+  display: none !important;
+}
+.ctx-foundation-batch > label {
+  grid-area: label;
+}
+.ctx-foundation-batch select {
+  grid-area: type;
+  min-width: 0;
+  width: 100%;
+}
+.planner-fields .ctx-foundation-batch #v2-ctx-footing-add {
+  grid-area: add;
+  align-self: stretch;
+  min-height: 0;
+  padding: 0 12px;
+}
+.ctx-foundation-batch .plan-context-note {
+  grid-area: note;
+  align-self: start;
+}
+.ctx-foundation-batch .plan-context-note:empty {
+  display: none;
 }
 .planner-fields #v2-ctx-status {
   align-self: auto;
@@ -3590,6 +3629,25 @@ button.fin-kind {
   font-variant-numeric: tabular-nums;
 }
 .level-rail-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.level-rail-name.is-editable,
+.level-station-elev.is-editable { cursor: text; }
+input.level-rail-name {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: 1.35em;
+  margin: 0;
+  padding: 0 2px;
+  border: 1px solid var(--copper);
+  border-radius: 2px;
+  background: #fff;
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: 1.15;
+  color: inherit;
+}
+input.level-rail-name:focus { outline: none; }
 .level-rail-labels button:hover,
 .level-rail-labels button.is-hover { background: rgba(26, 22, 18, 0.05); }
 .level-rail-labels button:focus-visible { outline: 1px solid var(--copper); outline-offset: -1px; }
@@ -4705,6 +4763,58 @@ input.level-station-elev:focus {
   display: none;
 }
 
+/* Text, Line and Fill on their placing and Modify tabs. */
+.annot-opts select {
+  height: 28px;
+  max-width: 10rem;
+  padding: 0 22px 0 8px;
+  font: inherit;
+  font-size: 0.78rem;
+}
+
+.annot-opts .unit-field input {
+  width: 4.4rem;
+}
+
+.annot-opts .colour-swatch {
+  min-width: 28px;
+  padding: 0 6px;
+  gap: 5px;
+}
+
+.annot-opts .colour-swatch span {
+  display: block;
+  width: 14px;
+  height: 14px;
+  border: 1px solid rgba(26, 22, 18, 0.3);
+  border-radius: 50%;
+}
+
+.annot-opts .colour-swatch.active span {
+  box-shadow: 0 0 0 2px #fff, 0 0 0 3px currentColor;
+}
+
+.annot-opts .is-override .draw-name,
+.annot-opts .seg button.is-override {
+  color: var(--copper, #b2451e);
+}
+
+.annot-opts .seg button.is-override {
+  box-shadow: inset 2px 0 0 var(--copper, #b2451e);
+}
+
+.annot-opts .fill-swatch {
+  display: block;
+  width: 18px;
+  height: 14px;
+  border: 1px solid rgba(26, 22, 18, 0.35);
+  border-radius: 2px;
+}
+
+#v2-fill-bar .seg button {
+  gap: 5px;
+}
+
 /* Last resort: Top and Height leave the row and open from this button. */
 .ribbon-settings[data-density="fold"]:not(:has(#v2-wall-top[hidden])) .settings-more {
   display: inline-flex;
@@ -4998,6 +5108,88 @@ input.level-station-elev:focus {
   display: none !important;
 }
 
+/* Document > Annotate > Text: the note being typed, over the plan where it lands. */
+.note-edit-input {
+  position: absolute;
+  z-index: 3;
+  box-sizing: content-box;
+  min-width: 80px;
+  margin: 0;
+  padding: 2px 4px;
+  resize: none;
+  overflow: hidden;
+  white-space: pre;
+  line-height: 1.25;
+  color: #1a1612;
+  background: rgba(255, 253, 248, 0.92);
+  border: 1.5px solid #3a5f7a;
+  border-radius: 2px;
+  box-shadow: var(--shadow);
+  transform-origin: 0 0;
+}
+
+.note-edit-input[hidden] {
+  display: none !important;
+}
+
+.planner-fields.text-fields textarea {
+  font: inherit;
+  font-size: 0.86rem;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--ink);
+  padding: 6px 8px;
+  resize: vertical;
+  min-height: 3.6em;
+}
+
+.text-fields .dim-text-fields,
+.text-fields .note-only-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.text-fields .text-format-row,
+.text-fields .text-size-row,
+.text-fields .text-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: end;
+}
+
+.text-fields .text-size-row label {
+  flex: 1 1 0;
+  min-width: 90px;
+}
+
+.text-fields input[type="color"] {
+  width: 100%;
+  min-height: 32px;
+  padding: 2px;
+}
+
+.planner-fields label.text-check {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 0.86rem;
+  color: var(--ink);
+}
+
+/* A property this object sets for itself rather than taking from its style. */
+.text-fields [data-text-prop].is-override,
+.text-fields button.is-override {
+  box-shadow: inset 3px 0 0 #b2451e;
+}
+
+.text-fields [data-text-prop].is-override {
+  padding-left: 7px;
+}
+
 /* Merged Types + Inspector dock: one panel, three states
    (create / edit / empty) rather than two permanently-open columns. */
 .dock-context {
@@ -5018,15 +5210,18 @@ input.level-station-elev:focus {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
+  gap: 8px;
   padding: 10px 12px 8px;
   border-bottom: 1px solid var(--line);
   flex-shrink: 0;
+  min-width: 0;
 }
 
 .inspect-heading {
   display: flex;
   align-items: baseline;
   gap: 10px;
+  flex: 1 1 auto;
   min-width: 0;
 }
 
@@ -5036,6 +5231,7 @@ input.level-station-elev:focus {
   background: transparent;
   padding: 0;
   margin: 0;
+  flex: 0 0 auto;
   font: inherit;
   font-size: 0.8rem;
   color: var(--copper);
@@ -5046,6 +5242,10 @@ input.level-station-elev:focus {
 
 .dock-context > header h2 {
   margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-family: Fraunces, Georgia, serif;
   font-size: 1rem;
   font-weight: 500;
@@ -5057,6 +5257,15 @@ input.level-station-elev:focus {
   font-size: 11px;
   font-weight: 400;
   color: var(--ink-soft);
+}
+
+#v2-inspect-kicker {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
 }
 
 .ctx-empty {
@@ -5099,10 +5308,12 @@ input.level-station-elev:focus {
 
 .ctx-type-current {
   display: grid;
-  grid-template-columns: 10px 1fr auto auto;
+  grid-template-columns: 10px minmax(0, 1fr) minmax(0, max-content) auto;
   align-items: center;
   gap: 8px;
   width: 100%;
+  min-width: 0;
+  overflow: hidden;
   text-align: left;
   padding: 7px 8px;
   border: 1px solid color-mix(in srgb, var(--ink) 18%, transparent);
@@ -5123,6 +5334,7 @@ input.level-station-elev:focus {
 .ctx-type-current-name {
   font-weight: 600;
   font-size: 13px;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -5131,7 +5343,12 @@ input.level-station-elev:focus {
   font-style: normal;
   font-size: 11px;
   color: var(--ink-soft);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
+.ctx-type-current em:empty { display: none; }
 .ctx-type-current .chev {
   width: 14px;
   height: 14px;
@@ -5555,6 +5772,14 @@ input.level-station-elev:focus {
 .planner-read-field > strong {
   font-weight: 600;
   text-align: right;
+}
+
+#v2-ctx-otype-note {
+  align-items: center;
+}
+
+#v2-ctx-otype-note > button[hidden] {
+  display: none;
 }
 
 #v2-attach-report .attach-row,
@@ -6577,6 +6802,8 @@ input.level-station-elev:focus {
   background: #fff;
   border-radius: 3px;
   cursor: pointer;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .schedule-overlay.peek .schedule-panel > header h2 {
@@ -6624,6 +6851,13 @@ input.level-station-elev:focus {
 
 .schedule-panel .cost-table td.wrap {
   font-size: 0.84rem;
+}
+
+.schedule-family-row td,
+.schedule-family {
+  padding-top: 12px;
+  font-weight: 600;
+  color: var(--ink-soft, #5c5348);
 }
 
 .schedule-panel .cost-table th {

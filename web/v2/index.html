@@ -10,7 +10,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,560&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="../shared/tokens.css" />
   <link rel="stylesheet" href="../shared/splash.css" />
-  <link rel="stylesheet" href="./v2.css?v=20261111-mass-host" />
+  <link rel="stylesheet" href="./v2.css?v=20261112-footing-add" />
   <!-- Painted before the stylesheet arrives, so a cold load is ink rather
        than a white flash. A reload of this tab skips it. -->
   <style>
@@ -111,6 +111,108 @@
            settings; mountRibbonSettings moves them into a Settings group.
            They stay out of the ribbon's innerHTML so a redraw cannot destroy them. -->
       <div id="v2-ribbon-settings-park" hidden>
+          <!-- Place Text / Modify | Text. Acts on the note being typed, the
+               selected notes and dimensions, or the next note placed. -->
+          <div class="wall-opts annot-opts" id="v2-text-bar" hidden>
+            <label class="field-stack" title="A named look shared by every note that uses it. Picking one clears this note's own settings.">
+              <span class="draw-name">Style</span>
+              <select id="v2-text-bar-style" aria-label="Text style"></select>
+            </label>
+            <label class="field-stack" data-text-bar-prop="font">
+              <span class="draw-name">Font</span>
+              <select id="v2-text-bar-font" aria-label="Font"></select>
+            </label>
+            <label class="field-stack" data-text-bar-prop="sizeMm" title="Height on the printed sheet, in millimetres. The same at every scale.">
+              <span class="draw-name">Size</span>
+              <span class="unit-field">
+                <input id="v2-text-bar-size" type="text" inputmode="decimal" autocomplete="off" aria-label="Text size in millimetres" />
+                <span class="unit">mm</span>
+              </span>
+            </label>
+            <div class="plan-loc">
+              <span class="draw-name">Format</span>
+              <div class="seg" role="group" aria-label="Format">
+                <button type="button" data-text-bar-toggle="bold" aria-pressed="false" title="Bold (Ctrl+B)"><b>B</b></button>
+                <button type="button" data-text-bar-toggle="italic" aria-pressed="false" title="Italic (Ctrl+I)"><i>I</i></button>
+                <button type="button" data-text-bar-toggle="underline" aria-pressed="false" title="Underline (Ctrl+U)"><u>U</u></button>
+                <button type="button" data-text-bar-toggle="box" aria-pressed="false" title="Print a frame around the text box">Border</button>
+              </div>
+            </div>
+            <div class="plan-loc">
+              <span class="draw-name">Align</span>
+              <div class="seg" role="group" aria-label="Align">
+                <button type="button" data-text-bar-align="left" aria-pressed="false" aria-label="Align left" title="Align left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 10h10M4 14h16M4 18h10"/></svg></button>
+                <button type="button" data-text-bar-align="center" aria-pressed="false" aria-label="Centre" title="Centre"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M7 10h10M4 14h16M7 18h10"/></svg></button>
+                <button type="button" data-text-bar-align="right" aria-pressed="false" aria-label="Align right" title="Align right"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M10 10h10M4 14h16M10 18h10"/></svg></button>
+              </div>
+            </div>
+            <div class="plan-loc" data-text-bar-prop="colour">
+              <span class="draw-name">Colour</span>
+              <div class="seg colour-swatches" role="group" aria-label="Text colour" id="v2-text-bar-colours"></div>
+              <input id="v2-text-bar-colour" type="color" class="visually-hidden" tabindex="-1" aria-hidden="true" />
+            </div>
+            <label class="field-stack" id="v2-text-bar-plan-only-wrap" title="Shown on the plan in a lighter colour, never printed on a sheet. For working notes.">
+              <span class="draw-name">Plan only</span>
+              <span class="check-slot"><input type="checkbox" id="v2-text-bar-plan-only" /></span>
+            </label>
+          </div>
+          <!-- Place Line / Modify | Lines. -->
+          <div class="wall-opts annot-opts" id="v2-line-bar" hidden>
+            <div class="plan-loc" id="v2-line-bar-shape-wrap">
+              <span class="draw-name">Draw</span>
+              <div class="seg" role="group" aria-label="Draw" id="v2-line-bar-shapes">
+                <button type="button" data-line-shape="line" aria-pressed="false" aria-label="Line" title="A straight line between two clicks"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M4 19L20 5"/></svg></button>
+                <button type="button" data-line-shape="rect" aria-pressed="false" aria-label="Rectangle" title="A rectangle between two opposite corners"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="4" y="6" width="16" height="12"/></svg></button>
+                <button type="button" data-line-shape="arc" aria-pressed="false" aria-label="Arc" title="An arc: click both ends, then a point it passes through"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M4 18a9 9 0 0 1 16 0"/></svg></button>
+              </div>
+            </div>
+            <label class="field-stack" id="v2-line-bar-chain-wrap" title="Each line starts where the last one ended. Esc ends the run.">
+              <span class="draw-name">Chain</span>
+              <span class="check-slot"><input type="checkbox" id="v2-line-bar-chain" /></span>
+            </label>
+            <div class="plan-loc" id="v2-line-bar-arrow-wrap">
+              <span class="draw-name">Arrows</span>
+              <div class="seg" role="group" aria-label="Arrowheads" id="v2-line-bar-arrows">
+                <button type="button" data-line-arrow="none" aria-pressed="false" aria-label="No arrowheads" title="No arrowheads"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M3 12h18"/></svg></button>
+                <button type="button" data-line-arrow="start" aria-pressed="false" aria-label="Arrow at the start" title="Arrowhead at the first end"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h18M8 7l-5 5 5 5"/></svg></button>
+                <button type="button" data-line-arrow="end" aria-pressed="false" aria-label="Arrow at the end" title="Arrowhead at the last end"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h18M16 7l5 5-5 5"/></svg></button>
+                <button type="button" data-line-arrow="both" aria-pressed="false" aria-label="Arrows at both ends" title="Arrowheads at both ends"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h18M8 7l-5 5 5 5M16 7l5 5-5 5"/></svg></button>
+              </div>
+            </div>
+            <div class="plan-loc">
+              <span class="draw-name">Line style</span>
+              <div class="seg" role="group" aria-label="Line style" id="v2-line-bar-styles"></div>
+            </div>
+            <label class="field-stack" title="Ticked, the line also goes into the DXF and IFC as a modelled edge and shows faintly on the floors above and below. Unticked, it is ink on this drawing only. Both print on the sheet.">
+              <span class="draw-name">Export to CAD</span>
+              <span class="check-slot"><input type="checkbox" id="v2-line-bar-export" /></span>
+            </label>
+          </div>
+          <!-- Place Dimension / Modify | Dimensions. -->
+          <div class="wall-opts annot-opts" id="v2-dim-bar" hidden>
+            <div class="plan-loc">
+              <span class="draw-name">Measure</span>
+              <div class="seg" role="group" aria-label="Measure" id="v2-dim-bar-dirs">
+                <button type="button" data-dim-dir="auto" aria-pressed="false" title="Horizontal when the line is pulled above or below, vertical when pulled to the side, aligned otherwise">Auto</button>
+                <button type="button" data-dim-dir="aligned" aria-pressed="false" aria-label="Aligned" title="Along the line between the two points"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M5 17L17 5M3 15l4 4M15 3l4 4"/></svg></button>
+                <button type="button" data-dim-dir="horizontal" aria-pressed="false" aria-label="Horizontal" title="Only the distance across"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M4 12h16M4 8v8M20 8v8"/></svg></button>
+                <button type="button" data-dim-dir="vertical" aria-pressed="false" aria-label="Vertical" title="Only the distance up and down"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M12 4v16M8 4h8M8 20h8"/></svg></button>
+              </div>
+            </div>
+            <div class="plan-loc" id="v2-dim-bar-text-wrap">
+              <span class="draw-name">Number</span>
+              <div class="seg" role="group" aria-label="Number">
+                <button type="button" id="v2-dim-bar-text-reset" title="Put the number back in the middle of the line">Back on the line</button>
+              </div>
+            </div>
+          </div>
+          <!-- Place Fill / Modify | Fill. -->
+          <div class="wall-opts annot-opts" id="v2-fill-bar" hidden>
+            <div class="plan-loc">
+              <span class="draw-name">Fill</span>
+              <div class="seg" role="group" aria-label="Fill" id="v2-fill-bar-fills"></div>
+            </div>
+          </div>
           <div class="plan-loc words" id="v2-roof-cut-kind" hidden>
             <span class="draw-name">Cut</span>
             <div class="seg" role="group" aria-label="What this cut does">
@@ -306,6 +408,7 @@
                while a sheet is loaded; synced by syncSheetToggles() in ui.js. -->
           <button type="button" id="v2-sheet-hide" hidden></button>
           <button type="button" id="v2-sheet-view" hidden></button>
+          <button type="button" id="v2-room-sizes" aria-pressed="false" title="Show each room's width and depth, and the overall size, on the plan. A view setting: nothing is placed or printed.">Room sizes</button>
           <div class="seg" role="group" aria-label="Show on plan">
             <button type="button" data-plan-status="both" class="active">Both</button>
             <button type="button" data-plan-status="existing">Existing</button>
@@ -314,6 +417,7 @@
         </div>
         <canvas id="v2-canvas"></canvas>
         <input class="temp-dim-input" id="v2-temp-dim" type="text" inputmode="decimal" autocomplete="off" aria-label="Dimension in millimetres" hidden />
+        <textarea class="note-edit-input" id="v2-note-edit" rows="1" autocomplete="off" spellcheck="true" aria-label="Note text" hidden></textarea>
         <span class="elev-edge-mode" id="v2-floor-edge-mode" hidden role="group" aria-label="Drag an edge to">
           <span class="elev-edge-subject" data-edge-subject>Editing the floor</span>
           <span class="elev-edge-actions">
@@ -601,6 +705,43 @@
             <div class="planner-sku-list" id="v2-sku-list"></div>
           </div>
         </div>
+        <div class="planner-fields text-fields" id="v2-ctx-text" hidden>
+          <label id="v2-ctx-note-text-wrap">Text
+            <textarea id="v2-ctx-note-text" rows="3" autocomplete="off"></textarea>
+          </label>
+          <div class="dim-text-fields" id="v2-ctx-dim-text-wrap" hidden>
+            <label title="Words before the number, such as ±.">Before
+              <input id="v2-ctx-dim-prefix" type="text" autocomplete="off" />
+            </label>
+            <label title="Words shown instead of the measured number, such as EQ. A replaced number is drawn in red so it is never mistaken for a measurement.">Replace number
+              <input id="v2-ctx-dim-replace" type="text" autocomplete="off" />
+            </label>
+            <label title="Words after the number, such as (verify on site).">After
+              <input id="v2-ctx-dim-suffix" type="text" autocomplete="off" />
+            </label>
+          </div>
+          <div class="note-only-fields" id="v2-ctx-note-only">
+            <label title="Words wrap at this width on the printed sheet. Blank keeps each line as typed.">Wrap width
+              <span class="unit-field">
+                <input id="v2-ctx-note-width" type="text" inputmode="decimal" autocomplete="off" placeholder="As typed" />
+                <span class="unit">mm</span>
+              </span>
+            </label>
+            <div class="text-actions">
+              <button type="button" id="v2-ctx-note-leader">Add leader</button>
+              <button type="button" id="v2-ctx-note-rotate" title="Turn the words a quarter turn. They always read from the bottom or the left.">Turn 90°</button>
+            </div>
+          </div>
+          <div class="text-actions">
+            <button type="button" id="v2-ctx-text-reset" title="Clear this object's own settings so it follows its style again">Reset to style</button>
+            <button type="button" id="v2-ctx-text-save-style" title="Make a new style from how this looks now">Save as style…</button>
+          </div>
+          <div class="text-actions" id="v2-ctx-text-style-name-wrap" hidden>
+            <input id="v2-ctx-text-style-name" type="text" autocomplete="off" placeholder="Style name" aria-label="New style name" />
+            <button type="button" id="v2-ctx-text-style-name-ok">Save</button>
+          </div>
+          <p class="hint" id="v2-ctx-text-note"></p>
+        </div>
         <div class="planner-fields" id="v2-inspect-fields" hidden>
           <p class="hint" id="v2-ctx-property" hidden>Drag a corner to reshape the boundary, or drag the line to move it. Delete removes it. A derived building line is cleared and has to be run again.</p>
           <label id="v2-ctx-name-wrap" hidden>Name
@@ -609,10 +750,8 @@
           <label id="v2-ctx-use-wrap" hidden>Use
             <select id="v2-ctx-use"></select>
           </label>
-          <label id="v2-ctx-region-wrap" hidden>Fill
-            <select id="v2-ctx-region">
-              <option value="">Not set</option>
-            </select>
+          <label id="v2-ctx-region-text-wrap" hidden title="Words drawn in the fill. Drag them on the plan to move them.">Text
+            <input id="v2-ctx-region-text" type="text" autocomplete="off" placeholder="None" />
           </label>
           <label id="v2-ctx-type-wrap" hidden>Type
             <select id="v2-ctx-type"></select>
@@ -621,6 +760,12 @@
             <span>Status</span>
             <button type="button" id="v2-ctx-status">Proposed</button>
           </p>
+          <div class="ctx-foundation-batch" id="v2-ctx-footing-wrap" hidden>
+            <label for="v2-ctx-footing-type">Foundation under</label>
+            <select id="v2-ctx-footing-type"></select>
+            <button type="button" id="v2-ctx-footing-add">Add</button>
+            <span class="plan-context-note" id="v2-ctx-footing-note"></span>
+          </div>
           <div class="floor-card-wrap" id="v2-ctx-floor-wrap" hidden>
             <button type="button" class="floor-card" id="v2-ctx-floor" aria-label="Open this floor">
               <span class="floor-card-label"><span>This floor</span><em id="v2-ctx-floor-name"></em></span>
@@ -702,6 +847,11 @@
             <select id="v2-ctx-olevel"></select>
           </label>
           <div class="insp-metrics">
+            <label id="v2-ctx-omark-wrap" hidden title="How this opening is called up on the drawings and in the schedules: W1, W2 for window types, D1, D2 for each door.">Mark
+              <span class="plan-context-field">
+                <input id="v2-ctx-omark" type="text" autocomplete="off" maxlength="12" spellcheck="false" aria-label="Window or door mark" />
+              </span>
+            </label>
             <label id="v2-ctx-sill-wrap" hidden>Sill
               <span class="plan-context-field">
                 <input id="v2-ctx-sill" type="text" inputmode="decimal" autocomplete="off" />
@@ -726,15 +876,13 @@
                 <span>mm</span>
               </span>
             </label>
-            <label id="v2-ctx-ooffset-wrap" hidden>Offset
-              <span class="plan-context-field">
-                <input id="v2-ctx-ooffset" type="text" inputmode="decimal" autocomplete="off" aria-label="Offset from left, mm" />
-                <span>mm</span>
-              </span>
-            </label>
           </div>
           <div class="planner-read-field" id="v2-ctx-osize-note" hidden>
             <strong></strong>
+          </div>
+          <div class="planner-read-field" id="v2-ctx-otype-note" hidden>
+            <span></span>
+            <button type="button" id="v2-ctx-otype-split" hidden title="Give this window a mark of its own, so it can be sized without changing the others">Make new type</button>
           </div>
           <div class="elev-preview-wrap" id="v2-ctx-elev-wrap" hidden>
             <div class="elev-card-label">
@@ -876,6 +1024,7 @@
           <h2 id="v2-schedule-title">Schedule</h2>
           <span id="v2-schedule-kicker">—</span>
         </div>
+        <button type="button" id="v2-schedule-download" hidden title="Download this bill as an Excel workbook">Download Excel</button>
         <button type="button" id="v2-schedule-peek">Side view</button>
         <button type="button" id="v2-schedule-close">Close</button>
       </header>
@@ -888,7 +1037,7 @@
             <label><input type="radio" name="v2-schedule-view" value="3d" checked><span>3D</span></label>
             <label><input type="radio" name="v2-schedule-view" value="2d"><span>2D plan</span></label>
           </div>
-          <span class="schedule-3d-note" id="v2-schedule-3d-note">Click a line to pick it out.</span>
+          <span class="schedule-3d-note" id="v2-schedule-3d-note">Click a line, or click the model. Click again to cycle through what is under the cursor.</span>
           <button type="button" id="v2-schedule-3d-drawing" disabled title="Leaves this table view: switches level, selects the element(s) and pans the real drawing to them">Exit to drawing &#8599;</button>
         </div>
         <div class="schedule-3d-stage">
@@ -913,6 +1062,7 @@
           <button type="button" data-mass-style="colour" class="active" title="Finishes and shading.">Colour</button>
           <button type="button" data-mass-style="lines" title="White faces and dark edges, like a hidden-line drawing.">Lines</button>
           <button type="button" data-mass-style="status" title="Grey for existing, colour for proposed. Nothing is hidden.">Existing / new</button>
+          <button type="button" data-mass-style="xray" title="See through the model. What you select is orange, the same as clicking a line in the bill of quantities.">X-ray</button>
         </div>
         <label class="mass-services" title="Hot water, cold water, drainage, electrical and gas. Drawn in each system's colour, including vertical rises. A run with no height set is left out.">
           <input type="checkbox" id="v2-mass-services" />
@@ -1403,6 +1553,6 @@
     </form>
   </div>
 
-  <script type="module" src="./ui.js?v=20261111-trim-lengths"></script>
+  <script type="module" src="./ui.js?v=20261112-foundation-delete"></script>
 </body>
 </html>

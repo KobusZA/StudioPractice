@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import { collectionFor, emptyDoc, hasJobContent, LINE_KINDS, normalizeDoc } from "../model.js";
 import { RIBBON, ribbonItems } from "../ribbon.js";
+import { lineStyleOf } from "../line-styles.js";
 import {
   alignSelection,
   attachSelection,
@@ -176,20 +177,31 @@ test("detach finds nothing to do on a line selection", () => {
 
 // --- ribbon wiring ----------------------------------------------------
 
-test("model-lines and annot-lines are live commands, not Week 3 todos", () => {
+test("one Line button under Annotate draws both kinds of line", () => {
   const items = ribbonItems();
-  assert.equal(items.get("model-lines").command, "model-lines");
-  assert.equal(items.get("model-lines").todo, undefined);
-  assert.equal(items.get("annot-lines").command, "annot-lines");
-  assert.equal(items.get("annot-lines").todo, undefined);
+  assert.equal(items.get("lines").command, "lines");
+  assert.equal(items.get("lines").todo, undefined);
+  assert.equal(items.get("lines").group, "Annotate");
+  assert.equal(items.get("model-lines"), undefined);
+  assert.equal(items.get("annot-lines"), undefined);
 });
 
-test("nothing in the customer's ribbon still calls the two line buttons unfinished", () => {
+test("nothing in the customer's ribbon still calls the line button unfinished", () => {
   for (const tab of RIBBON) {
     for (const group of tab.groups) {
       for (const item of group.items) {
-        if (item.id === "model-lines" || item.id === "annot-lines") assert.equal(item.todo, undefined);
+        if (item.id === "lines") assert.equal(item.todo, undefined);
       }
     }
   }
+});
+
+test("a line saved before styles keeps its look; a new one keeps its style", () => {
+  assert.equal(lineStyleOf({ kind: "annotation" }).id, "dashed");
+  assert.equal(lineStyleOf({ kind: "model" }).id, "thin");
+  assert.equal(lineStyleOf({ kind: "annotation", style: "heavy" }).id, "heavy");
+  assert.equal(lineStyleOf({ kind: "model", style: "nonsense" }).id, "thin");
+  const doc = normalizeDoc({ lines: [{ id: "a", kind: "model", style: "centre", x1: 0, y1: 0, x2: 1, y2: 0 }, { id: "b", kind: "annotation", style: "bogus", x1: 0, y1: 0, x2: 1, y2: 0 }] });
+  assert.equal(doc.lines[0].style, "centre");
+  assert.equal(doc.lines[1].style, undefined);
 });

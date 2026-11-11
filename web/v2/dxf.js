@@ -12,6 +12,7 @@
 // Canvas +y is screen-down; DXF +Y is north, so y is negated on the way out
 // (the same flip ifc.js makes).
 
+import { arcFromRadius } from "./click-draw.js";
 import { compile } from "./compile.js";
 import { skuById } from "./openings.js";
 
@@ -296,8 +297,18 @@ export function exportDxf(doc, pack) {
       continue;
     }
     const layer = layerName("A-LINE", levelNameOf(line.level));
-    const [a, b] = toMmPts([[line.x1, line.y1], [line.x2, line.y2]]);
-    dxf.line(layer, a, b);
+    const arc = line.arc ? arcFromRadius(line.x1, line.y1, line.x2, line.y2, line.arc.radius, line.arc.side, line.arc.major === true) : null;
+    if (arc) {
+      // Flipping y turns the arc the other way; DXF arcs run counter-clockwise.
+      const deg = 180 / Math.PI;
+      const from = -arc.a0 * deg;
+      const to = (-arc.a0 - arc.sweep) * deg;
+      const [c] = toMmPts([[arc.cx, arc.cy]]);
+      dxf.arc(layer, c[0], c[1], mm(arc.radius), Math.min(from, to), Math.max(from, to));
+    } else {
+      const [a, b] = toMmPts([[line.x1, line.y1], [line.x2, line.y2]]);
+      dxf.line(layer, a, b);
+    }
     report.counts.lines += 1;
   }
 

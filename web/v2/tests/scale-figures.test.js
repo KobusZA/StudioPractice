@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import { normalizeDoc } from "../model.js";
 import { compile } from "../compile.js";
-import { viewFaceStyle } from "../massing.js";
+import { massViewStyle, viewFaceStyle } from "../massing.js";
 import {
   FIGURE_SIZE,
   billboardRight,
@@ -76,6 +76,10 @@ test("lines and existing/new restyle a wall without touching a scale figure", ()
   assert.equal(figure.fill, "rgba(90,84,76,0.1)");
   const colour = viewFaceStyle(wall, "colour");
   assert.equal(colour.flat, undefined);
+  const xray = viewFaceStyle(wall, "xray");
+  assert.equal(xray.fill, colour.fill, "x-ray fades at draw time and keeps the colour fill");
+  assert.equal(massViewStyle("xray"), "xray");
+  assert.equal(massViewStyle("nope"), "colour");
 });
 
 test("turning people and cars on stands them just outside the building", () => {

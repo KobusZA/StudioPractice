@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import { LADDERS, maxStep, planSteps, shrinkKey } from "../ribbon-fit.js";
 import { readFileSync } from "node:fs";
-import { CONTEXT_TABS, GROUP_PRIORITY, RIBBON, floorFinishTab, placingTab, ribbonItems, selectionTab, sheetTab, tabWithStatus, wallFinishTab } from "../ribbon.js";
+import { CONTEXT_TABS, GROUP_PRIORITY, RIBBON, floorFinishTab, isAnnotatingTab, placingTab, ribbonItems, selectionTab, sheetTab, tabWithStatus, wallFinishTab } from "../ribbon.js";
 
 // A toy width model: each group's width depends on its kind and step, so the
 // planner can be exercised without a browser. Wider = nicer.
@@ -112,13 +112,14 @@ test("every id on a contextual tab is a RIBBON item, so a command is defined onc
 test("the Walls tab lists the agreed actions, and its Edit group is the last to shrink", () => {
   const wall = selectionTab(new Set(["wall"]));
   assert.equal(wall.label, "Walls");
-  assert.deepEqual(wall.groups.map((g) => g.label), ["Edit", "Wall", "Trim and extend", "View", "Finishes", "Height", "Arrange"]);
+  assert.deepEqual(wall.groups.map((g) => g.label), ["Edit", "Wall", "Trim and extend", "View", "Finishes", "Height", "Foundation", "Arrange"]);
   assert.deepEqual(wall.groups[0].items.map((i) => i.id), ["move", "copy", "rotate", "mirror", "align", "delete"]);
   assert.deepEqual(wall.groups[1].items.map((i) => i.id), ["split-wall", "snap", "join", "select-similar"]);
   assert.deepEqual(wall.groups[2].items.map((i) => i.id), ["trim-corner", "trim-single", "trim-circle"]);
   assert.deepEqual(wall.groups[3].items.map((i) => i.id), ["edit-face", "flip-face", "second-screen"]);
   assert.deepEqual(wall.groups[4].items.map((i) => i.id), ["wall-finishes"]);
   assert.deepEqual(wall.groups[5].items.map((i) => i.id), ["attach", "detach"]);
+  assert.deepEqual(wall.groups[6].items.map((i) => i.id), ["add-foundation"]);
   assert.equal(ribbonItems().get("edit-face").label, "Show face");
   assert.equal(ribbonItems().get("split-wall").label, "Split here");
   assert.deepEqual(selectionTab(new Set(["door"])).groups[0].items.map((i) => i.id), ["move", "copy", "align", "delete", "select-similar"]);
@@ -182,7 +183,7 @@ test("a placing tab lists only the tools that place, from the item's group", () 
   assert.equal(placingTab("floors").label, "Place Floor");
   assert.equal(placingTab("stairs").label, "Place Stair");
   assert.equal(placingTab("plumbing").label, "Place Plumbing");
-  const placingCommands = new Set(["room-sep", "service-route"]);
+  const placingCommands = new Set(["room-sep", "service-route", "text", "dimensions", "lines", "region", "revision"]);
   for (const [id, item] of ribbonItems()) {
     const expect = (item.tool && item.tabId === "build" && id !== "roof-cut") || placingCommands.has(id);
     if (expect) assert.ok(placingTab(id), id);
@@ -198,6 +199,24 @@ test("a placing tab lists only the tools that place, from the item's group", () 
   assert.deepEqual(placingTab("floors").groups[0].items.map((i) => i.id), ["floors", "ceilings", "roofs"]);
   assert.deepEqual(placingTab("rooms").groups[0].items.map((i) => i.id), ["rooms", "room-sep"]);
   assert.equal(placingTab("room-sep").label, "Place Room separator");
+  // Annotate: each tool opens its own tab, with the others one click away.
+  assert.equal(placingTab("text").label, "Place Text");
+  assert.equal(placingTab("lines").label, "Place Line");
+  assert.equal(placingTab("region").label, "Place Fill");
+  assert.equal(placingTab("dimensions").label, "Place Dimension");
+  assert.deepEqual(placingTab("text").groups[0].items.map((i) => i.id), ["text", "dimensions", "lines", "region", "revision"]);
+  assert.equal(isAnnotatingTab(placingTab("text")), true);
+  assert.equal(isAnnotatingTab(placingTab("lines")), false, "a line can be existing or proposed");
+  assert.equal(isAnnotatingTab(placingTab("walls")), false);
+  // Annotate: each tool opens its own tab, with the rest of Annotate one click away.
+  assert.equal(placingTab("text").label, "Place Text");
+  assert.equal(placingTab("dimensions").label, "Place Dimension");
+  assert.equal(placingTab("lines").label, "Place Line");
+  assert.equal(placingTab("region").label, "Place Fill");
+  assert.deepEqual(placingTab("text").groups[0].items.map((i) => i.id), ["text", "dimensions", "lines", "region", "revision"]);
+  assert.equal(isAnnotatingTab(placingTab("text")), true);
+  assert.equal(isAnnotatingTab(placingTab("lines")), false, "a line can be existing or proposed");
+  assert.equal(isAnnotatingTab(placingTab("walls")), false);
   assert.deepEqual(placingTab("electrical").groups[0].items.map((i) => i.id), ["electrical", "plumbing", "drainage", "service-route"]);
   assert.equal(placingTab("service-route").label, "Place Route");
 });
@@ -257,7 +276,7 @@ test("a floor or a roof can be split or merged from its own tab", () => {
 test("only the agreed commands wait for a selection", () => {
   const waits = [...ribbonItems().values()].filter((i) => i.needsSelection).map((i) => i.id).sort();
   assert.deepEqual(waits, [
-    "attach", "copy", "delete", "detach", "group", "mirror", "move", "rotate", "select-similar", "snap", "ungroup",
+    "add-foundation", "attach", "copy", "delete", "detach", "group", "mirror", "move", "rotate", "select-similar", "snap", "ungroup",
   ]);
   for (const id of ["align", "join", "split", "split-wall", "trim-corner", "trim-single", "trim-circle"]) {
     assert.equal(ribbonItems().get(id).needsSelection, undefined, id);
