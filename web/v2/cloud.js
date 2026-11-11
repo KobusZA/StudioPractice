@@ -222,6 +222,29 @@ export function createCloud({
       };
     },
 
+    /** Pictures kept on this job, newest first. The bytes are a separate read. */
+    async listVisualizations(projectId) {
+      const body = await call("GET", `/api/projects/${encodeURIComponent(projectId)}/visualizations`);
+      return body?.visualizations ?? [];
+    },
+
+    /**
+     * Store the picture currently on screen. The drawing does not record it.
+     * Resolves `{ asset, alreadyKept }`. `alreadyKept` is true when these
+     * exact bytes were already on the job.
+     */
+    async keepVisualization(projectId, { image, prompt } = {}) {
+      return call("POST", `/api/projects/${encodeURIComponent(projectId)}/visualizations`, { image, prompt });
+    },
+
+    /** Remove one kept picture. A plan file is not removed through this path. */
+    deleteVisualization(projectId, assetId) {
+      return call(
+        "DELETE",
+        `/api/projects/${encodeURIComponent(projectId)}/visualizations/${encodeURIComponent(assetId)}`,
+      );
+    },
+
     /** Snapshot in, photorealistic visualization out. The key stays on the server.
      *  `prompt` is the instruction shown in the 3D panel. Omit it and the server
      *  uses the built-in wording. `images` is the camera first, then any

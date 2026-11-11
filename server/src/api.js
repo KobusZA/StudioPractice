@@ -19,11 +19,11 @@ import {
   ACTIVITY_TYPES, BILLING_BASES, PROJECT_STATUSES, WRITE_DOWN_REASONS,
 } from "./defaults.js";
 import { withTransaction } from "./db.js";
-import { MAX_UNDERLAY_BYTES } from "./assets.js";
+import { MAX_UNDERLAY_BYTES, pngFromDataUrl } from "./assets.js";
 import {
   HttpError, clearedCookie, createRouter, parseCookies, readJsonBody, readRawBody, sendBytes, sendJson, sessionCookie,
 } from "./http.js";
-import { generateVisualization } from "./visualize.js";
+import { generateVisualization, MAX_VISUALIZE_PROMPT } from "./visualize.js";
 import { validDate } from "./team-report.js";
 
 /**
@@ -137,6 +137,9 @@ export function createApi(pool, options = {}, env = process.env) {
     ["POST", "/api/certificates/:id/write-downs", handleAddWriteDown],
     ["POST", "/api/certificates/:id/issue", handleIssueCertificate],
 
+    ["GET", "/api/projects/:id/visualizations", handleListVisualizations],
+    ["POST", "/api/projects/:id/visualizations", handlePutVisualization],
+    ["DELETE", "/api/projects/:id/visualizations/:assetId", handleDeleteVisualization],
     ["POST", "/api/visualize", handleVisualize],
   ]);
 
@@ -955,6 +958,58 @@ async function handleIssueCertificate({ req, res, pool, params }) {
   ));
   if (!certificate) throw new HttpError(404, "No such certificate");
   sendJson(res, 200, { certificate });
+}
+
+// --- kept pictures ---------------------------------------------------------
+//
+// A generated view is a deliverable of the job, not part of the drawing. The
+// drawing save never names it, so it is not released when the sheet changes.
+// Download stays in the browser. This is the copy that is still there after
+// the 3D panel is closed.
+
+async function handleListVisualizations({ req, res, pool, params }) {
+  const store = await requireStore(pool, req);
+  const visualizations = await store.listVisualizations(params.id);
+  if (!visualizations) throw new HttpError(404, "No such job");
+  sendJson(res, 200, { visualizations });
+}
+
+async function handlePutVisualization({ req, res, pool, params }) {
+  const session = await requireSession(pool, req);
+  const body = (await readJsonBody(req, { limit: 20 * 1024 * 1024 })) || {};
+  let bytes;
+  try {
+    bytes = pngFromDataUrl(body.image);
+  } catch (error) {
+    if (error.status === 400) throw new HttpError(400, error.message);
+    throw error;
+  }
+  if (!bytes) throw new HttpError(400, "A PNG picture is required");
+  const note = visualizationNote(body.prompt);
+  const kept = await withTransaction(pool, (client) => (
+    openStore(client, session).putVisualization(params.id, { bytes, note })
+  ));
+  if (!kept) throw new HttpError(404, "No such job");
+  sendJson(res, kept.alreadyKept ? 200 : 201, kept);
+}
+
+async function handleDeleteVisualization({ req, res, pool, params }) {
+  const session = await requireSession(pool, req);
+  const deleted = await withTransaction(pool, (client) => (
+    openStore(client, session).deleteVisualization(params.id, params.assetId)
+  ));
+  if (!deleted) throw new HttpError(404, "No such picture");
+  sendJson(res, 200, { deleted: deleted.id });
+}
+
+function visualizationNote(value) {
+  if (value === null || value === undefined) return null;
+  const text = String(value).replace(/\r\n/g, "\n").trim();
+  if (!text) return null;
+  if (text.length > MAX_VISUALIZE_PROMPT) {
+    throw new HttpError(400, `The prompt is too long. Keep it under ${MAX_VISUALIZE_PROMPT} characters.`);
+  }
+  return text;
 }
 
 // --- visualization ---------------------------------------------------------

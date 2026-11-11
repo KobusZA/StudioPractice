@@ -3,8 +3,9 @@
 // Same extrusion Camera and 3D already use - not a second model. Every cut
 // is also saved as a named view (below), so `sheets.js` can draft it onto a
 // sheet's viewport later (Output > Print > Sheets) without re-deriving it. The
-// cut itself is a viewing plane the user placed; look is to the left of the
-// stroke, so drawing the line the other way flips the view the way Revit does.
+// cut itself is a viewing plane the user placed. The line is the cut; a third
+// click says which side to look toward. Left of the stroke is the default
+// when that click lands on the line.
 
 import { nid } from "./model.js";
 
@@ -17,8 +18,9 @@ function xy(p) {
 }
 
 /**
- * Two plan clicks become a vertical cut. Look is 90° CCW from A→B.
- * Returns null when the clicks are the same point.
+ * Two plan clicks become a vertical cut. Look is 90° CCW from A→B, so the
+ * view looks to the left of the stroke. Returns null when the clicks are
+ * the same point.
  */
 export function sectionFromClicks(a, b, far = SECTION_FAR_M) {
   const [ax, ay] = xy(a);
@@ -38,6 +40,34 @@ export function sectionFromClicks(a, b, far = SECTION_FAR_M) {
     length,
     far: Number(far) > 0 ? Number(far) : SECTION_FAR_M,
   };
+}
+
+/** Signed side of `p` against the stroke A→B. Positive is the default look. */
+export function sectionSide(a, b, p) {
+  const [ax, ay] = xy(a);
+  const [bx, by] = xy(b);
+  const [px, py] = xy(p);
+  if (![ax, ay, bx, by, px, py].every(Number.isFinite)) return 0;
+  return (bx - ax) * (py - ay) - (by - ay) * (px - ax);
+}
+
+/**
+ * The cut along A→B that looks toward `side`. A point on the left, or on the
+ * line itself, keeps A→B. A point on the right is the same line drawn B→A.
+ */
+export function sectionFacing(a, b, side) {
+  if (sectionSide(a, b, side) < 0) return sectionFromClicks(b, a);
+  return sectionFromClicks(a, b);
+}
+
+/** The same line, looking the other way. */
+export function flipSectionCut(cut) {
+  if (!cut || cut.mode !== "section") return null;
+  const [ox, oy] = cut.origin;
+  const along = cut.along;
+  if (!along || along.length < 2) return null;
+  const end = [ox + along[0] * cut.length, oy + along[1] * cut.length];
+  return sectionFromClicks(end, [ox, oy], cut.far);
 }
 
 export function sectionDot(p, origin, n) {

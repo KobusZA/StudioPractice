@@ -8,6 +8,8 @@ import { normalizePackUnits } from "../schema.js";
 import { readFileSync } from "node:fs";
 import {
   sectionFromClicks,
+  sectionFacing,
+  flipSectionCut,
   clipFacesForSection,
   clipPolyHalfspace,
   sectionUV,
@@ -33,6 +35,28 @@ test("drawing the cut the other way flips the look", () => {
   const b = sectionFromClicks([4, 0], [0, 0]);
   assert.ok(a.look[1] > 0);
   assert.ok(b.look[1] < 0);
+});
+
+test("the side click picks the look, and a point on the line keeps the default", () => {
+  const left = sectionFacing([0, 0], [4, 0], [2, 1]);
+  const right = sectionFacing([0, 0], [4, 0], [2, -1]);
+  const onLine = sectionFacing([0, 0], [4, 0], [2, 0]);
+  assert.ok(left.look[1] > 0.99);
+  assert.ok(right.look[1] < -0.99);
+  assert.ok(Math.abs(right.origin[0] - 4) < 1e-9);
+  assert.ok(onLine.look[1] > 0.99);
+  assert.equal(sectionFacing([1, 1], [1, 1], [0, 0]), null);
+});
+
+test("flipping a cut looks the other way along the same line", () => {
+  const cut = sectionFromClicks([0, 0], [4, 0]);
+  const flipped = flipSectionCut(cut);
+  assert.ok(flipped.look[1] < 0);
+  assert.ok(Math.abs(flipped.length - cut.length) < 1e-9);
+  const back = flipSectionCut(flipped);
+  assert.ok(Math.abs(back.origin[0] - cut.origin[0]) < 1e-9);
+  assert.ok(Math.abs(back.look[1] - cut.look[1]) < 1e-9);
+  assert.equal(flipSectionCut(null), null);
 });
 
 test("a zero-length cut is refused rather than invented", () => {

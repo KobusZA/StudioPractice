@@ -372,3 +372,26 @@ test("visualize posts the extra massing views with the camera", async () => {
   assert.equal(fetch.calls[0].body.prompt, "Face brick.");
   assert.equal(fetch.calls[0].body.image, undefined);
 });
+
+test("a kept picture is listed, stored, and removed on the job", async () => {
+  const fetch = fakeFetch((call) => {
+    if (call.method === "GET") return response(200, { visualizations: [{ id: "ast1" }] });
+    if (call.method === "DELETE") return response(200, { deleted: "ast1" });
+    return response(201, { asset: { id: "ast1" }, alreadyKept: false });
+  });
+  const cloud = createCloud({ fetch });
+  const listed = await cloud.listVisualizations("prj 1");
+  assert.deepEqual(listed, [{ id: "ast1" }]);
+  const kept = await cloud.keepVisualization("prj 1", { image: "data:image/png;base64,abc", prompt: "Brick" });
+  assert.equal(kept.asset.id, "ast1");
+  assert.equal(kept.alreadyKept, false);
+  await cloud.deleteVisualization("prj 1", "ast/1");
+  assert.deepEqual(fetch.calls.map((c) => c.url), [
+    "/api/projects/prj%201/visualizations",
+    "/api/projects/prj%201/visualizations",
+    "/api/projects/prj%201/visualizations/ast%2F1",
+  ]);
+  assert.equal(fetch.calls[1].method, "POST");
+  assert.deepEqual(fetch.calls[1].body, { image: "data:image/png;base64,abc", prompt: "Brick" });
+  assert.equal(fetch.calls[2].method, "DELETE");
+});

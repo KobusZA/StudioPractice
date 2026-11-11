@@ -65,6 +65,37 @@ export function underlayAssetIds(doc) {
 
 const SHA256_HEX = /^[0-9a-f]{64}$/;
 
+/** One kept picture. A generated view is a few megabytes; this refuses a dump. */
+export const MAX_VISUALIZATION_BYTES = 12 * 1024 * 1024;
+
+/** How many pictures one job keeps. More than this and the user removes one. */
+export const MAX_VISUALIZATIONS = 30;
+
+const DATA_PNG = /^data:image\/png;base64,([A-Za-z0-9+/=\s]+)$/i;
+
+/**
+ * The PNG a kept picture is stored from. The client already holds it as the
+ * data URL Generate returned. Null when it is not a PNG. Too large is a 400
+ * the handler can pass on, rather than a silent null that looks like "no file".
+ */
+export function pngFromDataUrl(dataUrl, maxBytes = MAX_VISUALIZATION_BYTES) {
+  const match = typeof dataUrl === "string" ? dataUrl.trim().match(DATA_PNG) : null;
+  if (!match) return null;
+  let bytes;
+  try {
+    bytes = Buffer.from(match[1].replace(/\s+/g, ""), "base64");
+  } catch {
+    return null;
+  }
+  if (!bytes.length) return null;
+  if (bytes.length > maxBytes) {
+    const error = new Error("That picture is larger than 12 MB");
+    error.status = 400;
+    throw error;
+  }
+  return bytes;
+}
+
 /** A client-supplied hash, lower-cased, or null when it is not 64 hex characters. */
 export function cleanSha256(value) {
   const hex = String(value ?? "").trim().toLowerCase();

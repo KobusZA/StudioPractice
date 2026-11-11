@@ -21,6 +21,8 @@ import { sid } from "./ids.js";
 import { createHash } from "node:crypto";
 import {
   MAX_UNDERLAY_BYTES,
+  MAX_VISUALIZATION_BYTES,
+  MAX_VISUALIZATIONS,
   cleanSha256,
   ORG_UNDERLAY_QUOTA_BYTES,
   retargetUnderlayAssets,
@@ -439,6 +441,21 @@ export function openStore(queryable, { orgId, userId, role }) {
         orgId,
         userId,
       });
+      const { rows: pictures } = await q(
+        `select id from asset
+          where org_id = $1
+            and project_id = $2
+            and kind = 'visualization'
+            and deleted_at is null`,
+        [orgId, projectId],
+      );
+      await copyUnderlayAssets(q, {
+        fromProjectId: projectId,
+        toProjectId: newProjectId,
+        ids: pictures.map((row) => row.id),
+        orgId,
+        userId,
+      });
       if (retargetUnderlayAssets(doc, map)) {
         await q(
           `update drawing set doc = $3 where id = $1 and project_id = $2`,
@@ -738,7 +755,11 @@ export function openStore(queryable, { orgId, userId, role }) {
       return rows[0] ? assetSummary(rows[0]) : null;
     },
 
-    /** The bytes, or null when this firm has no such live file on a live job. */
+    /**
+     * The bytes, or null when this firm has no such live file on a live job.
+     * A plan file and a kept picture share this read. A drawing save only
+     * releases the plan files, so a picture stays until someone removes it.
+     */
     async getUnderlayAsset(assetId) {
       const { rows } = await q(
         `select a.id, a.project_id, a.kind, a.mime, a.bytes
@@ -747,7 +768,7 @@ export function openStore(queryable, { orgId, userId, role }) {
           where a.id = $1
             and a.org_id = $2
             and a.deleted_at is null
-            and a.kind = 'underlay'
+            and a.kind in ('underlay', 'visualization')
             and p.org_id = $2
             and p.deleted_at is null`,
         [assetId, orgId],
@@ -759,6 +780,108 @@ export function openStore(queryable, { orgId, userId, role }) {
         mime: rows[0].mime,
         bytes: rows[0].bytes,
       };
+    },
+
+    /**
+     * Keep one generated picture on the job. The same bytes already kept are
+     * the existing row, so Generate again and Keep again does not store a
+     * second copy. A drawing save does not name these and does not release
+     * them: they leave only when someone removes one.
+     *
+     * `note` is the instruction that was sent with the view. Null when the
+     * panel had nothing to record.
+     */
+    async putVisualization(projectId, { bytes, note = null, quota = ORG_UNDERLAY_QUOTA_BYTES }) {
+      const project = await this.getProject(projectId);
+      if (!project) return null;
+      const body = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes || []);
+      const detected = sniffUnderlay(body, "image/png");
+      if (detected !== "image/png") throw new ValidationError("A PNG picture is required");
+      if (body.length > MAX_VISUALIZATION_BYTES) {
+        throw new ValidationError("That picture is larger than 12 MB");
+      }
+      const sha256 = createHash("sha256").update(body).digest("hex");
+      const existing = await q(
+        `select id, project_id, kind, mime, octet_length(bytes) as byte_length, note, created_at
+           from asset
+          where org_id = $1
+            and project_id = $2
+            and kind = 'visualization'
+            and deleted_at is null
+            and sha256 = $3
+          limit 1`,
+        [orgId, projectId, sha256],
+      );
+      if (existing.rows[0]) {
+        return { asset: visualizationSummary(existing.rows[0]), alreadyKept: true };
+      }
+      const { rows: counted } = await q(
+        `select count(*)::int as n
+           from asset
+          where org_id = $1
+            and project_id = $2
+            and kind = 'visualization'
+            and deleted_at is null`,
+        [orgId, projectId],
+      );
+      if (Number(counted[0].n) >= MAX_VISUALIZATIONS) {
+        throw new ValidationError(`This job already has ${MAX_VISUALIZATIONS} pictures. Remove one to keep another.`);
+      }
+      await q(`select id from org where id = $1 for update`, [orgId]);
+      const { rows: used } = await q(
+        `select coalesce(sum(octet_length(a.bytes)), 0)::bigint as total
+           from asset a
+           join project p on p.id = a.project_id
+          where a.org_id = $1
+            and a.deleted_at is null
+            and p.deleted_at is null`,
+        [orgId],
+      );
+      if (Number(used[0].total) + body.length > quota) {
+        throw new ValidationError("Stored files have reached this firm's 4 GB limit");
+      }
+      const prompt = typeof note === "string" && note.trim() ? note.trim() : null;
+      const id = sid("ast");
+      const { rows } = await q(
+        `insert into asset (id, org_id, project_id, kind, mime, bytes, created_by, sha256, note)
+              values ($1, $2, $3, 'visualization', 'image/png', $4, $5, $6, $7)
+           returning id, project_id, kind, mime, octet_length(bytes) as byte_length, note, created_at`,
+        [id, orgId, projectId, body, userId, sha256, prompt],
+      );
+      return { asset: visualizationSummary(rows[0]), alreadyKept: false };
+    },
+
+    /** Pictures kept on this job, newest first. Bytes stay on the file read. */
+    async listVisualizations(projectId) {
+      const project = await this.getProject(projectId);
+      if (!project) return null;
+      const { rows } = await q(
+        `select id, project_id, kind, mime, octet_length(bytes) as byte_length, note, created_at
+           from asset
+          where org_id = $1
+            and project_id = $2
+            and kind = 'visualization'
+            and deleted_at is null
+          order by created_at desc`,
+        [orgId, projectId],
+      );
+      return rows.map(visualizationSummary);
+    },
+
+    /** Soft delete. A plan file cannot be removed through this path. */
+    async deleteVisualization(projectId, assetId) {
+      const { rows } = await q(
+        `update asset
+            set deleted_at = now()
+          where id = $1
+            and org_id = $2
+            and project_id = $3
+            and kind = 'visualization'
+            and deleted_at is null
+        returning id`,
+        [assetId, orgId, projectId],
+      );
+      return rows[0] ? { id: rows[0].id } : null;
     },
 
     // --- the register ---------------------------------------------------
@@ -3244,6 +3367,14 @@ function assetSummary(row) {
   };
 }
 
+function visualizationSummary(row) {
+  return {
+    ...assetSummary(row),
+    prompt: row.note || "",
+    createdAt: row.created_at ?? null,
+  };
+}
+
 /** Every named file must be a live underlay on this job. One missing id rejects the save. */
 async function assertUnderlayAssets(q, { orgId, projectId, ids }) {
   const { rows } = await q(
@@ -3267,8 +3398,8 @@ async function copyUnderlayAssets(q, { fromProjectId, toProjectId, ids, orgId, u
   for (const id of ids) {
     const newId = sid("ast");
     const { rows } = await q(
-      `insert into asset (id, org_id, project_id, kind, mime, bytes, created_by, sha256)
-       select $1, org_id, $2, kind, mime, bytes, $3, sha256
+      `insert into asset (id, org_id, project_id, kind, mime, bytes, created_by, sha256, note)
+       select $1, org_id, $2, kind, mime, bytes, $3, sha256, note
          from asset
         where id = $4
           and org_id = $5

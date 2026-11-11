@@ -361,7 +361,7 @@ export const HINTS = {
   detach: "Stop following what the selection sits on, leaving it at the elevation it already has.",
   "view-3d": "Open a massing view of the current plan.",
   "view-camera": "Click where you stand, then click what you look at.",
-  section: "Click two points to cut. Look is to the left of the line; draw the other way to flip.",
+  section: "Click the two ends of the cut, then click the side you want to look toward.",
   elevation: "Pick a compass side to extrude an orthographic elevation from the plan.",
   callout: "Click two opposite corners to box a detail crop of the plan.",
   revision: "Click two opposite corners. The cloud stays on the plan, where you can select it. Link it to a revision from the Sheets panel.",

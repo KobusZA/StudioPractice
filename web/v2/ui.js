@@ -32,8 +32,8 @@
 import { complianceGaps, normalizePackUnits, GEOMETRY_LENGTH_KEYS } from "./schema.js";
 import { RULE_PACK, evaluateCompliance, groupFindingsByPart, summarizeFindings } from "./rules.js";
 import { deriveBuildingLine, hitPropertyLine, setBuildingLine, setPropertyLine, setSgReference } from "./site.js?v=20261015-property";
-import { CONTEXT_TAB_ID, HINTS, firstTabId, placingTab, renderRibbon, selectionTab, sheetTab, tabWithStatus } from "./ribbon.js?v=20261110-ribbon-regroup";
-import { closeOverflowMenus, decorateRibbon, fitRibbon } from "./ribbon-fit.js?v=20261110-ribbon-regroup";
+import { CONTEXT_TAB_ID, HINTS, firstTabId, placingTab, renderRibbon, selectionTab, sheetTab, tabWithStatus } from "./ribbon.js?v=20261111-section-side";
+import { closeOverflowMenus, decorateRibbon, fitRibbon } from "./ribbon-fit.js?v=20261110-ribbon-soft";
 import {
   ghostContext,
   MAX_FLOORS_TO_ADD,
@@ -233,7 +233,7 @@ import { HEIGHT_PRESETS, bandFaceLine, compareBands, draftBandPreviewHtml, faceF
 import { alignCameraShift, centerVerticalFrame, clampElevationView, edgeResizeCursor, elevationFitFrame, elevationGuideLayout, elevationSvg, faceScreenCenter, finishLocate, nudgeIntoView, planFaceFrame, zoomElevationView } from "./wall-elevation-render.js?v=20261109-mirror-corner";
 import { FLOOR_TYPE_GROUPS, alignFloorPoint, faceToPlan, floorBox, floorFaceOf, floorFrameFromHold, floorHoldCentered, floorPictureSvg, planToFace, resolveFloorFinishOpen, trackFloorHold } from "./floor-picture.js?v=20261108-floor-scale";
 import { CORNER_JOIN_TOL, defaultSegmentTop, deriveWalls, drawnSegmentFromWall, drawnWallThickness, foundationChecks, gapMoveDelta, isDerivedFoundationId, isStripFooting, selectionAngleJoint, selectionSideGaps, skuDrawnHeight, statusVisible, wallFaceLengths, wallThicknessLabel } from "./walls.js?v=20261110-face-room-side";
-import { floorBuildUpStated, onGroundStorey, spotLevelLabel } from "./floor-levels.js?v=20261109-floor-offsets";
+import { floorBuildUpStated, groundStorey, onGroundStorey, spotLevelLabel } from "./floor-levels.js?v=20261109-floor-offsets";
 import { findJoinTarget, resolveJoin, sideTowardTarget } from "./wall-join.js?v=20261022-corner-b";
 import {
   doorAction,
@@ -306,7 +306,7 @@ import {
   visualizePromptId,
 } from "./visualize-prompts.js?v=20261107-viz-refs";
 import { drawLookPlan, lookPlanCaption } from "./look-plan.js";
-import { sectionFromClicks, createSection, ensureSections, sectionById, clipFacesForSection, sectionSpotLevels, sectionUV } from "./section.js?v=20261109-floor-offsets";
+import { sectionFromClicks, sectionFacing, flipSectionCut, createSection, ensureSections, sectionById, clipFacesForSection, sectionSpotLevels, sectionUV } from "./section.js?v=20261111-section-side";
 import { ELEVATION_DIRECTIONS, elevationDirectionLabel, createElevation, ensureElevations, elevationById } from "./elevation.js";
 import { calloutFromClicks, createCallout, ensureCallouts, calloutById, calloutExtent } from "./callout.js";
 import {
@@ -718,6 +718,7 @@ const el = {
   massLegend: document.getElementById("v2-mass-legend"),
   massPicture: document.getElementById("v2-mass-picture"),
   massHost: document.getElementById("v2-mass-host"),
+  massFlip: document.getElementById("v2-mass-flip"),
   massPrompt: document.getElementById("v2-mass-prompt"),
   massGenerate: document.getElementById("v2-mass-generate"),
   massPromptExamples: document.getElementById("v2-mass-prompt-examples"),
@@ -737,6 +738,10 @@ const el = {
   massRenderCopy: document.getElementById("v2-mass-render-copy"),
   massRenderPaint: document.getElementById("v2-mass-render-paint"),
   massRenderSave: document.getElementById("v2-mass-render-save"),
+  massRenderKeep: document.getElementById("v2-mass-render-keep"),
+  massRenderRemove: document.getElementById("v2-mass-render-remove"),
+  massKept: document.getElementById("v2-mass-kept"),
+  massKeptRow: document.getElementById("v2-mass-kept-row"),
   massClose: document.getElementById("v2-mass-close"),
   massPanel: document.querySelector("#v2-mass-overlay .mass-panel"),
   massPlanWrap: document.getElementById("v2-mass-plan-wrap"),
@@ -1350,6 +1355,7 @@ function syncLookPlan(cam, payload, info) {
   if (el.massLegend) el.massLegend.hidden = empty;
   if (el.massPicture) el.massPicture.hidden = isSection;
   if (el.massHost) el.massHost.hidden = !isSection;
+  if (el.massFlip) el.massFlip.hidden = !isSection;
   if (isSection) syncSectionHostButtons();
   if (isSection && el.massPrompt && !el.massPrompt.hidden) {
     el.massPrompt.hidden = true;
@@ -3470,6 +3476,10 @@ function refuseWrongFoundation() {
  * status line says why a foundation will not start on that plan. */
 function offerFoundationPlan() {
   const cats = armedCategories();
+  if (cats?.length && cats.every((c) => OPENING_CATEGORIES.has(c))) {
+    offerFloorPlanForOpening();
+    return;
+  }
   if (!cats?.length || cats.some((c) => c !== "foundation")) return;
   const home = foundationStorey(visibleLevels());
   if (!home || home.id === activeLevel) return;
@@ -3478,6 +3488,27 @@ function offerFoundationPlan() {
   selectStationIndex(idx);
   const name = home.name || home.id;
   setStatusMessage(`Foundations draw on "${name}". The level switcher moved there.`);
+}
+
+const OPENING_CATEGORIES = new Set(["door", "window", "opening"]);
+
+/** Doors, windows and openings never go on a foundation storey. Arming one
+ * there moves the cut up to the ground floor plan. */
+function offerFloorPlanForOpening() {
+  if (!isFoundationLevel(activeLevel)) return;
+  const ground = groundStorey(visibleLevels());
+  if (!ground) return;
+  const idx = houseStations.findIndex((s) => s.levelId === ground.id && s.kind === "floor");
+  if (idx < 0) return;
+  selectStationIndex(idx);
+  const what = openingsPhrase(armedCategories());
+  setStatusMessage(`${what} go on a floor plan, not a foundation. The level switcher moved to "${ground.name || ground.id}".`);
+}
+
+function openingsPhrase(cats) {
+  if (cats?.length === 1 && cats[0] === "door") return "Doors";
+  if (cats?.length === 1 && cats[0] === "window") return "Windows";
+  return "Doors and windows";
 }
 
 // --- level widget: house cutaway + elevation-accurate rail ---------------
@@ -4307,7 +4338,7 @@ function drawCameraDraft() {
 }
 
 function drawSectionDraft() {
-  const target = hoverPoint;
+  const end = sectionDraft.b || hoverPoint;
   const [ax, ay] = worldToScreen(sectionDraft.a.x, sectionDraft.a.y);
   ctx.save();
   ctx.strokeStyle = COLOUR.hover;
@@ -4316,8 +4347,8 @@ function drawSectionDraft() {
   ctx.beginPath();
   ctx.arc(ax, ay, 4, 0, Math.PI * 2);
   ctx.fill();
-  if (target) {
-    const [bx, by] = worldToScreen(target.x, target.y);
+  if (end) {
+    const [bx, by] = worldToScreen(end.x, end.y);
     ctx.beginPath();
     ctx.moveTo(ax, ay);
     ctx.lineTo(bx, by);
@@ -4325,26 +4356,35 @@ function drawSectionDraft() {
     ctx.beginPath();
     ctx.arc(bx, by, 4, 0, Math.PI * 2);
     ctx.fill();
-    const dx = bx - ax;
-    const dy = by - ay;
-    const len = Math.hypot(dx, dy) || 1;
-    const lx = -dy / len;
-    const ly = dx / len;
-    const mx = (ax + bx) / 2;
-    const my = (ay + by) / 2;
-    ctx.beginPath();
-    ctx.moveTo(mx, my);
-    ctx.lineTo(mx + lx * 22, my + ly * 22);
-    ctx.stroke();
-    const tx = mx + lx * 22;
-    const ty = my + ly * 22;
-    const ang = Math.atan2(ly, lx);
-    ctx.beginPath();
-    ctx.moveTo(tx, ty);
-    ctx.lineTo(tx - 10 * Math.cos(ang - 0.45), ty - 10 * Math.sin(ang - 0.45));
-    ctx.lineTo(tx - 10 * Math.cos(ang + 0.45), ty - 10 * Math.sin(ang + 0.45));
-    ctx.closePath();
-    ctx.fill();
+    // The arrow appears once both ends are down, and it follows the cursor
+    // onto the side the next click will look toward.
+    if (sectionDraft.b) {
+      const dx = bx - ax;
+      const dy = by - ay;
+      const len = Math.hypot(dx, dy) || 1;
+      let lx = -dy / len;
+      let ly = dx / len;
+      if (hoverPoint) {
+        const [hx, hy] = worldToScreen(hoverPoint.x, hoverPoint.y);
+        const side = dx * (hy - ay) - dy * (hx - ax);
+        if (side < 0) { lx = -lx; ly = -ly; }
+      }
+      const mx = (ax + bx) / 2;
+      const my = (ay + by) / 2;
+      ctx.beginPath();
+      ctx.moveTo(mx, my);
+      ctx.lineTo(mx + lx * 28, my + ly * 28);
+      ctx.stroke();
+      const tx = mx + lx * 28;
+      const ty = my + ly * 28;
+      const ang = Math.atan2(ly, lx);
+      ctx.beginPath();
+      ctx.moveTo(tx, ty);
+      ctx.lineTo(tx - 12 * Math.cos(ang - 0.45), ty - 12 * Math.sin(ang - 0.45));
+      ctx.lineTo(tx - 12 * Math.cos(ang + 0.45), ty - 12 * Math.sin(ang + 0.45));
+      ctx.closePath();
+      ctx.fill();
+    }
   }
   ctx.restore();
 }
@@ -11528,9 +11568,11 @@ function updateRibbonHint() {
     return;
   }
   if (tool === "section") {
-    setRibbonHint(sectionDraft?.a
-      ? "Click the other end of the cut. Look is to the left of the line."
-      : HINTS.section);
+    setRibbonHint(sectionDraft?.b
+      ? "Click the side you want to look toward. The arrow follows the cursor."
+      : sectionDraft?.a
+        ? "Click the other end of the cut."
+        : HINTS.section);
     return;
   }
   if (tool === "callout") {
@@ -12245,6 +12287,7 @@ function openMassing(view) {
   syncReferenceOffer();
   massView.setPayload(compile(store.doc, pack));
   hideMassRender();
+  loadKeptPictures();
   setPictureOpen(false);
   if (view?.mode !== "section") sectionLive = null;
   clearSectionFloatStyle();
@@ -12511,6 +12554,7 @@ function bindSectionChrome(doc) {
   if (doc.body.dataset.sectionBound !== "1") {
     doc.body.dataset.sectionBound = "1";
     doc.getElementById("screen-fit")?.addEventListener("click", fitSectionScreen);
+    doc.getElementById("screen-flip")?.addEventListener("click", flipOpenSection);
     doc.getElementById("screen-done")?.addEventListener("click", clearSectionScreen);
     doc.querySelectorAll("[data-section-status]").forEach((btn) => {
       btn.addEventListener("click", () => {
@@ -12549,10 +12593,12 @@ function syncSectionPanes(show) {
   if (waiting) waiting.hidden = show;
   if (view) view.hidden = !show;
   const fit = doc.getElementById("screen-fit");
+  const flip = doc.getElementById("screen-flip");
   const done = doc.getElementById("screen-done");
   const filters = doc.getElementById("screen-filters");
   const servicesLabel = doc.getElementById("screen-services-label");
   if (fit) fit.hidden = !show;
+  if (flip) flip.hidden = !show;
   if (done) done.hidden = !show;
   if (filters) filters.hidden = !show;
   if (servicesLabel) servicesLabel.hidden = !show;
@@ -12790,11 +12836,14 @@ function stopMassRenderClock() {
 
 function hideMassRender() {
   stopMassRenderClock();
+  shownKeptId = null;
+  revokeShownPicture();
   if (el.massRender) {
     el.massRender.hidden = true;
     el.massRender.classList.remove("is-ready", "is-pending");
   }
   if (el.massRenderImg) el.massRenderImg.removeAttribute("src");
+  syncKeptActions();
   if (el.massRenderRefs) {
     el.massRenderRefs.hidden = true;
     el.massRenderRefs.replaceChildren();
@@ -12907,7 +12956,7 @@ async function openRenderInPaint() {
     }
   } catch { /* helper not running, or it refused the picture */ }
   downloadBlob(blob, renderDownloadName());
-  setStatusMessage("Saved the picture. Open that file with Paint.", "ok");
+  setStatusMessage("Downloaded the picture. Open that file with Paint.", "ok");
 }
 
 async function saveRenderImage() {
@@ -12919,7 +12968,159 @@ async function saveRenderImage() {
     return;
   }
   downloadBlob(blob, renderDownloadName());
-  setStatusMessage("Saved the picture.", "ok");
+  setStatusMessage("Downloaded the picture.", "ok");
+}
+
+// The picture on screen, when it is one already stored on the job. A fresh
+// generation has none until Keep. Closing the picture clears it; the strip
+// of kept pictures stays.
+let shownKeptId = null;
+let shownPictureUrl = null;
+let keptLoadToken = 0;
+
+function revokeShownPicture() {
+  if (!shownPictureUrl) return;
+  URL.revokeObjectURL(shownPictureUrl);
+  shownPictureUrl = null;
+}
+
+function syncKeptActions() {
+  const kept = Boolean(shownKeptId);
+  if (el.massRenderKeep) {
+    el.massRenderKeep.disabled = kept;
+    el.massRenderKeep.textContent = kept ? "On this job" : "Keep on this job";
+    el.massRenderKeep.title = kept ? "This picture is on the job" : "Keep this picture on the job";
+  }
+  if (el.massRenderRemove) el.massRenderRemove.hidden = !kept;
+  el.massKeptRow?.querySelectorAll("[data-asset-id]").forEach((btn) => {
+    const on = btn.dataset.assetId === shownKeptId;
+    btn.setAttribute("aria-pressed", on ? "true" : "false");
+  });
+}
+
+function clearKeptThumbs() {
+  el.massKeptRow?.querySelectorAll("img").forEach((img) => {
+    const src = img.getAttribute("src") || "";
+    if (src.startsWith("blob:")) URL.revokeObjectURL(src);
+  });
+  el.massKeptRow?.replaceChildren();
+}
+
+/** The pictures kept on the open job, as a strip on the 3D view. */
+async function loadKeptPictures() {
+  const token = ++keptLoadToken;
+  const projectId = openProject?.id;
+  clearKeptThumbs();
+  if (!projectId || !el.massKept || !el.massKeptRow) {
+    if (el.massKept) el.massKept.hidden = true;
+    return;
+  }
+  let pictures;
+  try {
+    pictures = await cloud.listVisualizations(projectId);
+  } catch {
+    if (token === keptLoadToken && el.massKept) el.massKept.hidden = true;
+    return;
+  }
+  if (token !== keptLoadToken || openProject?.id !== projectId) return;
+  if (!pictures.length) {
+    el.massKept.hidden = true;
+    return;
+  }
+  el.massKept.hidden = false;
+  for (const picture of pictures) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "mass-kept-thumb";
+    btn.dataset.assetId = picture.id;
+    btn.title = picture.prompt || "Kept picture";
+    btn.setAttribute("aria-pressed", picture.id === shownKeptId ? "true" : "false");
+    btn.setAttribute("aria-label", picture.prompt || "Kept picture");
+    const img = document.createElement("img");
+    img.alt = "";
+    btn.append(img);
+    btn.addEventListener("click", () => { showKeptPicture(picture.id); });
+    el.massKeptRow.append(btn);
+    cloud.fetchAsset(picture.id).then((file) => {
+      if (token !== keptLoadToken || !btn.isConnected) return;
+      const blob = new Blob([file.bytes], { type: file.mime || "image/png" });
+      img.src = URL.createObjectURL(blob);
+    }).catch(() => { /* the strip omits a picture it could not load */ });
+  }
+}
+
+function showReadyPicture(src) {
+  if (el.massRenderImg) el.massRenderImg.src = src;
+  if (el.massRender) {
+    el.massRender.hidden = false;
+    el.massRender.classList.remove("is-pending");
+    el.massRender.classList.add("is-ready");
+  }
+  stopMassRenderClock();
+  if (el.massRenderStatus) el.massRenderStatus.hidden = true;
+  if (el.massShow3d) el.massShow3d.hidden = false;
+  syncKeptActions();
+}
+
+async function showKeptPicture(assetId) {
+  if (!assetId) return;
+  try {
+    const file = await cloud.fetchAsset(assetId);
+    const blob = new Blob([file.bytes], { type: file.mime || "image/png" });
+    revokeShownPicture();
+    shownPictureUrl = URL.createObjectURL(blob);
+    shownKeptId = assetId;
+    showReadyPicture(shownPictureUrl);
+  } catch (error) {
+    setStatusMessage(error?.message || "That picture could not be opened.", "warn");
+  }
+}
+
+async function keepRenderImage() {
+  if (!openProject?.id) {
+    setStatusMessage("Open a job to keep this picture.", "warn");
+    return;
+  }
+  if (shownKeptId) return;
+  let image;
+  try {
+    image = await blobToDataUrl(await renderPngBlob());
+  } catch {
+    setStatusMessage("Generate a model first.", "warn");
+    return;
+  }
+  try {
+    const kept = await cloud.keepVisualization(openProject.id, {
+      image,
+      prompt: el.massPromptText?.value || "",
+    });
+    shownKeptId = kept?.asset?.id || null;
+    syncKeptActions();
+    await loadKeptPictures();
+    setStatusMessage(
+      kept?.alreadyKept ? "This picture is already on the job." : "Kept this picture on the job.",
+      "ok",
+    );
+  } catch (error) {
+    const message = error?.authRequired
+      ? "Sign in to keep this picture."
+      : (error?.message || "The picture could not be kept.");
+    setStatusMessage(message, "warn");
+  }
+}
+
+async function removeKeptPicture() {
+  if (!shownKeptId || !openProject?.id) return;
+  const assetId = shownKeptId;
+  try {
+    await cloud.deleteVisualization(openProject.id, assetId);
+  } catch (error) {
+    setStatusMessage(error?.message || "The picture could not be removed.", "warn");
+    return;
+  }
+  hideMassRender();
+  await loadKeptPictures();
+  setStatusMessage("Removed the picture from the job.", "ok");
 }
 
 const VISUALIZE_PROMPT_KEY = "v2-visualize-prompt";
@@ -13072,6 +13273,9 @@ async function generateModel() {
     return;
   }
   const images = [{ role: "camera", image }, ...referenceSnapshots()];
+  shownKeptId = null;
+  revokeShownPicture();
+  syncKeptActions();
   if (el.massGenerate) {
     el.massGenerate.dataset.busy = "1";
     el.massGenerate.disabled = true;
@@ -13088,14 +13292,7 @@ async function generateModel() {
   try {
     const rendered = await cloud.visualize({ images, prompt: promptForGenerate() });
     if (!rendered) throw new CloudError(502, "The visualization could not be generated");
-    if (el.massRenderImg) el.massRenderImg.src = rendered;
-    if (el.massRender) {
-      el.massRender.classList.remove("is-pending");
-      el.massRender.classList.add("is-ready");
-    }
-    stopMassRenderClock();
-    if (el.massRenderStatus) el.massRenderStatus.hidden = true;
-    if (el.massShow3d) el.massShow3d.hidden = false;
+    showReadyPicture(rendered);
     if (el.massGenerate) el.massGenerate.textContent = "Generate again";
     setStatusMessage("Photorealistic model ready.", "ok");
   } catch (error) {
@@ -13162,12 +13359,12 @@ function startSectionCut() {
   store.clearSelection();
   syncToolButtons();
   drawRibbon();
-  setStatusMessage("Click two points to cut. Look is to the left of the line.", "ok");
+  setStatusMessage("Click the two ends of the cut, then the side you want to look toward.", "ok");
   render();
 }
 
-function finishSectionCut(target) {
-  const cut = sectionFromClicks(sectionDraft.a, target);
+function finishSectionCut(side) {
+  const cut = sectionFacing(sectionDraft.a, sectionDraft.b, side);
   if (!cut) {
     setStatusMessage("The two ends of the cut need to be different points.", "warn");
     return;
@@ -13189,6 +13386,31 @@ function finishSectionCut(target) {
   // Float stay on this page. The choice is remembered.
   showSection(made.section.cut, { name: made.section.name, id: made.section.id });
   render();
+}
+
+/** Turn the open section around. The cut line stays; only the look changes. */
+function flipOpenSection() {
+  const saved = sectionLive?.id ? sectionById(store.doc, sectionLive.id) : null;
+  const cut = saved?.cut || sectionLive?.cut || currentSectionCut();
+  const flipped = flipSectionCut(cut);
+  if (!flipped) {
+    setStatusMessage("There is no section to flip.", "warn");
+    return;
+  }
+  if (saved) {
+    store.pushUndo(`Flipped the look of ${saved.name}`);
+    saved.cut = flipped;
+    store.persist();
+  }
+  if (sectionLive) sectionLive = { ...sectionLive, cut: flipped };
+  const onScreen = Boolean(sectionScreenAlive() && sectionView?.mode() === "section");
+  const onPanel = Boolean(el.massOverlay && !el.massOverlay.hidden && massView.mode() === "section");
+  if (onScreen) paintSectionScreen({ reframe: true });
+  if (onPanel) {
+    massView.setSection(flipped);
+    massView.setPayload(compile(store.doc, pack), { reframe: false });
+  }
+  setStatusMessage("Looking the other way.", "ok");
 }
 
 // --- elevation (Output > Views > Elevation) --------------------------------
@@ -13534,6 +13756,7 @@ function finishMeasure(target) {
 function wireMassing() {
   wireVisualizePrompt();
   el.massClose.addEventListener("click", closeMassing);
+  el.massFlip?.addEventListener("click", flipOpenSection);
   el.massHost?.querySelectorAll("[data-section-host]").forEach((btn) => {
     btn.addEventListener("click", () => chooseSectionHost(btn.dataset.sectionHost));
   });
@@ -13546,6 +13769,16 @@ function wireMassing() {
   el.massRenderCopy?.addEventListener("click", () => { withRenderAction(el.massRenderCopy, copyRenderImage); });
   el.massRenderPaint?.addEventListener("click", () => { withRenderAction(el.massRenderPaint, openRenderInPaint); });
   el.massRenderSave?.addEventListener("click", () => { withRenderAction(el.massRenderSave, saveRenderImage); });
+  el.massRenderKeep?.addEventListener("click", async () => {
+    if (!el.massRenderKeep || el.massRenderKeep.disabled) return;
+    el.massRenderKeep.disabled = true;
+    try {
+      await keepRenderImage();
+    } finally {
+      syncKeptActions();
+    }
+  });
+  el.massRenderRemove?.addEventListener("click", () => { withRenderAction(el.massRenderRemove, removeKeptPicture); });
   el.massOverlay.addEventListener("click", (event) => {
     if (event.target === el.massOverlay) closeMassing();
   });
@@ -16520,6 +16753,10 @@ function abortClickDraft() {
     }
   }
   else if (cameraDraft?.a) cameraDraft = { a: null };
+  else if (sectionDraft?.b) {
+    sectionDraft = { a: sectionDraft.a };
+    updateRibbonHint();
+  }
   else if (sectionDraft?.a) sectionDraft = { a: null };
   else if (calloutDraft?.a) calloutDraft = { a: null };
   else if (revisionCloudDraft?.a) revisionCloudDraft = { a: null };
@@ -17250,6 +17487,17 @@ function onPointerDown(ev) {
     if (!sectionDraft?.a) {
       sectionDraft = { a: p };
       updateRibbonHint();
+      render();
+      return;
+    }
+    if (!sectionDraft.b) {
+      if (!sectionFromClicks(sectionDraft.a, p)) {
+        setStatusMessage("The two ends of the cut need to be different points.", "warn");
+        return;
+      }
+      sectionDraft = { a: sectionDraft.a, b: p };
+      updateRibbonHint();
+      setStatusMessage("Click the side you want to look toward.", "ok");
       render();
       return;
     }
@@ -19215,6 +19463,8 @@ function onPointerMove(ev) {
     return;
   }
   if (tool === "section") {
+    const p = applySnap(wx, wy);
+    hoverPoint = { x: p.x, y: p.y };
     el.canvas.style.cursor = "crosshair";
     if (sectionDraft?.a) render();
     return;

@@ -211,6 +211,11 @@ alter table asset add column if not exists sha256 text;
 create index if not exists asset_project_sha
   on asset (project_id, sha256) where deleted_at is null and sha256 is not null;
 
+-- The instruction that produced a kept visualization. Null on a plan file.
+-- The picture itself stays in `bytes`; a drawing save must not have to name
+-- it, and must not release it, because it is not part of the sheet.
+alter table asset add column if not exists note text;
+
 -- ---------------------------------------------------------------------------
 -- Practice operations. See .cursor/skills/practice-ops/SKILL.md.
 --

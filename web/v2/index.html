@@ -10,7 +10,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,560&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="../shared/tokens.css" />
   <link rel="stylesheet" href="../shared/splash.css" />
-  <link rel="stylesheet" href="./v2.css?v=20261110-ribbon-regroup2" />
+  <link rel="stylesheet" href="./v2.css?v=20261111-section-side" />
   <!-- Painted before the stylesheet arrives, so a cold load is ink rather
        than a white flash. A reload of this tab skips it. -->
   <style>
@@ -913,6 +913,7 @@
           Services
         </label>
         <div class="mass-actions">
+          <button type="button" id="v2-mass-flip" hidden title="Look the other way. The cut line stays where it is.">Flip look</button>
           <div class="seg section-host" id="v2-mass-host" hidden role="group" aria-label="Where the section is shown">
             <button type="button" data-section-host="overlay" title="Cover the plan">Overlay</button>
             <button type="button" data-section-host="float" title="A window on this screen. The plan stays editable and the section updates.">Float</button>
@@ -953,6 +954,10 @@
             <li><span class="mass-swatch mass-swatch-ground"></span>Ground floor</li>
           </ul>
           <canvas id="v2-mass-canvas"></canvas>
+          <div class="mass-kept" id="v2-mass-kept" hidden>
+            <p class="mass-kept-label">On this job</p>
+            <div class="mass-kept-row" id="v2-mass-kept-row"></div>
+          </div>
           <div class="empty" id="v2-mass-empty">
             <h3>Nothing to show</h3>
             <p>Draw a room, wall, roof, floor, door or window, then open 3D again.</p>
@@ -972,7 +977,9 @@
             <div class="mass-render-actions" role="group" aria-label="Picture">
               <button type="button" id="v2-mass-render-copy" title="Copy the picture">Copy</button>
               <button type="button" id="v2-mass-render-paint" title="Open this picture in Paint">Open in Paint</button>
-              <button type="button" id="v2-mass-render-save" title="Save the picture">Save</button>
+              <button type="button" id="v2-mass-render-save" title="Download the picture">Download</button>
+              <button type="button" id="v2-mass-render-keep" title="Keep this picture on the job">Keep on this job</button>
+              <button type="button" id="v2-mass-render-remove" title="Remove this picture from the job" hidden>Remove</button>
             </div>
           </div>
         </div>
@@ -1378,6 +1385,6 @@
     </form>
   </div>
 
-  <script type="module" src="./ui.js?v=20261110-pick-side"></script>
+  <script type="module" src="./ui.js?v=20261111-section-side"></script>
 </body>
 </html>
