@@ -4,7 +4,7 @@
 // Three blocks, shown as they apply:
 //   room       the room's finish rules, presets and floor regions
 //   face       what is on the selected wall face, and a form to add a run
-//   products   the products on this job and the two job settings
+//   products   the products on this job (its two finish settings are in Job settings)
 
 import { finishSwatch } from "./finish-data.js";
 import { floorCoverage, FINISH_CATEGORIES, categoriesForSurface, finishBillNote, finishProductById, regionsOnSlab } from "./finish-model.js";
@@ -1225,7 +1225,6 @@ export function faceFinishHtml(doc, model, opts = {}) {
 export function productsHtml(doc, { open = false } = {}) {
   const cats = Object.keys(FINISH_CATEGORIES).filter((c) => !FINISH_CATEGORIES[c].virtual);
   const products = doc.finishProducts || [];
-  const settings = doc.finishSettings || {};
   const groups = cats
     .map((c) => ({ category: c, items: products.filter((p) => p.category === c) }))
     .filter((g) => g.items.length);
@@ -1252,16 +1251,6 @@ export function productsHtml(doc, { open = false } = {}) {
       <button type="button" data-fin="product-add">Add product</button>
     </div>
     </div>
-    <div class="fin-row">
-      <label>External finish
-        <select data-fin="external-finish">${[["plaster", "Plaster"], ["render", "Render"], ["facebrick", "Face brick"]].map(([v, l]) => `<option value="${v}"${settings.externalFinish === v ? " selected" : ""}>${l}</option>`).join("")}</select>
-      </label>
-      <label>Wall volume at
-        <select data-fin="volume-basis">
-          <option value="overall"${settings.volumeBasis !== "core" ? " selected" : ""}>overall thickness</option>
-          <option value="core"${settings.volumeBasis === "core" ? " selected" : ""}>core thickness</option>
-        </select>
-      </label>
-    </div>
+    <p class="fin-note">External finish and wall volume are set in Document › Project › Job settings.</p>
   </details>`;
 }

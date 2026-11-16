@@ -920,8 +920,8 @@ test("the open face matches the plan scale and lines up with the wall", async ()
   assert.ok(Math.abs(skewMarks[2].planX - skewMarks[2].elevX) > 1, "a plumb line from the plan end misses the elevation");
   const skewGuides = elevationGuideLayout(skewMarks);
   assert.equal(skewGuides.across.length, 3, "a skew wall bends across before dropping");
-  assert.ok(Math.abs(skewGuides.fold.x2 - skewGuides.fold.x1 - 5 * 40) < 1e-6, "the fold spans the true length");
-  assert.ok(Math.abs(skewGuides.down[2].x - skewGuides.down[0].x - 5 * 40) < 1e-6);
+  assert.ok(Math.abs(skewGuides.down[2].x - skewGuides.down[0].x - 5 * 40) < 1e-6, "the guides span the true length");
+  assert.equal(skewGuides.fold, undefined, "no diagonal fold line");
 
   const flat = planFaceFrame({ x1: 0, y1: 2, x2: 6, y2: 2, side: 1 }, cam, 0);
   const flatGuides = elevationGuideLayout([0, 3, 6].map((s) => ({
@@ -930,7 +930,7 @@ test("the open face matches the plan scale and lines up with the wall", async ()
     elevX: flat.originX + flat.dir * s * flat.scale,
   })));
   assert.equal(flatGuides.across.length, 0, "a horizontal wall drops straight down");
-  assert.equal(flatGuides.fold, null);
+  assert.equal(flatGuides.down.length, 3);
 
   const shallow = planFaceFrame({ x1: 0, y1: 0, x2: 4, y2: 3, side: 1 }, cam, 0);
   assert.equal(shallow.vertical, false, "a wall closer to horizontal is not the vertical case");
@@ -943,7 +943,7 @@ test("the open face matches the plan scale and lines up with the wall", async ()
   assert.ok(Math.abs(shallowMarks[2].planX - shallowMarks[0].planX - 4 * 40) < 1e-6, "the plan only runs four metres across");
   const shallowGuides = elevationGuideLayout(shallowMarks);
   assert.equal(shallowGuides.across.length, 3, "a shallow skew bends the same way a vertical wall does");
-  assert.ok(Math.abs(shallowGuides.fold.x2 - shallowGuides.fold.x1 - 5 * 40) < 1e-6);
+  assert.ok(Math.abs(shallowGuides.down[2].x - shallowGuides.down[0].x - 5 * 40) < 1e-6);
 
   const px = frame.originX + 40;
   const py = 500 - 14 - 40;
@@ -1357,7 +1357,8 @@ test("lining the elevation up with the plan does not move the plan", () => {
   assert.match(fit, /elevationLink = "fitted"/);
   assert.match(src, /function detachElevationFromPlan\(\)/);
   const flash = src.slice(src.indexOf("function flashElevationAlignment()"), src.indexOf("function alignFloorToPicture()"));
-  assert.match(flash, /is-fold/);
+  assert.doesNotMatch(flash, /is-fold/);
+  assert.match(flash, /elev-align-dot/);
   assert.match(flash, /elevationGuideLayout/);
   assert.match(flash, /forceBend: frame\.vertical/);
   assert.match(flash, /planLinkedFrame/);

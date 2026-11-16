@@ -243,3 +243,9 @@ export function boqRows(compiled, rateBook) {
 export function scheduleTotal(rows) {
   return rows.reduce((sum, row) => sum + (row.amount || 0), 0);
 }
+
+/** Service bends the route counted because the pipe names no fitting type.
+ *  A generated foundation wall is also `derived`, and is not one of these. */
+export function untypedFittingLines(rows) {
+  return (rows || []).filter((row) => row.derived && row.category === "Service fittings");
+}

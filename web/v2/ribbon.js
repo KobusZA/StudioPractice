@@ -158,7 +158,7 @@ export const RIBBON = [
       {
         label: "Project",
         items: [
-          { id: "project-info", label: "Project information", command: "project-info" },
+          { id: "project-info", label: "Job settings", command: "project-info" },
         ],
       },
       {

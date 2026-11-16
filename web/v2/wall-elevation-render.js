@@ -224,22 +224,15 @@ export function alignCameraShift(vertical, projected, centerX) {
  * are spaced by the wall's true length, not by its plan projection.
  * A horizontal wall already has each plan point above its station, so the
  * guide drops straight down. Any other wall — vertical or skew — runs across
- * to the station's x and then down, and those bends sit on one fold line.
- * `forceBend` keeps the fold for a vertical wall even when a coordinate
- * happens to match.
+ * to the station's x and then down. `forceBend` keeps the bend for a vertical
+ * wall even when a coordinate happens to match.
  */
 export function elevationGuideLayout(marks, { forceBend = false } = {}) {
   const list = Array.isArray(marks) ? marks : [];
   const down = list.map((m) => ({ x: m.elevX, y: m.planY }));
   const bend = forceBend || list.some((m) => Math.abs(m.planX - m.elevX) > 1.5);
-  if (!bend || list.length < 2) return { down, across: [], fold: null };
-  const first = list[0];
-  const last = list[list.length - 1];
-  return {
-    down,
-    across: list.map((m) => ({ y: m.planY, x0: m.planX, x1: m.elevX })),
-    fold: { x1: first.elevX, y1: first.planY, x2: last.elevX, y2: last.planY },
-  };
+  if (!bend || list.length < 2) return { down, across: [] };
+  return { down, across: list.map((m) => ({ y: m.planY, x0: m.planX, x1: m.elevX })) };
 }
 
 /**

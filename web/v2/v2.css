@@ -1951,8 +1951,10 @@ body.library-home .project-info-overlay {
 }
 
 .project-info-panel {
-  width: min(420px, 100%);
+  width: min(560px, 100%);
   height: auto;
+  max-height: calc(100vh - 48px);
+  overflow: auto;
   padding: 16px;
   gap: 12px;
   display: flex;
@@ -1967,6 +1969,30 @@ body.library-home .project-info-overlay {
 
 .project-info-panel .sheet-fields label {
   flex: 1 1 160px;
+}
+
+.job-settings-sec {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line, rgba(0, 0, 0, 0.15));
+}
+
+.job-settings-sec h3 {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.job-settings-sec .hint {
+  margin: 0;
+  padding: 0;
+  font-size: 0.76rem;
+  line-height: 1.4;
 }
 
 .elevation-panel {
@@ -2344,10 +2370,22 @@ body.library-home {
   display: none;
 }
 
+/* The paper band keeps the dashes readable over a busy plan or sheet. */
 .elev-align-line {
   position: absolute;
   width: 0;
   border-left: 1.5px dashed #b2451e;
+  box-shadow: 0 0 0 1.5px rgba(251, 247, 240, 0.85);
+}
+
+.elev-align-dot {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  margin: -3.5px 0 0 -3.5px;
+  border-radius: 50%;
+  background: #b2451e;
+  box-shadow: 0 0 0 2px rgba(251, 247, 240, 0.95);
 }
 
 .elev-align-line.is-across {
@@ -2363,11 +2401,6 @@ body.library-home {
   border-left: 0;
   border-top: 1.5px dashed #b2451e;
   transform-origin: 0 0;
-}
-
-/* The fold a vertical or skew wall's guides turn on. */
-.elev-align-line.is-fold {
-  opacity: 0.55;
 }
 
 .svc-profile-dock {
@@ -3527,8 +3560,30 @@ button.fin-kind {
   font-weight: 600;
 }
 
-/* Same box as Chain, Radius and the other ribbon checkboxes. */
-.level-isolate input[type="checkbox"] {
+/* Outranks `.planner-fields label`, which otherwise stacks the box above
+   an uppercase caption. This is a sentence, like the status line above it. */
+.planner-fields label.ctx-foundation {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 8px;
+  align-items: center;
+  margin: 0;
+  font-size: 0.86rem;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink);
+  cursor: pointer;
+}
+.ctx-foundation small {
+  grid-column: 2;
+  font-size: 0.72rem;
+  color: var(--ink-soft);
+}
+.ctx-foundation small:empty { display: none; }
+#v2-ctx-foundation-own { margin: 0 0 8px; }
+
+.level-isolate input[type="checkbox"],
+.ctx-foundation input[type="checkbox"] {
   width: 15px;
   height: 15px;
   margin: 0;
@@ -3713,6 +3768,16 @@ input.level-rail-name:focus { outline: none; }
   color: var(--ink-soft);
 }
 .level-build-up-note.warn { color: var(--copper); }
+.level-foundation-walls {
+  margin-top: 8px;
+  padding-bottom: 0;
+}
+.level-foundation-type { margin-top: 6px; }
+.level-foundation-type[hidden] { display: none; }
+.level-foundation-type select {
+  max-width: 11em;
+  font-size: 0.78rem;
+}
 
 .level-station-elev {
   font-size: 0.72rem;
@@ -5309,8 +5374,10 @@ input.level-station-elev:focus {
 .ctx-type-current {
   display: grid;
   grid-template-columns: 10px minmax(0, 1fr) minmax(0, max-content) auto;
+  grid-template-areas: "swatch name meta chev";
   align-items: center;
-  gap: 8px;
+  column-gap: 8px;
+  row-gap: 1px;
   width: 100%;
   min-width: 0;
   overflow: hidden;
@@ -5327,11 +5394,14 @@ input.level-station-elev:focus {
 .ctx-type-current:hover { border-color: var(--copper); }
 .ctx-type-current[aria-expanded="true"] .chev { transform: rotate(180deg); }
 .ctx-type-current i {
+  grid-area: swatch;
   width: 10px;
   height: 10px;
   background: var(--ink);
 }
 .ctx-type-current-name {
+  grid-area: name;
+  min-width: 0;
   font-weight: 600;
   font-size: 13px;
   min-width: 0;
@@ -5340,8 +5410,11 @@ input.level-station-elev:focus {
   white-space: nowrap;
 }
 .ctx-type-current em {
+  grid-area: meta;
+  min-width: 0;
   font-style: normal;
   font-size: 11px;
+  line-height: 1.25;
   color: var(--ink-soft);
   min-width: 0;
   overflow: hidden;
@@ -5350,6 +5423,7 @@ input.level-station-elev:focus {
 }
 .ctx-type-current em:empty { display: none; }
 .ctx-type-current .chev {
+  grid-area: chev;
   width: 14px;
   height: 14px;
   color: var(--ink-soft);
@@ -6793,6 +6867,17 @@ input.level-station-elev:focus {
   white-space: nowrap;
 }
 
+#v2-schedule-kicker .schedule-kicker-change {
+  font: inherit;
+  font-size: inherit;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 .schedule-panel > header button {
   font: inherit;
   font-size: 0.82rem;
@@ -6825,6 +6910,80 @@ input.level-station-elev:focus {
   overflow: auto;
   margin-top: 10px;
   font-size: 0.84rem;
+}
+
+/* BOM materials choices: source, brick, concrete strength, waste. */
+.materials-strip {
+  margin-bottom: 12px;
+  padding: 8px 10px 10px;
+  border: 1px solid var(--line, rgba(0, 0, 0, 0.15));
+  border-radius: 3px;
+  background: #fff;
+}
+
+.materials-strip h3 {
+  margin: 0 0 6px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.materials-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+}
+
+.materials-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 0.76rem;
+  color: var(--ink-soft);
+}
+
+.materials-fields select,
+.materials-fields input {
+  font: inherit;
+  font-size: 0.82rem;
+  color: var(--ink);
+  padding: 3px 6px;
+  border: 1px solid var(--ink-soft);
+  border-radius: 3px;
+  background: #fff;
+  max-width: 22rem;
+}
+
+.materials-fields input {
+  width: 6.5rem;
+}
+
+.materials-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin: 0 0 8px;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.materials-summary button {
+  font: inherit;
+  font-size: 0.76rem;
+}
+
+.materials-strip .hint {
+  margin: 8px 0 0;
+  font-size: 0.74rem;
+  line-height: 1.4;
+  color: var(--ink-soft);
+}
+
+.schedule-overlay.peek .materials-fields label {
+  flex: 1 1 100%;
 }
 
 /* Full table: a long model code wraps instead of forcing the description

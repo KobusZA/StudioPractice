@@ -28,6 +28,7 @@ import {
   normalizeFinishSettings,
   normalizeRoomFinishes,
 } from "./finish-data.js";
+import { normalizeMaterialSettings } from "./materials.js";
 import { knownConvention } from "./region.js";
 import { cleanLineArc, knownLineArrow, knownLineStyle } from "./line-styles.js";
 import { cleanDimensionText, normalizeNotes, normalizeTextStyles } from "./notes.js";
@@ -222,6 +223,12 @@ export function emptyDoc() {
     // Floor build-up on the ground storey, mm from FFL to the slab top. Null
     // is not stated: the DPC is then taken at FFL, and Check says so.
     floorBuildUp: null,
+    // Foundation walls drawn under ground storey masonry walls. False turns
+    // them off for the job; a wall's own `foundation` flag still wins.
+    foundationWalls: true,
+    // The type those foundation walls take. Null follows the template's. A
+    // wall's own `foundationSku` still wins.
+    foundationWallSku: null,
     // Storeys this document added beyond the ones the template names - see
     // level-view.js's insertLevel(). Kept on the document, never merged into
     // the pack, because the pack is regenerated from the template.
@@ -240,6 +247,10 @@ export function emptyDoc() {
     finishRegions: [],
     finishPresets: [],
     finishSettings: normalizeFinishSettings(null),
+    // Material takeoff choices for this job (materials.js): which published
+    // source, which brick, concrete strength per type, waste. All unstated
+    // until the job states them.
+    materialSettings: normalizeMaterialSettings(null),
   };
 }
 
@@ -288,6 +299,32 @@ export function shapePolygon(shape) {
 
 export function roomPolygon(room) {
   return shapePolygon(room?.shape);
+}
+
+/** Room sides with their own foundation choice. Empty and junk are dropped. */
+function foundationEdgesOf(room) {
+  const raw = room?.foundationEdges;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const edges = {};
+  for (const [key, value] of Object.entries(raw)) {
+    const index = Number(key);
+    if (!Number.isInteger(index) || index < 0 || typeof value !== "boolean") continue;
+    edges[index] = value;
+  }
+  return Object.keys(edges).length ? { foundationEdges: edges } : {};
+}
+
+/** Room sides with their own foundation wall type. Empty and junk are dropped. */
+function foundationSkusOf(room) {
+  const raw = room?.foundationSkus;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const skus = {};
+  for (const [key, value] of Object.entries(raw)) {
+    const index = Number(key);
+    if (!Number.isInteger(index) || index < 0 || typeof value !== "string" || !value) continue;
+    skus[index] = value;
+  }
+  return Object.keys(skus).length ? { foundationSkus: skus } : {};
 }
 
 export function shapeRects(shape) {
@@ -1179,6 +1216,11 @@ export function normalizeDoc(raw) {
     wallHeight: Number.isFinite(room.wallHeight) && room.wallHeight > 0 ? room.wallHeight : null,
     // Floor offset from the level, millimetres. Absent means on the level.
     ...(Number.isFinite(room.offset) && room.offset !== 0 ? { offset: room.offset } : {}),
+    // Sides of this room that do not follow the job's foundation wall setting.
+    // Keys are polygon edge indexes. Absent means every side follows the job.
+    ...foundationEdgesOf(room),
+    // Sides whose foundation wall is not the job's type, by edge index.
+    ...foundationSkusOf(room),
     // Finish rules: what goes on this room's walls and floor.
     finishes: normalizeRoomFinishes(room.finishes),
     // A bound room keeps the point the user clicked inside the walls. Absent
@@ -1208,7 +1250,8 @@ export function normalizeDoc(raw) {
       y2: seg.y2,
       status: seg.status === "existing" ? "existing" : "planned",
       top: seg.top === "level-above" ? "level-above" : null,
-      ...(seg.foundation === false ? { foundation: false } : {}),
+      ...(typeof seg.foundation === "boolean" ? { foundation: seg.foundation } : {}),
+      ...(typeof seg.foundationSku === "string" && seg.foundationSku ? { foundationSku: seg.foundationSku } : {}),
       ...(location === "exterior" || location === "interior" ? { location } : {}),
       ...(arc ? { arc } : {}),
       ...(fillet ? { fillet } : {}),
@@ -1450,6 +1493,8 @@ export function normalizeDoc(raw) {
   doc.floorsRevealed = Number.isInteger(raw.floorsRevealed) && raw.floorsRevealed >= 0 ? raw.floorsRevealed : 0;
   // Millimetres from FFL down to the slab top on the ground storey. Null is not stated.
   doc.floorBuildUp = Number.isFinite(raw.floorBuildUp) && raw.floorBuildUp >= 0 ? raw.floorBuildUp : null;
+  doc.foundationWalls = raw.foundationWalls !== false;
+  doc.foundationWallSku = typeof raw.foundationWallSku === "string" && raw.foundationWallSku ? raw.foundationWallSku : null;
   // `num` rather than `Number(x)`: null and "" both coerce to 0, which would
   // silently turn an unstated floor-to-ceiling into a floor-to-ceiling of zero.
   const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
@@ -1483,6 +1528,7 @@ export function normalizeDoc(raw) {
   doc.finishRegions = normalizeFinishRegions(raw.finishRegions);
   doc.finishPresets = normalizeFinishPresets(raw.finishPresets);
   doc.finishSettings = normalizeFinishSettings(raw.finishSettings);
+  doc.materialSettings = normalizeMaterialSettings(raw.materialSettings);
 
   if (isV1) doc.migratedFrom = raw.schema || "sp.doc/1";
   return doc;

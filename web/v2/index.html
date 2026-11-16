@@ -10,7 +10,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,560&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="../shared/tokens.css" />
   <link rel="stylesheet" href="../shared/splash.css" />
-  <link rel="stylesheet" href="./v2.css?v=20261112-footing-add" />
+  <link rel="stylesheet" href="./v2.css?v=20261116-foundation-takeoff" />
   <!-- Painted before the stylesheet arrives, so a cold load is ink rather
        than a white flash. A reload of this tab skips it. -->
   <style>
@@ -392,6 +392,14 @@
               </span>
             </label>
             <p class="level-build-up-note" id="v2-floor-build-up-note"></p>
+            <label class="level-isolate level-foundation-walls" title="A 220 mm foundation wall under every masonry wall on the ground floor, from the foundation level up to the slab. A wall's own Foundation wall box overrides this.">
+              <input type="checkbox" id="v2-foundation-walls" />
+              Draw foundation walls under ground floor walls
+              <small id="v2-foundation-walls-note"></small>
+            </label>
+            <label class="level-build-up level-foundation-type" id="v2-foundation-type-wrap" hidden title="The type every foundation wall takes unless its wall states its own.">Foundation wall type
+              <select id="v2-foundation-type"></select>
+            </label>
           </div>
           <button type="button" class="panel-resize panel-resize-levels" id="v2-resize-levels"
                   aria-label="Resize levels panel" title="Drag to resize" tabindex="0"></button>
@@ -766,6 +774,15 @@
             <button type="button" id="v2-ctx-footing-add">Add</button>
             <span class="plan-context-note" id="v2-ctx-footing-note"></span>
           </div>
+          <label class="ctx-foundation" id="v2-ctx-foundation-wrap" hidden title="A 220 mm foundation wall runs under this wall, from the foundation level up to its base. Untick to leave it out. A room remembers the choice on each side.">
+            <input type="checkbox" id="v2-ctx-foundation" />
+            <span id="v2-ctx-foundation-label">Foundation wall under it</span>
+            <small id="v2-ctx-foundation-note"></small>
+          </label>
+          <label id="v2-ctx-foundation-type-wrap" hidden title="The type of the foundation wall under this wall. The job's type is set in the Levels panel.">Foundation type
+            <select id="v2-ctx-foundation-type"></select>
+          </label>
+          <button type="button" id="v2-ctx-foundation-own" hidden title="Turn the foundation wall under this wall into a drawn wall you can edit">Draw foundation as its own wall</button>
           <div class="floor-card-wrap" id="v2-ctx-floor-wrap" hidden>
             <button type="button" class="floor-card" id="v2-ctx-floor" aria-label="Open this floor">
               <span class="floor-card-label"><span>This floor</span><em id="v2-ctx-floor-name"></em></span>
@@ -929,11 +946,6 @@
                 <span>Base</span>
                 <strong id="v2-ctx-attach">Not attached</strong>
               </div>
-              <label class="level-isolate" id="v2-ctx-foundation-wrap" hidden title="A 220 mm foundation wall runs under this wall, from the foundation level up to its base. Untick for a wall that needs none.">
-                <input type="checkbox" id="v2-ctx-foundation" />
-                Foundation wall under it
-              </label>
-              <button type="button" id="v2-ctx-foundation-own" hidden title="Turn the foundation wall under this wall into a drawn wall you can edit">Draw foundation as its own wall</button>
             </div>
           </details>
           <button type="button" id="v2-ctx-convert" hidden title="Replace this room's walls with drawn walls you can select and edit one by one">Convert walls to drawn</button>
@@ -1276,18 +1288,35 @@
   <div class="sheet-overlay project-info-overlay" id="v2-project-info-overlay" hidden>
     <div class="panel sheet-panel project-info-panel">
       <header>
-        <h2>Project information</h2>
+        <h2>Job settings</h2>
         <button type="button" id="v2-project-info-close">Close</button>
       </header>
-      <p class="hint">Job number and client name are one job's own facts, not the pack's - every sheet's title block reads them from here.</p>
-      <div class="sheet-fields">
-        <label>Job number
-          <input id="v2-project-info-job-number" type="text" autocomplete="off" />
-        </label>
-        <label>Client name
-          <input id="v2-project-info-client-name" type="text" autocomplete="off" />
-        </label>
-      </div>
+      <section class="job-settings-sec" aria-labelledby="v2-job-sec-job">
+        <h3 id="v2-job-sec-job">Job</h3>
+        <p class="hint">Every sheet's title block reads these from here.</p>
+        <div class="sheet-fields">
+          <label>Job number
+            <input id="v2-project-info-job-number" type="text" autocomplete="off" />
+          </label>
+          <label>Client name
+            <input id="v2-project-info-client-name" type="text" autocomplete="off" />
+          </label>
+        </div>
+      </section>
+      <section class="job-settings-sec" aria-labelledby="v2-job-sec-pricing">
+        <h3 id="v2-job-sec-pricing">Pricing</h3>
+        <p class="hint">What the BOQ prices this drawing against. A named book stays with this job. Firm default follows whichever book is the default today, so a later change of default reaches this job.</p>
+        <div id="v2-job-pricing"></div>
+      </section>
+      <section class="job-settings-sec" aria-labelledby="v2-job-sec-materials">
+        <h3 id="v2-job-sec-materials">Materials</h3>
+        <p class="hint">What the BOM counts bricks, mortar and concrete by. Blank until chosen; the BOM lists what is missing. Concrete strength is chosen per type on the BOM.</p>
+        <div id="v2-job-materials"></div>
+      </section>
+      <section class="job-settings-sec" aria-labelledby="v2-job-sec-finishes">
+        <h3 id="v2-job-sec-finishes">Finishes</h3>
+        <div id="v2-job-finishes"></div>
+      </section>
     </div>
   </div>
 
@@ -1553,6 +1582,6 @@
     </form>
   </div>
 
-  <script type="module" src="./ui.js?v=20261112-foundation-delete"></script>
+  <script type="module" src="./ui.js?v=20261116-foundation-takeoff"></script>
 </body>
 </html>

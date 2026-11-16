@@ -1,0 +1,767 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Active cut panel — redesign mock</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,560&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --paper: #f3eee4;
+      --paper-2: #e8e0d2;
+      --panel: #f8f4ec;
+      --ink: #1a1612;
+      --ink-soft: #564d42;
+      --line: #cfc4b3;
+      --copper: #b2451e;
+      --copper-wash: rgba(178, 69, 30, 0.08);
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: "Source Sans 3", "Segoe UI", sans-serif;
+    }
+    body { padding: 28px 32px 48px; }
+    h1 {
+      font-family: Fraunces, Georgia, serif;
+      font-weight: 500;
+      font-size: 1.55rem;
+      margin: 0 0 6px;
+    }
+    .lede {
+      color: var(--ink-soft);
+      max-width: 70ch;
+      margin: 0 0 20px;
+      line-height: 1.45;
+    }
+    kbd {
+      font-size: 0.75rem;
+      border: 1px solid var(--line);
+      padding: 0 5px;
+      background: #fff;
+    }
+    .storeys {
+      display: inline-flex;
+      margin: 0 0 22px;
+      border: 1px solid var(--line);
+    }
+    .storeys button {
+      font: inherit;
+      font-size: 0.82rem;
+      padding: 6px 12px;
+      border: 0;
+      background: transparent;
+      color: var(--ink-soft);
+      cursor: pointer;
+    }
+    .storeys button[aria-pressed="true"] { background: var(--ink); color: var(--panel); }
+    .storeys button:focus-visible { outline: 1px solid var(--copper); outline-offset: -2px; }
+
+    .stage {
+      display: grid;
+      grid-template-columns: 340px minmax(0, 1fr);
+      gap: 36px;
+      align-items: start;
+      max-width: 980px;
+    }
+
+    /* --- The panel ---------------------------------------------------- */
+    .widget {
+      width: 340px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      padding: 14px 12px 14px;
+    }
+    .eyebrow {
+      margin: 0 0 4px;
+      font-size: 0.72rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--ink-soft);
+      font-weight: 600;
+    }
+    .cut-name {
+      font-family: Fraunces, Georgia, serif;
+      font-size: 1.18rem;
+      font-weight: 500;
+      margin: 0 0 2px;
+    }
+    .cut-name .code {
+      font-family: "Source Sans 3", sans-serif;
+      font-size: 0.8rem;
+      color: var(--ink-soft);
+      margin-right: 6px;
+      font-variant-numeric: tabular-nums;
+    }
+    .cut-meta {
+      margin: 0 0 12px;
+      font-size: 0.84rem;
+      color: var(--ink-soft);
+      font-variant-numeric: tabular-nums;
+    }
+    .cut-meta strong { color: var(--ink); font-weight: 600; }
+
+    .isolate {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 2px 8px;
+      align-items: center;
+      font-size: 0.86rem;
+      cursor: pointer;
+      padding: 8px 0 10px;
+      border-top: 1px solid var(--line);
+    }
+    .isolate input { margin: 0; accent-color: var(--copper); }
+    .isolate small {
+      grid-column: 2;
+      font-size: 0.74rem;
+      color: var(--ink-soft);
+    }
+
+    .section-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      font-size: 0.72rem;
+      color: var(--ink-soft);
+      border-top: 1px solid var(--line);
+      padding-top: 8px;
+      margin-bottom: 2px;
+    }
+    .section-head span:first-child {
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+
+    .frame { position: relative; width: 316px; }
+    .house {
+      display: block;
+      touch-action: none;
+      user-select: none;
+    }
+    .house:focus { outline: none; }
+    .house:focus-visible { outline: 1px solid var(--ink); outline-offset: 2px; }
+
+    .earth { fill: url(#earth); }
+    .grade { stroke: var(--ink); stroke-width: 0.9; fill: none; }
+    .poche { fill: #2c2824; stroke: var(--ink); stroke-width: 0.55; }
+    .void { fill: var(--panel); stroke: var(--ink); stroke-width: 0.55; }
+    .ceiling { fill: #cfc6b8; stroke: var(--ink); stroke-width: 0.4; }
+    .screed { fill: #e6dccb; stroke: var(--ink); stroke-width: 0.45; }
+    .gf-slab.focus .poche,
+    .gf-slab.focus .screed { stroke: var(--copper); stroke-width: 1.4; }
+    .stroke { fill: none; stroke: var(--ink); stroke-width: 0.9; }
+    /* Grey on purpose: the break says "drawing continues", it is not a wall. */
+    .break { fill: none; stroke: #a99c89; stroke-width: 0.7; }
+    /* What the plan has dropped. Labels and the cut line sit outside these groups. */
+    .part.dim { opacity: 0.22; }
+    .rail { stroke: #a99c89; stroke-width: 1; }
+    .tick { stroke: #6f6355; stroke-width: 1; }
+    .leader { stroke: #a99c89; stroke-width: 0.8; fill: none; }
+    .leader.active, .tick.active { stroke: var(--copper); }
+    .cut { stroke: var(--copper); stroke-width: 1.2; stroke-dasharray: 3.2 2.4; fill: none; }
+    .cut-cap { fill: var(--copper); }
+    .thumb { fill: var(--copper); }
+    .grip { stroke: var(--panel); stroke-width: 1; }
+    .rail-band, .thumb-hit { fill: transparent; cursor: ns-resize; }
+    .draw-hit { fill: transparent; cursor: pointer; }
+    .ghost { opacity: 0; pointer-events: none; }
+    .ghost.on { opacity: 1; }
+    .ghost line { stroke: var(--copper); stroke-width: 1.1; stroke-dasharray: 3.2 2.4; opacity: 0.45; }
+    @media (prefers-reduced-motion: no-preference) {
+      .cut-group { transition: transform 120ms ease-out; }
+    }
+
+    .rail-labels { list-style: none; margin: 0; padding: 0; }
+    .rail-labels li { position: absolute; left: 124px; width: 192px; height: 20px; }
+    .rail-labels button {
+      display: grid;
+      grid-template-columns: 18px minmax(0, 1fr) auto;
+      gap: 4px;
+      align-items: center;
+      width: 100%;
+      height: 100%;
+      border: 0;
+      background: transparent;
+      padding: 0 4px 0 4px;
+      font: inherit;
+      font-size: 0.78rem;
+      color: var(--ink);
+      text-align: left;
+      cursor: pointer;
+    }
+    .rail-labels .code { color: var(--ink-soft); font-size: 0.7rem; font-variant-numeric: tabular-nums; }
+    .rail-labels .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .rail-labels .elev { color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+    .rail-labels button:hover,
+    .rail-labels button.is-hover { background: rgba(26, 22, 18, 0.05); }
+    .rail-labels button:focus-visible { outline: 1px solid var(--copper); outline-offset: -1px; }
+    .rail-labels button[aria-current="true"] { background: var(--copper-wash); font-weight: 600; }
+    .rail-labels button[aria-current="true"] .name,
+    .rail-labels button[aria-current="true"] .elev,
+    .rail-labels button[aria-current="true"] .code { color: var(--copper); }
+
+    .hint {
+      font-size: 0.74rem;
+      color: var(--ink-soft);
+      margin: 6px 0 0;
+      line-height: 1.4;
+    }
+
+    .slab-block {
+      margin-top: 12px;
+      padding-top: 10px;
+      border-top: 1px solid var(--line);
+    }
+    .slab-block .eyebrow { margin-bottom: 6px; }
+    .build-up {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 0.86rem;
+    }
+    .build-up .field { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-soft); }
+    .build-up input {
+      width: 72px;
+      font: inherit;
+      font-size: 0.86rem;
+      text-align: right;
+      padding: 3px 6px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--ink);
+      font-variant-numeric: tabular-nums;
+    }
+    .build-up input:focus { outline: 1px solid var(--copper); border-color: var(--copper); }
+    .build-up input[aria-invalid="true"] { border-color: var(--copper); background: var(--copper-wash); }
+    .build-up-note {
+      margin: 6px 0 0;
+      font-size: 0.74rem;
+      line-height: 1.4;
+      color: var(--ink-soft);
+    }
+    .build-up-note.warn { color: var(--copper); }
+
+    /* --- Notes beside the mock ---------------------------------------- */
+    .notes h2 {
+      font-family: Fraunces, Georgia, serif;
+      font-weight: 500;
+      font-size: 1.1rem;
+      margin: 0 0 10px;
+    }
+    .notes ul { margin: 0; padding-left: 18px; line-height: 1.5; max-width: 60ch; }
+    .notes li { margin-bottom: 8px; }
+    .notes li strong { font-weight: 600; }
+  </style>
+</head>
+<body>
+  <h1>Active cut panel — redesign mock</h1>
+  <p class="lede">
+    The separate level list is gone. Each level is labelled on the rail beside the section,
+    so the drawing, the rail and the list are one control. Hover to preview, click a label or
+    the drawing to select, or drag the copper handle. With the section focused,
+    <kbd>↑</kbd> <kbd>↓</kbd> step one level and <kbd>PgUp</kbd> <kbd>PgDn</kbd> skip a storey.
+  </p>
+  <div class="storeys" role="group" aria-label="Mock building">
+    <button type="button" data-storeys="1" aria-pressed="true">1 storey</button>
+    <button type="button" data-storeys="3" aria-pressed="false">3 storeys</button>
+  </div>
+
+  <div class="stage">
+    <aside class="widget" aria-label="Active cut">
+      <p class="eyebrow">Active cut</p>
+      <p class="cut-name" id="cut-name"></p>
+      <p class="cut-meta" id="cut-meta"></p>
+
+      <label class="isolate">
+        <input type="checkbox" id="isolate" />
+        Show only this cut in the plan
+        <small id="isolate-note">Off: the neighbouring level is ghosted.</small>
+      </label>
+
+      <div class="section-head">
+        <span>Section</span>
+        <span>mm from ground floor FFL</span>
+      </div>
+      <div class="frame" id="frame">
+        <svg class="house" id="house" role="slider" aria-label="Building cut"
+             aria-orientation="vertical" aria-valuemin="0" tabindex="0"></svg>
+        <ol class="rail-labels" id="labels"></ol>
+      </div>
+
+      <div class="slab-block">
+        <p class="eyebrow">Ground floor slab</p>
+        <label class="build-up">
+          Floor build-up
+          <span class="field">
+            <input id="build-up" type="text" inputmode="decimal" autocomplete="off"
+                   placeholder="e.g. 75" aria-describedby="build-up-note" />
+            mm
+          </span>
+        </label>
+        <p class="build-up-note" id="build-up-note"></p>
+      </div>
+    </aside>
+
+    <section class="notes">
+      <h2>What changed from the current panel</h2>
+      <ul>
+        <li><strong>The ruler is labelled.</strong> Every tick carries the level name and height.
+          When levels sit close together (eaves and ceiling are 218 mm apart), the labels spread
+          out and a leader line points back to the tick.</li>
+        <li><strong>One control, not two.</strong> Hovering a label previews the cut in the drawing,
+          and hovering the drawing highlights the matching label. The duplicate list below the drawing is gone.</li>
+        <li><strong>The handle looks draggable.</strong> It's a filled copper grip with a resize cursor,
+          and it snaps to levels.</li>
+        <li><strong>The view type is plain text</strong> ("Ceiling plan"), not a chip that looks like a button.</li>
+        <li><strong>The isolate toggle states its scope</strong>: it acts on the plan, and the note says what "off" does.
+          While it is on, the section fades whatever that cut leaves off the plan. The labels and the cut line stay at full strength.</li>
+        <li><strong>Floor build-up has an owner.</strong> It sits under "Ground floor slab". Focusing it
+          outlines the slab in the section, and the screed layer appears as you type. When it's empty, the note
+          explains the consequence instead of showing "not stated" as if it were a value.</li>
+        <li><strong>Names and numbers are consistent.</strong> Names are spelled out ("Ground floor", not "GFL"), the
+          level code is a muted prefix, the unit is stated once in the column header, and negative heights use a true minus sign.</li>
+        <li><strong>The break line is grey</strong>, so it reads as "the drawing continues" rather than as construction.</li>
+      </ul>
+    </section>
+  </div>
+
+  <script>
+    const PRESETS = {
+      1: [
+        { code: "00", name: "Foundation", elevation: -0.6, kind: "foundation" },
+        { code: "01", name: "Ground floor", elevation: 0, floorToFloor: 3.12, floorToCeiling: 2.902 },
+      ],
+      3: [
+        { code: "00", name: "Foundation", elevation: -0.6, kind: "foundation" },
+        { code: "01", name: "Ground floor", elevation: 0, floorToFloor: 3.2, floorToCeiling: 2.902 },
+        { code: "02", name: "First floor", elevation: 3.2, floorToFloor: 3.0, floorToCeiling: 2.7 },
+        { code: "03", name: "Second floor", elevation: 6.2, floorToFloor: 2.8, floorToCeiling: 2.55 },
+      ],
+    };
+
+    const NS = "http://www.w3.org/2000/svg";
+    const W = 316;
+    const BASE_H = 330;
+    const PAD = 14;
+    const GAP = 21;
+    const X0 = 16;
+    const WALL = 7;
+    const X1 = X0 + WALL;
+    const BREAK_X = 100;
+    const RAIL_X = 112;
+    const LABEL_X = 124;
+    const GRAB = 12;
+    const SLAB = 0.2;
+    const CEIL = 0.09;
+    const ROOF_RISE = 1.05;
+
+    const svg = document.getElementById("house");
+    const labelList = document.getElementById("labels");
+    const frame = document.getElementById("frame");
+    const buildUpInput = document.getElementById("build-up");
+
+    let levels = [];
+    let stations = [];
+    let index = 0;
+    let buildUpMm = null;
+    let buildUpFocused = false;
+    let zToY = () => 0;
+    let yToZ = () => 0;
+    let cutGroup = null;
+    let ghostGroup = null;
+    let slabGroup = null;
+
+    function buildStations(src) {
+      const out = [];
+      for (const level of src) {
+        if (level.kind === "foundation") {
+          out.push({ id: `${level.code}::floor`, code: level.code, kind: "foundation", elevation: level.elevation, label: level.name });
+          continue;
+        }
+        out.push({ id: `${level.code}::floor`, code: level.code, kind: "floor", elevation: level.elevation, label: `${level.name} · floor` });
+        out.push({ id: `${level.code}::ceiling`, code: level.code, kind: "ceiling", elevation: level.elevation + level.floorToCeiling, label: `${level.name} · ceiling` });
+      }
+      const top = src[src.length - 1];
+      out.push({ id: "roof", code: "", kind: "roof", elevation: top.elevation + top.floorToFloor, label: "Roof · eaves" });
+      return out;
+    }
+
+    function fmtMm(metres, signed) {
+      const mm = Math.round(metres * 1000);
+      const abs = String(Math.abs(mm)).replace(/\B(?=(\d{3})+(?!\d))/g, "\u202f");
+      if (mm < 0) return `\u2212${abs}`;
+      if (signed && mm > 0) return `+${abs}`;
+      return abs;
+    }
+
+    function kindPhrase(kind) {
+      if (kind === "ceiling") return "Ceiling plan";
+      if (kind === "roof") return "Roof plan";
+      if (kind === "foundation") return "Foundation plan";
+      return "Floor plan";
+    }
+
+    function nearestIndex(z) {
+      let best = 0;
+      let dist = Infinity;
+      stations.forEach((s, i) => {
+        const d = Math.abs(s.elevation - z);
+        if (d < dist) { dist = d; best = i; }
+      });
+      return best;
+    }
+
+    /** Label rows keep GAP apart; the tick stays at true height and a leader joins them. */
+    function labelPositions(H) {
+      const ideal = stations.map((s) => zToY(s.elevation));
+      const order = stations.map((_, i) => i).sort((a, b) => ideal[a] - ideal[b]);
+      const ys = new Array(stations.length);
+      const top = 10;
+      const bottom = H - 10;
+      order.forEach((i, k) => {
+        ys[i] = k === 0 ? Math.max(top, ideal[i]) : Math.max(ideal[i], ys[order[k - 1]] + GAP);
+      });
+      for (let k = order.length - 1; k >= 0; k--) {
+        const i = order[k];
+        const limit = k === order.length - 1 ? bottom : ys[order[k + 1]] - GAP;
+        ys[i] = Math.min(ys[i], limit);
+      }
+      return ys;
+    }
+
+    function svgEl(name, attrs) {
+      const node = document.createElementNS(NS, name);
+      for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+      return node;
+    }
+
+    function breakLine(x, y0, y1) {
+      const mid = (y0 + y1) / 2;
+      return `<path class="break" d="M ${x} ${y0} L ${x} ${mid - 9} L ${x + 4} ${mid - 5}
+        L ${x - 4} ${mid + 5} L ${x} ${mid + 9} L ${x} ${y1}" />`;
+    }
+
+    function draw() {
+      const H = Math.max(BASE_H, stations.length * GAP + 2 * PAD);
+      const top = levels[levels.length - 1];
+      const eavesZ = top.elevation + top.floorToFloor;
+      const roofEndZ = eavesZ + ROOF_RISE;
+      const zMin = levels[0].elevation - 0.55;
+      const zMax = roofEndZ + 0.3;
+      zToY = (z) => PAD + (1 - (z - zMin) / (zMax - zMin)) * (H - 2 * PAD);
+      yToZ = (y) => zMin + (1 - (y - PAD) / (H - 2 * PAD)) * (zMax - zMin);
+
+      const bu = (buildUpMm ?? 0) / 1000;
+      const groundY = zToY(0);
+      const foundY = zToY(levels[0].elevation);
+      const footY = zToY(levels[0].elevation - 0.2);
+      const eavesY = zToY(eavesZ);
+      const roofEndY = zToY(roofEndZ);
+      const occupied = levels.filter((l) => l.kind !== "foundation");
+
+      const walls = occupied.map((l, i) => {
+        const topZ = i + 1 < occupied.length ? occupied[i + 1].elevation : eavesZ;
+        const y = zToY(topZ);
+        const sill = zToY(l.elevation + 0.95);
+        const head = zToY(l.elevation + 2.2);
+        const opening = sill - head > 1
+          ? `<rect class="void" x="${X0 - 0.3}" y="${head}" width="${WALL + 0.6}" height="${sill - head}" />`
+          : "";
+        return `<g class="part" data-storey="${l.code}" data-role="wall">
+          <rect class="poche" x="${X0}" y="${y}" width="${WALL}" height="${zToY(l.elevation) - y}" />
+          ${opening}
+        </g>`;
+      }).join("");
+
+      const upperSlabs = occupied.slice(1).map((l) => {
+        const y = zToY(l.elevation);
+        return `<g class="part" data-storey="${l.code}" data-role="floor">
+          <rect class="poche" x="${X1}" y="${y}" width="${BREAK_X - X1}" height="${Math.max(1.8, zToY(l.elevation - SLAB) - y)}" />
+        </g>`;
+      }).join("");
+
+      const ceilings = occupied.map((l) => {
+        const y = zToY(l.elevation + l.floorToCeiling);
+        return `<g class="part" data-storey="${l.code}" data-role="ceiling">
+          <rect class="ceiling" x="${X1}" y="${y}" width="${BREAK_X - X1}" height="${Math.max(1, zToY(l.elevation + l.floorToCeiling - CEIL) - y)}" />
+        </g>`;
+      }).join("");
+
+      const slabTopY = zToY(-bu);
+      const screed = bu > 0
+        ? `<rect class="screed" x="${X1}" y="${groundY}" width="${BREAK_X - X1}" height="${Math.max(1.5, slabTopY - groundY)}" />`
+        : "";
+      const gfCode = occupied[0].code;
+      const gfSlab = `<g id="gf-slab" class="part gf-slab" data-storey="${gfCode}" data-role="floor">${screed}
+        <rect class="poche" x="${X1}" y="${slabTopY}" width="${BREAK_X - X1}" height="${Math.max(1.8, zToY(-bu - SLAB) - slabTopY)}" /></g>`;
+
+      const ys = labelPositions(H);
+      const ticks = stations.map((s, i) => {
+        const y = zToY(s.elevation);
+        return `<line class="tick" data-i="${i}" x1="${RAIL_X - 3.5}" y1="${y}" x2="${RAIL_X + 3.5}" y2="${y}" />
+          <path class="leader" data-i="${i}" d="M ${RAIL_X + 3.5} ${y} L ${RAIL_X + 6} ${y} L ${LABEL_X - 2} ${ys[i]}" />`;
+      }).join("");
+
+      const eaveX = X0 - 9;
+      const eaveY = eavesY + 2;
+
+      svg.setAttribute("width", String(W));
+      svg.setAttribute("height", String(H));
+      svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+      svg.setAttribute("aria-valuemax", String(stations.length - 1));
+      svg.innerHTML = `
+        <defs>
+          <pattern id="earth" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(32)">
+            <line x1="0" y1="0" x2="0" y2="5" stroke="#cdbfab" stroke-width="0.6" />
+          </pattern>
+        </defs>
+        <rect class="draw-hit" x="0" y="0" width="${RAIL_X - GRAB}" height="${H}" />
+        <g class="part" data-storey="foundation" data-role="earth">
+          <rect class="earth" x="2" y="${groundY}" width="${BREAK_X + 2}" height="${H - groundY - 6}" />
+          <line class="grade" x1="2" y1="${groundY}" x2="${BREAK_X + 4}" y2="${groundY}" />
+        </g>
+        <g class="part" data-storey="foundation" data-role="foundation">
+          <rect class="poche" x="${X0 - 5}" y="${groundY}" width="${WALL + 10}" height="${footY - groundY}" />
+          <rect class="poche" x="${X1}" y="${foundY}" width="${BREAK_X - X1}" height="${Math.max(1.6, zToY(levels[0].elevation - 0.16) - foundY)}" />
+        </g>
+        ${walls}
+        ${gfSlab}
+        ${upperSlabs}
+        ${ceilings}
+        <g class="part" data-storey="${top.code}" data-role="roof">
+          <path class="poche" d="M ${eaveX} ${eaveY} L ${BREAK_X + 2} ${roofEndY} L ${BREAK_X + 2} ${roofEndY + 5} L ${eaveX + 2.5} ${eaveY + 5} Z" />
+          <path class="stroke" d="M ${eaveX} ${eaveY} L ${BREAK_X + 2} ${roofEndY}" />
+        </g>
+        ${breakLine(BREAK_X, roofEndY + 6, footY)}
+        <line class="rail" x1="${RAIL_X}" y1="${roofEndY}" x2="${RAIL_X}" y2="${foundY + 6}" />
+        ${ticks}
+        <rect class="rail-band" x="${RAIL_X - GRAB}" y="${roofEndY - 12}" width="${GRAB * 2}" height="${foundY - roofEndY + 24}" />
+        <g id="cut-layer"></g>
+      `;
+      frame.style.height = `${H}px`;
+
+      slabGroup = svg.querySelector("#gf-slab");
+      slabGroup.classList.toggle("focus", buildUpFocused);
+
+      const xLeft = 6;
+      ghostGroup = svgEl("g", { class: "ghost" });
+      ghostGroup.append(svgEl("line", { x1: xLeft, y1: 0, x2: RAIL_X - 7, y2: 0 }));
+
+      cutGroup = svgEl("g", { class: "cut-group" });
+      cutGroup.append(
+        svgEl("line", { class: "cut", x1: xLeft, y1: 0, x2: RAIL_X - 7, y2: 0 }),
+        svgEl("polygon", { class: "cut-cap", points: `${xLeft},0 ${xLeft - 4.5},-2.8 ${xLeft - 4.5},2.8` }),
+        svgEl("rect", { class: "thumb", x: RAIL_X - 6, y: -5, width: 12, height: 10, rx: 1.5 }),
+        svgEl("line", { class: "grip", x1: RAIL_X - 3, y1: -1.5, x2: RAIL_X + 3, y2: -1.5 }),
+        svgEl("line", { class: "grip", x1: RAIL_X - 3, y1: 1.5, x2: RAIL_X + 3, y2: 1.5 }),
+        svgEl("rect", { class: "thumb-hit", x: RAIL_X - GRAB, y: -12, width: GRAB * 2, height: 24 }),
+      );
+      cutGroup.setAttribute("transform", `translate(0 ${zToY(stations[index].elevation)})`);
+      svg.querySelector("#cut-layer").append(ghostGroup, cutGroup);
+
+      labelList.innerHTML = stations.map((s, i) => `
+        <li style="top:${ys[i] - 10}px">
+          <button type="button" data-i="${i}" title="${s.label}, ${fmtMm(s.elevation, false)} mm">
+            <span class="code">${s.code}</span>
+            <span class="name">${s.label}</span>
+            <span class="elev">${fmtMm(s.elevation, false)}</span>
+          </button>
+        </li>`).join("");
+
+      render();
+    }
+
+    function render() {
+      const s = stations[index];
+      cutGroup.setAttribute("transform", `translate(0 ${zToY(s.elevation)})`);
+      svg.setAttribute("aria-valuenow", String(index));
+      svg.setAttribute("aria-valuetext", `${s.label}, ${fmtMm(s.elevation, true)} millimetres`);
+
+      const code = s.code ? `<span class="code">${s.code}</span>` : "";
+      document.getElementById("cut-name").innerHTML = `${code}${s.label}`;
+      document.getElementById("cut-meta").innerHTML =
+        `${kindPhrase(s.kind)} · <strong>${fmtMm(s.elevation, true)} mm</strong>`;
+
+      for (const btn of labelList.querySelectorAll("button")) {
+        if (Number(btn.dataset.i) === index) btn.setAttribute("aria-current", "true");
+        else btn.removeAttribute("aria-current");
+      }
+      for (const el of svg.querySelectorAll(".tick, .leader")) {
+        el.classList.toggle("active", Number(el.dataset.i) === index);
+      }
+      const isolate = document.getElementById("isolate").checked;
+      for (const part of svg.querySelectorAll(".part")) {
+        part.classList.toggle("dim", isolate && !partShown(part, s));
+      }
+    }
+
+    /** Whether this slice of the section is on the plan while "show only this cut" is on. */
+    function partShown(part, station) {
+      if (part.id === "gf-slab" && buildUpFocused) return true;
+      const storey = part.dataset.storey;
+      const role = part.dataset.role;
+      if (station.kind === "roof") return role === "roof";
+      if (station.kind === "ceiling") {
+        return storey === station.code && (role === "ceiling" || role === "wall");
+      }
+      if (station.kind === "foundation") return storey === "foundation";
+      // A floor plan keeps its storey. The roof is its own cut, even on one storey.
+      return storey === station.code && role !== "roof";
+    }
+
+    function select(i) {
+      index = i;
+      hideGhost();
+      render();
+    }
+
+    function showGhost(i) {
+      for (const btn of labelList.querySelectorAll("button")) {
+        btn.classList.toggle("is-hover", Number(btn.dataset.i) === i && i !== index);
+      }
+      if (i === index) { ghostGroup.classList.remove("on"); return; }
+      ghostGroup.setAttribute("transform", `translate(0 ${zToY(stations[i].elevation)})`);
+      ghostGroup.classList.add("on");
+    }
+
+    function hideGhost() {
+      if (ghostGroup) ghostGroup.classList.remove("on");
+      for (const btn of labelList.querySelectorAll("button.is-hover")) btn.classList.remove("is-hover");
+    }
+
+    function localPoint(e) {
+      const pt = svg.createSVGPoint();
+      pt.x = e.clientX;
+      pt.y = e.clientY;
+      const ctm = svg.getScreenCTM();
+      return ctm ? pt.matrixTransform(ctm.inverse()) : null;
+    }
+
+    labelList.addEventListener("click", (e) => {
+      const btn = e.target.closest("button");
+      if (btn) select(Number(btn.dataset.i));
+    });
+    labelList.addEventListener("pointerover", (e) => {
+      const btn = e.target.closest("button");
+      if (btn) showGhost(Number(btn.dataset.i));
+    });
+    labelList.addEventListener("pointerleave", hideGhost);
+
+    let dragging = false;
+    svg.addEventListener("pointerdown", (e) => {
+      const loc = localPoint(e);
+      if (!loc || loc.x > RAIL_X + GRAB) return;
+      if (loc.x >= RAIL_X - GRAB) {
+        dragging = true;
+        svg.setPointerCapture(e.pointerId);
+      }
+      select(nearestIndex(yToZ(loc.y)));
+    });
+    svg.addEventListener("pointermove", (e) => {
+      const loc = localPoint(e);
+      if (!loc) return;
+      if (dragging) select(nearestIndex(yToZ(loc.y)));
+      else if (loc.x <= RAIL_X + GRAB) showGhost(nearestIndex(yToZ(loc.y)));
+      else hideGhost();
+    });
+    svg.addEventListener("pointerup", () => { dragging = false; });
+    svg.addEventListener("pointercancel", () => { dragging = false; });
+    svg.addEventListener("pointerleave", () => { if (!dragging) hideGhost(); });
+
+    /** Next station in `dir` that starts a storey, so paging skips ceilings. */
+    function storeyStep(dir) {
+      for (let i = index + dir; i >= 0 && i < stations.length; i += dir) {
+        if (stations[i].kind !== "ceiling") return i;
+      }
+      return dir > 0 ? stations.length - 1 : 0;
+    }
+
+    svg.addEventListener("keydown", (e) => {
+      const moves = {
+        ArrowUp: () => Math.min(stations.length - 1, index + 1),
+        ArrowRight: () => Math.min(stations.length - 1, index + 1),
+        ArrowDown: () => Math.max(0, index - 1),
+        ArrowLeft: () => Math.max(0, index - 1),
+        PageUp: () => storeyStep(1),
+        PageDown: () => storeyStep(-1),
+        Home: () => 0,
+        End: () => stations.length - 1,
+      };
+      if (!moves[e.key]) return;
+      e.preventDefault();
+      select(moves[e.key]());
+    });
+
+    function renderBuildUpNote(invalid) {
+      const note = document.getElementById("build-up-note");
+      note.classList.toggle("warn", invalid || buildUpMm == null);
+      if (invalid) {
+        note.textContent = "Enter a thickness in mm, 0 or more.";
+      } else if (buildUpMm == null) {
+        note.textContent = "Not stated yet. Until it is, the DPC is taken at finished floor level.";
+      } else {
+        note.textContent = `Screed and finish on the slab. Ground floor walls start ${buildUpMm} mm below finished floor level.`;
+      }
+    }
+
+    buildUpInput.addEventListener("input", () => {
+      const raw = buildUpInput.value.trim();
+      if (raw === "") {
+        buildUpMm = null;
+      } else {
+        const n = Number(raw);
+        if (!Number.isFinite(n) || n < 0) {
+          buildUpInput.setAttribute("aria-invalid", "true");
+          renderBuildUpNote(true);
+          return;
+        }
+        buildUpMm = Math.round(n);
+      }
+      buildUpInput.removeAttribute("aria-invalid");
+      renderBuildUpNote(false);
+      draw();
+    });
+    buildUpInput.addEventListener("focus", () => {
+      buildUpFocused = true;
+      slabGroup.classList.add("focus");
+    });
+    buildUpInput.addEventListener("blur", () => {
+      buildUpFocused = false;
+      slabGroup.classList.remove("focus");
+    });
+
+    document.getElementById("isolate").addEventListener("change", (e) => {
+      document.getElementById("isolate-note").textContent = e.target.checked
+        ? "On: the plan hides the rest. The section fades it."
+        : "Off: the neighbouring level is ghosted.";
+      render();
+    });
+
+    function mount(src) {
+      levels = src;
+      stations = buildStations(src);
+      index = Math.max(0, stations.findIndex((s) => s.id === "01::ceiling"));
+      draw();
+    }
+
+    document.querySelector(".storeys").addEventListener("click", (e) => {
+      const btn = e.target.closest("button");
+      if (!btn) return;
+      for (const b of document.querySelectorAll(".storeys button")) {
+        b.setAttribute("aria-pressed", b === btn ? "true" : "false");
+      }
+      mount(PRESETS[Number(btn.dataset.storeys)]);
+    });
+
+    renderBuildUpNote(false);
+    mount(PRESETS[1]);
+  </script>
+</body>
+</html>

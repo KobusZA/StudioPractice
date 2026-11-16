@@ -120,10 +120,27 @@ export function createCloud({
       return body?.rateBook ?? null;
     },
 
+    /** The firm's books, headers only. Owner-only: the server refuses anyone else. */
+    async listRateBooks() {
+      const body = await call("GET", "/api/rate-books");
+      return body?.rateBooks ?? [];
+    },
+
     /** The book a job registered today would be priced against, or null. */
     async defaultRateBookId() {
-      const body = await call("GET", "/api/rate-books");
-      return (body?.rateBooks ?? []).find((book) => book.isDefault)?.id ?? null;
+      const books = await this.listRateBooks();
+      return books.find((book) => book.isDefault)?.id ?? null;
+    },
+
+    /**
+     * Which book prices this job. Null follows the firm's default as it stands
+     * today; a named book stays with the job when the default later moves.
+     */
+    async setProjectRateBook(projectId, rateBookId) {
+      const body = await call("PATCH", `/api/register/${encodeURIComponent(projectId)}`, {
+        rateBookId: rateBookId || "",
+      });
+      return body?.project ?? null;
     },
 
     /**

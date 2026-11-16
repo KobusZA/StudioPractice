@@ -235,6 +235,7 @@ export function deriveRoomWalls(doc, pack) {
         edges: hits.map((h) => ({ roomId: h.room.id, edgeIndex: h.edgeIndex })),
         drawn: false,
         status: combineStatus(rooms),
+        ...foundationStamp(doc, hits.map((h) => ({ roomId: h.room.id, edgeIndex: h.edgeIndex }))),
       });
     }
   }
@@ -301,7 +302,8 @@ export function deriveDrawnWalls(doc, pack, minLength = 0.3) {
       edges: [],
       drawn: true,
       status: objectStatus(seg),
-      ...(seg.foundation === false ? { foundation: false } : {}),
+      ...(typeof seg.foundation === "boolean" ? { foundation: seg.foundation } : {}),
+      ...(typeof seg.foundationSku === "string" && seg.foundationSku ? { foundationSku: seg.foundationSku } : {}),
       ...(arc ? { arc: { radius: arc.radius, side: arc.side, ...(arc.major ? { major: true } : {}) } } : {}),
     };
     drawnWall.roomIds = adjoining(drawnWall, arc ? { x: arc.crownX, y: arc.crownY } : null);
@@ -917,8 +919,25 @@ export function foundationWallThickness(pack) {
   return Number.isFinite(t) && t > 0 ? t : FOUNDATION_WALL_THICKNESS;
 }
 
-/** The pack's foundation wall type, else the first that is not a strip footing, unplastered first. */
-export function foundationWallSkuId(pack) {
+/** A type a foundation wall can take: a foundation type that is not a strip footing. */
+export function foundationWallTypeOk(pack, id) {
+  const sku = skuById(pack, id);
+  return Boolean(sku && sku.category === "foundation" && !isStripFooting(sku));
+}
+
+/** Every type a foundation wall can take, by name. */
+export function foundationWallTypes(pack) {
+  return (pack?.skus || [])
+    .filter((s) => s.category === "foundation" && !isStripFooting(s))
+    .sort((a, b) => String(a.name || a.id).localeCompare(String(b.name || b.id)));
+}
+
+/**
+ * The job's foundation wall type: the job's own choice, else the pack's, else
+ * the first that is not a strip footing, unplastered first.
+ */
+export function foundationWallSkuId(pack, doc = null) {
+  if (foundationWallTypeOk(pack, doc?.foundationWallSku)) return doc.foundationWallSku;
   const stated = pack?.system?.defaultFoundationWallSku;
   if (skuById(pack, stated)) return stated;
   const types = (pack?.skus || []).filter((s) => s.category === "foundation" && !isStripFooting(s));
@@ -940,6 +959,141 @@ function unattachedBase(doc, pack, wall, floors) {
     ?? levelElevationOf(pack, wall.level) + (wall.baseOffset || 0);
 }
 
+/** The job draws foundation walls unless `doc.foundationWalls` is false. */
+export function foundationWallsOn(doc) {
+  return doc?.foundationWalls !== false;
+}
+
+/** A wall's own `foundation` flag, else the job's setting. */
+export function wantsFoundationWall(doc, wall) {
+  return typeof wall?.foundation === "boolean" ? wall.foundation : foundationWallsOn(doc);
+}
+
+/**
+ * A ground-storey masonry wall the Foundation wall checkbox can speak for.
+ * Attached walls and pool walls are left out: they do not take a derived one.
+ */
+export function foundationChoiceEligible(pack, wall) {
+  if (!wall || wall.category !== "wall" || wall.baseAttach) return false;
+  if (!foundationStorey(pack?.levels) || !onGroundStorey(pack, wall.level)) return false;
+  return !isPoolWall(skuById(pack, wall.sku));
+}
+
+/** A room side's own choice, or undefined when that side follows the job. */
+export function foundationEdgeFlag(doc, roomId, edgeIndex) {
+  const room = (doc?.rooms || []).find((r) => r.id === roomId);
+  const flag = room?.foundationEdges?.[edgeIndex];
+  return typeof flag === "boolean" ? flag : undefined;
+}
+
+/** A room side's own foundation wall type, or undefined when that side follows the job. */
+export function foundationEdgeSku(doc, roomId, edgeIndex) {
+  const room = (doc?.rooms || []).find((r) => r.id === roomId);
+  const sku = room?.foundationSkus?.[edgeIndex];
+  return typeof sku === "string" && sku ? sku : undefined;
+}
+
+/**
+ * `{ foundation, foundationSku }` for what a room wall's sides say of their
+ * own, else nothing. Sides that disagree on the type: the first one stated.
+ */
+function foundationStamp(doc, edges) {
+  if (!edges?.length) return {};
+  const out = {};
+  const flags = edges.map((e) => foundationEdgeFlag(doc, e.roomId, e.edgeIndex));
+  if (flags.some((f) => f !== undefined)) {
+    const job = foundationWallsOn(doc);
+    out.foundation = edges.some((e, i) => (typeof flags[i] === "boolean" ? flags[i] : job));
+  }
+  const sku = edges.map((e) => foundationEdgeSku(doc, e.roomId, e.edgeIndex)).find(Boolean);
+  if (sku) out.foundationSku = sku;
+  return out;
+}
+
+/** The type of the foundation wall under `wall`: its own choice, else the job's. */
+export function foundationSkuFor(doc, pack, wall) {
+  if (foundationWallTypeOk(pack, wall?.foundationSku)) return wall.foundationSku;
+  return foundationWallSkuId(pack, doc);
+}
+
+/**
+ * The foundation wall type for one wall, stored where its on/off choice is:
+ * on the segment, or on each room side. The job's type clears the stored one.
+ */
+export function setWallFoundationSku(doc, pack, wall, skuId) {
+  if (!wall) return;
+  const own = foundationWallTypeOk(pack, skuId) && skuId !== foundationWallSkuId(pack, doc) ? skuId : null;
+  if (wall.drawn) {
+    const seg = (doc?.segments || []).find((s) => s.id === wall.id);
+    if (!seg) return;
+    if (own) seg.foundationSku = own;
+    else delete seg.foundationSku;
+    return;
+  }
+  for (const edge of wall.edges || []) {
+    const room = (doc?.rooms || []).find((r) => r.id === edge.roomId);
+    if (!room) continue;
+    if (own) {
+      if (!room.foundationSkus) room.foundationSkus = {};
+      room.foundationSkus[edge.edgeIndex] = own;
+    } else if (room.foundationSkus) {
+      delete room.foundationSkus[edge.edgeIndex];
+      if (!Object.keys(room.foundationSkus).length) delete room.foundationSkus;
+    }
+  }
+}
+
+/** Drop every wall's own foundation type that now matches the job's. */
+export function tidyFoundationSkus(doc, pack) {
+  const job = foundationWallSkuId(pack, doc);
+  const stale = (id) => id === job;
+  for (const seg of doc?.segments || []) {
+    if (seg.foundationSku && stale(seg.foundationSku)) delete seg.foundationSku;
+  }
+  for (const room of doc?.rooms || []) {
+    if (!room.foundationSkus) continue;
+    for (const [k, v] of Object.entries(room.foundationSkus)) if (stale(v)) delete room.foundationSkus[k];
+    if (!Object.keys(room.foundationSkus).length) delete room.foundationSkus;
+  }
+}
+
+/** Clear every wall's own foundation type, so all of them follow the job's. */
+export function clearFoundationSkus(doc) {
+  for (const seg of doc?.segments || []) delete seg.foundationSku;
+  for (const room of doc?.rooms || []) delete room.foundationSkus;
+}
+
+/** Remember a room side's choice. A value that matches the job is not stored. */
+export function setFoundationEdge(doc, roomId, edgeIndex, value) {
+  const room = (doc?.rooms || []).find((r) => r.id === roomId);
+  if (!room || typeof value !== "boolean") return;
+  if (value === foundationWallsOn(doc)) {
+    if (!room.foundationEdges) return;
+    delete room.foundationEdges[edgeIndex];
+    if (!Object.keys(room.foundationEdges).length) delete room.foundationEdges;
+    return;
+  }
+  if (!room.foundationEdges) room.foundationEdges = {};
+  room.foundationEdges[edgeIndex] = value;
+}
+
+/**
+ * The foundation choice for one wall. A drawn wall stores it on the segment.
+ * A room wall stores it on each side it came from, so a shared wall is one
+ * choice for both rooms. A value that matches the job clears the stored one.
+ */
+export function setWallFoundation(doc, wall, value) {
+  if (!wall || typeof value !== "boolean") return;
+  if (wall.drawn) {
+    const seg = (doc?.segments || []).find((s) => s.id === wall.id);
+    if (!seg) return;
+    if (value === foundationWallsOn(doc)) delete seg.foundation;
+    else seg.foundation = value;
+    return;
+  }
+  for (const edge of wall.edges || []) setFoundationEdge(doc, edge.roomId, edge.edgeIndex, value);
+}
+
 /** A drawn foundation wall (not a strip footing) lies along `wall`, on any level. */
 function drawnFoundationAlong(wall, drawnFoundations) {
   const mx = (wall.x1 + wall.x2) / 2;
@@ -959,8 +1113,8 @@ function drawnFoundationAlong(wall, drawnFoundations) {
 /**
  * Ground-storey masonry walls that take a derived foundation wall, each with
  * the base it resolves to. Boundary walls, fences and pool walls have their own
- * foundations. A wall marked `foundation: false`, an attached wall, or one with
- * a foundation wall drawn along it is skipped.
+ * foundations. A wall that takes none (`wantsFoundationWall`), an attached
+ * wall, or one with a foundation wall drawn along it is skipped.
  */
 function foundationHosts(doc, pack, walls) {
   const drawnFoundations = walls.filter((w) => w.drawn && w.category === "foundation"
@@ -968,7 +1122,7 @@ function foundationHosts(doc, pack, walls) {
   const floors = groundFloorsOf(doc, pack);
   const out = [];
   for (const wall of walls) {
-    if (wall.category !== "wall" || wall.derived || wall.foundation === false || wall.baseAttach) continue;
+    if (wall.category !== "wall" || wall.derived || !wantsFoundationWall(doc, wall) || wall.baseAttach) continue;
     if (!onGroundStorey(pack, wall.level)) continue;
     if (isPoolWall(skuById(pack, wall.sku))) continue;
     const base = unattachedBase(doc, pack, wall, floors);
@@ -994,8 +1148,7 @@ const MIN_FOUNDATION_HEIGHT = 0.02;
  */
 export function deriveFoundationWalls(doc, pack, walls) {
   const home = foundationStorey(pack?.levels);
-  const skuId = foundationWallSkuId(pack);
-  if (!home || !skuId) return [];
+  if (!home || !foundationWallSkuId(pack, doc)) return [];
   const thickness = foundationWallThickness(pack);
   const bottom = home.elevation;
   const make = (host, top, x1, y1, x2, y2, lo, hi, extra = {}) => ({
@@ -1005,7 +1158,7 @@ export function deriveFoundationWalls(doc, pack, walls) {
     x2,
     y2,
     length: hi - lo,
-    sku: skuId,
+    sku: foundationSkuFor(doc, pack, host),
     category: "foundation",
     thickness,
     height: top - bottom,
@@ -1028,7 +1181,10 @@ export function deriveFoundationWalls(doc, pack, walls) {
   for (const { wall, base } of foundationHosts(doc, pack, walls)) {
     if (base - bottom < MIN_FOUNDATION_HEIGHT) continue;
     if (wall.arc) {
-      out.push(make(wall, base, wall.x1, wall.y1, wall.x2, wall.y2, 0, wall.length, { arc: { ...wall.arc } }));
+      out.push(make(wall, base, wall.x1, wall.y1, wall.x2, wall.y2, 0, wall.length, {
+        arc: { ...wall.arc },
+        hostWallIds: [wall.id],
+      }));
       continue;
     }
     if (segLength(wall.x1, wall.y1, wall.x2, wall.y2) < EPS) continue;
@@ -1057,9 +1213,10 @@ export function deriveFoundationWalls(doc, pack, walls) {
       const clash = hits.some((p) => Math.abs(p.top - winner.top) > TOP_TOL);
       const [x1, y1] = pointFromBasis(g.basis, lo, g.offset);
       const [x2, y2] = pointFromBasis(g.basis, hi, g.offset);
-      out.push(make(winner.wall, winner.top, x1, y1, x2, y2, lo, hi, clash
-        ? { conflict: hits.map((p) => ({ hostWallId: p.wall.id, top: p.top })) }
-        : {}));
+      out.push(make(winner.wall, winner.top, x1, y1, x2, y2, lo, hi, {
+        hostWallIds: [...new Set(hits.map((p) => p.wall.id))],
+        ...(clash ? { conflict: hits.map((p) => ({ hostWallId: p.wall.id, top: p.top })) } : {}),
+      }));
     }
   }
   return out;
@@ -1099,9 +1256,10 @@ export function foundationChecks(doc, pack, walls = null) {
   if (!floorBuildUpStated(doc)) {
     out.push({ kind: "build-up", message: "Floor build-up not stated; the DPC is taken at finished floor level." });
   }
-  if (!foundationStorey(pack?.levels)) {
+  const wanted = groundWalls.some((w) => wantsFoundationWall(doc, w));
+  if (wanted && !foundationStorey(pack?.levels)) {
     out.push({ kind: "no-storey", message: "This template has no foundation storey, so no foundation walls were drawn." });
-  } else if (!foundationWallSkuId(pack)) {
+  } else if (wanted && !foundationWallSkuId(pack, doc)) {
     out.push({ kind: "no-type", message: "This template has no foundation wall type, so no foundation walls were drawn." });
   }
 

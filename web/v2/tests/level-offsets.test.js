@@ -11,6 +11,11 @@ import {
   deriveWalls,
   drawnSegmentFromWall,
   foundationChecks,
+  foundationWallSkuId,
+  foundationWallTypes,
+  setWallFoundation,
+  setWallFoundationSku,
+  tidyFoundationSkus,
 } from "../walls.js";
 import { ceilingElevation, fflText, floorLevel, roomCeilingHeight, spotLevelLabel } from "../floor-levels.js";
 import { levelAboveRise } from "../level-view.js";
@@ -149,6 +154,127 @@ test("a wall marked foundation: false gets no foundation wall, and the flag surv
   assert.ok(!derived(deriveWalls(doc, pack)).some((f) => f.hostWallId === "p1"));
   delete doc.segments[0].foundation;
   assert.ok(derived(deriveWalls(doc, pack)).some((f) => f.hostWallId === "p1"));
+});
+
+test("foundation walls switched off for the job: none are drawn, a wall marked foundation: true still gets one", () => {
+  const doc = roomDoc({
+    foundationWalls: false,
+    segments: [seg("p1", 2.5, 0, 2.5, 4, { foundation: true }), seg("p2", 1, 0, 1, 4)],
+  });
+  assert.equal(doc.foundationWalls, false);
+  assert.equal(doc.segments[0].foundation, true, "the wall's own flag survives a reload");
+  const found = derived(deriveWalls(doc, pack));
+  assert.deepEqual([...new Set(found.map((f) => f.hostWallId))], ["p1"]);
+  const off = normalizeDoc({ rooms: [room("r1", 0, 0, 5, 4, { wallSku: "TSP_MAS009" })], foundationWalls: false });
+  assert.ok(!foundationChecks(off, plannerPack).some((c) => c.kind === "no-storey" || c.kind === "no-type"), "no missing-storey warning when they are switched off");
+});
+
+test("an old document draws foundation walls: the job setting defaults to on", () => {
+  assert.equal(roomDoc().foundationWalls, true);
+  assert.equal(normalizeDoc({ foundationWalls: "no" }).foundationWalls, true);
+});
+
+test("a room side can opt out of its foundation wall, and the choice survives a reload", () => {
+  const doc = roomDoc();
+  const south = deriveWalls(doc, pack).find((w) => w.category === "wall" && Math.abs(w.y1) < 1e-6 && Math.abs(w.y2) < 1e-6);
+  setWallFoundation(doc, south, false);
+  assert.equal(doc.rooms[0].foundationEdges[0], false);
+  assert.ok(!derived(deriveWalls(doc, pack)).some((f) => f.hostWallId === south.id));
+  const again = normalizeDoc(JSON.parse(JSON.stringify(doc)));
+  assert.equal(again.rooms[0].foundationEdges[0], false);
+  assert.equal(derived(deriveWalls(again, pack)).length, 3);
+  setWallFoundation(doc, south, true);
+  assert.equal(doc.rooms[0].foundationEdges, undefined, "a choice that matches the job is not stored");
+  assert.equal(derived(deriveWalls(doc, pack)).length, 4);
+});
+
+test("one room side can keep a foundation wall while the job has them off", () => {
+  const doc = roomDoc({ foundationWalls: false });
+  const south = deriveWalls(doc, pack).find((w) => w.category === "wall" && Math.abs(w.y1) < 1e-6 && Math.abs(w.y2) < 1e-6);
+  assert.equal(derived(deriveWalls(doc, pack)).length, 0);
+  setWallFoundation(doc, south, true);
+  const found = derived(deriveWalls(doc, pack));
+  assert.equal(found.length, 1);
+  assert.ok(Math.abs(found[0].y1) < 1e-6 && Math.abs(found[0].y2) < 1e-6);
+  assert.ok(found[0].hostWallIds.includes(south.id));
+});
+
+test("opting out a shared wall records both rooms' sides", () => {
+  const doc = normalizeDoc({ rooms: [room("r1", 0, 0, 4, 4), room("r2", 4, 0, 4, 4)] });
+  const shared = deriveWalls(doc, pack).find((w) => w.shared);
+  setWallFoundation(doc, shared, false);
+  assert.equal(doc.rooms[0].foundationEdges[1], false);
+  assert.equal(doc.rooms[1].foundationEdges[3], false);
+  const walls = deriveWalls(doc, pack);
+  assert.ok(!derived(walls).some((f) => Math.abs(f.x1 - 4) < 1e-6 && Math.abs(f.x2 - 4) < 1e-6));
+  assert.equal(derived(walls).length, 6, "the other three sides of each room keep theirs");
+});
+
+// --- 5b. Foundation wall type ------------------------------------------------
+
+const FND_PERIMETER = "TSP_FND_MASONARY_WALL_220MM_FOUNDATI_2";
+
+test("the foundation wall types leave out strip footings", () => {
+  const ids = foundationWallTypes(pack).map((s) => s.id);
+  assert.ok(ids.includes(FND_WALL) && ids.includes(FND_PERIMETER));
+  assert.ok(!ids.includes(FOOTING));
+});
+
+test("the job's foundation wall type is used under every wall, and survives a reload", () => {
+  const doc = roomDoc({ foundationWallSku: FND_PERIMETER });
+  assert.equal(foundationWallSkuId(pack, doc), FND_PERIMETER);
+  assert.ok(derived(deriveWalls(doc, pack)).every((f) => f.sku === FND_PERIMETER));
+  const again = normalizeDoc(JSON.parse(JSON.stringify(doc)));
+  assert.equal(again.foundationWallSku, FND_PERIMETER);
+});
+
+test("a job type that is a strip footing or unknown falls back to the template's", () => {
+  assert.equal(foundationWallSkuId(pack, roomDoc({ foundationWallSku: FOOTING })), FND_WALL);
+  assert.equal(foundationWallSkuId(pack, roomDoc({ foundationWallSku: "NOPE" })), FND_WALL);
+  assert.equal(roomDoc().foundationWallSku, null);
+});
+
+test("one drawn wall can take its own foundation type; the job's type clears it", () => {
+  const doc = normalizeDoc({ segments: [seg("w1", 0, 0, 6, 0), seg("w2", 0, 3, 6, 3)] });
+  const w1 = deriveWalls(doc, pack).find((w) => w.id === "w1");
+  setWallFoundationSku(doc, pack, w1, FND_PERIMETER);
+  assert.equal(doc.segments[0].foundationSku, FND_PERIMETER);
+  const found = derived(deriveWalls(doc, pack));
+  assert.equal(found.find((f) => f.hostWallId === "w1").sku, FND_PERIMETER);
+  assert.equal(found.find((f) => f.hostWallId === "w2").sku, FND_WALL);
+  const again = normalizeDoc(JSON.parse(JSON.stringify(doc)));
+  assert.equal(again.segments[0].foundationSku, FND_PERIMETER);
+  setWallFoundationSku(doc, pack, w1, FND_WALL);
+  assert.equal(doc.segments[0].foundationSku, undefined, "a type that matches the job is not stored");
+});
+
+test("a shared room wall's foundation type is stored on both rooms' sides and survives a reload", () => {
+  const doc = normalizeDoc({ rooms: [room("r1", 0, 0, 4, 4), room("r2", 4, 0, 4, 4)] });
+  const shared = deriveWalls(doc, pack).find((w) => w.shared);
+  setWallFoundationSku(doc, pack, shared, FND_PERIMETER);
+  assert.equal(doc.rooms[0].foundationSkus[1], FND_PERIMETER);
+  assert.equal(doc.rooms[1].foundationSkus[3], FND_PERIMETER);
+  const again = normalizeDoc(JSON.parse(JSON.stringify(doc)));
+  const found = derived(deriveWalls(again, pack));
+  const under = found.filter((f) => Math.abs(f.x1 - 4) < 1e-6 && Math.abs(f.x2 - 4) < 1e-6);
+  assert.equal(under.length, 1);
+  assert.equal(under[0].sku, FND_PERIMETER);
+  assert.equal(found.filter((f) => f.sku === FND_WALL).length, 6, "the other sides keep the job's type");
+});
+
+test("changing the job's type to a wall's own type drops that wall's stored choice", () => {
+  const doc = normalizeDoc({ segments: [seg("w1", 0, 0, 6, 0)] });
+  setWallFoundationSku(doc, pack, deriveWalls(doc, pack)[0], FND_PERIMETER);
+  doc.foundationWallSku = FND_PERIMETER;
+  tidyFoundationSkus(doc, pack);
+  assert.equal(doc.segments[0].foundationSku, undefined);
+  assert.equal(derived(deriveWalls(doc, pack))[0].sku, FND_PERIMETER);
+});
+
+test("drawing a foundation wall as its own wall keeps the type chosen for it", () => {
+  const doc = normalizeDoc({ segments: [seg("w1", 0, 0, 6, 0, { foundationSku: FND_PERIMETER })] });
+  const f = derived(deriveWalls(doc, pack)).find((w) => w.hostWallId === "w1");
+  assert.equal(drawnSegmentFromWall(f, pack).sku, FND_PERIMETER);
 });
 
 // --- 6. Hand-drawn wins ------------------------------------------------------

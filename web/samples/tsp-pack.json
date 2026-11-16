@@ -3855,7 +3855,7 @@
         "coreThickness": 110
       },
       "cost": {
-        "rateRef": null,
+        "rateRef": "TSP_MAS008",
         "wasteFactor": null
       },
       "compliance": {
@@ -3947,7 +3947,7 @@
         "depth": 200
       },
       "cost": {
-        "rateRef": null,
+        "rateRef": "TSP_EW132",
         "wasteFactor": null
       },
       "compliance": {

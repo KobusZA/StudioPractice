@@ -63,6 +63,11 @@ test("a named masonry wall records its core, and a foundation does not", () => {
   assert.equal(byName("Masonary wall 220mm Foundation (No-plaster)").geometry.coreThickness, undefined);
 });
 
+test("the 110 mm wall and its foundation wall point at the demo rate book", () => {
+  assert.equal(byName("Masonary wall 110mm (plaster)").cost.rateRef, "TSP_MAS008");
+  assert.equal(byName("Masonary wall 220mm Foundation (No-plaster)").cost.rateRef, "TSP_EW132");
+});
+
 test("dimensional type names yield real geometry", () => {
   assert.equal(byName("Masonary wall 110mm (plaster)").geometry.thickness, 110);
   const door = byName("Door-Interior-Single-4_Panel-Wood — 850 x 2100mm");

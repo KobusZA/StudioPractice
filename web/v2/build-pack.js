@@ -378,6 +378,12 @@ function slug(text) {
     .slice(0, 28);
 }
 
+// QS codes in the demo rate book. The Revit type id is not that code.
+const RATE_REF_BY_ID = {
+  TSP_WAL_MASONARY_WALL_110MM_PLASTER: "TSP_MAS008",
+  TSP_FND_MASONARY_WALL_220MM_FOUNDATI: "TSP_EW132",
+};
+
 function makeId(type, category, taken) {
   const base = `TSP_${ID_PREFIX[category] || "GEN"}_${slug(type.type || type.family)}`;
   let id = base;
@@ -487,9 +493,10 @@ export function buildPack(catalog, { includeUnplaced = false, id, name, version 
       continue;
     }
     const category = typeof mapping === "function" ? mapping(type) : mapping;
+    const id = makeId(type, category, taken);
 
     skus.push({
-      id: makeId(type, category, taken),
+      id,
       name: displayName(type),
       family: withoutFirmMark(type.family) || undefined,
       category,
@@ -502,7 +509,7 @@ export function buildPack(catalog, { includeUnplaced = false, id, name, version 
         placedCount: type.placedCount,
       },
       geometry: withCoreThickness(geometryFor(type, category, assumed), type, category, notes),
-      cost: { rateRef: null, wasteFactor: null },
+      cost: { rateRef: RATE_REF_BY_ID[id] ?? null, wasteFactor: null },
       compliance: complianceFor(type, category, notes),
       drawing: { colourClass: colourClassFor(type, category), hatch: null, symbol: null },
       schedule: { report: [...(REQUIRED_MEASURES[category] || ["count"])], scheduleName: null },

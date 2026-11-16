@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { compile } from "../compile.js";
 import { normalizeDoc } from "../model.js";
 import { normalizePackUnits } from "../schema.js";
-import { bomRows, boqRows, findRate, qtyForUnit, scheduleTotal } from "../schedule.js";
+import { bomRows, boqRows, findRate, qtyForUnit, scheduleTotal, untypedFittingLines } from "../schedule.js";
 
 const pack = normalizePackUnits(
   JSON.parse(readFileSync(new URL("../../samples/planner-pack-v2.json", import.meta.url))),
@@ -172,4 +172,42 @@ test("a placed stair is a solid with the stair's own id", () => {
   assert.equal(form.selectKind, "stair");
   assert.ok(form.profileLoops[0].curves.length >= 4);
   assert.equal(out.instances.find((row) => row.elementId === "st1").kind, "stair");
+});
+
+test("a drawn 110 mm wall prices its own rate, and the foundation wall under it prices the foundation rate", () => {
+  const template = normalizePackUnits(
+    JSON.parse(readFileSync(new URL("../../samples/tsp-pack.json", import.meta.url))),
+  );
+  const doc = normalizeDoc({
+    segments: [{
+      id: "w1",
+      sku: "TSP_WAL_MASONARY_WALL_110MM_PLASTER",
+      level: "01 GFL",
+      x1: 0, y1: 0, x2: 3, y2: 0,
+    }],
+  });
+  const rows = boqRows(compile(doc, template), rateBook);
+
+  const wall = rows.find((r) => r.model === "TSP_WAL_MASONARY_WALL_110MM_PLASTER");
+  assert.equal(wall.rateRef, "TSP_MAS008");
+  assert.equal(wall.rate, 3650);
+  assert.equal(wall.description, "Masonry wall 110mm (plaster)");
+  assert.ok(Math.abs(wall.qty - 1.17) < 1e-9);
+
+  const foundation = rows.find((r) => r.model === "TSP_FND_MASONARY_WALL_220MM_FOUNDATI");
+  assert.equal(foundation.rateRef, "TSP_EW132");
+  assert.equal(foundation.rate, 2740);
+  assert.equal(foundation.description, "Masonry 220mm foundation (no plaster)");
+  assert.ok(Math.abs(foundation.qty - 0.396) < 1e-9);
+  assert.equal(foundation.derived, true);
+
+  const plaster = rows.find((r) => r.model === "FINISH:plaster");
+  assert.equal(plaster.priced, false);
+  assert.ok(Math.abs(plaster.qty - 18) < 1e-9);
+
+  assert.equal(untypedFittingLines(rows).length, 0);
+  assert.equal(untypedFittingLines([
+    { derived: true, category: "Service fittings" },
+    { derived: true, category: "Walls" },
+  ]).length, 1);
 });

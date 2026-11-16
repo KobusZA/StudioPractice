@@ -275,8 +275,17 @@ Null is treated as 0 and Check says it was not stated.
 Every masonry wall on the ground storey gets a derived foundation wall
 (`deriveFoundationWalls` in [walls.js](walls.js)) from the foundation level up
 to that wall's resolved base. They are not stored: they move and go with their
-wall. A drawn wall opts out with `foundation: false`; a foundation wall drawn
-by hand along the wall replaces the derived one. All of this is additive, with
+wall. `doc.foundationWalls: false` turns them off for the job (absent or true
+means on). A drawn wall's own `foundation` flag wins over the job setting:
+`false` leaves it out, `true` draws one while the job has them off. A room
+wall has no segment to store that on, so the choice is kept on the room as
+`foundationEdges`, keyed by polygon edge index, and a shared wall writes both
+rooms. A value that matches the job is not stored. The type follows the same
+pattern: `doc.foundationWallSku` is the job's (null follows
+`system.defaultFoundationWallSku`), a drawn wall's `foundationSku` and a room's
+`foundationSkus` (by edge index) override it, and a type that matches the job
+is not stored. A strip footing or unknown id falls back. A foundation wall drawn by
+hand along the wall replaces the derived one. All of this is additive, with
 no `DOC_SCHEMA` bump: a document saved earlier has no offsets and no build-up,
 so it draws as before apart from the derived foundation walls.
 
@@ -367,8 +376,8 @@ belong to one printed drawing, not to the SKU catalog or the rule pack.
   they exist, and an em-dash where they do not - the same "unknown is never a
   plausible default" rule this document states for SKU compliance facts,
   applied to a drawing sheet instead of a SKU. Job number and client name are
-  edited once, doc-wide, in the Project information panel `project-info`
-  opens; drawn-by/checked-by/date stay per-sheet fields, because those vary
+  edited once, doc-wide, in the Job settings panel `project-info`
+  opens (which also holds the job's material and finish settings); drawn-by/checked-by/date stay per-sheet fields, because those vary
   sheet to sheet where a job number and client name do not.
 - **Revisions are letters, issued once, never reused** (A, B, ... Z, AA, ...),
   because a title block's revision history is part of the record, not a

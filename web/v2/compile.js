@@ -602,6 +602,9 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
   // same elevation the wall itself got rather than resolving it a second time
   // (and warning about the same broken attach twice).
   const wallBases = new Map();
+  // Wall rows by wall id, so the openings below can take their area off the
+  // face the material takeoff counts bricks over (materials.js).
+  const wallRows = new Map();
   // Full-storey walls whose top is fixed no longer reach the level above after
   // a level edit; they are listed once, never silently stretched.
   const shortWalls = [];
@@ -639,6 +642,11 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
       volume: a * (coreBasis && sku.geometry?.coreThickness > 0 ? sku.geometry.coreThickness : wall.thickness),
       count: 1,
     });
+    // `area` stays gross because the QS workbook reads it; `faceArea` is net
+    // of openings once they are placed below.
+    row.faceArea = a;
+    row.coreThickness = sku.geometry?.coreThickness > 0 ? sku.geometry.coreThickness : wall.thickness;
+    wallRows.set(wall.id, row);
     row.external = isExternalWall(wall);
     row.level = wall.level;
     // Only a directly-drawn wall/foundation segment is a selectable doc
@@ -692,7 +700,8 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
     const size = openingSize(pack, opening);
 
     const row = baseRow(pack, sku, opening.id, objectStatus(opening));
-    applyMeasures(row, sku, { count: 1, area: openingVoidArea(size.width, size.height, sku, size.rise) });
+    const voidArea = openingVoidArea(size.width, size.height, sku, size.rise);
+    applyMeasures(row, sku, { count: 1, area: voidArea });
     row.type = sizedTypeName(sku, size);
     if (Number.isFinite(size.width) && Number.isFinite(size.height)) row.openingSize = { width: size.width, height: size.height };
     const kind = markKind(pack, opening);
@@ -700,6 +709,8 @@ export function compile(doc, pack, { phase = "Day 1" } = {}) {
       row.markKind = kind;
       if (opening.mark) row.mark = opening.mark;
     }
+    const hostRow = wallRows.get(wall.id);
+    if (hostRow) hostRow.faceArea = Math.max(0, hostRow.faceArea - voidArea);
     if (size.nonStandard) {
       row.nonStandardSize = true;
       nonStandardOpenings.push(`${opening.mark ? `${opening.mark} ` : ""}${row.type} on ${levelName(pack, wall.level)}`);

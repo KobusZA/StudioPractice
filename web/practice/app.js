@@ -2618,6 +2618,12 @@ function tasksHtml(project) {
     </table>`;
 }
 
+/** The empty choice: follow the default as it stands, named so the two apps agree. */
+function firmDefaultLabel(books) {
+  const name = (books || []).find((book) => book.isDefault)?.name;
+  return name ? `Firm default (${name})` : "Firm default (none set)";
+}
+
 function registerFormHtml(project) {
   const types = state.reference?.projectTypes || [];
   const value = (key) => esc(project?.[key] ?? "");
@@ -2673,7 +2679,7 @@ function registerFormHtml(project) {
           <label for="f-rate-book">Rate book
             <span class="hint" tabindex="0" title="What a BOQ of this job's drawing prices against. Editing that book later does not re-price a job already quoted; a new year's prices are a new book.">?</span></label>
           <select id="f-rate-book" name="rateBookId">
-            <option value="">The firm's default, as it stands</option>
+            <option value="">${esc(firmDefaultLabel(state.rateBooks))}</option>
             ${state.rateBooks.map((book) => `
               <option value="${esc(book.id)}"${book.id === project?.rateBookId ? " selected" : ""}>
                 ${esc(book.name)}${book.isDefault ? " (default)" : ""}

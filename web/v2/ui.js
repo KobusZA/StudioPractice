@@ -257,7 +257,7 @@ import {
   hostedFinishRegionsOf,
   carryFinishRegionsToLevel,
   translateShape,
-} from "./model.js?v=20261111-annot4";
+} from "./model.js?v=20261116-foundation-type";
 import { historyAction, historyListHtml } from "./history-panel.js?v=20261103-history-icons";
 import { clearShapeLink, enclosedFace, exteriorOuterFaces, footprintFace, footprintOuterFace, spaceAt, syncRoomBounds } from "./room-bound.js?v=20261108-ridge";
 import { DEFAULT_REGION_CONVENTION, REGION_CONVENTIONS, hatchLines, regionConvention } from "./region.js?v=20261111-annot3";
@@ -266,9 +266,9 @@ import { FACE_CORNER_ALONG, FACE_CORNER_TRAVEL, FACE_CUE_INTRO_MS, FACE_CUE_PULS
 import { createFinishRegion, createFinishRun, dependentsOfWalls, faceArcScale, finishBillNote, finishEditRing, finishProductById, floorCoverage, libraryLine, materializeFinishRing, planWallFinishMarks, presetFromRoom, roomsBySide, rulesFromPreset, savePreset } from "./finish-model.js?v=20261111-boq-click";
 import { FINISH_CATEGORIES, finishId, finishSwatch, normalizeFinishProducts, normalizeFinishSettings } from "./finish-data.js";
 import { HEIGHT_PRESETS, bandFaceLine, compareBands, draftBandPreviewHtml, faceFinishHtml, finishCalloutHtml, floorOpenHtml, formatFloorArea, openingCalloutHtml, floorProductSuggestions, parseTarget, productsHtml, roomFinishHtml, slabFinishHtml, targetOptions } from "./finish-panel.js?v=20261108-face-length";
-import { alignCameraShift, centerVerticalFrame, clampElevationView, edgeResizeCursor, elevationFitFrame, elevationGuideLayout, elevationSvg, faceScreenCenter, finishLocate, nudgeIntoView, planFaceFrame, zoomElevationView } from "./wall-elevation-render.js?v=20261109-mirror-corner";
+import { alignCameraShift, centerVerticalFrame, clampElevationView, edgeResizeCursor, elevationFitFrame, elevationGuideLayout, elevationSvg, faceScreenCenter, finishLocate, nudgeIntoView, planFaceFrame, zoomElevationView } from "./wall-elevation-render.js?v=20261116-align-dots";
 import { FLOOR_TYPE_GROUPS, alignFloorPoint, faceToPlan, floorBox, floorFaceOf, floorFrameFromHold, floorHoldCentered, floorPictureSvg, planToFace, resolveFloorFinishOpen, trackFloorHold } from "./floor-picture.js?v=20261108-floor-scale";
-import { CORNER_JOIN_TOL, defaultSegmentTop, deriveWalls, drawnSegmentFromWall, drawnWallThickness, foundationChecks, gapMoveDelta, isDerivedFoundationId, isStripFooting, selectionAngleJoint, selectionSideGaps, skuDrawnHeight, statusVisible, wallFaceLengths, wallThicknessLabel } from "./walls.js?v=20261110-face-room-side";
+import { CORNER_JOIN_TOL, clearFoundationSkus, defaultSegmentTop, deriveWalls, drawnSegmentFromWall, drawnWallThickness, foundationChecks, foundationChoiceEligible, foundationEdgeFlag, foundationSkuFor, foundationWallSkuId, foundationWallTypes, foundationWallsOn, gapMoveDelta, setWallFoundationSku, tidyFoundationSkus, isDerivedFoundationId, isStripFooting, selectionAngleJoint, selectionSideGaps, setWallFoundation, skuDrawnHeight, statusVisible, wallFaceLengths, wallThicknessLabel } from "./walls.js?v=20261116-foundation-type";
 import { floorBuildUpStated, groundStorey, onGroundStorey, spotLevelLabel } from "./floor-levels.js?v=20261109-floor-offsets";
 import { findJoinTarget, resolveJoin, sideTowardTarget } from "./wall-join.js?v=20261022-corner-b";
 import {
@@ -333,13 +333,23 @@ import {
   levelElevation,
   objectLabel,
   resolvedBase,
-} from "./compile.js?v=20261111-boq-click";
+} from "./compile.js?v=20261116-materials";
 import { exportDxf } from "./dxf.js?v=20261111-annot3";
 import { exportIfc } from "./ifc.js";
-import { boqRows, bomRows, familyHeadingAt, scheduleCode, scheduleLineKey, scheduleTotal } from "./schedule.js?v=20261111-boq-click";
+import { boqRows, bomRows, familyHeadingAt, scheduleCode, scheduleLineKey, scheduleTotal, untypedFittingLines } from "./schedule.js?v=20261116-foundation-takeoff";
 import { captionBesideName, ensureOpeningMarks, markForNewOpening, markKind, markSide, remarkRetypedWindows, renameMark, shareWindowSize, sizedTypeName, splitWindowType, windowsOfMark } from "./marks.js";
 import { boqDownloadName, boqWorkbook } from "./boq-xlsx.js?v=20261111-boq-style";
 import { createMassingView, cycleStackedHits, lookFromClicks, EYE_HEIGHT_M, facesFromPayload, faceStyle, massingLayer, hatchPolygon, paintSpotLevels, rayPlanePoint, strokeFaceEdges, massViewStyle } from "./massing.js?v=20261111-boq-click";
+import {
+  BRICKS,
+  CONCRETE_SOURCES,
+  MASONRY_SOURCES,
+  STRENGTHS,
+  concreteTypesUsed,
+  materialSummary,
+  materialTakeoff,
+  normalizeMaterialSettings,
+} from "./materials.js";
 import { figureFootprint, figureLabel, figureNose, scaleFigurePair } from "./scale-figures.js?v=20261111-mass-figures";
 import {
   MAX_VISUALIZE_PROMPT,
@@ -709,7 +719,13 @@ const el = {
   ctxFootingType: document.getElementById("v2-ctx-footing-type"),
   ctxFootingAdd: document.getElementById("v2-ctx-footing-add"),
   ctxFootingNote: document.getElementById("v2-ctx-footing-note"),
+  ctxFoundationType: document.getElementById("v2-ctx-foundation-type"),
+  ctxFoundationTypeWrap: document.getElementById("v2-ctx-foundation-type-wrap"),
   floorBuildUp: document.getElementById("v2-floor-build-up"),
+  foundationWalls: document.getElementById("v2-foundation-walls"),
+  foundationWallsNote: document.getElementById("v2-foundation-walls-note"),
+  foundationType: document.getElementById("v2-foundation-type"),
+  foundationTypeWrap: document.getElementById("v2-foundation-type-wrap"),
   ctxType: document.getElementById("v2-ctx-type"),
   ctxTypeWrap: document.getElementById("v2-ctx-type-wrap"),
   ctxStatusWrap: document.getElementById("v2-ctx-status-wrap"),
@@ -886,6 +902,9 @@ const el = {
   projectInfoClose: document.getElementById("v2-project-info-close"),
   projectInfoJobNumber: document.getElementById("v2-project-info-job-number"),
   projectInfoClientName: document.getElementById("v2-project-info-client-name"),
+  jobPricing: document.getElementById("v2-job-pricing"),
+  jobMaterials: document.getElementById("v2-job-materials"),
+  jobFinishes: document.getElementById("v2-job-finishes"),
   elevationOverlay: document.getElementById("v2-elevation-overlay"),
   elevationClose: document.getElementById("v2-elevation-close"),
   elevationDirections: document.getElementById("v2-elevation-directions"),
@@ -906,6 +925,14 @@ let pack = null;
 // as "no rate on file" - schedule.js's findRate()/boqRows() already treat a
 // null rate as "-", never a guessed 0.
 let rateBook = null;
+// The firm's books, for the Job settings picker. Null until asked for, and
+// cleared when the job or the account changes. Owner-only to load.
+let rateBookChoices = null;
+let rateBookSave = 0;
+// The choice last asked for, which may not be saved yet. A second change
+// while the first is still saving has to win; comparing with the saved value
+// would see the old book and drop the new choice.
+let rateBookRequested = undefined;
 // The document's save path. Every mutation still calls store.persist(); what
 // persist() reaches is a sink that coalesces writes and reports whether they
 // landed.
@@ -1815,6 +1842,8 @@ async function enterApp() {
 function applyOpenedJob({ project, drawing }) {
   openProject = project;
   openDrawingId = drawing.id;
+  rateBookChoices = null;
+  rateBookRequested = undefined;
 
   // Not awaited: nothing on screen reads a price until somebody runs a BOQ,
   // and the editor must not wait on the firm's price list to open a drawing.
@@ -2535,6 +2564,8 @@ async function runSignOut() {
   openProject = null;
   openDrawingId = null;
   currentSession = null;
+  rateBookChoices = null;
+  rateBookRequested = undefined;
   accountJobCount = 0;
   setAccountOpen(false);
   drawAccount();
@@ -4939,6 +4970,8 @@ function render() {
   syncSgPanel();
   syncLevelPanel();
   syncFloorBuildUp();
+  syncFoundationWallsSwitch();
+  syncFoundationTypeSwitch();
   restoreSatelliteBitmap();
   restoreStoredUnderlay();
   syncAttachPanel();
@@ -4958,9 +4991,14 @@ function render() {
   syncHistoryPanel();
   syncSectionScreen();
   syncMassIfNeeded();
+  noteFirstFoundationWall();
 }
 
 let lastPlanHintKey = "";
+const FOUNDATION_TOLD_KEY = "v2-foundation-walls-told";
+// The document and whether it had a derived foundation wall at the last render.
+let foundationSeenDoc = null;
+let foundationSeen = false;
 
 /** The one selected door, or null. A door has no free position: drag moves it, and the Doors tab flips it. */
 function selectedDoor() {
@@ -6121,15 +6159,16 @@ function drawWallsJoined(walls) {
         // Derived from the wall above: outlined lighter so it reads as
         // something the drawing works out, not something drawn here.
         const width = Math.max(2, wall.thickness * cam.scale);
+        const picked = wall.id === pickedFoundationId;
         ctx.lineCap = "butt";
-        ctx.strokeStyle = "rgba(26, 22, 18, 0.45)";
-        ctx.lineWidth = width;
+        ctx.strokeStyle = picked ? COLOUR.selection : "rgba(26, 22, 18, 0.45)";
+        ctx.lineWidth = picked ? width + 4 : width;
         ctx.beginPath();
         ctx.moveTo(ax, ay);
         ctx.lineTo(bx, by);
         ctx.stroke();
         ctx.strokeStyle = "rgba(255, 255, 255, 0.85)";
-        ctx.lineWidth = Math.max(0, width - 3);
+        ctx.lineWidth = Math.max(0, (picked ? width + 4 : width) - 3);
         ctx.stroke();
       } else if (!wall.drawn) {
         ctx.strokeStyle = COLOUR.wall;
@@ -12873,6 +12912,8 @@ function stepHistory(dir) {
   drawLevelSwitcher();
   drawRibbon();
   render();
+  refreshBom();
+  renderJobSettings();
 }
 
 let historyOpen = true;
@@ -17049,6 +17090,115 @@ function openProjectInfo() {
   el.projectInfoJobNumber.value = info.jobNumber || "";
   el.projectInfoClientName.value = info.clientName || "";
   el.projectInfoOverlay.hidden = false;
+  renderJobSettings();
+  loadRateBookChoices();
+}
+
+const EXTERNAL_FINISHES = [["plaster", "Plaster"], ["render", "Render"], ["facebrick", "Face brick"]];
+
+/** The job-wide choices the BOM and the finish model read. Repainted on open,
+ *  after each change and after an undo, so it never shows a stale value. */
+function firmDefaultLabel(books) {
+  const name = (books || []).find((book) => book.isDefault)?.name;
+  return name ? `Firm default (${name})` : "Firm default (none set)";
+}
+
+/** Owner-only. A role the server refuses leaves the section as a sentence. */
+async function loadRateBookChoices() {
+  if (!openProject || currentSession?.role !== "owner" || rateBookChoices) return;
+  try {
+    rateBookChoices = await cloud.listRateBooks();
+  } catch {
+    rateBookChoices = [];
+  }
+  renderJobSettings();
+}
+
+function rateBookFieldHtml() {
+  if (!openProject) {
+    return `<p class="hint">This drawing is not a saved job, so the BOQ prices against the sample rate book.</p>`;
+  }
+  if (currentSession?.role !== "owner") {
+    return `<p class="hint">Only an owner can choose which rate book prices this job.</p>`;
+  }
+  if (!rateBookChoices) return `<p class="hint">Loading the firm's rate books…</p>`;
+  const current = openProject.rateBookId || "";
+  const options = [
+    `<option value=""${current ? "" : " selected"}>${escapeHtml(firmDefaultLabel(rateBookChoices))}</option>`,
+    ...rateBookChoices.map((book) => `
+      <option value="${escapeHtml(book.id)}"${book.id === current ? " selected" : ""}>${escapeHtml(book.name)}${book.isDefault ? " (default)" : ""}</option>`),
+  ];
+  return `
+    <div class="materials-fields">
+      <label>Rate book
+        <select data-job="rateBook">${options.join("")}</select>
+      </label>
+    </div>`;
+}
+
+async function setJobRateBook(value) {
+  if (!openProject) return;
+  const next = value || null;
+  const saved = openProject.rateBookId || null;
+  if ((rateBookRequested ?? saved) === next) return;
+  rateBookRequested = next;
+  const token = ++rateBookSave;
+  setStatusMessage("Saving the rate book…");
+  try {
+    const project = await cloud.setProjectRateBook(openProject.id, next);
+    if (token !== rateBookSave) return;
+    openProject = { ...openProject, rateBookId: project?.rateBookId ?? next };
+    rateBookRequested = openProject.rateBookId || null;
+    await loadRateBook(openProject);
+    if (token !== rateBookSave) return;
+    setStatusMessage(rateBook
+      ? `Pricing against ${rateBook.name}.`
+      : "This job follows the firm's default, and none is set.", "ok");
+    refreshBoq();
+    renderJobSettings();
+  } catch (error) {
+    if (token !== rateBookSave) return;
+    rateBookRequested = openProject.rateBookId || null;
+    setStatusMessage(error?.message || "Could not change the rate book.", "warn");
+    renderJobSettings();
+  }
+}
+
+function renderJobSettings() {
+  if (!el.projectInfoOverlay || el.projectInfoOverlay.hidden) return;
+  if (el.jobPricing) el.jobPricing.innerHTML = rateBookFieldHtml();
+  if (el.jobMaterials) el.jobMaterials.innerHTML = materialFieldsHtml();
+  if (el.jobFinishes) {
+    const settings = store.doc.finishSettings || {};
+    el.jobFinishes.innerHTML = `
+      <div class="materials-fields">
+        <label>External finish
+          <select data-job="externalFinish">${EXTERNAL_FINISHES.map(([v, l]) => `<option value="${v}"${settings.externalFinish === v ? " selected" : ""}>${l}</option>`).join("")}</select>
+        </label>
+        <label>Wall volume at
+          <select data-job="volumeBasis">
+            <option value="overall"${settings.volumeBasis !== "core" ? " selected" : ""}>overall thickness</option>
+            <option value="core"${settings.volumeBasis === "core" ? " selected" : ""}>core thickness</option>
+          </select>
+        </label>
+      </div>`;
+  }
+}
+
+function setJobFinishSetting(target) {
+  const key = target.dataset.job;
+  const before = normalizeFinishSettings(store.doc.finishSettings);
+  const after = normalizeFinishSettings({ ...before, [key]: target.value });
+  if (after[key] === before[key]) return;
+  store.pushUndo(key === "externalFinish"
+    ? `Set the external finish to ${EXTERNAL_FINISHES.find(([v]) => v === after[key])?.[1].toLowerCase() || after[key]}`
+    : `Measured wall volume at ${after[key] === "core" ? "core" : "overall"} thickness`);
+  store.doc.finishSettings = after;
+  store.persist();
+  finishKey = "";
+  render();
+  refreshBom();
+  renderJobSettings();
 }
 
 function closeProjectInfo() {
@@ -17073,6 +17223,19 @@ function wireProjectInfo() {
   };
   field(el.projectInfoJobNumber, "jobNumber");
   field(el.projectInfoClientName, "clientName");
+  el.jobMaterials?.addEventListener("change", (event) => {
+    const target = event.target.closest?.("[data-mat]");
+    if (!target) return;
+    setMaterialSetting(target);
+    renderJobSettings();
+  });
+  el.jobFinishes?.addEventListener("change", (event) => {
+    const target = event.target.closest?.("[data-job]");
+    if (target) setJobFinishSetting(target);
+  });
+  el.jobPricing?.addEventListener("change", (event) => {
+    if (event.target.dataset?.job === "rateBook") setJobRateBook(event.target.value);
+  });
 }
 
 function openCheck() {
@@ -19484,6 +19647,7 @@ function cancelDrawing() {
   snapGuide = null;
   underlaySelected = false;
   propertySelected = false;
+  pickedFoundationId = null;
   propertyHover = null;
   calibration = null;
   siteDraft = null;
@@ -20440,6 +20604,7 @@ function onPointerDown(ev) {
     if (underlaySelected) drawRibbon();
     underlaySelected = false;
     propertySelected = false;
+    pickedFoundationId = null;
     if (ev.shiftKey) {
       store.toggleRefs([hit], hit);
     } else if (!(store.isSelected(hit.kind, hit.id) && store.selected.length > 1)) {
@@ -20511,7 +20676,13 @@ function onPointerDown(ev) {
     const holdRoute = tool === "select" && !ev.shiftKey && selectionIsRoute();
     if (!ev.shiftKey && !holdRoute) store.clearSelection();
     const foundation = tool === "select" && !ev.shiftKey ? derivedFoundationAt(wx, wy) : null;
-    if (foundation) offerFoundationAsOwnWall(foundation);
+    if (foundation) {
+      pickDerivedFoundation(foundation);
+      if (wasUnderlay) drawRibbon();
+      render();
+      return;
+    }
+    pickedFoundationId = null;
     drag = { kind: "marquee", x0: wx, y0: wy, x1: wx, y1: wy, shift: ev.shiftKey, holdRoute };
     if (wasUnderlay) drawRibbon();
   }
@@ -23115,6 +23286,10 @@ function deleteSelection() {
     setStatusMessage("Property line removed.", "ok");
     return;
   }
+  if (pickedFoundationId) {
+    removePickedFoundation();
+    return;
+  }
   if (!store.selected.length) return;
   const wallPrompt = elevationWallDeletePrompt();
   if (wallPrompt) {
@@ -24844,6 +25019,7 @@ function derivedFoundationAt(wx, wy) {
 function drawFoundationAsOwnWall(wall) {
   const seg = drawnSegmentFromWall(wall, pack);
   if (!seg) return;
+  pickedFoundationId = null;
   store.pushUndo("Drew the foundation wall as its own wall");
   store.doc.segments.push(seg);
   store.selectOne({ kind: "segment", id: seg.id });
@@ -24852,20 +25028,48 @@ function drawFoundationAsOwnWall(wall) {
   render();
 }
 
-/** True when `id` is a derived foundation wall: it cannot be selected, so the click offers to draw it instead. */
-function offerDerivedFoundation(id) {
-  if (!isDerivedFoundationId(id)) return false;
-  const wall = currentWalls().find((w) => w.id === id);
-  if (wall) offerFoundationAsOwnWall(wall);
-  return true;
-}
+/** The derived foundation wall last clicked on the plan. Delete opts its wall out. */
+let pickedFoundationId = null;
 
-function offerFoundationAsOwnWall(wall) {
+/** Select a derived foundation wall. It is not stored, so it cannot be moved. */
+function pickDerivedFoundation(wall) {
+  if (!wall) return;
+  pickedFoundationId = wall.id;
+  underlaySelected = false;
+  propertySelected = false;
+  store.clearSelection();
   setStatusMessage(
-    "This foundation wall follows the wall above it. Draw it as its own wall to change it.",
+    "Foundation wall selected. Delete takes it out from under the wall above. The wall stays. To change its type, select the wall above.",
     "ok",
     { label: "Draw as its own wall", run: () => drawFoundationAsOwnWall(wall) },
   );
+  render();
+}
+
+/** True when `id` is a derived foundation wall: select it so Delete can take it out. */
+function offerDerivedFoundation(id) {
+  if (!isDerivedFoundationId(id)) return false;
+  const wall = currentWalls().find((w) => w.id === id);
+  if (wall) pickDerivedFoundation(wall);
+  return true;
+}
+
+/** Delete on a selected derived foundation wall opts out every wall it stands under. */
+function removePickedFoundation() {
+  const wall = currentWalls().find((w) => w.id === pickedFoundationId);
+  pickedFoundationId = null;
+  if (!wall) return;
+  const ids = wall.hostWallIds?.length ? wall.hostWallIds : [wall.hostWallId];
+  const hosts = ids.map((id) => currentWalls().find((w) => w.id === id)).filter(Boolean);
+  if (!hosts.length) return;
+  store.pushUndo(hosts.length > 1
+    ? "Took the foundation wall from under these walls"
+    : "Took the foundation wall from under the wall");
+  for (const host of hosts) setWallFoundation(store.doc, host, false);
+  foundationSeenDoc = null;
+  store.persist();
+  setStatusMessage("Foundation wall removed. The wall above stays. Undo puts it back.", "ok");
+  render();
 }
 
 /** Edit as polygon, from the Floors and Roofs tabs. A rectangle becomes a polygon whose corners drag. */
@@ -28767,9 +28971,17 @@ function flashElevationAlignment() {
     line.style.width = `${Math.abs(xB - xA)}px`;
     host.appendChild(line);
   };
-  const skew = (from, to, fold = false) => {
+  const dot = (x, y) => {
+    const mark = document.createElement("span");
+    mark.className = "elev-align-dot";
+    mark.style.left = `${x}px`;
+    mark.style.top = `${y}px`;
+    host.appendChild(mark);
+  };
+  const stripTop = toY(body.top + (el.elevBody.clientTop || 0));
+  const skew = (from, to) => {
     const line = document.createElement("span");
-    line.className = fold ? "elev-align-line is-skew is-fold" : "elev-align-line is-skew";
+    line.className = "elev-align-line is-skew";
     const dx = to.x - from.x;
     const dy = to.y - from.y;
     line.style.left = `${from.x}px`;
@@ -28781,27 +28993,26 @@ function flashElevationAlignment() {
   // A curve is longer once unrolled, so a plumb line from a plan end misses
   // the elevation end. The guides run from the plan's ends out to those edges.
   if (wall.arc) {
-    const toElev = (pt, svgX) => skew(
-      { x: pt.x - cr.left, y: pt.y - cr.top },
-      { x: toX(svgX), y: toY(body.bottom) },
-    );
+    const toElev = (pt, svgX) => {
+      skew(
+        { x: pt.x - cr.left, y: pt.y - cr.top },
+        { x: toX(svgX), y: toY(body.bottom) },
+      );
+      dot(pt.x - cr.left, pt.y - cr.top);
+    };
     toElev(arcEnds[0], xOf(faceFrom));
     toElev(arcEnds[1], xOf((faceFrom + faceTo) / 2));
     toElev(arcEnds[2], xOf(faceTo));
   } else {
     // Stations are the true length apart in the strip. A horizontal wall has
     // each plan point already above its station, so the guide drops straight
-    // down. A vertical or skew wall runs across to that x first; the bends
-    // share one fold, the same construction at every angle.
+    // down. A vertical or skew wall runs across to that x first.
     const layout = elevationGuideLayout(marks, { forceBend: frame.vertical });
     for (const seg of layout.across) across(seg.y, seg.x0, seg.x1);
     for (const seg of layout.down) verticalLine(seg.x - body.left - inset, seg.y, body.bottom);
-    if (layout.fold && Math.hypot(layout.fold.x2 - layout.fold.x1, layout.fold.y2 - layout.fold.y1) > 1) {
-      skew(
-        { x: layout.fold.x1 - cr.left, y: layout.fold.y1 - cr.top },
-        { x: layout.fold.x2 - cr.left, y: layout.fold.y2 - cr.top },
-        true,
-      );
+    for (const m of marks) {
+      dot(m.planX - cr.left, m.planY - cr.top);
+      dot(m.elevX - cr.left, stripTop);
     }
   }
   if (elevationAlignTimer) window.clearTimeout(elevationAlignTimer);
@@ -30562,14 +30773,6 @@ el.ctxFinish?.addEventListener("change", (e) => {
     });
     return;
   }
-  if (field === "external-finish") {
-    finishCommit(() => { doc.finishSettings = normalizeFinishSettings({ ...doc.finishSettings, externalFinish: e.target.value }); });
-    return;
-  }
-  if (field === "volume-basis") {
-    finishCommit(() => { doc.finishSettings = normalizeFinishSettings({ ...doc.finishSettings, volumeBasis: e.target.value }); });
-    return;
-  }
   const rule = finishRule(room, e.target);
   if (!rule) return;
   if (field === "rule-type") {
@@ -31256,7 +31459,7 @@ function syncWallSettingsFold(kind) {
   const details = el.ctxWallMore;
   const box = el.ctxWallMoreFields;
   if (!details || !box) return;
-  const wallNodes = [el.ctxTopWrap, el.ctxWallHWrap, el.ctxAttachWrap, el.ctxFoundationWrap, el.ctxFoundationOwn].filter(Boolean);
+  const wallNodes = [el.ctxTopWrap, el.ctxWallHWrap, el.ctxAttachWrap].filter(Boolean);
   const floorNodes = [el.ctxOLevelWrap, el.ctxWallHWrap, el.ctxConvert].filter(Boolean);
   for (const node of [...wallNodes, ...floorNodes]) pinFoldHome(node);
   const hostObj = store.primary ? objByRef(store.primary) : null;
@@ -31588,7 +31791,7 @@ function syncPlanContext() {
     setHidden(el.ctxOverhangWrap, true);
     setHidden(el.ctxPlateWrap, true);
     setHidden(el.ctxFloorOffsetWrap, true);
-    syncFoundationToggle(null);
+    syncFoundationToggle();
     setHidden(el.ctxTypeWrap, true);
     setHidden(el.ctxOLevelWrap, true);
     setHidden(el.ctxTopWrap, true);
@@ -31632,7 +31835,7 @@ function syncPlanContext() {
     const offset = floorOffsetMm(obj);
     el.ctxFloorOffset.value = offset ? String(Math.round(offset)) : "";
   }
-  syncFoundationToggle(ref?.kind === "segment" && !draft ? obj : null);
+  syncFoundationToggle();
   syncRoofCutInspector(roof ? obj : null);
   const pitched = Boolean(roof && obj && obj.form !== "flat");
   setHidden(el.ctxPitchWrap, !pitched);
@@ -31675,6 +31878,8 @@ function syncPlanContext() {
     setHidden(el.ctxRemove, true);
     setHidden(el.ctxAttachWrap, true);
     setHidden(el.ctxFloorOffsetWrap, true);
+    setHidden(el.ctxFoundationWrap, true);
+    setHidden(el.ctxFoundationOwn, true);
     syncInspectKicker(`Floor · ${obj?.name || "This floor"}`);
   } else if ((room || floorSlab) && obj) {
     syncInspectKicker(`${room ? "Room" : "Slab"} · ${obj.name || "This floor"}`);
@@ -32243,36 +32448,197 @@ el.ctxFloorOffset?.addEventListener("change", (e) => {
   render();
 });
 
+/** Ground-storey walls the Foundation wall checkbox applies to, from the selection. */
+function foundationToggleWalls() {
+  if (!pack || wallDraft) return [];
+  const walls = currentWalls();
+  const out = [];
+  const seen = new Set();
+  for (const ref of store.selected) {
+    if (ref.kind === "segment") {
+      const wall = walls.find((w) => w.drawn && w.id === ref.id);
+      if (wall && foundationChoiceEligible(pack, wall) && !seen.has(wall.id)) {
+        seen.add(wall.id);
+        out.push(wall);
+      }
+    } else if (ref.kind === "room") {
+      for (const wall of walls) {
+        if (wall.drawn || seen.has(wall.id) || !wall.roomIds?.includes(ref.id)) continue;
+        if (!foundationChoiceEligible(pack, wall)) continue;
+        seen.add(wall.id);
+        out.push(wall);
+      }
+    }
+  }
+  return out;
+}
+
+/** on, off, or mixed: a room wall can be split across sides that disagree. */
+function foundationChoice(wall) {
+  const job = foundationWallsOn(store.doc);
+  if (wall.drawn) return wall.foundation === false ? false : (wall.foundation === true ? true : job);
+  const flags = (wall.edges || []).map((e) => foundationEdgeFlag(store.doc, e.roomId, e.edgeIndex));
+  if (!flags.length || flags.every((f) => f === undefined)) return job;
+  const values = flags.map((f) => (typeof f === "boolean" ? f : job));
+  return values.every((v) => v === values[0]) ? values[0] : "mixed";
+}
+
 /**
- * "Foundation wall under it" on a drawn masonry wall on the ground storey.
- * Ticked by default; unticking writes `foundation: false`. A room's own walls
- * show the hint to convert them first, as they cannot carry a flag.
+ * "Foundation wall under it", beside the wall's type and status. One wall,
+ * several walls, or a room's sides. A tick that differs from the job is
+ * stored; one that matches the job clears the stored choice.
  */
-function syncFoundationToggle(seg) {
-  const sku = seg ? skuById(seg.sku) : null;
-  const eligible = Boolean(seg && sku?.category === "wall" && pack && onGroundStorey(pack, effectiveLevel(seg, pack))
-    && foundationStorey(pack.levels || []));
-  setHidden(el.ctxFoundationWrap, !eligible);
-  if (eligible && el.ctxFoundation) el.ctxFoundation.checked = seg.foundation !== false;
-  const under = eligible ? derivedFoundationUnder(seg.id) : null;
-  setHidden(el.ctxFoundationOwn, !under);
+function syncFoundationToggle() {
+  const walls = foundationToggleWalls();
+  setHidden(el.ctxFoundationWrap, !walls.length);
+  const label = el.ctxFoundationWrap?.querySelector("#v2-ctx-foundation-label");
+  const note = el.ctxFoundationWrap?.querySelector("#v2-ctx-foundation-note");
+  if (walls.length && el.ctxFoundation) {
+    const choices = walls.map(foundationChoice);
+    const mixed = choices.some((c) => c === "mixed") || new Set(choices).size > 1;
+    el.ctxFoundation.indeterminate = mixed;
+    el.ctxFoundation.checked = !mixed && choices[0] === true;
+    if (label) label.textContent = walls.length > 1 ? "Foundation wall under each" : "Foundation wall under it";
+    if (note) note.textContent = mixed ? "Some of these have one and some do not." : "";
+  }
+  const one = walls.length === 1 ? walls[0] : null;
+  setHidden(el.ctxFoundationOwn, !(one && derivedFoundationUnder(one.id)));
+  syncFoundationTypeSelect(walls);
+}
+
+/** `<option>`s for the foundation wall types. `markJob` tags the job's type. */
+function foundationTypeOptions(selected, mixed = false, markJob = false) {
+  const job = foundationWallSkuId(pack, store.doc);
+  const rows = foundationWallTypes(pack).map((s) => {
+    const name = escapeHtml(s.name || s.id);
+    const tag = markJob && s.id === job ? " (job)" : "";
+    return `<option value="${escapeHtml(s.id)}"${!mixed && s.id === selected ? " selected" : ""}>${name}${tag}</option>`;
+  });
+  if (mixed) rows.unshift(`<option value="" selected disabled>Mixed</option>`);
+  return rows.join("");
+}
+
+/** "Foundation type" under the checkbox, for walls that have a foundation wall under them. */
+function syncFoundationTypeSelect(walls) {
+  if (!el.ctxFoundationType) return;
+  const on = walls.filter((w) => foundationChoice(w) !== false);
+  const types = pack ? foundationWallTypes(pack) : [];
+  setHidden(el.ctxFoundationTypeWrap, !on.length || types.length < 2);
+  if (!on.length || types.length < 2 || activeEl() === el.ctxFoundationType) return;
+  const skus = on.map((w) => foundationSkuFor(store.doc, pack, w));
+  const mixed = new Set(skus).size > 1;
+  const html = foundationTypeOptions(skus[0], mixed, true);
+  if (el.ctxFoundationType.dataset.html !== html) {
+    el.ctxFoundationType.innerHTML = html;
+    el.ctxFoundationType.dataset.html = html;
+  }
+}
+
+el.ctxFoundationType?.addEventListener("change", (e) => {
+  const skuId = e.target.value;
+  const walls = foundationToggleWalls().filter((w) => foundationChoice(w) !== false);
+  if (!skuId || !walls.length) return;
+  const name = skuById(skuId)?.name || skuId;
+  store.pushUndo(`${historyDid("Set the foundation type under")} to ${name}`);
+  for (const wall of walls) setWallFoundationSku(store.doc, pack, wall, skuId);
+  store.persist();
+  render();
+  if (skuId === foundationWallSkuId(pack, store.doc)) return;
+  setStatusMessage(
+    `The foundation wall under ${walls.length > 1 ? "these walls" : "this wall"} is now ${name}. The rest of the job keeps its type.`,
+    "ok",
+    { label: "Use for every wall", run: () => setJobFoundationType(skuId, true) },
+  );
+});
+
+/** The job's foundation wall type. `everyWall` also clears the walls that chose their own. */
+function setJobFoundationType(skuId, everyWall = false) {
+  if (!skuId) return;
+  const name = skuById(skuId)?.name || skuId;
+  store.pushUndo(everyWall
+    ? `Set every foundation wall to ${name}`
+    : `Set the job's foundation wall type to ${name}`);
+  store.doc.foundationWallSku = skuId === pack?.system?.defaultFoundationWallSku ? null : skuId;
+  if (everyWall) clearFoundationSkus(store.doc);
+  else tidyFoundationSkus(store.doc, pack);
+  store.persist();
+  render();
+  if (everyWall) setStatusMessage(`Every foundation wall is now ${name}.`, "ok");
+}
+
+el.foundationType?.addEventListener("change", (e) => setJobFoundationType(e.target.value));
+
+/** Walls that chose a foundation type other than the job's. A shared wall counts once. */
+function foundationTypeOwnCount() {
+  const job = foundationWallSkuId(pack, store.doc);
+  return wallsCache.filter((w) => w.category === "wall" && w.foundationSku && w.foundationSku !== job).length;
+}
+
+function syncFoundationTypeSwitch() {
+  if (!el.foundationType) return;
+  const types = pack ? foundationWallTypes(pack) : [];
+  const show = types.length > 1 && Boolean(foundationStorey(pack?.levels));
+  setHidden(el.foundationTypeWrap, !show);
+  if (!show || activeEl() === el.foundationType) return;
+  const html = foundationTypeOptions(foundationWallSkuId(pack, store.doc));
+  if (el.foundationType.dataset.html !== html) {
+    el.foundationType.innerHTML = html;
+    el.foundationType.dataset.html = html;
+  }
+  const own = foundationTypeOwnCount();
+  el.foundationType.title = own ? `${own} wall${own === 1 ? "" : "s"} use${own === 1 ? "s" : ""} another type.` : "";
 }
 
 el.ctxFoundation?.addEventListener("change", (e) => {
-  const seg = soleOf("segment");
-  if (!seg) return;
+  const walls = foundationToggleWalls();
+  if (!walls.length) return;
   store.pushUndo(e.target.checked
     ? historyDid("Put a foundation wall back under")
     : historyDid("Took the foundation wall from under"));
-  if (e.target.checked) delete seg.foundation;
-  else seg.foundation = false;
+  for (const wall of walls) setWallFoundation(store.doc, wall, e.target.checked);
+  foundationSeenDoc = null;
   store.persist();
   render();
 });
 
+function syncFoundationWallsSwitch() {
+  if (!el.foundationWalls) return;
+  const on = foundationWallsOn(store.doc);
+  el.foundationWalls.checked = on;
+  const own = foundationOwnCount(on);
+  const base = on ? "On: each one follows its wall." : "Off: none are drawn unless a wall asks for one.";
+  const text = own ? `${base} ${own} wall${own === 1 ? "" : "s"} set otherwise.` : base;
+  if (el.foundationWallsNote && el.foundationWallsNote.textContent !== text) el.foundationWallsNote.textContent = text;
+}
+
+el.foundationWalls?.addEventListener("change", (e) => {
+  store.pushUndo(e.target.checked
+    ? "Turned on foundation walls under ground floor walls"
+    : "Turned off foundation walls under ground floor walls");
+  if (e.target.checked) delete store.doc.foundationWalls;
+  else store.doc.foundationWalls = false;
+  foundationSeenDoc = null;
+  store.persist();
+  render();
+});
+
+/**
+ * The first foundation wall the app draws for you says so once, with the way
+ * to turn it off. Loading a job or undoing into one that has them stays quiet.
+ */
+function noteFirstFoundationWall() {
+  const now = wallsCache.some((w) => w.derived && w.category === "foundation");
+  const fresh = foundationSeenDoc === store.doc && !foundationSeen && now;
+  foundationSeenDoc = store.doc;
+  foundationSeen = now;
+  if (!fresh || elevDismissed(FOUNDATION_TOLD_KEY)) return;
+  elevDismiss(FOUNDATION_TOLD_KEY);
+  setStatusMessage("A 220 mm foundation wall is drawn under each ground floor wall. To leave one out, untick \"Foundation wall under it\" on that wall, or turn them off for the job in the Levels panel.", "ok");
+}
+
 el.ctxFoundationOwn?.addEventListener("click", () => {
-  const seg = soleOf("segment");
-  const under = seg ? derivedFoundationUnder(seg.id) : null;
+  const walls = foundationToggleWalls();
+  const under = walls.length === 1 ? derivedFoundationUnder(walls[0].id) : null;
   if (under) drawFoundationAsOwnWall(under);
 });
 
@@ -32386,6 +32752,24 @@ el.ctxFootingType?.addEventListener("change", (e) => {
 });
 
 el.ctxFootingAdd?.addEventListener("click", addFootingsUnderSelection);
+
+/** Walls whose foundation choice is not the job's. A shared wall counts once. */
+function foundationOwnCount(jobOn) {
+  let n = 0;
+  for (const wall of wallsCache) {
+    if (wall.category !== "wall") continue;
+    if (wall.drawn) {
+      if (typeof wall.foundation === "boolean" && wall.foundation !== jobOn) n += 1;
+      continue;
+    }
+    const own = (wall.edges || []).some((edge) => {
+      const flag = foundationEdgeFlag(store.doc, edge.roomId, edge.edgeIndex);
+      return typeof flag === "boolean" && flag !== jobOn;
+    });
+    if (own) n += 1;
+  }
+  return n;
+}
 
 function syncFloorBuildUp() {
   if (houseBuildUpMm() !== houseDrawnBuildUp) drawHouse();
@@ -32895,6 +33279,7 @@ function money(rate, symbol) {
 }
 
 function fmtQty(qty, unit) {
+  if (qty === null || qty === undefined) return "—";
   if (unit === "ea") return String(Math.round(qty));
   return `${(Number(qty) || 0).toFixed(2)} ${unit}`;
 }
@@ -32950,13 +33335,21 @@ function elementRowHtml(groupIndex, element, elementIndex) {
     </div>`;
 }
 
+/** What to order once waste is added, where the line states it: materials
+ *  and wasted lengths as `orderQty`, finishes as `orderQuantity`. */
+function scheduleOrderQty(row) {
+  if (Number.isFinite(row.orderQty)) return row.orderQty;
+  if (Number.isFinite(row.orderQuantity)) return row.orderQuantity;
+  return null;
+}
+
 function scheduleRowsHtml(rows, { priced }) {
   const symbol = rateBook?.symbol || "R";
   // Full column count, so the expanded element list spans the whole table.
-  const colspan = priced ? 8 : 6;
+  const colspan = priced ? 8 : 7;
   const head = priced
     ? `<tr><th></th><th>Model</th><th class="wrap">Description</th><th>Category</th><th class="num">Qty</th><th>Unit</th><th class="num">Rate</th><th class="num">Amount</th></tr>`
-    : `<tr><th></th><th>Model</th><th class="wrap">Description</th><th>Category</th><th class="num">Qty</th><th>Unit</th></tr>`;
+    : `<tr><th></th><th>Model</th><th class="wrap">Description</th><th>Category</th><th class="num">Qty</th><th>Unit</th><th class="num" title="Quantity plus the waste allowance, rounded up to what is sold">Order</th></tr>`;
   const body = rows.map((row, i) => {
     const first = `
       <td class="schedule-caret"><button type="button" class="schedule-caret-btn" aria-expanded="${scheduleOpenGroups.has(scheduleGroupKey(row))}" aria-label="Show or hide the elements on this line" title="Show or hide the elements on this line"></button></td>
@@ -32969,7 +33362,8 @@ function scheduleRowsHtml(rows, { priced }) {
       ? `
       <td class="num">${row.priced ? money(row.rate, symbol) : "—"}</td>
       <td class="num">${row.priced ? money(row.amount, symbol) : "—"}</td>`
-      : "";
+      : `
+      <td class="num">${fmtQty(scheduleOrderQty(row), row.unit)}</td>`;
     const refCount = scheduleGroupRefs(row).length;
     const elements = (row.elements || [])
       .map((element, j) => elementRowHtml(i, element, j))
@@ -33022,6 +33416,7 @@ function scheduleCompactHtml(rows, { priced }) {
               <span class="schedule-line-cat">${escapeHtml(row.category || "")}</span>
               <span class="schedule-line-qty">${fmtQty(row.qty, row.unit)}</span>
               ${priced ? `<span class="schedule-line-amt">${amount}</span>` : ""}
+              ${!priced && scheduleOrderQty(row) !== null ? `<span class="schedule-line-amt" title="Order quantity, waste added">order ${fmtQty(scheduleOrderQty(row), row.unit)}</span>` : ""}
             </div>
           </div>
         </div>
@@ -33070,20 +33465,25 @@ function rateBookEffective() {
     : `from ${date.toLocaleDateString("en-ZA", { day: "numeric", month: "long", year: "numeric" })}`;
 }
 
+/** The line under the title. A priced schedule names its book and, on a saved
+ *  job, offers the change, because a total that does not say what it was
+ *  priced against is not evidence of anything. */
+function paintScheduleKicker(rows, { priced }) {
+  if (!el.scheduleKicker) return;
+  const parts = [`${rows.length} lines`];
+  if (priced) parts.push(rateBook?.name || "No rate book loaded", rateBookEffective());
+  const change = priced && openProject
+    ? ` <button type="button" class="schedule-kicker-change" data-open="job-settings">Change</button>`
+    : "";
+  el.scheduleKicker.innerHTML = `${escapeHtml(parts.filter(Boolean).join(" · "))}${change}`;
+}
+
 function openSchedule(title, rows, { priced }) {
   scheduleRowsCache = rows;
   schedulePriced = Boolean(priced);
   if (el.scheduleOverlay) el.scheduleOverlay.hidden = false;
   if (el.scheduleTitle) el.scheduleTitle.textContent = title;
-  // Which price list produced these figures, beside the line count: a priced
-  // schedule that does not say what it was priced against is not evidence of
-  // anything.
-  if (el.scheduleKicker) {
-    el.scheduleKicker.textContent = [
-      `${rows.length} lines`,
-      ...(priced ? [rateBook?.name, rateBookEffective()] : []),
-    ].filter(Boolean).join(" · ");
-  }
+  paintScheduleKicker(rows, { priced });
   if (el.scheduleDownload) el.scheduleDownload.hidden = !priced;
   // Warnings are inserted after this returns. Clear first so a second open
   // does not keep the previous banner.
@@ -33112,35 +33512,185 @@ function setSchedulePeek(on) {
   paintSchedule();
 }
 
-function runBoq() {
-  const out = compile(store.doc, pack);
-  if (!out) return;
-  const rows = boqRows(out, rateBook);
+function boqWarningHtml(rows) {
   const unpriced = rows.filter((r) => !r.priced).length;
-  const derived = rows.filter((r) => r.derived).length;
-  openSchedule("BOQ — bill of quantities", rows, { priced: true });
+  const derived = untypedFittingLines(rows).length;
   const warnings = [
     derived ? `${derived} fitting ${derived === 1 ? "line is" : "lines are"} counted from the route's bends. The template names no fitting type for ${derived === 1 ? "it" : "them"}, so price by the line's code.` : null,
     !rateBook ? 'No rate book loaded — every line prices at "—".' : null,
     rateBook && unpriced ? `${unpriced} of ${rows.length} lines have no rate on file and price at "—".` : null,
   ].filter(Boolean);
-  if (warnings.length && el.scheduleBody) {
-    el.scheduleBody.insertAdjacentHTML("afterbegin",
-      `<div class="compile-warnings">${warnings.map((w) => `<p class="warn">⚠ ${escapeHtml(w)}</p>`).join("")}</div>`);
-  }
+  return warnings.length
+    ? `<div class="compile-warnings">${warnings.map((w) => `<p class="warn">⚠ ${escapeHtml(w)}</p>`).join("")}</div>`
+    : "";
+}
+
+function runBoq() {
+  const out = compile(store.doc, pack);
+  if (!out) return;
+  const rows = boqRows(out, rateBook);
+  openSchedule("BOQ — bill of quantities", rows, { priced: true });
+  if (el.scheduleBody) el.scheduleBody.insertAdjacentHTML("afterbegin", boqWarningHtml(rows));
   window.__boq = rows;
   // eslint-disable-next-line no-console
   console.log("v2 BOQ:", rows);
 }
 
-function runBom() {
+/** Re-price the open BOQ after the job's book changes, keeping the dock. */
+function refreshBoq() {
+  if (!schedulePriced || !el.scheduleOverlay || el.scheduleOverlay.hidden) return;
   const out = compile(store.doc, pack);
   if (!out) return;
-  const rows = bomRows(out);
-  openSchedule("BOM — bill of materials", rows, { priced: false });
-  window.__bom = rows;
+  const rows = boqRows(out, rateBook);
+  scheduleRowsCache = rows;
+  paintScheduleKicker(rows, { priced: true });
+  el.scheduleBody?.querySelector(".compile-warnings")?.remove();
+  if (el.scheduleBody) el.scheduleBody.insertAdjacentHTML("afterbegin", boqWarningHtml(rows));
+  paintSchedule();
+  window.__boq = rows;
+}
+
+// --- Materials (materials.js) ---------------------------------------------
+//
+// The bricks, cement, sand and stone behind the measured BOM lines. Every
+// choice belongs to the job and is blank until made; a gap is printed, never
+// filled with a default. Two published sources disagree, so the job picks one.
+
+function bomSchedule() {
+  const out = compile(store.doc, pack);
+  if (!out) return null;
+  const takeoff = materialTakeoff(out, pack, store.doc.materialSettings);
+  return { out, takeoff, rows: [...bomRows(out), ...takeoff.rows] };
+}
+
+function materialOptions(table, value, label) {
+  return [
+    `<option value=""${value ? "" : " selected"}>Not chosen</option>`,
+    ...Object.entries(table).map(([id, entry]) => {
+      const title = entry.cite ? ` title="${escapeHtml(entry.cite)}"` : "";
+      return `<option value="${escapeHtml(id)}"${id === value ? " selected" : ""}${title}>${escapeHtml(label(entry))}</option>`;
+    }),
+  ].join("");
+}
+
+function materialCitesHtml(s) {
+  const cites = [MASONRY_SOURCES[s.masonrySource], CONCRETE_SOURCES[s.concreteSource]]
+    .filter(Boolean)
+    .map((source) => `${source.name}: ${source.cite}.`);
+  return cites.length ? `<p class="hint">${cites.map(escapeHtml).join(" ")}</p>` : "";
+}
+
+/** The job-wide choices, edited in Job settings. Strength is per type and stays on the BOM. */
+function materialFieldsHtml() {
+  const s = normalizeMaterialSettings(store.doc.materialSettings);
+  const percent = (key) => (s.waste[key] === null ? "" : String(Math.round(s.waste[key] * 1000) / 10));
+  const waste = ["bricks", "mortar", "concrete"].map((key) => `
+        <label>Waste on ${key}, %
+          <input type="number" min="0" max="100" step="1" inputmode="decimal" data-mat="waste" data-key="${key}" value="${percent(key)}" placeholder="not stated">
+        </label>`).join("");
+  return `
+      <div class="materials-fields">
+        <label>Bricks and mortar per
+          <select data-mat="masonrySource">${materialOptions(MASONRY_SOURCES, s.masonrySource, (source) => source.name)}</select>
+        </label>
+        <label>Brick
+          <select data-mat="brick">${materialOptions(BRICKS, s.brick, (brick) => brick.label)}</select>
+        </label>
+        <label>Concrete per
+          <select data-mat="concreteSource">${materialOptions(CONCRETE_SOURCES, s.concreteSource, (source) => source.name)}</select>
+        </label>${waste}
+      </div>
+      ${materialCitesHtml(s)}`;
+}
+
+function materialStripHtml(out) {
+  const s = normalizeMaterialSettings(store.doc.materialSettings);
+  const strengths = concreteTypesUsed(out, pack).map((type) => `
+        <label>${escapeHtml(type.name)}, strength
+          <select data-mat="strength" data-sku="${escapeHtml(type.id)}">${materialOptions(STRENGTHS, s.concreteStrength[type.id] || null, (name) => name)}</select>
+        </label>`).join("");
+  return `
+    <section class="materials-strip" aria-label="Materials">
+      <h3>Materials</h3>
+      <p class="materials-summary">
+        <span>${escapeHtml(materialSummary(s))}</span>
+        <button type="button" data-open="job-settings">Change in job settings</button>
+      </p>
+      ${strengths ? `<div class="materials-fields">${strengths}
+      </div>` : ""}
+      ${materialCitesHtml(s)}
+    </section>`;
+}
+
+/** The strip and its gaps sit above the lines; repainting them leaves the lines alone. */
+function paintBomExtras(out, takeoff) {
+  if (!el.scheduleBody) return;
+  el.scheduleBody.querySelector(".materials-strip")?.remove();
+  el.scheduleBody.querySelector(".compile-warnings")?.remove();
+  const gaps = takeoff.gaps.length
+    ? `<div class="compile-warnings">${takeoff.gaps.map((g) => `<p class="warn">⚠ ${escapeHtml(g)}</p>`).join("")}</div>`
+    : "";
+  el.scheduleBody.insertAdjacentHTML("afterbegin", materialStripHtml(out) + gaps);
+}
+
+function runBom() {
+  const built = bomSchedule();
+  if (!built) return;
+  openSchedule("BOM — bill of materials", built.rows, { priced: false });
+  paintBomExtras(built.out, built.takeoff);
+  window.__bom = built.rows;
   // eslint-disable-next-line no-console
-  console.log("v2 BOM:", rows);
+  console.log("v2 BOM:", built.rows);
+}
+
+/** Re-read the open BOM after a material choice or an undo, keeping the
+ *  panel's dock, picks and open lines where they are. */
+function refreshBom() {
+  if (schedulePriced || !el.scheduleOverlay || el.scheduleOverlay.hidden) return;
+  const built = bomSchedule();
+  if (!built) return;
+  scheduleRowsCache = built.rows;
+  paintScheduleKicker(built.rows, { priced: false });
+  paintBomExtras(built.out, built.takeoff);
+  paintSchedule();
+  window.__bom = built.rows;
+}
+
+function materialChangeLabel(target, value) {
+  switch (target.dataset.mat) {
+    case "masonrySource": return value ? `Counted bricks and mortar per the ${MASONRY_SOURCES[value].name}` : "Cleared the bricks and mortar source";
+    case "brick": return value ? `Chose ${BRICKS[value].label} bricks` : "Cleared the brick";
+    case "concreteSource": return value ? `Counted concrete per the ${CONCRETE_SOURCES[value].name}` : "Cleared the concrete source";
+    case "strength": return value ? `Set ${STRENGTHS[value].toLowerCase()} concrete for ${objectLabel(pack, { sku: target.dataset.sku })}` : "Cleared a concrete strength";
+    default: return value === null ? `Cleared the waste on ${target.dataset.key}` : `Set the waste on ${target.dataset.key} to ${value}%`;
+  }
+}
+
+function setMaterialSetting(target) {
+  const before = normalizeMaterialSettings(store.doc.materialSettings);
+  const next = structuredClone(before);
+  let value = target.value || null;
+  if (target.dataset.mat === "waste") {
+    const raw = String(target.value ?? "").trim();
+    value = raw === "" ? null : Number(raw);
+    if (value !== null && !(Number.isFinite(value) && value >= 0 && value <= 100)) {
+      setStatusMessage("Waste is a percentage from 0 to 100.", "warn");
+      refreshBom();
+      return;
+    }
+    next.waste[target.dataset.key] = value === null ? null : value / 100;
+  } else if (target.dataset.mat === "strength") {
+    if (value) next.concreteStrength[target.dataset.sku] = value;
+    else delete next.concreteStrength[target.dataset.sku];
+  } else {
+    next[target.dataset.mat] = value;
+  }
+  const after = normalizeMaterialSettings(next);
+  if (JSON.stringify(after) === JSON.stringify(before)) return;
+  store.pushUndo(materialChangeLabel(target, value));
+  store.doc.materialSettings = after;
+  store.persist();
+  refreshBom();
 }
 
 /** Centre of a doc entity in plan coordinates, or null when its kind has no
@@ -33634,6 +34184,10 @@ function wireSchedule() {
   el.schedulePeek?.addEventListener("click", () => setSchedulePeek(!schedulePeeking));
   el.scheduleDownload?.addEventListener("click", downloadBoqWorkbook);
   el.scheduleOverlay?.addEventListener("click", (event) => {
+    if (event.target.closest?.('[data-open="job-settings"]')) {
+      openProjectInfo();
+      return;
+    }
     // In peek mode the backdrop is not there to be dismissed - it is the plan.
     if (event.target === el.scheduleOverlay && !schedulePeeking) closeSchedule();
   });
@@ -33648,6 +34202,10 @@ function wireSchedule() {
       scheduleView3d?.setFlat(scheduleModelIs2d());
       applySchedule3dPick();
     });
+  });
+  el.scheduleBody?.addEventListener("change", (event) => {
+    const target = event.target.closest?.("[data-mat]");
+    if (target) setMaterialSetting(target);
   });
   // The row is the control: no per-line buttons.
   el.scheduleBody?.addEventListener("click", (event) => {
